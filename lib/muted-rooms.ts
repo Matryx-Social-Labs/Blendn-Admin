@@ -9,7 +9,7 @@ import {
   LISTED_MEMBER_STATUSES,
   liveRoomsOnly,
 } from "./chat-group-rows"
-import { crewAndBlendRooms } from "./chat-list"
+import { ownedRooms } from "./chat-list"
 import { blockCounterparties } from "./conversations"
 import { db } from "./db"
 import { mutedNowSql } from "./room-mute"
@@ -96,7 +96,7 @@ async function listedAmong(userId: string, now: Date, ids: string[]): Promise<Se
       where: { ...where, chat_group: EVENT_ROOM_WHERE, ...liveRoomsOnly(now) },
       select: { chat_group_id: true },
     }),
-    crewAndBlendRooms(userId, { chat_group_id: { in: ids } }),
+    ownedRooms(userId, { chat_group_id: { in: ids } }, now),
   ])
   return new Set([...events, ...others].map((m) => m.chat_group_id))
 }
@@ -155,7 +155,7 @@ export async function mutedRoomPage(userId: string, limit: number, after: Candid
   const [blockedIds, eventRows, others] = await Promise.all([
     blockCounterparties(userId),
     db.chat_group_members.findMany({ where: { ...where, chat_group: EVENT_ROOM_WHERE, ...liveRoomsOnly(now) }, ...eventMemberArgs }),
-    crewAndBlendRooms(userId, ids),
+    ownedRooms(userId, ids, now),
   ])
   const notUnread = [...blockedIds, userId]
   const built = await buildChatRows({

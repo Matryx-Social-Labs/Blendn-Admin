@@ -216,11 +216,32 @@ export const ChatGroupSchema = z
 export const ChatRoomListItemSchema = z
   .object({
     id: z.string().uuid(),
-    kind: z.enum(["crew", "blend"]).describe("Open it as that room, never as an event's."),
-    name: z.string(),
+    kind: z.enum(["crew", "blend", "board_post"]).describe("Open it as that room, never as an event's. `board_post`: a Lobby post's room."),
+    name: z.string().describe("A Lobby room's is the post's words, clipped."),
     crewId: z.string().uuid().nullable().describe("A crew's chat: its crew (`GET /crews/{crewId}`)."),
     blendId: z.string().uuid().nullable().describe("A Mix's room: its Mix (`GET /blends`)."),
-    closesAt: z.string().datetime().nullable().describe("A Mix's clock — gone from this list then. Null for a crew's chat."),
+    closesAt: z
+      .string()
+      .datetime()
+      .nullable()
+      .describe("A Mix's clock, or a Lobby room's (with its event's room, a day after the end) — gone from this list then. Null for a crew's chat."),
+    boardPost: z
+      .object({
+        id: z.string().uuid(),
+        eventId: z.string().uuid().describe("The event whose Lobby it was posted on."),
+        kind: z.enum(["offer", "seeking", "chat"]),
+        subKind: z.enum(["ride", "spots", "ticket", "buddy"]).nullable().describe("What it is about: \"Your ride\" is an offer of a `ride`. Null on `chat` and on older posts."),
+        yours: z.boolean().describe("You wrote the post."),
+      })
+      .optional()
+      .describe("A Lobby room only (Flow 5 C5): the post it belongs to. Absent on a crew's or a Mix's row."),
+    others: z
+      .object({
+        names: z.array(z.string()).max(3).describe("Room pseudonyms, the post's author first; never yours, never somebody in a block with you."),
+        count: z.number().int().describe("Everyone else seated, named or not: \"With Lunar Fox and 2 others\"."),
+      })
+      .optional()
+      .describe("A Lobby room only: who else is in it, as the room names people."),
     unreadCount: z.number().describe("Messages you can see and have not read: none from somebody in a block with you."),
     mute: RoomMuteSchema,
     lastMessageAt: z.string().datetime().nullable().describe("The newest message you can see — never one from somebody in a block with you."),
@@ -234,7 +255,7 @@ export const ChatRoomListItemSchema = z
         createdAt: z.string().datetime(),
         user: z
           .object({ id: RoomUserRefSchema, name: z.string() })
-          .describe("As the room names people: a crewmate's first name; in a Mix, tonight's pseudonym (a reveal names people on GET /blends, never in the chat)."),
+          .describe("As the room names people: a crewmate's first name; in a Mix, tonight's pseudonym (a reveal names people on GET /blends, never in the chat); in a Lobby room, the pseudonym seated there."),
       })
       .nullable(),
     membership: z.object({ role: z.string(), joinedAt: z.string().datetime(), status: z.enum(["active", "muted"]) }),
@@ -248,7 +269,7 @@ export const ChatGroupListResponseSchema = z
     rooms: z
       .array(ChatRoomListItemSchema)
       .describe(
-        "My crews' chats and my Mixes' rooms while open, each as its door admits me now (never a Mix across a block), newest message I can see first. Not paged: sent with page 1, [] after."
+        "My crews' chats, my Mixes' rooms while open and the Lobby rooms I am seated in until they close, each as its door admits me now (never a Mix across a block; a Lobby room only while its post stands and I am its author or an accepted asker), newest message I can see first. Not paged: sent with page 1, [] after."
       ),
     pagination: PaginationMetaSchema,
   })

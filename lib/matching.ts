@@ -287,6 +287,11 @@ export interface Match {
   userId: string
   /** Pseudonym unless they revealed. Never the real name otherwise. */
   displayName: string
+  /**
+   * `displayName` is their name (SCRUM-1067): revealed to this viewer AND named. The client's face reads it (initial or
+   * photo when true, creature when false) rather than guessing from the photo. Says nothing `displayName` does not.
+   */
+  revealed: boolean
   /** Null unless they revealed. A photo identifies as surely as a name. */
   photo: string | null
   /** The actual overlapping category ids — this is what the card renders. */
@@ -615,36 +620,40 @@ export function rankMatches(
    */
   const roomIsBigEnough = (opts.peopleInside ?? opts.population) >= MIN_ROOM_FOR_WORK_FIELD
 
-  return scored.slice(0, opts.limit ?? scored.length).map(({ candidate, sharedInterestIds, sharedIntents }) => ({
-    userId: candidate.userId,
-    // The reveal decision is enforced here rather than at the route, so no
-    // caller can forget it and no second implementation can disagree.
-    displayName: candidate.revealed && candidate.name ? firstName(candidate.name) : candidate.pseudonym,
-    photo: candidate.revealed ? candidate.photo : null,
-    sharedInterestIds,
-    sharedIntents,
-    // Suppressed, not scrubbed from the ranking: it still moved the order
-    // above, because the *score* is never shown and the attribute is.
-    workField: roomIsBigEnough ? candidate.workField : null,
-    /*
-     * Same floor, and see the field's own note for why that is not caution.
-     * The viewer knows their own field, so `true` names the candidate's — this
-     * would be a second door onto the attribute the line above just closed.
-     */
-    sharedWorkField:
-      roomIsBigEnough && !!viewer.workField && candidate.workField === viewer.workField,
-    /*
-     * Same floor. The ranking above already used the real number — this is only
-     * whether it may be said out loud.
-     */
-    sharedEvents: roomIsBigEnough ? (candidate.sharedEvents ?? 0) : 0,
-    sharedPlans: roomIsBigEnough ? (candidate.sharedPlans ?? 0) : 0,
-    age: candidate.age ?? null,
-    insideNow: candidate.insideNow,
-    labelBudget: {
-      max: candidate.revealed ? MAX_DISPLAY_LINES_REVEALED : MAX_DISPLAY_LINES,
-      tierB: tierBBudget({ roomIsBigEnough, revealed: candidate.revealed }),
-    },
-    roomIsBigEnough,
-  }))
+  return scored.slice(0, opts.limit ?? scored.length).map(({ candidate, sharedInterestIds, sharedIntents }) => {
+    const named = candidate.revealed && !!candidate.name
+    return {
+      userId: candidate.userId,
+      // The reveal decision is enforced here rather than at the route, so no
+      // caller can forget it and no second implementation can disagree.
+      displayName: named ? firstName(candidate.name!) : candidate.pseudonym,
+      revealed: named,
+      photo: candidate.revealed ? candidate.photo : null,
+      sharedInterestIds,
+      sharedIntents,
+      // Suppressed, not scrubbed from the ranking: it still moved the order
+      // above, because the *score* is never shown and the attribute is.
+      workField: roomIsBigEnough ? candidate.workField : null,
+      /*
+       * Same floor, and see the field's own note for why that is not caution.
+       * The viewer knows their own field, so `true` names the candidate's — this
+       * would be a second door onto the attribute the line above just closed.
+       */
+      sharedWorkField:
+        roomIsBigEnough && !!viewer.workField && candidate.workField === viewer.workField,
+      /*
+       * Same floor. The ranking above already used the real number — this is only
+       * whether it may be said out loud.
+       */
+      sharedEvents: roomIsBigEnough ? (candidate.sharedEvents ?? 0) : 0,
+      sharedPlans: roomIsBigEnough ? (candidate.sharedPlans ?? 0) : 0,
+      age: candidate.age ?? null,
+      insideNow: candidate.insideNow,
+      labelBudget: {
+        max: candidate.revealed ? MAX_DISPLAY_LINES_REVEALED : MAX_DISPLAY_LINES,
+        tierB: tierBBudget({ roomIsBigEnough, revealed: candidate.revealed }),
+      },
+      roomIsBigEnough,
+    }
+  })
 }

@@ -350,6 +350,8 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
   it("reached the viewer with the other's answer, on the deck and the person sheet, beside no identity", async () => {
     const deck = await call(route("events/[eventId]/matches").GET, `/api/mobile/events/${eventId}/matches`, viewer, { params: { eventId } })
     expect(deck.body.data.matches.find((m: { userId: string }) => m.userId === refs.room[0])?.tonightAnswer).toBe(TONIGHT_ANSWER)
+    // Not revealed to the viewer, and the card says so (SCRUM-1067): the face is their creature.
+    expect(deck.body.data.matches.find((m: { userId: string }) => m.userId === refs.room[0])?.revealed).toBe(false)
     const sheet = await call(route("users/[userId]").GET, `/api/mobile/users/${refs.room[0]}`, viewer, { params: { userId: refs.room[0] } })
     expect(sheet.body.data.tonight?.answer).toBe(TONIGHT_ANSWER)
     // Its why-I'm-here too: the control for the host search below, which looks for this fragment.
@@ -419,6 +421,24 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
     // The deck and the person sheet answered the host: withheld there, not merely refused.
     expect([...answered]).toEqual(expect.arrayContaining(["events/[eventId]/matches", "users/[userId]"]))
     expect(found).toEqual([])
+
+    // Revealed to the room, still a pseudonym to its host (`roomIdentity`'s host side, SCRUM-1067); the viewer is the control.
+    const reveal = await db.event_match_preferences.upsert({
+      where: { event_id_user_id: { event_id: eventId, user_id: other.id } },
+      create: { event_id: eventId, user_id: other.id, revealed: true },
+      update: { revealed: true },
+    })
+    try {
+      const path = `/api/mobile/events/${eventId}/matches`
+      const asViewer = await call(route("events/[eventId]/matches").GET, path, viewer, { params: { eventId } })
+      expect(asViewer.body.data.matches.some((m: { revealed: boolean }) => m.revealed)).toBe(true)
+      const asHost = await call(route("events/[eventId]/matches").GET, path, host, { params: { eventId } })
+      expect(asHost.body.data.matches.length).toBeGreaterThan(0)
+      expect(asHost.body.data.matches.every((m: { revealed: unknown }) => m.revealed === false)).toBe(true)
+      expect(asHost.text).not.toContain(SECRET_NAME.split(" ")[0])
+    } finally {
+      await db.event_match_preferences.update({ where: { id: reveal.id }, data: { revealed: false } })
+    }
   }, 120_000)
 
   it("lists no past night they were a pseudonym at, by any ref the viewer holds (SCRUM-1042)", async () => {

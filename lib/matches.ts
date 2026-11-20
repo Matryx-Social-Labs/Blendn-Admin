@@ -47,6 +47,8 @@ import {
 export interface MatchCard {
   userId: string
   displayName: string
+  /** `displayName` is their name, not the pseudonym (SCRUM-1067). False for everyone a host sees. */
+  revealed: boolean
   photo: string | null
   /** Names, not ids — the card renders "Techno", and a uuid explains nothing. */
   sharedInterests: string[]
@@ -683,6 +685,8 @@ export async function matchesForEvent(
        */
       userId: roomHandle(eventId, m.userId),
       displayName: m.displayName,
+      // The name above is theirs (SCRUM-1067): a face, never a creature. Hosts never recognise anyone (`roomIdentity`).
+      revealed: m.revealed,
       photo: m.photo,
       sharedInterests: m.sharedInterestIds.map((id) => nameOf.get(id) ?? id),
       sharedIntents: m.sharedIntents,

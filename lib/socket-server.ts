@@ -120,6 +120,8 @@ export interface ServerToClientEvents {
     eventId: string
     userId: string
     userName: string
+    /** `userName` is their name, not the pseudonym (SCRUM-1067): the deck card's `revealed`. */
+    revealed: boolean
     userImage?: string
     checkInTime: string
     /** As on `event:checkin`. */
@@ -1494,6 +1496,7 @@ export function emitEventCheckIn(
             eventId,
             userId: idFor(userId),
             userName: named || userName,
+            revealed: !!named,
             ...(named && identity?.image ? { userImage: identity.image } : {}),
             checkInTime,
             hereCount,

@@ -1,7 +1,8 @@
 import { logger } from "@/lib/logger"
 import { refRoomBanRefusal } from "@/lib/room-ban"
 import { NextRequest } from "next/server"
-import { metInFor, metInSelect } from "@/lib/met-in"
+import { lobbyMetInFor, metInFor, metInRoomSelect, metInSelect } from "@/lib/met-in"
+import { lobbyMeeting } from "@/lib/lobby-meeting"
 import { z } from "zod"
 import { randomUUID } from "crypto"
 import { haveSharedAnEvent, pairIsClosed } from "@/lib/conversations"
@@ -93,7 +94,10 @@ export async function POST(request: NextRequest) {
     if (preSaveCheck(message)) {
       return textNotAllowedResponse("message", "That message can’t be sent. Take out contact details and offensive language, and try again.")
     }
-    const recipientId = userIdFromRef(ref)
+    // A Lobby room's handle names somebody only while that room seats you both (`lobbyMeeting`); refused, it is nobody.
+    const lobby = await lobbyMeeting(ref, authUser.userId)
+    if (lobby && "refused" in lobby) return notFoundResponse("User not found")
+    const recipientId = lobby ? lobby.recipientId : userIdFromRef(ref)
     // Banned from the room this handle came from: the chat's answer (`refRoomBanRefusal`).
     const banned = await refRoomBanRefusal(ref, authUser.userId)
     if (banned) return banned
@@ -159,7 +163,8 @@ export async function POST(request: NextRequest) {
      * "Ever", not "right now", deliberately. See `haveSharedAnEvent`.
      */
     // The same answer as an id nobody has: a raw id must not say whether its owner was at one of your events (SCRUM-1050).
-    if (!(await haveSharedAnEvent(authUser.userId, recipientId))) {
+    // A Lobby room that seats you both stands in for a shared check-in (`lobbyMeeting`).
+    if (!lobby && !(await haveSharedAnEvent(authUser.userId, recipientId))) {
       return notFoundResponse("User not found")
     }
 
@@ -169,7 +174,7 @@ export async function POST(request: NextRequest) {
      * request may be allowed by another room they shared; neither makes this one where they met. A raw id has none.
      * Read before the refusals below, so the silent 201 does the same reads as a real request.
      */
-    const handleEventId = resolveUserRef(ref)?.eventId ?? null
+    const handleEventId = lobby ? null : (resolveUserRef(ref)?.eventId ?? null)
     const metInEventId =
       handleEventId && (await haveSharedAnEvent(authUser.userId, recipientId, handleEventId)) ? handleEventId : null
 
@@ -285,6 +290,8 @@ export async function POST(request: NextRequest) {
         message,
         status: "pending",
         met_in_event_id: metInEventId,
+        // "Met in the Lobby · Your ride": the Lobby room that seats them both, never beside an event room.
+        met_in_room_id: lobby?.roomId ?? null,
       },
       include: {
         recipient: { select: { id: true } },
@@ -378,6 +385,7 @@ export async function GET(request: NextRequest) {
           },
         },
         met_in_event: { select: metInSelect },
+        met_in_room: { select: metInRoomSelect },
       },
       orderBy: { created_at: "desc" },
       skip: offset,
@@ -396,7 +404,7 @@ export async function GET(request: NextRequest) {
         message: r.message,
         status: r.status,
         createdAt: r.created_at,
-        metIn: metInFor(r.met_in_event),
+        metIn: r.met_in_room ? lobbyMetInFor(r.met_in_room, authUser.userId) : metInFor(r.met_in_event),
       })),
       totalCount,
     })

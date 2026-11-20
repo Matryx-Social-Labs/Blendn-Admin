@@ -13,7 +13,7 @@ import {
   LISTED_MEMBER_STATUSES,
   liveRoomsOnly,
 } from "@/lib/chat-group-rows"
-import { crewAndBlendRooms } from "@/lib/chat-list"
+import { ownedRooms } from "@/lib/chat-list"
 import {
   successResponse,
   unauthorizedResponse,
@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
      *
      * Crew and Blend rooms (step 9) are a list of their own, `rooms`, not rows
      * of `groups`: an installed app reads `event` off every `groups` row, and
-     * these rooms have none. Not paged (`crewAndBlendRooms`), so sent with the
+     * these rooms have none. Not paged (`ownedRooms`), so sent with the
      * first page only.
      */
     const [blockedIds, totalCount, rows, others] = await Promise.all([
@@ -78,7 +78,7 @@ export async function GET(request: NextRequest) {
         skip: (page - 1) * limit,
         take: limit,
       }),
-      page > 1 ? [] : crewAndBlendRooms(authUser.userId),
+      page > 1 ? [] : ownedRooms(authUser.userId, {}, now),
     ])
     // What can be unread: never a blocked person's line, nor your own.
     const notUnread = [...blockedIds, authUser.userId]

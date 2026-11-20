@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client"
 import { hereCounts } from "@/lib/attendee-counts"
-import { lastMessagesOf, unreadAfterMarkers, unreadTotalsOf, type OtherMemberRow } from "@/lib/chat-list"
+import { lastMessagesOf, lobbyOthersOf, unreadAfterMarkers, unreadTotalsOf, type OtherMemberRow } from "@/lib/chat-list"
+import { chatClosesAt } from "@/lib/chat-window"
 import { db } from "@/lib/db"
 import { inRoomWhere, realEventsWhere } from "@/lib/event-kind"
 import { namesInRoom } from "@/lib/identity"
@@ -16,7 +17,7 @@ import { roomMuteState } from "@/lib/room-mute"
  * file owns what an event-room membership must satisfy to be listed at all (the
  * live-room and kind filters), the shape that query reads (`eventMemberArgs`)
  * and the rows built from them. Crew and Blend rooms, and their owners' doors,
- * are read by `crewAndBlendRooms` (`lib/chat-list.ts`).
+ * are read by `ownedRooms` (`lib/chat-list.ts`).
  */
 
 /**
@@ -110,7 +111,8 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
   const allRooms = [...memberships, ...others]
   const chatGroupIds = allRooms.map((m) => m.chat_group_id)
   const eventIds = memberships.map((m) => m.chat_group.event.id)
-  const [totals, lastMessagesRaw, unread, activeCheckIns, here] = await Promise.all([
+  const lobbyIds = others.flatMap((m) => (m.chat_group.kind === "board_post" ? [m.chat_group_id] : []))
+  const [totals, lastMessagesRaw, unread, activeCheckIns, here, lobbyOthers] = await Promise.all([
     // Every visible message per room that is not an advert: what is unread for a member who has read nothing.
     unreadTotalsOf(chatGroupIds, notUnread),
     lastMessagesOf(chatGroupIds, blockedIds),
@@ -151,6 +153,8 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
      * A venue day's room says no count at all (below).
      */
     hereCounts(memberships.filter((m) => m.chat_group.event.kind !== "venue_day").map((m) => m.chat_group.event.id)),
+    // Who else is in each Lobby room, by room pseudonym (Flow 5 C5): one statement for all of them.
+    lobbyOthersOf(lobbyIds, userId, blockedIds),
   ])
   const { lastReadMessageMap, unreadCountMap } = unread
   const totalOf = totals
@@ -281,22 +285,34 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
     }
   })
 
-  // The crew and Blend rows: who wrote last, named as that room names people.
+  // The crew, Blend and Lobby rows: who wrote last, named as that room names people.
   const rooms = others.map((m) => {
     const room = m.chat_group
-    const kind = room.kind as "crew" | "blend"
+    const kind = room.kind as "crew" | "blend" | "board_post"
+    const post = room.board_post
     const lastMessage = lastMessageMap.get(room.id)
     const lastReadAt = m.last_read_message_id ? lastReadMessageMap.get(m.last_read_message_id) : null
     const scope = { kind, groupId: room.id }
     return {
       id: room.id,
-      /** `crew` or `blend`: open it as that room, never as an event's. */
+      /** `crew`, `blend` or `board_post` (a Lobby post's room): open it as that room, never as an event's. */
       kind,
+      /** A Lobby room's is the post's words, clipped (`seatBoardRoom`). */
       name: room.name,
       crewId: room.crew_id,
       blendId: room.blend_id,
-      /** A Blend's clock: it closes then (the occurrence's end + 12 h). Null for a crew's chat. */
-      closesAt: room.blend?.closes_at ?? null,
+      /** When it closes: a Blend's clock (the occurrence's end + 12 h), a Lobby room's with its event's room. Null for a crew's chat. */
+      closesAt: room.blend?.closes_at ?? (post ? chatClosesAt(post.event) : null),
+      /*
+       * A Lobby room only (Flow 5 C5 · B-A "Your ride"): the post it belongs to, and who else is in it by room
+       * pseudonym. Absent on a crew's or a Blend's row.
+       */
+      ...(post
+        ? {
+            boardPost: { id: post.id, eventId: post.event_id, kind: post.kind, subKind: post.sub_kind, yours: post.author_id === userId },
+            others: lobbyOthers.get(room.id) ?? { names: [], count: 0 },
+          }
+        : {}),
       unreadCount: lastReadAt ? unreadCountMap.get(room.id) || 0 : (totalOf.get(room.id) ?? 0),
       mute: roomMuteState(m.notification_preferences),
       // The newest message this viewer can see — a blocked person's later
@@ -312,7 +328,8 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
             // As on `groups`: a crew's "liked … for the crew" line is `system` (S-7).
             type: lastMessage.type,
             createdAt: lastMessage.created_at,
-            user: { id: idForViewer(userId, scope, lastMessage.user_id), name: roomSenderNames.get(room.id) },
+            // A Lobby room names people by their pseudonym in it, which the last-message read already joins.
+            user: { id: idForViewer(userId, scope, lastMessage.user_id), name: post ? lastMessage.user_name : roomSenderNames.get(room.id) },
           }
         : null,
       membership: { role: m.role, joinedAt: m.joined_at, status: m.status },

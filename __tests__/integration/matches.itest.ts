@@ -242,6 +242,37 @@ describe("the card", () => {
     expect(JSON.stringify(matches)).not.toContain("Test mx-i")
   })
 
+  it("says who is revealed: true only where the card names them (SCRUM-1067)", async () => {
+    const eventId = await room()
+    const [me, named, anon, nameless] = await Promise.all([makeUser("mx-r1"), makeUser("mx-r2"), makeUser("mx-r3"), makeUser("mx-r4")])
+    users.push(me, named, anon, nameless)
+    for (const u of [me, named, anon, nameless]) await attend(u, eventId)
+    const group = await db.chat_groups.findUniqueOrThrow({ where: { event_id: eventId } })
+    await db.chat_group_members.createMany({
+      data: [
+        { chat_group_id: group.id, user_id: named, anonymous_name: "Lunar Fox" },
+        { chat_group_id: group.id, user_id: anon, anonymous_name: "Velvet Owl" },
+        { chat_group_id: group.id, user_id: nameless, anonymous_name: "Amber Lynx" },
+      ],
+    })
+    // Two revealed here; one of them has no name on the account, so the card still says the pseudonym.
+    await db.event_match_preferences.createMany({
+      data: [
+        { event_id: eventId, user_id: named, revealed: true },
+        { event_id: eventId, user_id: nameless, revealed: true },
+      ],
+    })
+    await db.user.update({ where: { id: nameless }, data: { name: null } })
+
+    const cards = (await matchesForEvent(eventId, me))!
+    const by = (name: string) => cards.find((c) => c.displayName === name)
+    expect(by("Test")).toMatchObject({ revealed: true })
+    expect(by("Velvet Owl")).toMatchObject({ revealed: false })
+    // Never "revealed" beside a pseudonym: the face would draw the pseudonym's initial as a name.
+    expect(by("Amber Lynx")).toMatchObject({ revealed: false })
+    expect(cards.every((c) => typeof c.revealed === "boolean")).toBe(true)
+  })
+
   it("never says whether they liked you", async () => {
     // The one thing that would turn this into a different product.
     const eventId = await room()
