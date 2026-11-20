@@ -8,7 +8,7 @@ import type {
 } from "@prisma/client"
 
 import { db } from "./db"
-import { plusGrantFrom, plusStateFrom, type PlusGrant, type PlusState } from "./plus-state"
+import { plusGrantFrom, plusPlanFrom, plusStateFrom, type PlusGrant, type PlusPlan, type PlusState } from "./plus-state"
 
 /**
  * Who may use what was paid for (plan v2 §9.2). The one module that reads or
@@ -636,12 +636,13 @@ export function eraseUserEntitlements(userId: string) {
  * lasts longest, else the store purchase that ended last (so "expired" and
  * "refunded" can be said to someone with nothing live). Everything is
  * omitted-when-unknown: a grant row has no store state, a store row has no
- * grant, and a purchase with no delivery on record has neither.
+ * grant, and a purchase with no delivery on record has neither. `plan` is the
+ * store plan the purchase's deliveries name (`plusPlanFrom`), for a store row only.
  */
 export async function plusDetail(
   userId: string,
   now: Date = new Date()
-): Promise<{ state?: PlusState; grant?: PlusGrant }> {
+): Promise<{ state?: PlusState; grant?: PlusGrant; plan?: PlusPlan }> {
   const rows = await db.entitlements.findMany({
     where: userPlus(userId),
     orderBy: [{ expires_at: { sort: "desc", nulls: "first" } }],
@@ -659,22 +660,30 @@ export async function plusDetail(
   // The newest delivery about this purchase: the webhook stores each processed
   // event whole, and `original_transaction_id` (or `transaction_id` for a Night
   // Pass) is the reference the row was made under. Indexed by the migration.
-  const [latest] = await db.$queryRaw<{ type: string; cancel_reason: string | null; grace_ms: string | null }[]>`
-    SELECT type,
-           payload->'event'->>'cancel_reason' AS cancel_reason,
-           payload->'event'->>'grace_period_expiration_at_ms' AS grace_ms
-      FROM payment_events
-     WHERE provider = 'revenuecat'
-       AND processed_at IS NOT NULL
-       AND (payload->'event'->>'original_transaction_id' = ${row.external_ref}
-            OR payload->'event'->>'transaction_id' = ${row.external_ref})
-     ORDER BY (payload->'event'->>'event_timestamp_ms')::bigint DESC, received_at DESC
-     LIMIT 1`
+  // `product_id` is the newest delivery's that is not a PRODUCT_CHANGE: that one
+  // is informational and names the product being left (the change arrives as a
+  // renewal), so the plan moves when the store bills the new one.
+  const [latest] = await db.$queryRaw<{ type: string; cancel_reason: string | null; grace_ms: string | null; product_id: string | null }[]>`
+    SELECT type, cancel_reason, grace_ms, product_id
+      FROM (SELECT type,
+                   payload->'event'->>'cancel_reason' AS cancel_reason,
+                   payload->'event'->>'grace_period_expiration_at_ms' AS grace_ms,
+                   first_value(payload->'event'->>'product_id') OVER (
+                     ORDER BY (type = 'PRODUCT_CHANGE' OR payload->'event'->>'product_id' IS NULL),
+                              (payload->'event'->>'event_timestamp_ms')::bigint DESC, received_at DESC) AS product_id,
+                   row_number() OVER (ORDER BY (payload->'event'->>'event_timestamp_ms')::bigint DESC, received_at DESC) AS n
+              FROM payment_events
+             WHERE provider = 'revenuecat'
+               AND processed_at IS NOT NULL
+               AND (payload->'event'->>'original_transaction_id' = ${row.external_ref}
+                    OR payload->'event'->>'transaction_id' = ${row.external_ref})) d
+     WHERE n = 1`
   const state = plusStateFrom(
     latest ? { type: latest.type, cancelReason: latest.cancel_reason, graceExpiresAtMs: latest.grace_ms ? Number(latest.grace_ms) : null } : null,
     isLive(row),
     row.source,
     now
   )
-  return state ? { state } : {}
+  const plan = plusPlanFrom(latest?.product_id ?? null)
+  return { ...(state && { state }), ...(plan && { plan }) }
 }

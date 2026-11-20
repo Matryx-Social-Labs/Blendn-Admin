@@ -1370,6 +1370,12 @@ const PlusStatusSchema = z
       .datetime()
       .nullable()
       .describe("The latest `updated_at` over every `plus` and `night_pass` row, including rows not yet started (a stacked Night Pass). Null with none. Additive."),
+    plan: z
+      .enum(["monthly", "quarterly", "yearly"])
+      .nullable()
+      .describe(
+        "The store plan of the described subscription, from the product its newest delivery names (a PRODUCT_CHANGE is skipped: the new plan counts from the renewal that bills it). Null when not known: a grant, a Night Pass, no purchase, a store row with no delivery, a product we do not sell. Kept for a cancelled or expired subscription. Additive."
+      ),
     state: z
       .enum(["active", "cancelled", "grace", "hold", "paused", "expired", "refunded"])
       .optional()

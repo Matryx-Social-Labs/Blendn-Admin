@@ -7,6 +7,24 @@
 
 export type PlusState = "active" | "cancelled" | "grace" | "hold" | "paused" | "expired" | "refunded"
 export type PlusGrant = "trial" | "referral"
+export type PlusPlan = "monthly" | "quarterly" | "yearly"
+
+/**
+ * The store products Blendn+ is sold as (docs/IAP-SETUP.md, "The fixed names"):
+ * Apple's product id, and Google's `subscription:base plan` as RevenueCat
+ * reports it. Exact ids only, so a product we do not sell names no plan.
+ */
+const PLAN_OF_PRODUCT: ReadonlyMap<string, PlusPlan> = new Map(
+  (["monthly", "quarterly", "yearly"] as const).flatMap((plan) => [
+    [`blendn_plus_${plan}`, plan],
+    [`blendn_plus:${plan}`, plan],
+  ])
+)
+
+/** Which plan a store product is, from the delivery's `product_id`; null for anything else (the Night Pass included). */
+export function plusPlanFrom(productId: string | null): PlusPlan | null {
+  return (productId && PLAN_OF_PRODUCT.get(productId)) || null
+}
 
 /** The fields of a stored RevenueCat delivery this reads. */
 export interface StoreDelivery {

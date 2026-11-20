@@ -4770,9 +4770,18 @@ others there earn a month (each friend counts once; at most 3 a year).
   "product": "plus",
   "source": "apple",
   "expiresAt": "2026-11-10T09:00:00.000Z",
-  "changedAt": "2026-10-27T09:00:00.000Z"
+  "changedAt": "2026-10-27T09:00:00.000Z",
+  "plan": "yearly"
 } }
 ```
+
+`plan` is `monthly`, `quarterly` or `yearly`: the store plan of the described
+subscription (the live one, else the store purchase that ended last), from the
+`product_id` of its newest RevenueCat delivery (`blendn_plus_yearly` on Apple,
+`blendn_plus:yearly` on Google, docs/IAP-SETUP.md). A `PRODUCT_CHANGE` is skipped:
+it names the product being left, and the new plan counts from the renewal that
+bills it. Always present, and `null` when not known: a grant, a Night Pass, no
+purchase, a store row with no delivery on record, or a product we do not sell.
 
 `changedAt` is the latest `updated_at` over every `plus` and `night_pass` row the
 person has, **including rows that have not started** (a Night Pass stacked on a
