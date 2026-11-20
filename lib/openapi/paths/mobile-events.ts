@@ -458,6 +458,7 @@ registry.registerPath({
     "403 `AGE_RESTRICTED` on an age-restricted event for an under-age or unknown age (`reasonCode` `AGE_UNKNOWN` for the latter); 404 for a draft " +
     "or a private event you are not on the list for (lib/event-access.ts); 409 `CONFLICT` + `reasonCode` `EVENT_CANCELLED` for a new `going` or " +
     "`maybe` on a cancelled event (`not_going` and DELETE stay open, so somebody who was in can get out). " +
+    "A `not_going` gets 409 `CONFLICT` + `reasonCode` `ALREADY_CHECKED_IN` while the caller is checked in here. " +
     "409 `errorCode` `tickets_required` on a native ticketed event while TICKETING is on: the paid ticket writes the RSVP, a full refund removes it.",
   security: bearerAuth,
   request: {
@@ -476,7 +477,9 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/rsvp",
   tags: ["Mobile Events"],
   summary: "Cancel RSVP",
-  description: "409 `errorCode` `tickets_required` on a native ticketed event while TICKETING is on: the RSVP is the ticket's.",
+  description:
+    "409 `errorCode` `tickets_required` on a native ticketed event while TICKETING is on: the RSVP is the ticket's. " +
+    "409 `CONFLICT` + `reasonCode` `ALREADY_CHECKED_IN` (\"You’re checked in here. Check out first.\") while the caller is checked in here.",
   security: bearerAuth,
   request: { params: z.object({ eventId: z.string().uuid() }) },
   responses: {
@@ -724,7 +727,7 @@ registry.registerPath({
   tags: ["Mobile Events"],
   summary: "Rooms where a wave is waiting for you (Banter's pinned rows)",
   description:
-    "One entry per open room with an unanswered wave: how many, the newest, and the newest three for the row's pile (`latestFaces`: handle and name only), as `GET /events/{eventId}/waves` names them. Never a room you run or host or were banned from, never a closed room. At most 20 rooms.",
+    "One entry per open room with an unanswered wave: how many, the newest, and the newest three for the row's pile (`latestFaces`: handle and name only), as `GET /events/{eventId}/waves` names them. Never a room you run or host or were banned from, never a closed room: closed counts from the run's last held day, so a festival whose last day was called off closes with the day before. At most 20 rooms.",
   security: bearerAuth,
   responses: {
     200: { description: "Waiting waves by room", content: { "application/json": { schema: wrap(WavesWaitingResponseSchema) } } },

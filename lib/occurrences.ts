@@ -389,12 +389,15 @@ export async function syncOccurrences(
    * Days nobody attended are deleted, because an empty row for a day that
    * never ran is just noise.
    */
-  const withAttendance = await db.event_check_ins.groupBy({
-    by: ["occurrence_id"],
-    where: { occurrence_id: { in: orphaned.map((o) => o.id) } },
-    _count: { _all: true },
-  })
-  const attended = new Set(withAttendance.map((r) => r.occurrence_id))
+  const orphanIds = orphaned.map((o) => o.id)
+  // A crew like or a Blend on the day is a record too, and its foreign key refuses the delete (ON DELETE RESTRICT):
+  // the seed's `--refresh-times` died there, and so would an organizer's date edit.
+  const [withAttendance, liked, blended] = await Promise.all([
+    db.event_check_ins.groupBy({ by: ["occurrence_id"], where: { occurrence_id: { in: orphanIds } }, _count: { _all: true } }),
+    db.crew_likes.findMany({ where: { occurrence_id: { in: orphanIds } }, select: { occurrence_id: true }, distinct: ["occurrence_id"] }),
+    db.blends.findMany({ where: { occurrence_id: { in: orphanIds } }, select: { occurrence_id: true }, distinct: ["occurrence_id"] }),
+  ])
+  const attended = new Set([...withAttendance, ...liked, ...blended].map((r) => r.occurrence_id))
 
   const toCancel = orphaned.filter((o) => attended.has(o.id)).map((o) => o.id)
   const toDelete = orphaned.filter((o) => !attended.has(o.id)).map((o) => o.id)

@@ -413,7 +413,7 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
       const r = await call(route(rel).GET, path, host, { params })
       if (r.status < 300) answered.add(rel)
       // Nor any wave, wave count or wave-derived field (SCRUM-1042: hosts never wave or get waved at).
-      const waveDerived = ['"wavedAt"', '"waiting"', '"wavedAtYou":true', '"youWaved":true'].some((t) => r.text.includes(t))
+      const waveDerived = ['"wavedAt"', '"wavedAtYouAt":"', '"waiting"', '"wavedAtYou":true', '"youWaved":true'].some((t) => r.text.includes(t))
       // Nor any crew: hosts get counts in their insights, never a crew's name or who is in it (crews 6A).
       const crewDerived = r.text.includes(CREW_NAME) || r.text.includes('"here":[{') || r.text.includes('"myCrewPlans":[{')
       if (r.text.includes(TONIGHT_ANSWER) || r.text.includes(WORK_INTENT) || waveDerived || crewDerived) found.push(`${rel} ${JSON.stringify(params)} -> ${r.status}`)

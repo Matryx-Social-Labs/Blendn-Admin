@@ -128,6 +128,8 @@ export async function hasWaved(eventId: string, fromId: string, toId: string): P
 export interface WaveStanding {
   youWaved: boolean
   wavedAtYou: boolean
+  /** When they waved at you here (ISO), so a card says it after a restart; null when they have not. */
+  wavedAtYouAt: string | null
   /**
    * The conversation a mutual here opened, so Say hi reaches it after a restart. Its id only (the same one the
    * mutual's response and `room:match` carried), never a person's. Null without a wave either way: a match from
@@ -148,7 +150,7 @@ export async function waveStandings(eventId: string, viewerId: string, otherIds:
   const [waves, conversations] = await Promise.all([
     db.event_waves.findMany({
       where: { event_id: eventId, OR: [{ from_id: viewerId, to_id: { in: ids } }, { to_id: viewerId, from_id: { in: ids } }] },
-      select: { from_id: true, to_id: true },
+      select: { from_id: true, to_id: true, created_at: true },
     }),
     // A match opened here, and only that: `openIfMutual` is the one writer with this event and no board ask.
     db.private_conversations.findMany({
@@ -163,10 +165,11 @@ export async function waveStandings(eventId: string, viewerId: string, otherIds:
     }),
   ])
   const youWaved = new Set(waves.filter((w) => w.from_id === viewerId).map((w) => w.to_id))
-  const wavedAtYou = new Set(waves.filter((w) => w.to_id === viewerId).map((w) => w.from_id))
+  // One wave per pair per room (W1), so this is the one.
+  const wavedAtYouAt = new Map(waves.filter((w) => w.to_id === viewerId).map((w) => [w.from_id, w.created_at.toISOString()]))
   const conversationWith = new Map(conversations.map((c) => [c.user1_id === viewerId ? c.user2_id : c.user1_id, c.id]))
   for (const id of ids) {
-    const standing = { youWaved: youWaved.has(id), wavedAtYou: wavedAtYou.has(id) }
+    const standing = { youWaved: youWaved.has(id), wavedAtYou: wavedAtYouAt.has(id), wavedAtYouAt: wavedAtYouAt.get(id) ?? null }
     const waved = standing.youWaved || standing.wavedAtYou
     standings.set(id, { ...standing, conversationId: waved ? (conversationWith.get(id) ?? null) : null })
   }
@@ -194,14 +197,31 @@ export async function recordWave(eventId: string, fromId: string, toId: string, 
   })
 }
 
-/** Is this event's room still open (event end + window, or the venue day's reset)? Answering a wave lasts this long. */
+/**
+ * Is this event's room still open (end + window, or the venue day's reset)? Answering a wave lasts this long. The end
+ * is the run's real one, its last held day: a festival whose last day was called off closed with the day before
+ * (the door answers EVENT_ENDED), whatever `end_time` still says. Every day called off: closed.
+ */
 export async function roomIsOpen(eventId: string, now: Date = new Date()): Promise<boolean> {
   const event = await db.events.findUnique({
     where: { id: eventId },
-    select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, chat_group: { select: { status: true } } },
+    select: {
+      start_time: true,
+      end_time: true,
+      status: true,
+      deleted_at: true,
+      kind: true,
+      chat_group: { select: { status: true } },
+      occurrences: { where: { cancelled_at: null }, select: { start_time: true, end_time: true }, orderBy: { end_time: "desc" }, take: 1 },
+      _count: { select: { occurrences: true } },
+    },
   })
   if (!event) return false
-  return chatWindowState(event, { status: event.chat_group?.status ?? "active" }, now).open
+  const lastHeld = event.occurrences[0]?.end_time
+  // No rows at all is a legacy event: its own window, as `eventSession` reads one.
+  if (!lastHeld && event._count.occurrences > 0) return false
+  const realEnd = lastHeld && lastHeld < event.end_time ? lastHeld : event.end_time
+  return chatWindowState({ ...event, end_time: realEnd }, { status: event.chat_group?.status ?? "active" }, now).open
 }
 
 /**

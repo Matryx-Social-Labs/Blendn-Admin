@@ -16,6 +16,7 @@ const OfferSchema = z
       id: z.string().uuid(),
       name: z.string(),
       venueType: z.string().nullable().describe("The venue's type (`pub_bar`, `cafe`, …, the `venue_type` enum), for the pass's tile; null when it has none."),
+      timezone: z.string().describe("The venue's IANA zone, for the pass's day and clock (\"Valid today, till 11 PM\"): the venue's, never the phone's. Additive."),
     }),
     text: z.string().max(140).describe("The venue's words."),
     sentAt: z.string().datetime(),
