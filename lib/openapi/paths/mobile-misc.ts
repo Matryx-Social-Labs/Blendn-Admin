@@ -894,13 +894,22 @@ const NotificationSchema = z.object({
   ]),
   title: z.string(),
   body: z.string(),
-  /** The same payload the push carried, so the app has one deep-link switch. */
+  /**
+   * The same payload the push carried, so the app has one deep-link switch. An `event_changed` row written since
+   * SCRUM-1091 also carries `field` (`time` | `venue`), `from` and `to` (two ISO instants with `timeZone`, the event's
+   * IANA zone; or two venue names, `from` absent when there was none), so the row can say "New time: 9:30 PM, was 8:00 PM".
+   */
   data: z.record(z.string(), z.unknown()).nullable(),
   readAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
   display: z
     .object({
-      title: z.string().optional(),
+      title: z
+        .string()
+        .optional()
+        .describe(
+          "The row's own words, in place of the stored title: \"{full name} wants to be friends\" and \"{full name} wants to message you\" while the ask waits; \"Crew invite: {crew}\" while the crew may be named; \"Someone from {crew} is here\" for a member of a crew still standing."
+        ),
       context: z
         .string()
         .optional()
@@ -910,6 +919,7 @@ const NotificationSchema = z.object({
       visual: z
         .discriminatedUnion("type", [
           z.object({ type: z.literal("photo"), uri: z.string() }),
+          z.object({ type: z.literal("initial"), name: z.string() }).describe("A named person with no photo: draw their initial on their hue (`personFace`)."),
           z.object({ type: z.literal("creature"), pseudonym: z.string() }),
           z.object({ type: z.literal("emblem"), seed: z.string() }),
           z.object({
@@ -923,7 +933,7 @@ const NotificationSchema = z.object({
     })
     .optional()
     .describe(
-      "What the row can say for the reader beyond the push's nameless words, only where they may already see it: a friend request's asker (name and photo) while it waits; a match's room pseudonym (also as `context`); a crew's emblem seed, with `context` naming the Mix's room or the inviting crew while the reader may see them; an event's cover. Absent when it cannot be resolved: draw the kind's own tile. `stack` is not sent."
+      "What the row can say for the reader beyond the push's nameless words, only where they may already see it: a friend request's asker and a message request's sender (full name; photo, else `initial`) while it waits; a match's room pseudonym (also as `context`); a crew's emblem seed, with `context` naming the Mix's room or the inviting crew while the reader may see them; an event's cover. Absent when it cannot be resolved: draw the kind's own tile. `stack` is not sent."
     ),
   open: z
     .boolean()
@@ -939,7 +949,7 @@ registry.registerPath({
   tags: ["Mobile Notifications"],
   summary: "List the caller's notifications, newest first",
   description:
-    "Cursor-paginated because the list grows at the head — offset pages would repeat rows as new ones arrive. Returns only the caller's own; `user_id` comes from the token and is never a parameter. `unreadCount` ships with the feed so the bell needs one request rather than two. A build that knows `event_changed` says so with `X-Channel-Set: 2` (the number it posts with its push token); without it, or with a value below 2, an `event_changed` row is served as `kind` and `data.type` `event_update` so the tap opens the event, and the stored row is untouched. At most 13 statements per request however long the page.",
+    "Cursor-paginated because the list grows at the head — offset pages would repeat rows as new ones arrive. Returns only the caller's own; `user_id` comes from the token and is never a parameter. `unreadCount` ships with the feed so the bell needs one request rather than two. A build that knows `event_changed` says so with `X-Channel-Set: 2` (the number it posts with its push token); without it, or with a value below 2, an `event_changed` row is served as `kind` and `data.type` `event_update` so the tap opens the event, and the stored row is untouched. `unreadCount` leaves out talk-asks (message requests, Lobby asks, reveal asks: plain lines here, answered in Banter); `talkAsks` and `badgeCount` count the waiting ones. A fixed number of statements however long the page (`bell-cost.itest.ts`).",
   security: bearerAuth,
   request: {
     headers: z.object({
@@ -964,11 +974,21 @@ registry.registerPath({
           schema: wrap(
             z.object({
               notifications: z.array(NotificationSchema),
-              unreadCount: z.number().int().max(1000).describe("Capped at 1000: at 1000 there may be more (show \"999+\")."),
+              unreadCount: z
+                .number()
+                .int()
+                .max(1000)
+                .describe("The bell's number: unseen rows that are not talk-asks (`message_request`, `board_request`, `reveal_request` are never counted). Capped at 1000: at 1000 there may be more (show \"999+\")."),
+              talkAsks: z
+                .object({
+                  messageRequests: z.number().int().describe("Message requests waiting on you, as `GET /message-requests?status=pending` counts them."),
+                  lobbyAsks: z.number().int().describe("Lobby asks waiting on you, as `GET /board/requests` lists its live incoming ones."),
+                })
+                .describe("The asks the Banter dot carries (requests placement A)."),
               badgeCount: z
                 .number()
                 .int()
-                .describe("The app icon's number: `unreadCount` (so capped at 1000) plus live conversations with something unread from the other person (a thread, not a message). Every push carries this same number as its `badge`."),
+                .describe("The app icon's number: the bell plus the Banter dot, i.e. `unreadCount` + live conversations with something unread from the other person (a thread, not a message) + `talkAsks.messageRequests` + `talkAsks.lobbyAsks`. The Banter dot is `badgeCount - unreadCount`. Every push carries this same number as its `badge`."),
               pagination: z.object({
                 limit: z.number().int(),
                 hasMore: z.boolean(),
@@ -1022,7 +1042,7 @@ registry.registerPath({
       description: "Marked",
       content: {
         "application/json": {
-          schema: wrap(z.object({ marked: z.number().int(), unreadCount: z.number().int().max(1000).describe("Capped at 1000, as on the feed.") })),
+          schema: wrap(z.object({ marked: z.number().int(), unreadCount: z.number().int().max(1000).describe("The bell's number, as on the feed: talk-asks left out, capped at 1000.") })),
         },
       },
     },

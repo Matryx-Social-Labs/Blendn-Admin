@@ -146,8 +146,10 @@ function deliveryForFlow9(data: NotificationData): Delivery {
     // Only the host's latest note is true.
     case "board_host_post":
       return replaced("events", data.eventId && `lobby-host:${data.eventId}`)
-    case "crew_invite":
+    // One updating push per crew a night (owner 2026-11-14): the next arrival replaces the last.
     case "crew_here":
+      return replaced("crew", data.crewId && `crew-here:${data.crewId}`)
+    case "crew_invite":
     case "blend":
       return { channelId: "crew" }
     case "event_update":
@@ -520,6 +522,14 @@ async function recordNotification(
     logger.warn("Failed to record notification", { userId, error: String(error) })
     return null
   }
+}
+
+/**
+ * A bell row with no push: for a notice whose push a window spares (a second crew invite from the same inviter) but
+ * which must still wait on the reader in the app. Never throws.
+ */
+export async function recordBellRow(userId: string, title: string, body: string, payload: NotificationData): Promise<void> {
+  await recordNotification(userId, title, body, payload)
 }
 
 /**
@@ -1154,13 +1164,24 @@ export async function notifyEventChanged(
   eventName: string,
   message: string,
   eventId: string,
-  changedFields: string
+  changedFields: string,
+  /** What it was and is, so the row can say "New time: 9:30 PM, was 8:00 PM" (Flow 9 A). */
+  move?: EventMove
 ): Promise<{ sent: number; failed: number }> {
   const reason = reasonOf(changedFields.split(","))
   return sendBulkPushNotifications({
     userIds: recipientIds,
     title: eventName,
     body: message,
-    data: { type: "event_changed", eventId, changed: changedFields, ...(reason && { reason }) },
+    data: { type: "event_changed", eventId, changed: changedFields, ...(reason && { reason }), ...move },
   })
 }
+
+/**
+ * The one change an `event_changed` row spells out (`data.field`, `data.from`, `data.to`): the start time as two ISO
+ * instants with the event's IANA `timeZone` (the app writes them in the event city's zone, no zone label), or the venue
+ * as two names. `from` is left off when there was none. Time first when both moved, as `reasonOf` ranks them.
+ */
+export type EventMove =
+  | { field: "time"; from: string; to: string; timeZone: string }
+  | { field: "venue"; from?: string; to: string }

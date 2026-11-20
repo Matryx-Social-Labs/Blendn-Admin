@@ -113,11 +113,9 @@ describe("With {crew} at the hold (S1)", () => {
     await hold(eventId, arjun, crewId)
     // Priya is in already: she gets the names, not "hold when you get there".
     expect((await pushesTo(priya.id)).map((p) => p.body)).toEqual(["Arjun is in."])
-    // Meera is not in yet: both names, then the hold line.
-    expect((await pushesTo(meera.id)).map((p) => p.body)).toEqual([
-      "Priya is in. Hold to Blend’n when you get there.",
-      "Priya and Arjun are in. Hold to Blend’n when you get there.",
-    ])
+    // Meera is not in yet: both names, then the hold line. One updating row per crew a night (owner 2026-11-14): the
+    // second arrival replaces the first, so her bell holds the latest only.
+    expect((await pushesTo(meera.id)).map((p) => p.body)).toEqual(["Priya and Arjun are in. Hold to Blend’n when you get there."])
     for (const p of await pushesTo(meera.id)) expect(p.body).not.toContain(VENUE)
   })
 
@@ -187,8 +185,8 @@ describe("The crew's strip names who is in with it (S2)", () => {
     // Rhea's pushes never name Arjun, nor his hers: a block holds across any member.
     expect((await pushesTo(blocked.id)).map((p) => p.body).join(" ")).not.toContain("Arjun")
     expect((await pushesTo(arjun.id)).map((p) => p.body).join(" ")).not.toContain("Rhea")
-    // Control: Priya's pushes name both.
-    expect((await pushesTo(priya.id)).map((p) => p.body)).toEqual(["Arjun is in.", "Arjun and Rhea are in."])
+    // Control: Priya's push names both (one updating row a night, so the latest).
+    expect((await pushesTo(priya.id)).map((p) => p.body)).toEqual(["Arjun and Rhea are in."])
   })
 
   it("shows each crewmate as the crew room does: an anonymous member without a photo, an erased one not at all", async () => {

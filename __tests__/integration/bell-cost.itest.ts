@@ -124,14 +124,15 @@ afterAll(async () => {
 
 /**
  * The most statements one poll can send, measured with a REAL live Blend and a real open invite behind the rows
- * (review M1), so every decoration read runs: the page and its two counts (3); the decoration reads, one per kind
- * (friend requests, memberships, message and board requests, conversations, events, crews: 7) and the friend
- * request's sender and profile (2); everybody kept apart from the reader, read once for every door (2); the crew
+ * (review M1), so every decoration read runs: the page and its four counts (5: the bell, unread conversations,
+ * waiting message requests and Lobby asks, `lib/badge-count.ts`); the decoration reads, one per kind (friend
+ * requests, memberships, message and board requests, conversations, events, crews: 7), the friend request's sender
+ * and profile (2) and the message request's sender (1); everybody kept apart from the reader, read once for every door (2); the crew
  * invite door (the invites, their crews' members, the friends: 4, plus a crew Prisma loads for the relation); and
  * the Blend door (the Blends, their rooms, crews, members and the reader's check-ins: 5). Each once per page, never
  * per row: the 10-row and 50-row pages below cost the same, and no statement is sent twice.
  */
-const MOST_STATEMENTS = 23
+const MOST_STATEMENTS = 26
 
 it("a 50-row page costs the statements a 10-row page does, once each, and no more than the cap", async () => {
   const small = await person("bc-small")
@@ -175,7 +176,8 @@ it("the unread-conversation count is answered by the partial index, not by readi
 
   const run = await statementsDuring(() => poll(me, 20))
   expect((await run.result.json()).data.badgeCount).toBe(5)
-  const count = run.statements.find((statement) => statement.text.includes('FROM "public"."private_conversations"') && statement.text.includes("COUNT"))!
+  // The icon's count, `lib/badge-count.ts` (the push's own): written out, so found by its words.
+  const count = run.statements.find((statement) => statement.text.includes("FROM private_conversations") && statement.text.includes("COUNT"))!
   const plan = await db.$queryRawUnsafe<{ "QUERY PLAN": string }[]>(`EXPLAIN ${count.text}`, ...count.values)
   const text = plan.map((line) => line["QUERY PLAN"]).join("\n")
   expect(text).toContain("Index Scan using private_messages_unread_idx")

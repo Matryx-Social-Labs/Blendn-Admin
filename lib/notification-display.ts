@@ -2,7 +2,7 @@ import { db } from "@/lib/db"
 import { personCard, personSelect } from "@/lib/friends"
 import { VISIBLE_TO_AUTHOR } from "@/lib/board-access"
 import { getAccessibleMediaUrl } from "@/lib/tigris"
-import { firstName } from "@/lib/conversation-identity"
+import { UNNAMED } from "@/lib/conversation-identity"
 import { blockCounterparties, closedPairKeys } from "@/lib/conversations"
 import { admittingBlendRooms } from "@/lib/room-kind"
 import { acceptableInviteCrewIds } from "@/lib/crews/views"
@@ -42,6 +42,8 @@ import { acceptableInviteCrewIds } from "@/lib/crews/views"
 
 export type NotificationVisual =
   | { type: "photo"; uri: string }
+  /** A named person with no photo: the app draws their initial on their hue, as `personFace` does (#570). */
+  | { type: "initial"; name: string }
   | { type: "creature"; pseudonym: string }
   | { type: "emblem"; seed: string }
   | { type: "event"; cover: string | null; badge: EventBadge; cancelled: boolean }
@@ -83,6 +85,10 @@ const uuidOf = (payload: unknown, key: string) => {
   const v = idOf(payload, key)
   return v && UUID.test(v) ? v : null
 }
+
+/** A named person's face: their photo, else their initial. Never for anybody anonymous (that is a creature). */
+const faceOf = (name: string, photo: string | null): NotificationVisual =>
+  photo ? { type: "photo", uri: getAccessibleMediaUrl(photo) } : { type: "initial", name }
 
 const unique = <T>(xs: readonly (T | null)[]): T[] => [...new Set(xs.filter((x): x is T => x !== null))]
 
@@ -130,16 +136,17 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
     // The Crews screen's door (`acceptableInviteCrewIds`): open, not lapsed, the crew standing, the inviter still a
     // member and your friend, nobody in it kept apart from you. An invite it would not list is neither open nor named.
     acceptableInviteCrewIds(viewerId, unique(crewInviteRows.map((r) => uuidOf(r.payload, "crewId"))), new Date(), apart),
-    crewInviteRows.length
+    crewRows.length
       ? db.crew_members.findMany({
-          where: { user_id: viewerId, crew_id: { in: unique(crewInviteRows.map((r) => uuidOf(r.payload, "crewId"))) } },
+          where: { user_id: viewerId, crew_id: { in: unique(crewRows.map((r) => uuidOf(r.payload, "crewId"))) } },
           select: { crew_id: true },
         })
       : [],
     messageRequestRows.length
       ? db.message_requests.findMany({
           where: { id: { in: unique(messageRequestRows.map((r) => uuidOf(r.payload, "requestId"))) }, recipient_id: viewerId, status: "pending" },
-          select: { id: true },
+          // The sender as `GET /message-requests` shows them to the same person: a message request carries a name by design.
+          select: { id: true, sender: { select: { name: true, image: true } } },
         })
       : [],
     boardRows.length
@@ -195,13 +202,8 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
       continue
     }
     const person = personCard(request.sender)
-    set(row.id, {
-      open: true,
-      display: {
-        title: `${firstName(person.name)} wants to be friends`,
-        ...(person.photo && { visual: { type: "photo", uri: getAccessibleMediaUrl(person.photo) } }),
-      },
-    })
+    // The whole name, as the approved board draws it (Flow 9 A).
+    set(row.id, { open: true, display: { title: `${person.name} wants to be friends`, visual: faceOf(person.name, person.photo) } })
   }
 
   for (const row of crewInviteRows) {
@@ -211,16 +213,23 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
       ...(crewId &&
         emblemOf.has(crewId) && {
           display: {
-            ...(namesCrew(crewId) && { context: crewOf.get(crewId)!.name }),
+            ...(namesCrew(crewId) && { title: `Crew invite: ${crewOf.get(crewId)!.name}`, context: crewOf.get(crewId)!.name }),
             visual: { type: "emblem", seed: emblemOf.get(crewId)! },
           },
         }),
     })
   }
   // A Blend has no emblem of its own, and a crew's would be the wrong one: it carries no visual and the app draws its glyph (SCRUM-861).
+  // The stored title is the bare crew name; the row says what happened, to a member of a crew still standing.
   for (const row of rows.filter((r) => r.kind === "crew_here")) {
-    const seed = emblemOf.get(uuidOf(row.payload, "crewId") ?? "")
-    if (seed) set(row.id, { display: { visual: { type: "emblem", seed } } })
+    const crewId = uuidOf(row.payload, "crewId") ?? ""
+    const seed = emblemOf.get(crewId)
+    const crew = crewOf.get(crewId)
+    const titled = !!crew && !crew.dissolved_at && !crew.hidden_at && joined.has(crewId)
+    if (seed || titled)
+      set(row.id, {
+        display: { ...(titled && { title: `Someone from ${crew.name} is here` }), ...(seed && { visual: { type: "emblem", seed } }) },
+      })
   }
 
   /*
@@ -241,8 +250,16 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
     for (const row of revealRows) set(row.id, { open: waiting.has(uuidOf(row.payload, "conversationId") ?? "") })
   }
 
-  const pendingMessage = new Set(messageRequests.map((m) => m.id))
-  for (const row of messageRequestRows) set(row.id, { open: pendingMessage.has(uuidOf(row.payload, "requestId") ?? "") })
+  const pendingMessage = new Map(messageRequests.map((m) => [m.id, m]))
+  for (const row of messageRequestRows) {
+    const request = pendingMessage.get(uuidOf(row.payload, "requestId") ?? "")
+    if (!request) {
+      set(row.id, { open: false })
+      continue
+    }
+    const name = request.sender.name?.trim() || UNNAMED
+    set(row.id, { open: true, display: { title: `${name} wants to message you`, visual: faceOf(name, request.sender.image) } })
+  }
   const pendingBoard = new Set(boardRequests.map((m) => m.id))
   for (const row of boardRows) set(row.id, { open: pendingBoard.has(uuidOf(row.payload, "requestId") ?? "") })
 

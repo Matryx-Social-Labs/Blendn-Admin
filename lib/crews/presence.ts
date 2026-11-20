@@ -486,12 +486,22 @@ export async function crewHere(
     .filter((m) => !blocked.includes(m.user_id) && !isRoomMuted(m.notification_preferences))
     .map((m) => m.user_id)
   const bodies = await crewInBodies(crew.id, room.id, occurrenceId, recipients)
+  // One updating bell row per crew a night, as the push replaces itself on the phone: the last arrival's says who is in now.
+  if (recipients.length > 0) {
+    await db.notifications.deleteMany({
+      where: {
+        user_id: { in: recipients },
+        kind: "crew_here",
+        AND: [{ data: { path: ["crewId"], equals: crew.id } }, { data: { path: ["occurrenceId"], equals: occurrenceId } }],
+      },
+    })
+  }
   for (const [body, userIds] of bodies) {
     await sendBulkPushNotifications({
       userIds,
       title: crew.name,
       body,
-      data: { type: "crew_here", crewId: crew.id, chatGroupId: room.id },
+      data: { type: "crew_here", crewId: crew.id, chatGroupId: room.id, occurrenceId },
     }).catch((error: unknown) => logger.warn("Push notification failed", { context: "crew here", error: String(error) }))
   }
   const notified = [...bodies.values()].reduce((n, ids) => n + ids.length, 0)

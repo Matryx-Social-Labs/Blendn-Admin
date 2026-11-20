@@ -168,6 +168,7 @@ export const EventCitiesResponseSchema = z
         launchState: z.enum(["live", "preview"]).nullable().openapi({ description: "The lower of the city's own state and its country's. A hidden city is never listed. Null when uncatalogued." }),
         access: z.enum(["full", "comingSoon"]).openapi({ description: "`comingSoon`: a city this viewer cannot open, or would open empty: a preview city (unless a previewer), or a city with no rows right now (live included; a previewer of its country still gets `full`). Its counts are 0 and its lists empty. Show the coming-soon screen and record demand. Only sent to a client declaring `X-Client-Features: travel1`." }),
         timezone: z.string().nullable().openapi({ description: "IANA zone to show this city's times in. Null when uncatalogued." }),
+        whatsappChannelUrl: z.string().url().nullable().openapi({ description: "The city's WhatsApp Channel (an https whatsapp.com/channel/ link, CHECKed in the database), for Notification settings' \"Your city\" row (Flow 9 A, ruling 7). Null when the city has none (every Canadian city today) or is uncatalogued: show no row." }),
         bounds: z
           .object({ minLat: z.number(), minLon: z.number(), maxLat: z.number(), maxLon: z.number() })
           .nullable()

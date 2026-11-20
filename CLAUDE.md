@@ -197,6 +197,7 @@ and therefore in every deployed environment:
 | `cities_bounds_order` | `min_lat < max_lat` and `min_lon < max_lon` |
 | `cities_centre_in_bounds` | a city's centre is inside its box |
 | `cities_licensed_min_age_floor` | a city's licensed-venue age default is never under the 18+ floor |
+| `cities_whatsapp_channel_url_shape` | a city's WhatsApp Channel is NULL or an https `whatsapp.com/channel/` link (Notification settings' "Your city" row) |
 | `mobile_refresh_tokens_revoked_reason_known` | a refresh token's `revoked_reason` is NULL, `password_reset` or `signout_all` — the two `endPhoneSessions` reasons (`lib/session-end.ts`) the refresh turns into `PASSWORD_RESET` / `SESSION_REVOKED_ELSEWHERE` |
 | `markets_ticket_fee_slabs_shape` | a market's service-fee slabs: thresholds and rates the same length, at least one, the first from ticket 1, no NULLs |
 | `markets_ticket_fee_slabs_ascending` | slab thresholds strictly ascending, through the IMMUTABLE SQL function `ticket_fee_slabs_ascending` (also `parseFeeSchedule`'s, `lib/ticket-fees.ts`) |

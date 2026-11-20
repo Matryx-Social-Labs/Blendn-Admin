@@ -236,7 +236,7 @@ describe("crew rows", () => {
 
     const open = await rowOf(me, "crew_invite")
     expect(open.open).toBe(true)
-    expect(open.display).toEqual({ context: "Nebula", visual: { type: "emblem", seed: "seed-nebula" } })
+    expect(open.display).toEqual({ title: "Crew invite: Nebula", context: "Nebula", visual: { type: "emblem", seed: "seed-nebula" } })
 
     await db.crew_invites.update({ where: { id: invite.id }, data: { declined_at: new Date() } })
     const declined = await rowOf(me, "crew_invite")
@@ -530,7 +530,7 @@ describe("open: what is still the reader's to answer", () => {
     const joined = await rowOf(me, "crew_invite")
     expect(joined.open).toBe(false)
     // Still the crew's emblem: closing the question does not lose the picture.
-    expect(joined.display).toEqual({ context: "Joined", visual: { type: "emblem", seed: "seed-joined" } })
+    expect(joined.display).toEqual({ title: "Crew invite: Joined", context: "Joined", visual: { type: "emblem", seed: "seed-joined" } })
 
     await db.crew_members.delete({ where: { crew_id_user_id: { crew_id: crew.id, user_id: me } } })
     await db.crew_invites.update({ where: { id: invite.id }, data: { removed_at: new Date() } })
