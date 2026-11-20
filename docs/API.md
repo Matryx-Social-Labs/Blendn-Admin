@@ -3302,7 +3302,7 @@ reveal already made is not undone. Deleting your account deletes your reveals.
 | `orientations` | array of `straight` · `gay` · `lesbian` · `bisexual` · `pansexual` · `queer` · `asexual` · `prefer_not_to_say` — **up to three**, distinct, and `prefer_not_to_say` alone | **nobody but the owner**, unless `show_orientation` *and* `maySeeIdentity` |
 | `work_field` | a slug from `GET /work-fields` | anyone who can see the profile |
 | `languages` | up to five slugs from `GET /profile-options` (besides English; `kannada_learning` is "Learning Kannada") | as a shared line on a card (Tier B); the labels to whoever can see who you are |
-| `home_state` | a state / union territory slug, or `abroad` | the same |
+| `home_state` | a region slug from `GET /profile-options` (an Indian state or union territory, a Canadian province or territory), or `abroad`. With a home city in a country that has its own lists (India, Canada) the slug must be one of **that country's** (the city sent in the same save, else the one on file): otherwise 400 `VALIDATION_ERROR` "Not a province we list for your home city". With no home city, any region we list (installed builds) | the same |
 | `homeCitySlug` | a `slug` from `GET /events/cities`, or `null` to clear. A preview city is accepted; an unknown or hidden one is 400 `VALIDATION_ERROR` and nothing is written. Read back as `profile.homeCitySlug` on your own GET and PUT | **nobody but the owner** |
 | `sun_sign` + `sign_system` | opt-in: a sign slug and `western` or `rashi`, **both or neither** (400 otherwise; `profiles_sign_shape` in the table). Null both to take it off | the same, plus your own `sign` chip on cards |
 | `shows_up_badge` | boolean, default false | turns on the "Shows up" badge |
@@ -3327,6 +3327,15 @@ non-veg (`__tests__/never-build-fields.test.ts`).
 
 `GET /profile-options` serves the vocabulary (languages, home states, the
 twelve signs with Western and rashi names, the this-or-that questions).
+With no query it is India's, unchanged for installed builds. `?country=IN` or
+`?country=CA` (either case) answers with that country's lists plus `country`
+and `regionWord` (`"state"`, `"province"`): Canada's languages start with
+English and French, its `homeStates` are provinces and territories (and
+`abroad`), and its this-or-that leaves out India's five (filter coffee, Nandi
+Hills, auto, cricket, Bollywood) and adds three of its own. Any other code, or
+an empty one, is the neutral view — every language by name and none
+"Learning …", no `homeStates`, only the questions asked everywhere, `country`
+and `regionWord` null. Never India's.
 `GET /me/this-or-that` returns `{ answers: { [question]: "a" | "b" } }`;
 `PUT /me/this-or-that` takes `{ answers: { [question]: "a" | "b" | null } }` —
 a choice sets, `null` takes back, an unknown question or choice refuses the
@@ -3998,7 +4007,7 @@ Chat is unaffected: posting a message is its own choice to be seen.
 |--------|----------|-------------|
 | GET | `/users/:userId` | Get user profile. `:userId` may be a room handle, echoed back as `id`, and is then answered in that room's terms — see Room handles. When `identityVisible` is true it also carries `connection: { conversationId, request: "sent" \| "received" \| null, youRevealed, theyRevealed }` — your open conversation, any pending message request between you, and who has revealed in it as `GET /conversations/:id` says (both false with no open conversation; additive, for the one-sided copy); absent otherwise, so the side that has not been revealed to learns nothing |
 | POST | `/users/:userId/block` | Block/unblock user (`DELETE` to unblock) |
-| GET | `/users/blocked` | The people you blocked. `blocked_id` is an **opaque ref to the block** (`bk_…`), not their account id — somebody blocked by their Lobby post or room handle was never shown one, and this list must not be where it arrives. Send it back to `DELETE /users/:userId/block` to unblock; only a block you made is removed. A raw id still unblocks, for older clients, on your own block only. Name and photo appear only where the identity rules allow |
+| GET | `/users/blocked` | The people you blocked. `blocked_id` is an **opaque ref to the block** (`bk_…`), not their account id — somebody blocked by their Lobby post or room handle was never shown one, and this list must not be where it arrives. Send it back to `DELETE /users/:userId/block` to unblock; only a block you made is removed. A raw id still unblocks, for older clients, on your own block only. Name and photo appear only where the identity rules allow. Each row also carries `seen_as` (the pseudonym you were shown for them when you blocked — a room's, the Lobby's or a match's, never a real name; null when none was shown or the block predates 2026-11-20 outside a match), `seen_in` (where you blocked from: the event's title, a venue day's venue, or a crew's, Mix's or post's room name; null when not recorded) and `account_deleted`. `?q=` (1–100 characters, trimmed; longer is 400) searches on the server, case-insensitively, over `seen_as`, `seen_in`, a match's pseudonym and a real name **only where this list would show it** — a hidden name finds nobody — with `pagination.totalCount` the number of matches. 60 a minute |
 | GET | `/users/:userId/favorites` | Get your saved events, each with `visibility` — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176); also `changedAt`/`changedFields`, as on `GET /me/rsvps` |
 | GET | `/profiles/:userId` | Get a profile. Your own carries `email` and the whole `profile` row except `date_of_birth` (`age` derived) — `name`, `gender`, `interested_in`, `intent_default`, `reveal_by_default`, `blur_photo`, `interests`, `created_at`, `updated_at` included, and `expertise` as slugs. Anybody else's `profile` is `id, age, onboarded, location, interests, work_field, expertise` (labels), plus `bio, occupation, education, photos` if you can see who they are, else `blurPhoto`; no `email`, and `image` only if you can see who they are |
 | PUT | `/profiles/:userId` | Update profile |
@@ -4770,9 +4779,18 @@ others there earn a month (each friend counts once; at most 3 a year).
   "product": "plus",
   "source": "apple",
   "expiresAt": "2026-11-10T09:00:00.000Z",
-  "changedAt": "2026-10-27T09:00:00.000Z"
+  "changedAt": "2026-10-27T09:00:00.000Z",
+  "plan": "yearly"
 } }
 ```
+
+`plan` is `monthly`, `quarterly` or `yearly`: the store plan of the described
+subscription (the live one, else the store purchase that ended last), from the
+`product_id` of its newest RevenueCat delivery (`blendn_plus_yearly` on Apple,
+`blendn_plus:yearly` on Google, docs/IAP-SETUP.md). A `PRODUCT_CHANGE` is skipped:
+it names the product being left, and the new plan counts from the renewal that
+bills it. Always present, and `null` when not known: a grant, a Night Pass, no
+purchase, a store row with no delivery on record, or a product we do not sell.
 
 `changedAt` is the latest `updated_at` over every `plus` and `night_pass` row the
 person has, **including rows that have not started** (a Night Pass stacked on a

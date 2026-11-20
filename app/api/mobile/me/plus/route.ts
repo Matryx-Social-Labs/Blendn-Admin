@@ -44,9 +44,13 @@ export async function GET(request: NextRequest) {
       expiresAt: live?.expiresAt?.toISOString() ?? null,
       // When any of your Plus or Night Pass rows last changed, started or not (a stacked pass counts): the app refetches on a new value.
       changedAt: changedAt?.toISOString() ?? null,
+      // Monthly / quarterly / yearly, from the product the store last billed; null
+      // when no delivery names one of ours (a grant, the Night Pass, no delivery).
+      plan: detail.plan ?? null,
       // Only when the data says so: `state` of a store subscription (from the
       // RevenueCat deliveries), `grant` for a free month of ours. Never guessed.
-      ...detail,
+      ...(detail.state && { state: detail.state }),
+      ...(detail.grant && { grant: detail.grant }),
     })
     res.headers.set("Cache-Control", "private, no-store")
     return res

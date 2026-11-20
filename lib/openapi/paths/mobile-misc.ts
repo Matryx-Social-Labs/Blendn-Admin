@@ -487,8 +487,13 @@ registry.registerPath({
     "What the profile editor picks from (plan v2 §8): `languages` besides English (at most `maxLanguages`), `homeStates` " +
     "(states, union territories and `abroad`), the twelve `signs` with their Western and rashi names, and the twelve " +
     "`thisOrThat` questions (answer `a` or `b` through PUT /me/this-or-that). Every one is display only — printed as a " +
-    "shared line, never used to rank. Identical for every caller, cached for an hour.",
+    "shared line, never used to rank. Identical for every caller of one URL, cached for an hour. " +
+    "Per country (SCRUM-711): `?country=` (a market code, `IN` or `CA`, either case) answers with that country's lists " +
+    "(Canada: English and French first, provinces and territories, no India-only questions) plus `country` and `regionWord`; " +
+    "any other value, or an empty one, is the neutral view (every language by name, no `homeStates`, only the questions asked " +
+    "everywhere) with both null — never India's. With no `?country=` the answer is India's, byte for byte as installed builds read it.",
   security: bearerAuth,
+  request: { query: z.object({ country: z.string().optional().describe("A market code (`IN`, `CA`); anything else is the neutral view.") }) },
   responses: {
     200: {
       description: "The vocabulary",
@@ -501,6 +506,12 @@ registry.registerPath({
               homeStates: z.array(z.object({ slug: z.string(), label: z.string() })),
               signs: z.array(z.object({ slug: z.string(), western: z.string(), rashi: z.string(), symbol: z.string() })),
               thisOrThat: z.array(z.object({ slug: z.string(), a: z.string(), b: z.string() })),
+              country: z.enum(["IN", "CA"]).nullable().optional().describe("Sent only with `?country=`: whose lists these are; null for the neutral view."),
+              regionWord: z
+                .enum(["state", "province"])
+                .nullable()
+                .optional()
+                .describe("Sent only with `?country=`: what this country calls a `homeStates` entry; null where there are none."),
             })
           ),
         },
@@ -1283,9 +1294,12 @@ registry.registerPath({
     "blocked by their Lobby post or room handle was never shown an id, and this list must not be " +
     "where it arrives. Send it back to `DELETE /users/{userId}/block` to unblock. A name and photo " +
     "appear only where the identity rules allow. Newest first, a page at a time (`?limit=`, `?cursor=`: without `limit` or `cursor` up to 200, " +
-    "otherwise default 100, 1-100) with `pagination.totalCount` the whole list.",
+    "otherwise default 100, 1-100) with `pagination.totalCount` the whole list. " +
+    "`?q=` (1-100 characters, trimmed; longer is 400) searches on the server, case-insensitively, over `seen_as`, `seen_in`, a match's pseudonym " +
+    "and a real name only where the list would show it, so a name the identity rules hide finds nobody; `totalCount` is then the matches. " +
+    "60 a minute per person.",
   security: bearerAuth,
-  request: { query: ListQuerySchema },
+  request: { query: ListQuerySchema.extend({ q: z.string().max(100).optional().describe("Search: a substring of the pseudonym, the place or a name the list may show.") }) },
   responses: {
     200: {
       description: "Blocked users",
@@ -1301,6 +1315,15 @@ registry.registerPath({
                   blocked_user_photo: z.null().describe("Always null: the blocked list draws a creature, never a face (SCRUM-834). The key stays for installed builds."),
                   reason: z.string().nullable(),
                   blocked_at: z.string().datetime(),
+                  seen_as: z
+                    .string()
+                    .nullable()
+                    .describe("The pseudonym you were shown for them when you blocked (a room's, the Lobby's, a match's): draw its creature and use it as the row's name when `blocked_user_name` is null. Never a real name. Null when none was shown or not recorded (blocks before 2026-11-20 outside a match). Additive."),
+                  seen_in: z
+                    .string()
+                    .nullable()
+                    .describe("Where you blocked them from: the event's title, a venue day's venue, or a crew's, a Mix's or a post's room name. Null when blocked from no place (a profile, Friends) or not recorded. Additive."),
+                  account_deleted: z.boolean().describe("Their account has been deleted since; the block stays, and can still be removed. Additive."),
                 })
               ),
               pagination: ListPaginationSchema,
@@ -1370,6 +1393,12 @@ const PlusStatusSchema = z
       .datetime()
       .nullable()
       .describe("The latest `updated_at` over every `plus` and `night_pass` row, including rows not yet started (a stacked Night Pass). Null with none. Additive."),
+    plan: z
+      .enum(["monthly", "quarterly", "yearly"])
+      .nullable()
+      .describe(
+        "The store plan of the described subscription, from the product its newest delivery names (a PRODUCT_CHANGE is skipped: the new plan counts from the renewal that bills it). Null when not known: a grant, a Night Pass, no purchase, a store row with no delivery, a product we do not sell. Kept for a cancelled or expired subscription. Additive."
+      ),
     state: z
       .enum(["active", "cancelled", "grace", "hold", "paused", "expired", "refunded"])
       .optional()

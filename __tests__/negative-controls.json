@@ -35,6 +35,12 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "profile-options-country.test.ts": {
+      "guards": "SCRUM-711 / SCRUM-1082: GET /profile-options with no ?country= is byte for byte the India response installed builds read (fixture __tests__/fixtures/profile-options-india.json), while ?country= serves a country's own lists or the neutral view.",
+      "mutation": "app/api/mobile/profile-options/route.ts: legacy() put maxLanguages before languages (same values, a different key order).",
+      "observed": "1 of 10 failing, the byte-for-byte test. Restored; 10/10.",
+      "date": "2026-11-20"
+    },
     "banned-names.test.ts": {
       "guards": "SCRUM-1027 naming review (owner 2026-11-05): the retired names (Board, blend in, Blend as the crew match, Event Pass, door pass, spaces left, Liking as, centre) never come back in a string a person reads under app/, components/ and lib/.",
       "mutation": "lib/billing-plans.ts: the event_pass label put back to \"Event Pass\".",

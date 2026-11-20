@@ -118,6 +118,94 @@ export const HOME_STATES: readonly Option[] = [
   { slug: "abroad", label: "Grew up abroad" },
 ] as const
 
+/*
+ * Per country (SCRUM-711). The lists above are India's, and stay exactly as
+ * installed builds read them. A country with lists of its own has its
+ * languages, its regions and the word it uses for them; any other country, or
+ * none, gets the neutral view (`profileListsFor(null)`), never India's.
+ */
+
+/** The countries with lists of their own, by market code. */
+export type ListCountry = "IN" | "CA"
+export const listCountry = (code: string | null | undefined): ListCountry | null => {
+  const upper = code?.toUpperCase()
+  return upper === "IN" || upper === "CA" ? upper : null
+}
+
+/**
+ * Canada's languages. English and French first: unlike India's list, both are
+ * what people there say they speak, and neither is a given in a room.
+ * Then the most spoken at home after them (Statistics Canada, 2021 census).
+ */
+const CANADA_LANGUAGES: readonly Option[] = [
+  { slug: "english", label: "English" },
+  { slug: "french", label: "French" },
+  { slug: "mandarin", label: "Mandarin" },
+  { slug: "punjabi", label: "Punjabi" },
+  { slug: "cantonese", label: "Cantonese" },
+  { slug: "spanish", label: "Spanish" },
+  { slug: "arabic", label: "Arabic" },
+  { slug: "tagalog", label: "Tagalog" },
+  { slug: "hindi", label: "Hindi" },
+  { slug: "urdu", label: "Urdu" },
+  { slug: "tamil", label: "Tamil" },
+  { slug: "gujarati", label: "Gujarati" },
+  { slug: "persian", label: "Persian" },
+  { slug: "portuguese", label: "Portuguese" },
+  { slug: "italian", label: "Italian" },
+  { slug: "german", label: "German" },
+  { slug: "korean", label: "Korean" },
+  { slug: "vietnamese", label: "Vietnamese" },
+  { slug: "russian", label: "Russian" },
+  { slug: "ukrainian", label: "Ukrainian" },
+  { slug: "polish", label: "Polish" },
+] as const
+
+/** Provinces and territories, never a town, for the reason states are. "Grew up abroad" is India's slug too. */
+const CANADA_PROVINCES: readonly Option[] = [
+  { slug: "alberta", label: "Alberta" },
+  { slug: "british_columbia", label: "British Columbia" },
+  { slug: "manitoba", label: "Manitoba" },
+  { slug: "new_brunswick", label: "New Brunswick" },
+  { slug: "newfoundland_labrador", label: "Newfoundland and Labrador" },
+  { slug: "nova_scotia", label: "Nova Scotia" },
+  { slug: "ontario", label: "Ontario" },
+  { slug: "prince_edward_island", label: "Prince Edward Island" },
+  { slug: "quebec", label: "Quebec" },
+  { slug: "saskatchewan", label: "Saskatchewan" },
+  { slug: "northwest_territories", label: "Northwest Territories" },
+  { slug: "nunavut", label: "Nunavut" },
+  { slug: "yukon", label: "Yukon" },
+  { slug: "abroad", label: "Grew up abroad" },
+] as const
+
+/** What a region is called where it is. Null: a country we keep no regions for. */
+export type RegionWord = "state" | "province"
+
+const COUNTRY_LISTS: Record<ListCountry, { languages: readonly Option[]; regions: readonly Option[]; regionWord: RegionWord }> = {
+  IN: { languages: LANGUAGES, regions: HOME_STATES, regionWord: "state" },
+  CA: { languages: CANADA_LANGUAGES, regions: CANADA_PROVINCES, regionWord: "province" },
+}
+
+const ALL_LANGUAGES: readonly Option[] = [...new Map([...LANGUAGES, ...CANADA_LANGUAGES].map((o) => [o.slug, o])).values()]
+const ALL_REGIONS: readonly Option[] = [...new Map([...HOME_STATES, ...CANADA_PROVINCES].map((o) => [o.slug, o])).values()]
+
+/**
+ * Neutral: every language we list, by name, and none of them "Learning …" (a
+ * bridge into one city's language is that city's); no regions, because a
+ * region list is a country's.
+ */
+const NEUTRAL_LANGUAGES: readonly Option[] = ALL_LANGUAGES.filter((o) => !o.slug.endsWith("_learning")).sort((a, b) => a.label.localeCompare(b.label, "en"))
+
+/** A country's languages, regions and region word; the neutral view for null. */
+export function profileListsFor(country: ListCountry | null): { languages: readonly Option[]; regions: readonly Option[]; regionWord: RegionWord | null } {
+  return country ? COUNTRY_LISTS[country] : { languages: NEUTRAL_LANGUAGES, regions: [], regionWord: null }
+}
+
+/** Is this a home region in that country (`PUT /profiles/:id` for an account whose country is known). */
+export const isHomeStateIn = (country: ListCountry, slug: unknown): boolean =>
+  typeof slug === "string" && COUNTRY_LISTS[country].regions.some((o) => o.slug === slug)
+
 export type SignSystem = "western" | "rashi"
 export const SIGN_SYSTEMS: readonly SignSystem[] = ["western", "rashi"]
 
@@ -160,8 +248,9 @@ export const SIGNS: readonly Sign[] = [
 
 export const ELEMENT_EMOJI: Record<Element, string> = { fire: "🔥", earth: "🌱", air: "🌬️", water: "🌊" }
 
-const LANGUAGE = new Map(LANGUAGES.map((o) => [o.slug, o.label]))
-const STATE = new Map(HOME_STATES.map((o) => [o.slug, o.label]))
+// Every country's, so a stored slug always has its label, whatever the account's country is now.
+const LANGUAGE = new Map(ALL_LANGUAGES.map((o) => [o.slug, o.label]))
+const STATE = new Map(ALL_REGIONS.map((o) => [o.slug, o.label]))
 const SIGN = new Map(SIGNS.map((s) => [s.slug, s]))
 
 export const isLanguage = (slug: unknown): slug is string => typeof slug === "string" && LANGUAGE.has(slug)

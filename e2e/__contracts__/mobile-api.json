@@ -361,6 +361,7 @@
       "changedAt",
       "expiresAt",
       "gated",
+      "plan",
       "product",
       "source"
     ]

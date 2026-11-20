@@ -19,6 +19,7 @@ import {
 import { readJson, isUuid } from "@/lib/api-input"
 import { evictBlockedFromBlends } from "@/lib/crews/like"
 import { blockPairIn } from "@/lib/block-pair"
+import { requestSeen } from "@/lib/block-seen"
 import { notifyFriendshipChanged } from "@/lib/room-friends"
 import { closeConversationRoom } from "@/lib/socket-server"
 
@@ -157,7 +158,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (action === "block") {
       // The same block as every other door (lib/block-pair.ts): the row, the
       // friendship and every friend request, crew invites, and the conversation.
-      const closedId = await db.$transaction((tx) => blockPairIn(tx, authUser.userId, messageRequest.sender_id))
+      const seen = await requestSeen(messageRequest.met_in_event_id)
+      const closedId = await db.$transaction((tx) => blockPairIn(tx, authUser.userId, messageRequest.sender_id, seen))
       if (closedId) closeConversationRoom(closedId)
       void notifyFriendshipChanged(authUser.userId, messageRequest.sender_id)
       // Out of any Blend room that now refuses them; the Blend goes on for the rest (D-9).
