@@ -1283,9 +1283,12 @@ registry.registerPath({
     "blocked by their Lobby post or room handle was never shown an id, and this list must not be " +
     "where it arrives. Send it back to `DELETE /users/{userId}/block` to unblock. A name and photo " +
     "appear only where the identity rules allow. Newest first, a page at a time (`?limit=`, `?cursor=`: without `limit` or `cursor` up to 200, " +
-    "otherwise default 100, 1-100) with `pagination.totalCount` the whole list.",
+    "otherwise default 100, 1-100) with `pagination.totalCount` the whole list. " +
+    "`?q=` (1-100 characters, trimmed; longer is 400) searches on the server, case-insensitively, over `seen_as`, `seen_in`, a match's pseudonym " +
+    "and a real name only where the list would show it, so a name the identity rules hide finds nobody; `totalCount` is then the matches. " +
+    "60 a minute per person.",
   security: bearerAuth,
-  request: { query: ListQuerySchema },
+  request: { query: ListQuerySchema.extend({ q: z.string().max(100).optional().describe("Search: a substring of the pseudonym, the place or a name the list may show.") }) },
   responses: {
     200: {
       description: "Blocked users",
@@ -1301,6 +1304,15 @@ registry.registerPath({
                   blocked_user_photo: z.null().describe("Always null: the blocked list draws a creature, never a face (SCRUM-834). The key stays for installed builds."),
                   reason: z.string().nullable(),
                   blocked_at: z.string().datetime(),
+                  seen_as: z
+                    .string()
+                    .nullable()
+                    .describe("The pseudonym you were shown for them when you blocked (a room's, the Lobby's, a match's): draw its creature and use it as the row's name when `blocked_user_name` is null. Never a real name. Null when none was shown or not recorded (blocks before 2026-11-20 outside a match). Additive."),
+                  seen_in: z
+                    .string()
+                    .nullable()
+                    .describe("Where you blocked them from: the event's title, a venue day's venue, or a crew's, a Blend's or a post's room name. Null when blocked from no place (a profile, Friends) or not recorded. Additive."),
+                  account_deleted: z.boolean().describe("Their account has been deleted since; the block stays, and can still be removed. Additive."),
                 })
               ),
               pagination: ListPaginationSchema,

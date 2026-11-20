@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { blockPairIn } from "@/lib/block-pair"
+import { blockSeenFromRef } from "@/lib/block-seen"
 import { notifyFriendshipChanged } from "@/lib/room-friends"
 import { db } from "@/lib/db"
 import { closeConversationRoom } from "@/lib/socket-server"
@@ -34,7 +35,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (limited) return limited
 
     // A room handle or a raw id (SCRUM-371); a forged handle reads as unknown.
-    const targetId = await userTargetFromRef(authUser.userId, (await params).userId)
+    const ref = (await params).userId
+    const targetId = await userTargetFromRef(authUser.userId, ref)
 
     if (targetId === authUser.userId) {
       return errorResponse("Cannot block yourself", 400)
@@ -64,10 +66,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * Every statement is idempotent, so a retry after a partial network failure
      * converges rather than compounding.
      */
+    // What they were shown as and where, from the handle the block came by: read before, written with the row.
+    const seen = await blockSeenFromRef(ref, targetId)
     const closedConversationId = await db.$transaction(async (tx) => {
       // The block itself, whichever door: the lock, the row, the requests, the
       // friendship, and the conversation (lib/block-pair.ts).
-      const closedId = await blockPairIn(tx, authUser.userId, targetId)
+      const closedId = await blockPairIn(tx, authUser.userId, targetId, seen)
 
       /*
        * And the bell. Their board asks leave the blocker's list at once (hidden

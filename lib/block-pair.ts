@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client"
 import { closeConversation, conversationPair } from "@/lib/conversations"
 import { lockPair, severFriendship } from "@/lib/friends"
+import { SEEN_NOTHING, type BlockSeen } from "@/lib/block-seen"
 
 /**
  * ONE block, whichever door it came through.
@@ -23,14 +24,22 @@ import { lockPair, severFriendship } from "@/lib/friends"
  * - the conversation, closed (a block implies an unmatch, and unmatching is
  *   permanent).
  *
+ * `seen` is what the blocker was shown for them and where (`lib/block-seen.ts`),
+ * written with a new block only: blocking again keeps what the first one saw.
+ *
  * Returns the id of the conversation it closed, for the caller to evict from
  * the socket room after the commit; null if there was none or it was closed.
  */
-export async function blockPairIn(tx: Prisma.TransactionClient, blockerId: string, blockedId: string): Promise<string | null> {
+export async function blockPairIn(
+  tx: Prisma.TransactionClient,
+  blockerId: string,
+  blockedId: string,
+  seen: BlockSeen = SEEN_NOTHING
+): Promise<string | null> {
   await lockPair(tx, blockerId, blockedId)
   await tx.blocked_users.upsert({
     where: { blocker_id_blocked_id: { blocker_id: blockerId, blocked_id: blockedId } },
-    create: { blocker_id: blockerId, blocked_id: blockedId },
+    create: { blocker_id: blockerId, blocked_id: blockedId, seen_as: seen.seenAs, seen_in: seen.seenIn },
     update: {},
   })
   // Both directions: a request either of them left pending must not survive to

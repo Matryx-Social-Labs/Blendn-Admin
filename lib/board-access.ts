@@ -488,14 +488,14 @@ export async function fileBoardReport(input: {
 export async function boardRequestCounterpart(
   viewerId: string,
   requestId: string
-): Promise<string | null> {
+): Promise<{ userId: string; eventId: string } | null> {
   const r = await db.board_requests.findUnique({
     where: { id: requestId },
-    select: { from_user_id: true, to_user_id: true, silenced_at: true },
+    select: { from_user_id: true, to_user_id: true, silenced_at: true, event_id: true },
   })
-  if (r?.from_user_id === viewerId) return r.to_user_id
+  if (r?.from_user_id === viewerId) return { userId: r.to_user_id, eventId: r.event_id }
   // An ask silenced at ask time does not exist for its author.
-  if (r?.to_user_id === viewerId && !r.silenced_at) return r.from_user_id
+  if (r?.to_user_id === viewerId && !r.silenced_at) return { userId: r.from_user_id, eventId: r.event_id }
   return null
 }
 
