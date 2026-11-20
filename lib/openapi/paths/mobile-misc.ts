@@ -487,8 +487,13 @@ registry.registerPath({
     "What the profile editor picks from (plan v2 §8): `languages` besides English (at most `maxLanguages`), `homeStates` " +
     "(states, union territories and `abroad`), the twelve `signs` with their Western and rashi names, and the twelve " +
     "`thisOrThat` questions (answer `a` or `b` through PUT /me/this-or-that). Every one is display only — printed as a " +
-    "shared line, never used to rank. Identical for every caller, cached for an hour.",
+    "shared line, never used to rank. Identical for every caller of one URL, cached for an hour. " +
+    "Per country (SCRUM-711): `?country=` (a market code, `IN` or `CA`, either case) answers with that country's lists " +
+    "(Canada: English and French first, provinces and territories, no India-only questions) plus `country` and `regionWord`; " +
+    "any other value, or an empty one, is the neutral view (every language by name, no `homeStates`, only the questions asked " +
+    "everywhere) with both null — never India's. With no `?country=` the answer is India's, byte for byte as installed builds read it.",
   security: bearerAuth,
+  request: { query: z.object({ country: z.string().optional().describe("A market code (`IN`, `CA`); anything else is the neutral view.") }) },
   responses: {
     200: {
       description: "The vocabulary",
@@ -501,6 +506,12 @@ registry.registerPath({
               homeStates: z.array(z.object({ slug: z.string(), label: z.string() })),
               signs: z.array(z.object({ slug: z.string(), western: z.string(), rashi: z.string(), symbol: z.string() })),
               thisOrThat: z.array(z.object({ slug: z.string(), a: z.string(), b: z.string() })),
+              country: z.enum(["IN", "CA"]).nullable().optional().describe("Sent only with `?country=`: whose lists these are; null for the neutral view."),
+              regionWord: z
+                .enum(["state", "province"])
+                .nullable()
+                .optional()
+                .describe("Sent only with `?country=`: what this country calls a `homeStates` entry; null where there are none."),
             })
           ),
         },
@@ -1311,7 +1322,7 @@ registry.registerPath({
                   seen_in: z
                     .string()
                     .nullable()
-                    .describe("Where you blocked them from: the event's title, a venue day's venue, or a crew's, a Blend's or a post's room name. Null when blocked from no place (a profile, Friends) or not recorded. Additive."),
+                    .describe("Where you blocked them from: the event's title, a venue day's venue, or a crew's, a Mix's or a post's room name. Null when blocked from no place (a profile, Friends) or not recorded. Additive."),
                   account_deleted: z.boolean().describe("Their account has been deleted since; the block stays, and can still be removed. Additive."),
                 })
               ),
