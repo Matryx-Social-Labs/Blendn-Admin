@@ -161,7 +161,7 @@ already know each other's ids.
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `event:room:checkin` | `{ eventId, userId, userName, userImage?, checkInTime, hereCount? }` | Who arrived, by pseudonym. Never sent to the arriver's block counterparties, and not sent at all for an arriver with "Show online status" off — the roster leaves them out, so only `event:checkin` (no name) moves the count (SCRUM-620). Nor to the arriver's **friends**, whatever their switch: friends never meet as strangers in a room. |
+| `event:room:checkin` | `{ eventId, userId, userName, revealed, userImage?, checkInTime, hereCount? }` | Who arrived, by pseudonym; `revealed: true` when `userName` is their first name instead (the deck's `revealed`, SCRUM-1067). Never sent to the arriver's block counterparties, and not sent at all for an arriver with "Show online status" off — the roster leaves them out, so only `event:checkin` (no name) moves the count (SCRUM-620). Nor to the arriver's **friends**, whatever their switch: friends never meet as strangers in a room. |
 
 ### Room Events (room: `user:{userId}`)
 

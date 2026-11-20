@@ -646,6 +646,11 @@ export const MatchListResponseSchema = z
         userId: RoomUserRefSchema,
         /** Room pseudonym unless that person revealed themselves at this event. */
         displayName: z.string(),
+        revealed: z
+          .boolean()
+          .describe(
+            "True when `displayName` is their name, not the pseudonym (SCRUM-1067): draw their photo or initial, never a creature. False for everyone a host sees."
+          ),
         /** Null unless revealed — a photo identifies as surely as a name. */
         photo: z.string().nullable(),
         /** Category names, which is what the card renders. */

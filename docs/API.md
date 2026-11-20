@@ -1042,13 +1042,17 @@ ticket.
 Each card names what the two of you share rather than who the other person is:
 
 ```json
-{ "userId": "...", "displayName": "Cosmic Panda", "photo": null,
+{ "userId": "...", "displayName": "Cosmic Panda", "revealed": false, "photo": null,
   "sharedInterests": ["Techno", "Board games"],
   "sharedIntents": ["networking"], "insideNow": true, "youLiked": false }
 ```
 
 `displayName` is the room pseudonym and `photo` is null unless that person chose
-to be revealed at this event. **There is no score** — the ordering is not
+to be revealed at this event. `revealed` says which (SCRUM-1067): true exactly when
+`displayName` is their name, so a client draws their photo or, with none, their
+initial, and a creature only when it is false. A revealed person with no name on
+the account stays their pseudonym and `revealed: false`. A host is never told
+anyone is revealed. **There is no score** — the ordering is not
 exposed, because a number implies a precision the data cannot support.
 
 Staff are excluded. People who have checked out are not: they were in the room
