@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { BBOX_WITH_RADIUS, bboxParam, notBboxAndRadius } from "@/lib/map-bbox"
 import { VENUE_TYPES } from "@/lib/venue-types"
 
 /** `a,b` to `["a", "b"]`, each one of `VENUE_TYPES`; a blank entry is not one. */
@@ -40,6 +41,8 @@ export const venueQuerySchema = z.object({
   lon: z.coerce.number().min(-180).max(180).optional(),
   /** Only bites when asked for. See the note above — no default, ever. */
   radius: z.coerce.number().min(0.1).max(100).optional(),
+  /** The map's view, as on events (`lib/map-bbox.ts`); `pagination.totalCount` is how many are inside. Never with `radius`. */
+  bbox: bboxParam.optional(),
 
   /**
    * One type or a comma list (`pub_bar,brewery`), each of the vocabulary: a
@@ -76,6 +79,6 @@ export const venueQuerySchema = z.object({
   order: z.enum(["live"]).optional(),
   sortBy: z.enum(["name", "distance"]).default("name"),
   sortOrder: z.enum(["asc", "desc"]).default("asc"),
-})
+}).refine(notBboxAndRadius, { message: BBOX_WITH_RADIUS, path: ["bbox"] })
 
 export type VenueQueryInput = z.infer<typeof venueQuerySchema>

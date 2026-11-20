@@ -1307,6 +1307,7 @@ GET /events/:eventId/people?limit=30&cursor=rh_…
 | lat | float | - | Latitude — sorts and labels by distance, never excludes |
 | lon | float | - | Longitude |
 | radius | float | **none** | Hard limit in **km**. No default: sending coordinates alone no longer filters |
+| bbox | string | - | **The map's view** (backend round 3, SCRUM-1086): `minLon,minLat,maxLon,maxLat`, GeoJSON order, as a map reports its visible bounds. Only events inside it, and `pagination.totalCount` is how many are, so a capped page (`limit` ≤ 100) can say "+130 more · zoom in". Never with `radius` (400), nor across the antimeridian (west > east, 400). A box is not a fix: `distance` stays null unless `lat`/`lon` are sent as well. Not cached server-side (every pan is a new box). On `(latitude, longitude)`, indexed |
 | categoryId | uuid | - | Filter by category. Parent-inclusive — picking a parent sweeps in its children |
 | categorySlug | string | - | Same, by slug |
 | startDate | ISO date | - | Events starting after |
@@ -1316,7 +1317,25 @@ GET /events/:eventId/people?limit=30&cursor=rh_…
 | status | string | published | Event status filter |
 | sortBy | enum | start_time | `start_time`, `created_at`, `distance` |
 | sortOrder | enum | asc | `asc`, `desc` |
-| include | string | - | Comma-separated: `checkins,activeCheckins,profile` |
+| include | string | - | Comma-separated: `checkins,activeCheckins,profile,near`. `near` needs `lat`/`lon`: see below |
+
+**`near`: "Nothing near you yet" (`include=near` with `lat`/`lon`; backend round 3).**
+`{ reachKm: 25, empty, nearestCity }`. `empty` is true when nothing the viewer
+could go to — published, public, not ended, within their age, in a city they
+may open; **no** `city`, search, category or date filter — is within 25 km of
+the fix. Only then is `nearestCity` set: `{ slug, name, country, distanceKm,
+centre: { latitude, longitude } }`, the nearest catalogue city (by its centre)
+the viewer may open fully **that has something on**, so the map can show it
+("Nothing near you yet · showing Mysuru"). Null when nothing is open anywhere.
+Any country: the cities are `cities` rows, a preview market counts only for its
+previewers. Absent without a fix, without `include=near`, and if the signal
+could not be read (logged; the list still answers). `lib/near-signal.ts`.
+
+**`distance` is from the fix, or null.** Kilometres from `lat`/`lon` when both
+are sent and the event has a pin; otherwise null — never from a map view
+(`bbox`), a city centre or a guess. With `featured=true` and a fix, the five
+come **nearest first**, each with its `distance`; the day's rotation breaks
+ties and orders them with no fix (`featured.rank` still says the rotation).
 
 **`featured` on each event is `{ kind, rank, by }` or `null`.** `kind` is
 `editorial` (Blendn's own pick, today's `isFeatured`, set by an admin; `by` is
@@ -1704,6 +1723,7 @@ vocabulary, meaning exactly what it means there.
 | `city` | Exact, case-insensitive. Venues with no city are unreachable this way, as with events |
 | `lat` + `lon` | Enables `sortBy=distance` and populates `distance`. **Does not filter** |
 | `radius` | km. **No default.** Only bites when you send it |
+| `bbox` | The map's view, as on `GET /events`: `minLon,minLat,maxLon,maxLat`. Only venues inside it; `pagination.totalCount` is how many are. Never with `radius` (400) |
 | `venueType` | One of the 35 slugs, or a comma list (`pub_bar,brewery`): a venue of any of them. An unknown slug is a 400. `venueTypes` is the same filter under its plural name; send both and a venue of either matches |
 | `area` | A neighbourhood by `areaSlug` (`koramangala-1st-block`). A venue with no area is in none |
 | `area` / `areaSlug` (on every item) | The neighbourhood a person would name, from Overture's own division polygons (`scripts/places/areas.sql`, set by `scripts/backfill-venue-areas.ts`); both `null` when unknown, never guessed: fall back to the address or city. The list of areas is `GET /venues/summary` |
