@@ -124,17 +124,26 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return errorResponse(`Add ${missing} to your profile first`, 400, "reveal_incomplete")
     }
 
-    // The flip is the claim: only the call whose UPDATE changes the row tells
-    // anybody, so a repeat (or a parallel pair) pushes once (API M4).
-    const mine = isUser1 ? "user1_revealed" : "user2_revealed"
-    const { count } = await db.private_conversations.updateMany({
-      where: { id: conversationId, [mine]: false, closed_at: null },
-      data: isUser1 ? { user1_revealed: true } : { user2_revealed: true },
-    })
-    const after = await db.private_conversations.findUniqueOrThrow({
-      where: { id: conversationId },
-      select: { user1_revealed: true, user2_revealed: true },
-    })
+    /*
+     * The flip is the claim: only the call whose UPDATE changes the row tells
+     * anybody, so a repeat (or a parallel pair) pushes once (API M4). Both
+     * flags come back from that same UPDATE (RETURNING), not from a re-read:
+     * when both sides tap at once, exactly one of the two writes sees the
+     * other's tap, so exactly one "Names swapped" goes out (review of #1001).
+     */
+    type Flags = { u1: boolean; u2: boolean }
+    const flipped = isUser1
+      ? await db.$queryRaw<Flags[]>`UPDATE private_conversations SET user1_revealed = true WHERE id = ${conversationId}::uuid AND user1_revealed = false AND closed_at IS NULL RETURNING user1_revealed AS u1, user2_revealed AS u2`
+      : await db.$queryRaw<Flags[]>`UPDATE private_conversations SET user2_revealed = true WHERE id = ${conversationId}::uuid AND user2_revealed = false AND closed_at IS NULL RETURNING user1_revealed AS u1, user2_revealed AS u2`
+    const count = flipped.length
+    const after = flipped[0]
+      ? { user1_revealed: flipped[0].u1, user2_revealed: flipped[0].u2 }
+      : await db.private_conversations.findUniqueOrThrow({
+          where: { id: conversationId },
+          select: { user1_revealed: true, user2_revealed: true, closed_at: true },
+        })
+    // Closed between the read above and the write: gone, as for a closed one.
+    if (count === 0 && "closed_at" in after && after.closed_at) return notFoundResponse("Conversation not found")
     const swapped = after.user1_revealed && after.user2_revealed
 
     const themId = isUser1 ? conversation.user2_id : conversation.user1_id

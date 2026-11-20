@@ -2706,15 +2706,16 @@ A swap never opens the profile (SCRUM-752, and now past the swap too): `GET
 room-level reveal, a friend who turned on `friends_see_me_in_rooms` and a
 conversation that never was pseudonymous still identify as before.
 
-**The other person's id in a DM is a handle until you have swapped.** In `GET
+**The other person's id in a match's or a board post's DM is always a handle — swapped or not.** In `GET
 /conversations`, `GET /conversations/:id`, `POST /conversations`, a message's
 `senderId` / `sender.id` and the `private:*` socket events, the other person of
-a match you have not swapped with is an opaque `rh_…` handle scoped to that
+a match or a board post is an opaque `rh_…` handle scoped to that
 conversation (the same one on every one of those surfaces, so a sender still
-matches the other person). Your own id is always your real id. Once you both swap
-the real id comes back, everywhere at once. The handle is accepted by `POST
-/users/:id/block`, `POST /users/:id/report` and `POST /conversations`, and by no
-profile or friend route (they answer it as an id nobody has): it names a person
+matches the other person). Your own id is always your real id. A swap does not
+change it (first name and photo, this chat only). The handle is accepted by `POST
+/users/:id/block`, `POST /users/:id/report`, `POST /conversations` and `POST
+/friends/requests` (a swapped pair may ask by it; anyone else gets the plain
+404), and by no profile route (they answer it as an id nobody has): it names a person
 only inside that DM. It exists because every other surface that carries an
 account id also carries a name, so the id beside a pseudonym was a join key.
 `private:message` is sent per recipient (their copy names the sender by the
@@ -3053,7 +3054,7 @@ malformed or reset token, a deleted account, a block either way, a pair who
 left each other, an id you have no relationship with, and a match not swapped
 on both sides (until both swap neither may name the other, so a reason would say
 who a pseudonym is; `NOT_A_REVEALED_MATCH` is no longer sent). A swapped match
-asks from the DM by the real id the chat hands over. A request made
+asks from the DM by the chat's handle (`otherUser.id`). A request made
 this way notifies with `data.via = "match"` (so the app can say "from your
 match"), and never names an event or room. The invite-link path is unchanged.
 `GET /profiles/:id` also carries `friend` (same shape as above) for somebody you

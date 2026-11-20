@@ -4,6 +4,7 @@ import { z } from "zod"
 import { db } from "@/lib/db"
 import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
 import { INVITE_TOKEN, matchStanding, mayConnect, personCard, personSelect, releaseHeldRequests, requestFriend } from "@/lib/friends"
+import { userIdFromDmRef } from "@/lib/conversation-ref"
 import { identityForRef } from "@/lib/identity"
 import { recordReferral } from "@/lib/plus"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -163,11 +164,14 @@ export async function POST(request: NextRequest) {
       // handle still resolves through `identityForRef`, and a handle the room
       // keeps anonymous is refused as unknown even for a revealed match: a
       // 200 there would say which pseudonym in that room is them.
-      // A conversation's handle (what the inbox gives for a match until they
-      // reveal) is not resolved here: it is only ever somebody the asker cannot
-      // name yet, so the answer would be the plain 404 anyway, and it is, as an
-      // id nobody has.
-      const target = await identityForRef(me, parsed.data.userId)
+      // A conversation's handle -- what a match's or a board post's chat gives
+      // for the other person, swapped or not -- names them to the other person
+      // in that chat (`userIdFromDmRef`), and the match rule below decides: a
+      // pair who have swapped may ask; anyone else gets the plain 404.
+      const viaDm = await userIdFromDmRef(me, parsed.data.userId)
+      const target = viaDm
+        ? { userId: viaDm, room: null, identified: true }
+        : await identityForRef(me, parsed.data.userId)
       recipientId = target.userId
       const { standing } = await matchStanding(me, recipientId)
       const nameable = !target.room || target.identified

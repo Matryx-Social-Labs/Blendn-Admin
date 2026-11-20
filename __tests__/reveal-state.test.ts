@@ -77,11 +77,13 @@ describe("the swap endpoint", () => {
   const del = src.slice(src.indexOf("export async function DELETE"))
 
   it("a tap writes only the caller's own side", () => {
-    expect(post).toMatch(/isUser1 \? \{ user1_revealed: true \} : \{ user2_revealed: true \}/)
-    expect(post).not.toMatch(/revealed: false/)
+    expect(post).toMatch(/isUser1\s*\?\s*await db\.\$queryRaw<Flags\[\]>`UPDATE private_conversations SET user1_revealed = true WHERE id = \$\{conversationId\}::uuid AND user1_revealed = false AND closed_at IS NULL/)
+    expect(post).toMatch(/:\s*await db\.\$queryRaw<Flags\[\]>`UPDATE private_conversations SET user2_revealed = true WHERE id = \$\{conversationId\}::uuid AND user2_revealed = false AND closed_at IS NULL/)
+    expect(post).not.toMatch(/revealed = false,|revealed: false/)
   })
 
   it("answers mutual from the re-read after the write, not the read before it", () => {
+    expect(post).toMatch(/RETURNING user1_revealed AS u1, user2_revealed AS u2/)
     expect(post).toMatch(/const swapped = after\.user1_revealed && after\.user2_revealed/)
     expect(post).toMatch(/successResponse\(\{ revealed: true, mutual: swapped \}\)/)
   })

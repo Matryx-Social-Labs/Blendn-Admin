@@ -297,6 +297,9 @@ describe("emitPrivateTyping / emitPrivateRead", () => {
     mockDb.private_conversations.findUnique.mockResolvedValue({
       user1_id: USER,
       user2_id: "user_other",
+      // An accepted message request: real names, one conversation room.
+      user1_pseudonym: null,
+      user2_pseudonym: null,
     })
   const asOutsider = () =>
     mockDb.private_conversations.findUnique.mockResolvedValue({

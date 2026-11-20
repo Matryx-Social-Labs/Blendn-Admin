@@ -164,7 +164,7 @@ registry.registerPath({
   tags: ["Mobile Conversations"],
   summary: "Tap Swap names",
   description:
-    "A mutual swap (identity model). Nothing shows until BOTH sides have tapped; then each sees the other's FIRST name and one photo (`otherUser.image`), in this chat only -- never the full name, and a swap never opens the profile by id. Your tap is also the ask: the other side reads `revealRequested: true` (\"they want to swap\"). A repeat tap is a no-op and pushes nothing. There is no decline. `mutual` is true once both have tapped.\n\nTapping without a name and a photo is refused with `reveal_incomplete`. A conversation that was never pseudonymous (an accepted message request) is a 400. An accepted Lobby ask opens already swapped. The body takes nothing (`ask` was removed: the tap is the ask).",
+    "A mutual swap (identity model). Nothing shows until BOTH sides have tapped; then each sees the other's FIRST name and one photo (`otherUser.image`), in this chat only -- never the full name, and the other person stays the chat's `rh_` handle (a swap never hands over the account id or opens the profile). Your tap is also the ask: the other side reads `revealRequested: true` (\"they want to swap\"). A repeat tap is a no-op and pushes nothing. There is no decline. `mutual` is true once both have tapped.\n\nTapping without a name and a photo is refused with `reveal_incomplete`. A conversation that was never pseudonymous (an accepted message request) is a 400. An accepted Lobby ask opens already swapped. The body takes nothing (`ask` was removed: the tap is the ask).",
   security: bearerAuth,
   request: { params: z.object({ conversationId: z.string().uuid() }) },
   responses: {

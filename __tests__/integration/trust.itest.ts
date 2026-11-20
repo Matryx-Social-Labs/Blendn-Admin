@@ -59,7 +59,8 @@ async function connect(eventId: string, a: string, b: string) {
 }
 
 /** Who a person may rate, as the ids the list names. */
-const peers = async (eventId: string, raterId: string) => (await ratablePeers(eventId, raterId)).map((p) => p.ref)
+// By account: the ref is the chat's handle for a match, swapped or not (identity model), and resolves to `userId`.
+const peers = async (eventId: string, raterId: string) => (await ratablePeers(eventId, raterId)).map((p) => p.userId)
 
 afterAll(async () => {
   await db.private_conversations.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })

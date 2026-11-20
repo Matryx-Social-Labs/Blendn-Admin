@@ -359,15 +359,14 @@ describe("who you may rate (H2)", () => {
     expect((await list(ana, eventId)).body.data.userIds).toEqual([])
   })
 
-  it("is the raw id once both swap names (a one-sided tap keeps the handle), and a stale handle still resolves", async () => {
+  it("stays the chat's handle even once both swap names (a swap is that chat only), and the handle rates", async () => {
     const [ana, ben] = [await person("fh-r2-a", "Ana"), await person("fh-r2-b", "Ben")]
     const { eventId } = await ended(ana, ben)
     const id = await pseudonymousPair(ana, ben, { origin_event_id: eventId })
     const [handle] = (await list(ana, eventId)).body.data.userIds as string[]
     await reveal(ben, id)
-    expect((await list(ana, eventId)).body.data.userIds).toEqual([handle])
     await reveal(ana, id)
-    expect((await list(ana, eventId)).body.data.userIds).toEqual([ben.id])
+    expect((await list(ana, eventId)).body.data.userIds).toEqual([handle])
     expect((await rate(ana, eventId, handle)).status).toBe(200)
   })
 

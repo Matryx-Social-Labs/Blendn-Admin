@@ -304,6 +304,22 @@ describe("the friend offer on conversations and profiles", () => {
     expect((await detail(ana, hidden)).body.data.friend).toEqual({ state: "none", canAdd: false })
   })
 
+  it("takes the DM's handle: a swapped pair may ask by it, an unswapped one gets the plain 404", async () => {
+    const [ana, ben] = [await person("far-dh-a", "Ana"), await person("far-dh-b", "Ben")]
+    const id = await converse(ana, ben)
+    const handle = (await detail(ana, id)).body.data.otherUser.id as string
+    expect(handle).toMatch(/^rh_/)
+    expect((await ask(ana, { userId: handle })).body.data).toEqual({ state: "requested" })
+
+    const [cat, dan] = [await person("far-dh-c", "Cat"), await person("far-dh-d", "Dan")]
+    const unswapped = await converse(cat, dan, { revealed: { a: true, b: false } })
+    const h2 = (await detail(cat, unswapped)).body.data.otherUser.id as string
+    const unknown = (await ask(cat, { userId: "no-such-user" })).body
+    const res = await ask(cat, { userId: h2 })
+    expect(res.status).toBe(404)
+    expect(res.body).toEqual(unknown)
+  })
+
   it("rides on the DM of a swapped match, never on their profile, which a swap does not open", async () => {
     const [ana, ben, stranger] = [await person("far-pr-a", "Ana"), await person("far-pr-b", "Ben"), await person("far-pr-s", "Sam")]
     const id = await converse(ana, ben)

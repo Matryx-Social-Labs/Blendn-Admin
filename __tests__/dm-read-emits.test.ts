@@ -15,7 +15,7 @@ const mockDb = {
   },
   profiles: { findUnique: jest.fn() },
   private_conversations: {
-    findUnique: jest.fn(async () => ({ user1_id: "reader", user2_id: "sender", closed_at: null })),
+    findUnique: jest.fn(async () => ({ user1_id: "reader", user2_id: "sender", closed_at: null, user1_pseudonym: null, user2_pseudonym: null })),
     // Never pseudonymous: the read keeps its old shape, to the conversation room, by the real id.
     findMany: jest.fn(async ({ where }: { where: { id: { in: string[] } } }) =>
       where.id.in.map((id) => ({
