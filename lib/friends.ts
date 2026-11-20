@@ -55,6 +55,10 @@ export const personSelect = {
   profile: { select: { name: true, photos: true } },
 } as const
 
+/** The name a friend surface shows: the profile's, else the account's, else "Someone". */
+export const personName = (user: { name: string | null; profile: { name: string | null } | null }): string =>
+  user.profile?.name || user.name || UNNAMED
+
 export function personCard(user: {
   id: string
   name: string | null
@@ -63,7 +67,7 @@ export function personCard(user: {
 }) {
   return {
     userId: user.id,
-    name: user.profile?.name || user.name || UNNAMED,
+    name: personName(user),
     photo: user.profile?.photos?.[0] ?? user.image ?? null,
   }
 }
@@ -377,7 +381,7 @@ export async function revealedMatch(me: string, other: string): Promise<boolean>
 export async function requestFriend(
   senderId: string,
   recipientId: string,
-  via?: "match"
+  via: "link" | "match"
 ): Promise<"friends" | "requested" | "refused"> {
   const outcome = await db.$transaction(async (tx) => {
     await lockPair(tx, senderId, recipientId)
@@ -419,7 +423,8 @@ export async function requestFriend(
       if (mine.withdrawn_at || hold) {
         await tx.friend_requests.update({
           where: { id: mine.id },
-          data: { withdrawn_at: null, ...(hold && { held_at: new Date() }) },
+          // A withdrawn request asked again is a new ask: it says where this one came from.
+          data: { withdrawn_at: null, ...(mine.withdrawn_at && { via }), ...(hold && { held_at: new Date() }) },
         })
       }
       // Held once, and the reveal that releases it is what delivers it
@@ -428,7 +433,7 @@ export async function requestFriend(
     }
 
     const created = await tx.friend_requests.create({
-      data: { sender_id: senderId, recipient_id: recipientId, ...(holding && { held_at: new Date() }) },
+      data: { sender_id: senderId, recipient_id: recipientId, via, ...(holding && { held_at: new Date() }) },
       select: { id: true },
     })
     return holding ? { state: "requested" as const } : { state: "requested" as const, requestId: created.id }
@@ -675,13 +680,13 @@ export async function severFriendship(
  * Fire-and-forget like every other sender, but logged: a broken push pipeline
  * must not be invisible.
  */
-function notifyFriendRequest(recipientId: string, requestId: string, via?: "match"): void {
+function notifyFriendRequest(recipientId: string, requestId: string, via?: "link" | "match"): void {
   sendPushNotification({
     userId: recipientId,
     title: "New friend request",
     body: "Someone wants to be friends. Open Blend’n to see who.",
     // `via` lets the app say "from your match". Never an event or a room.
-    data: { type: "friend_request", requestId, ...(via && { via }) },
+    data: { type: "friend_request", requestId, ...(via === "match" && { via }) },
   }).catch((err: unknown) => logPushFailure("friend request", err))
 }
 
