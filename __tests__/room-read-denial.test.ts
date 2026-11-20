@@ -61,7 +61,7 @@ describe("a closed room is gone (SCRUM-1026)", () => {
 })
 
 it("says who removed them", () => {
-  expect(bannedRefusal({ banned_by: "user_organiser" })).toBe("The organizer has removed you from this room.")
+  expect(bannedRefusal({ banned_by: "user_organiser" })).toBe("The host has removed you from this room.")
 })
 
 it("tells a restored account the way back in, not a verdict nobody made (SCRUM-291)", () => {

@@ -92,6 +92,8 @@ export interface MatchCard {
    * (owner ruling 2026-11-12); a like is not, and is never read for this.
    */
   wavedAtYou: boolean
+  /** When they waved at you here (ISO), so the card says it after a restart. Null when they have not, and to a host. */
+  wavedAtYouAt: string | null
   /** The conversation a mutual wave here opened (`waveStandings`): Say hi after a restart. Null otherwise, and to a host. */
   conversationId: string | null
   /**
@@ -703,6 +705,7 @@ export async function matchesForEvent(
       youWaved: standings.get(m.userId)?.youWaved ?? false,
       // Hosts never wave or get waved at (the waves route refuses both), so both are false for a host.
       wavedAtYou: standings.get(m.userId)?.wavedAtYou ?? false,
+      wavedAtYouAt: standings.get(m.userId)?.wavedAtYouAt ?? null,
       // The conversation your mutual opened here (`waveStandings`), so Say hi reaches it after a restart. Never to a host.
       conversationId: operates ? null : (standings.get(m.userId)?.conversationId ?? null),
       overlaps: card.overlaps,

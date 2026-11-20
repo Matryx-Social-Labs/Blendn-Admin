@@ -1324,7 +1324,7 @@ registry.registerPath({
                   seen_in: z
                     .string()
                     .nullable()
-                    .describe("Where you blocked them from: the event's title, a venue day's venue, or a crew's, a Mix's or a post's room name. Null when blocked from no place (a profile, Friends) or not recorded. Additive."),
+                    .describe("Where you blocked them from: the event's title, a venue day's venue, or a crew's, a Mix's or a post's room name (a message request sent from a Lobby room keeps that room's name). Null when blocked from no place (a profile, Friends) or not recorded. Additive."),
                   account_deleted: z.boolean().describe("Their account has been deleted since; the block stays, and can still be removed. Additive."),
                 })
               ),

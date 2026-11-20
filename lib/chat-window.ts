@@ -299,7 +299,7 @@ export function mayWriteToRoom(
  */
 export function bannedRefusal(membership: { banned_by: string | null }): string {
   return membership.banned_by
-    ? "The organizer has removed you from this room."
+    ? "The host has removed you from this room."
     : "Your account was restored, but you are not back in this room yet. Check in at the event to rejoin it."
 }
 

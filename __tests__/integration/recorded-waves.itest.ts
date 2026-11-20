@@ -229,6 +229,10 @@ describe("the deck card and the person card carry the conversation a mutual open
     await wave(ana, ben)
     expect(await cardFor(ana, ben)).toMatchObject({ youWaved: true, conversationId: null })
     expect(await cardFor(ben, ana)).toMatchObject({ wavedAtYou: true, conversationId: null })
+    // When they waved, so the card says it after a restart; null on the waver's own card (nobody waved at them).
+    const at = (await db.event_waves.findFirstOrThrow({ where: { event_id: eventId, from_id: ana.id, to_id: ben.id } })).created_at
+    expect((await cardFor(ben, ana))?.wavedAtYouAt).toBe(at.toISOString())
+    expect((await cardFor(ana, ben))?.wavedAtYouAt).toBeNull()
     expect((await personCard(ana, ben)).body.data.wave).toBeUndefined()
     expect((await personCard(ben, ana)).body.data.wave).toBeUndefined()
   })

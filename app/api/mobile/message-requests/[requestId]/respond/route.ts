@@ -158,7 +158,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (action === "block") {
       // The same block as every other door (lib/block-pair.ts): the row, the
       // friendship and every friend request, crew invites, and the conversation.
-      const seen = await requestSeen(messageRequest.met_in_event_id)
+      const seen = await requestSeen(messageRequest)
       const closedId = await db.$transaction((tx) => blockPairIn(tx, authUser.userId, messageRequest.sender_id, seen))
       if (closedId) closeConversationRoom(closedId)
       void notifyFriendshipChanged(authUser.userId, messageRequest.sender_id)
