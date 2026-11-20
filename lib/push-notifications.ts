@@ -836,28 +836,29 @@ export async function notifyMatch(
   })
 }
 
-/** Somebody asked to see who you are. There is no decline to send back. */
+/** A match tapped Swap names and the recipient has not. There is no decline to send back. */
 export async function notifyRevealRequest(
   recipientId: string,
   conversationId: string
 ): Promise<boolean> {
+  // No names on a lock screen: the swap has not happened yet (advisor Q5, 2026-11-20).
   return sendPushNotification({
     userId: recipientId,
-    title: "A match wants to know you",
-    body: "Someone you matched with wants to see who you are.",
+    title: "A match wants to swap names",
+    body: "A match tapped Swap names. Tap yours to see each other.",
     data: { type: "reveal_request", conversationId },
   })
 }
 
-/** The other person showed you their name and photos. */
+/** Both sides have tapped Swap names: told to the one who tapped first. */
 export async function notifyReveal(
   recipientId: string,
   conversationId: string
 ): Promise<boolean> {
   return sendPushNotification({
     userId: recipientId,
-    title: "A match revealed",
-    body: "Someone you matched with showed you who they are.",
+    title: "Names swapped",
+    body: "You can now see each other’s first name and photo.",
     data: { type: "reveal", conversationId },
   })
 }

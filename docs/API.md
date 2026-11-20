@@ -457,9 +457,9 @@ an opaque, url-safe string. Field names and shapes did not change.
   `{ events: [{ id, title, startTime, timezone, venueName, coverImageUrl }],
   pagination: { limit, hasMore, nextCursor, totalCount } }`, `?limit=` (default
   20, at most 100) and `?cursor=`. Only events where they were **not a
-  pseudonym to you**: they revealed there, they revealed to you in the
-  conversation that event's mutual like opened, or they let friends recognise
-  them in rooms and you are friends. Never an event your organisation ran or
+  pseudonym to you**: they revealed there, or they let friends recognise
+  them in rooms and you are friends (a Swap names in a DM opens nothing
+  outside that chat). Never an event your organisation ran or
   whose venue it owns. The ref is gated as `GET /users/:userId` gates the name:
   one that does not name them to you (or only by their pending request) answers
   an empty list, so a list never names a pseudonym. A block either way is a 404.
@@ -2668,30 +2668,45 @@ with two differences:
 Like `photos`, it comes back as the sealed copy's URL; sending that back
 unchanged does not copy it again. `null` clears it.
 
-### Revealing
+### Swap names
 
 A conversation opened by a mutual like carries **the same pseudonym the match
-card showed**. Real name and photos appear only when that side reveals.
+card showed**. Identity is a **mutual swap** (identity model, owner 2026-11-11):
+nothing shows until both sides have tapped, then both at once — each other's
+**first name** and one photo (`otherUser.image`), **in that chat only**. Never
+the full name.
 
 | Endpoint | Effect |
 |---|---|
-| `POST /conversations/:id/reveal` | Your side becomes visible to them |
-| `POST /conversations/:id/reveal` with `{ "ask": true }` | Ask them to reveal |
+| `POST /conversations/:id/reveal` | Tap Swap names → `{ revealed: true, mutual }`. Your tap is the ask: the other side reads `revealRequested: true` |
+| `DELETE /conversations/:id/reveal` | Take your tap back while they have not tapped → `{ revealed: false }`; 409 once both have |
 
-Until they reveal, the other person is a stranger on every raw-id surface too
-(SCRUM-752): `GET /profiles/:id` and `GET /users/:id` answer their `otherUser.id`
-exactly as they answer anyone you may not see — `name: "Attendee"`, the blurred
-photo, no bio or photos — and carry no `friend`. A mutual like alone no longer
-identifies; their reveal does. A room-level reveal, a friend who turned on
-`friends_see_me_in_rooms` and a conversation that never was pseudonymous still
-identify as before.
+On the conversation payloads: `youRevealed` is your tap, `theyRevealed` is true
+once you may see their name (both tapped, or never pseudonymous), and
+`revealRequested` is "they tapped, you have not". `{ "ask": true }` is gone. A
+one-way reveal from before the swap is a pending tap now: it names nobody until
+the other side taps. Nobody starts swapped in a match — not even somebody named
+in the room (a room reveal no longer carries into its DMs). **An accepted Lobby
+ask opens already swapped** (both see first name + photo at once; the ask sheet
+says so before it is sent); asks accepted before this shipped stay a swap.
 
-**The other person's id in a DM is a handle until they reveal.** In `GET
+Pushes (no names on the lock screen): a first tap sends `reveal_request` "A
+match wants to swap names"; the swap completing sends `reveal` "Names swapped"
+to the one who tapped first. Taking a tap back sends nothing.
+
+A swap never opens the profile (SCRUM-752, and now past the swap too): `GET
+/profiles/:id` and `GET /users/:id` answer a match's or a board post's
+`otherUser.id` exactly as they answer anyone you may not see — `name:
+"Attendee"`, the blurred photo, no bio or photos — and carry no `friend`. A
+room-level reveal, a friend who turned on `friends_see_me_in_rooms` and a
+conversation that never was pseudonymous still identify as before.
+
+**The other person's id in a DM is a handle until you have swapped.** In `GET
 /conversations`, `GET /conversations/:id`, `POST /conversations`, a message's
 `senderId` / `sender.id` and the `private:*` socket events, the other person of
-a match who has not revealed to you is an opaque `rh_…` handle scoped to that
+a match you have not swapped with is an opaque `rh_…` handle scoped to that
 conversation (the same one on every one of those surfaces, so a sender still
-matches the other person). Your own id is always your real id. Once they reveal
+matches the other person). Your own id is always your real id. Once you both swap
 the real id comes back, everywhere at once. The handle is accepted by `POST
 /users/:id/block`, `POST /users/:id/report` and `POST /conversations`, and by no
 profile or friend route (they answer it as an id nobody has): it names a person
@@ -2983,7 +2998,7 @@ already is: counted in the headcount, listed nowhere.
 | GET | `/friends/invite/:token` | Who sent this link → `{ person, state }` |
 | GET | `/friends/invite/:token/preview` | **No auth.** Signed-out invite screen → `{ name, photoUrl }` — first name only. Per-IP limit (20/min). Same 404 |
 | GET | `/friends/requests` | `{ incoming, outgoing, pagination }` — 50 of each; `?list=incoming\|outgoing&cursor=` pages one alone. Each incoming row carries `via`: `"link"`, `"match"`, or `null` (below) |
-| POST | `/friends/requests` | Ask: `{ token }`, or `{ userId }` for a revealed match → `{ state: "requested" \| "friends" }`. 404, plus `reasonCode` `NOT_A_REVEALED_MATCH` for a match not yet revealed on both sides |
+| POST | `/friends/requests` | Ask: `{ token }`, or `{ userId }` for a swapped match → `{ state: "requested" \| "friends" }`. 404 `PERSON_UNAVAILABLE` for anything else, a match not swapped on both sides included |
 | POST | `/friends/requests/:id` | `{ action: "accept" \| "dismiss" }` — recipient only |
 | DELETE | `/friends/requests/:id` | Withdraw — sender only. Kept as withdrawn: asking again later neither re-notifies nor undoes a "Not now" |
 
@@ -3030,16 +3045,15 @@ which pseudonym in that room is them.
 
 Every refusal a stranger could reach answers with the **same 404**: an unknown,
 malformed or reset token, a deleted account, a block either way, a pair who
-left each other, an id you have no relationship with. The one addition is
-`reasonCode: "NOT_A_REVEALED_MATCH"` on that 404 (`errorCode` stays
-`NOT_FOUND`), said only to someone in an open match with that person who has
-**already revealed to them** and where you have not revealed back — they know who
-it is. Where the other person is still a pseudonym to you, the 404 is plain: the
-code would say who the pseudonym is, to anyone holding an id or a handle for them. A request made
+left each other, an id you have no relationship with, and a match not swapped
+on both sides (until both swap neither may name the other, so a reason would say
+who a pseudonym is; `NOT_A_REVEALED_MATCH` is no longer sent). A swapped match
+asks from the DM by the real id the chat hands over. A request made
 this way notifies with `data.via = "match"` (so the app can say "from your
 match"), and never names an event or room. The invite-link path is unchanged.
 `GET /profiles/:id` also carries `friend` (same shape as above) for somebody you
-may see, and never for yourself or a stranger.
+may see, and never for yourself or a stranger — nor for a swapped match, whose
+profile a swap does not open: their offer is the DM's `friend`.
 
 A pair whose conversation began as an accepted message request or a Lobby post
 is never on this path: only a conversation born of a mutual like counts, however

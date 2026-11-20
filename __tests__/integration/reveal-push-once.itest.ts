@@ -59,24 +59,35 @@ async function pair() {
 
 beforeEach(() => jest.clearAllMocks())
 
-it("pushes an ask once, however many times it is repeated", async () => {
+it("pushes the first tap once, as the ask, however many times it is repeated", async () => {
   const { a, id } = await pair()
-  expect(await call(a, id, { ask: true })).toBe(200)
-  expect(await call(a, id, { ask: true })).toBe(200)
-  expect(await call(a, id, { ask: true })).toBe(200)
+  expect(await call(a, id)).toBe(200)
+  expect(await call(a, id)).toBe(200)
+  expect(await call(a, id)).toBe(200)
   expect(notifyRevealRequest).toHaveBeenCalledTimes(1)
+  expect(notifyReveal).not.toHaveBeenCalled()
 })
 
-it("pushes a reveal once, however many times it is repeated", async () => {
-  const { a, id } = await pair()
-  expect(await call(a, id)).toBe(200)
-  expect(await call(a, id)).toBe(200)
+it("pushes the swap once, to the one who tapped first", async () => {
+  const { a, b, id } = await pair()
+  await call(a, id)
+  jest.clearAllMocks()
+  expect(await call(b, id)).toBe(200)
+  expect(await call(b, id)).toBe(200)
   expect(notifyReveal).toHaveBeenCalledTimes(1)
+  expect(notifyReveal).toHaveBeenCalledWith(a.id, id)
+  expect(notifyRevealRequest).not.toHaveBeenCalled()
 })
 
-it("pushes once when two reveals race", async () => {
+it("pushes once when two taps race", async () => {
   const { a, id } = await pair()
   const statuses = await Promise.all([call(a, id), call(a, id), call(a, id)])
   expect(statuses).toEqual([200, 200, 200])
-  expect(notifyReveal).toHaveBeenCalledTimes(1)
+  expect(notifyRevealRequest).toHaveBeenCalledTimes(1)
+})
+
+it("refuses the removed ask body", async () => {
+  const { a, id } = await pair()
+  expect(await call(a, id, { ask: true })).toBe(400)
+  expect(notifyRevealRequest).not.toHaveBeenCalled()
 })

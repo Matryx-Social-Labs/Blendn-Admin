@@ -3,7 +3,7 @@ import { logger } from "@/lib/logger"
 import { isReadForViewer } from "@/lib/read-receipts"
 import { NextRequest } from "next/server"
 import { ConversationClosedError, blockedEitherWay, mayConverse, openConversation } from "@/lib/conversations"
-import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymous } from "@/lib/conversation-identity"
+import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymous, theyAskedToSwap } from "@/lib/conversation-identity"
 import { VISIBLE_DM } from "@/lib/dm-moderation"
 import { latestVisibleMessages } from "@/lib/inbox-preview"
 import { db } from "@/lib/db"
@@ -175,10 +175,8 @@ export async function GET(request: NextRequest) {
           ? conv.user1_revealed
           : conv.user2_revealed,
         theyRevealed: otherRevealed,
-        /** Whether they have asked you to reveal. There is no "declined". */
-        revealRequested: conv.user1_id === authUser.userId
-          ? conv.user1_reveal_requested
-          : conv.user2_reveal_requested,
+        /** They tapped Swap names and you have not: "they want to swap". There is no "declined". */
+        revealRequested: theyAskedToSwap(conv, authUser.userId),
         lastMessage: lastMessage
           ? {
               id: lastMessage.id,

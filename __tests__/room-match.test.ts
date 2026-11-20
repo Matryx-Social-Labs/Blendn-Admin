@@ -79,17 +79,21 @@ describe("announceRoomMatch", () => {
     expect(mockDb.user.findMany).not.toHaveBeenCalled()
   })
 
-  it("names only the side that revealed", async () => {
+  it("names nobody on a one-sided tap", async () => {
     mockDb.private_conversations.findUnique.mockResolvedValue(conversation({ user2_revealed: true }))
     await announceRoomMatch(EVENT, "conv-1")
-
     const sent = mockEmitRoomMatch.mock.calls[0]![0]
-    // A sees B by B's real name (B revealed); B sees A by A's pseudonym.
-    expect(sent.b).toEqual({ userId: B, name: "Priya Iyer" })
     expect(sent.a).toEqual({ userId: A, name: "Cosmic Panda" })
-    expect(mockDb.user.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: { in: [B] } } })
-    )
+    expect(sent.b).toEqual({ userId: B, name: "Quiet Otter" })
+    expect(mockDb.user.findMany).not.toHaveBeenCalled()
+  })
+
+  it("names both by first name once both have swapped", async () => {
+    mockDb.private_conversations.findUnique.mockResolvedValue(conversation({ user1_revealed: true, user2_revealed: true }))
+    await announceRoomMatch(EVENT, "conv-1")
+    const sent = mockEmitRoomMatch.mock.calls[0]![0]
+    expect(sent.a).toEqual({ userId: A, name: "Arjun" })
+    expect(sent.b).toEqual({ userId: B, name: "Priya" })
   })
 
   it("never rejects, so it cannot fail the like", async () => {

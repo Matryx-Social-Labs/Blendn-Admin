@@ -1479,9 +1479,10 @@ model notifications {
 ///   │  pseudonyms + blurred photos                          │
 ///   │  user1_revealed = user2_revealed = false              │
 ///   └───────────────┬───────────────────────────────────────┘
-///                   │ each side reveals independently, one way
+///                   │ each side taps Swap names (cancellable alone)
 ///   ┌───────────────▼───────────────────────────────────────┐
-///   │  that side shows their real name and photos           │
+///   │  both tapped: each sees the other's FIRST name and    │
+///   │  one photo, in this chat only                         │
 ///   └───────────────┬───────────────────────────────────────┘
 ///                   │ unmatch / block — either party
 ///   ┌───────────────▼───────────────────────────────────────┐
@@ -1497,11 +1498,11 @@ model private_conversations {
   updated_at      DateTime  @default(now()) @db.Timestamptz(6)
   last_message_at DateTime? @db.Timestamptz(6)
 
-  /// Whether each side has shown their real name and photos to the other.
-  /// Per side, not mutual: revealing is a standing offer, not a trade. Seeded
-  /// true at creation for anyone already revealed in the originating room —
-  /// they have nothing left to reveal to someone who saw their card. Monotonic;
-  /// nothing sets these back to false, because nothing can unsee a face.
+  /// Whether each side has tapped Swap names (identity model, owner 2026-11-11).
+  /// Mutual: nothing shows until BOTH are true (`mayShowRealName`), and a side
+  /// may set its own back to false only while the other is still false
+  /// (`DELETE /conversations/:id/reveal`). Both true at creation only for an
+  /// accepted Lobby ask, whose sheet said so before it was sent.
   user1_revealed Boolean @default(false)
   user2_revealed Boolean @default(false)
 
@@ -1518,12 +1519,9 @@ model private_conversations {
   user1_pseudonym String?
   user2_pseudonym String?
 
-  /// Set when the other side has asked this side to reveal.
-  ///
-  /// A boolean rather than a table, and that shape is the feature: asking twice
-  /// writes the same `true`, so it cannot nag, and there is deliberately no
-  /// "declined" state — a decline would deliver a rejection, which is the one
-  /// thing this product exists to remove.
+  /// UNUSED since the swap (2026-11-20): the other side's tap is the ask now
+  /// (`theyAskedToSwap`). Kept because migrations here are additive; nothing
+  /// reads or writes them. Drop in a later contract migration.
   user1_reveal_requested Boolean @default(false)
   user2_reveal_requested Boolean @default(false)
 

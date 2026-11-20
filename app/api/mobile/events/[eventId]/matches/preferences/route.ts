@@ -19,7 +19,6 @@ import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { readJson, isUuid } from "@/lib/api-input"
-import { revealConversationsFrom } from "@/lib/matches"
 import { lensForEvent, WORK_LENS, type RoomLens } from "@/lib/tonight"
 import { screenUserText, textNotAllowedResponse } from "@/lib/moderation/user-text"
 
@@ -261,20 +260,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       select: preferencesSelect,
     })
 
-    /*
-     * Going public in the room carries into the DMs you already have from it.
-     *
-     * Somebody who reveals mid-event has shown their name and face on the match
-     * card to everyone there — including people they already matched with. A DM
-     * still calling them "Wandering Kestrel" after that is not protecting
-     * anything; it is just two screens disagreeing.
-     *
-     * Monotonic, and only in this direction. Un-revealing in the room does NOT
-     * re-anonymise a conversation: nothing can unsee a face, and a control that
-     * implied otherwise would be a lie. `revealed: false` in the filter is what
-     * makes it monotonic — an already-revealed side is left alone.
-     */
-    if (revealed === true) await revealConversationsFrom(eventId, [authUser.userId])
+    // Going public in the room does not name you in the DMs from it: each DM is its own swap (identity model).
 
     if (rememberIntent || rememberReveal) {
       await db.profiles.update({

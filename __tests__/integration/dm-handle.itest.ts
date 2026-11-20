@@ -145,9 +145,10 @@ describe("a friend who is also an unrevealed match is a handle in the DM", () =>
       expect(wire).not.toContain("blur")
     }
 
-    // And Ben, who Ana has revealed to, sees Ana's real id: she is a name to him.
+    // Ana's one-sided tap names her to nobody: Ben gets a handle too, until both swap.
     const bens = (await inbox(ben)).data.conversations.find((c: { id: string }) => c.id === id)
-    expect(bens.otherUser.id).toBe(ana.id)
+    expect(bens.otherUser.id).toMatch(/^rh_/)
+    expect(bens.revealRequested).toBe(true)
 
     // The handle opens nothing that names Ben.
     const friendsList = (await call(friendsRoute.GET as Handler, "/api/mobile/friends", ana)).body
@@ -230,7 +231,7 @@ describe("the DM socket events carry the handle too", () => {
     expect(toBen.rooms).not.toContain(`user:${ana.id}`)
   })
 
-  it("typing and read receipts: to the other person alone, by the handle, until they reveal", async () => {
+  it("typing and read receipts: to the other person alone, by the handle, until both swap", async () => {
     const { ana, ben, id } = await friendsWhoMatched("dmh-6")
     const handleForAna = (await inbox(ana)).data.conversations.find((c: { id: string }) => c.id === id).otherUser.id as string
 
@@ -249,7 +250,8 @@ describe("the DM socket events carry the handle too", () => {
     expect(read.rooms).toEqual([`user:${ana.id}`])
     expect(read.payload.readBy).toBe(handleForAna)
 
-    // Ana is revealed to Ben, so for Ben she is a name: her typing keeps the old shape.
+    // Once both have swapped she is a name to him: her typing keeps the old shape.
+    await db.private_conversations.update({ where: { id }, data: { user1_revealed: true, user2_revealed: true } })
     const anaSocket = { data: { userId: ana.id }, to: (room: string) => ({ emit: (event: string, payload: unknown) => void emits.push({ rooms: [room], event, payload }) }), nsp: fakeIo() }
     emits = []
     await emitPrivateTyping(anaSocket as never, id, true)

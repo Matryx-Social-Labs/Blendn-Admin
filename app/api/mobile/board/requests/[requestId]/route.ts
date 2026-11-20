@@ -210,6 +210,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
      * match. Both are pseudonymous, so provenance cannot be inferred from
      * the pseudonyms; without the marker the client draws the match opener
      * on two people who agreed to share a car.
+     *
+     * And swapped from the start (identity model, owner 2026-11-11): these two
+     * are about to meet in person, so the chat shows each one's first name and
+     * photo at once. The ask sheet said so before it was sent, and accepting
+     * is the consent. The pseudonyms stay underneath, so it is still first
+     * name only and still this chat only. Not backfilled: asks accepted before
+     * that copy shipped stay a mutual swap (advisor Q3, 2026-11-20).
      */
     const pseudonyms = Object.fromEntries(
       await boardPseudonyms(boardRequest.event_id, [
@@ -287,7 +294,12 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         const opened = await openConversation(
           boardRequest.from_user_id,
           boardRequest.to_user_id,
-          { eventId: boardRequest.event_id, pseudonyms, boardRequestId: requestId },
+          {
+            eventId: boardRequest.event_id,
+            pseudonyms,
+            boardRequestId: requestId,
+            revealed: [boardRequest.from_user_id, boardRequest.to_user_id],
+          },
           tx
         )
         // The post's room, once a second asker is in (CR-I16, SCRUM-535).

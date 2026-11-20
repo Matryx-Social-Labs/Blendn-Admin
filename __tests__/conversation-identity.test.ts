@@ -4,6 +4,7 @@ import {
   UNNAMED,
   displayNameInConversation,
   mayShowRealName,
+  theyAskedToSwap,
   type ConversationIdentity,
 } from "@/lib/conversation-identity"
 
@@ -34,47 +35,42 @@ const conv = (over: Partial<ConversationIdentity> = {}): ConversationIdentity =>
 })
 
 describe("displayNameInConversation", () => {
-  it("uses the pseudonym for a matched pair who have not revealed", () => {
+  it("uses the pseudonym for a matched pair who have not swapped", () => {
     expect(displayNameInConversation(conv(), A, "Priya Raman")).toBe("Wandering Kestrel")
     expect(displayNameInConversation(conv(), B, "Rahul Mehta")).toBe("Cosmic Panda")
   })
 
-  it("uses the real name once that side reveals", () => {
-    const c = conv({ user1_revealed: true })
-    expect(displayNameInConversation(c, A, "Priya Raman")).toBe("Priya Raman")
+  it("names nobody while only one side has tapped Swap names", () => {
+    /*
+     * The swap is mutual (identity model, owner 2026-11-11): nothing shows
+     * until both have tapped, then both at once. A one-sided tap -- and every
+     * one-way reveal from before the swap -- is a pending offer, not a name.
+     */
+    for (const c of [conv({ user1_revealed: true }), conv({ user2_revealed: true })]) {
+      expect(displayNameInConversation(c, A, "Priya Raman")).toBe("Wandering Kestrel")
+      expect(displayNameInConversation(c, B, "Rahul Mehta")).toBe("Cosmic Panda")
+    }
   })
 
-  it("reveals each side independently", () => {
-    /*
-     * Revealing is a standing offer, not a trade. One side going first must not
-     * expose the other -- that is the whole reason the flags are per side
-     * rather than a single mutual boolean.
-     */
-    const c = conv({ user1_revealed: true, user2_revealed: false })
-    expect(displayNameInConversation(c, A, "Priya Raman")).toBe("Priya Raman")
-    expect(displayNameInConversation(c, B, "Rahul Mehta")).toBe("Cosmic Panda")
+  it("shows the FIRST name only, on both sides at once, when both have swapped", () => {
+    const c = conv({ user1_revealed: true, user2_revealed: true })
+    expect(displayNameInConversation(c, A, "Priya Raman")).toBe("Priya")
+    expect(displayNameInConversation(c, B, "Rahul Mehta")).toBe("Rahul")
   })
 
   it("uses the real name when the conversation was never pseudonymous", () => {
     /*
-     * The case that makes this shippable ahead of the reveal work, and the one
-     * that would be catastrophic to get backwards.
-     *
      * A null pseudonym means the conversation came from an accepted message
      * request, which has shown real names since it existed. Reading null as
-     * "anonymous" would retro-anonymise every conversation in the database --
-     * a worse bug than the one this fixes. Today nothing writes pseudonyms, so
-     * every conversation takes this branch and nothing visibly changes.
+     * "anonymous" would retro-anonymise every such conversation.
      */
     const c = conv({ user1_pseudonym: null, user2_pseudonym: null })
     expect(displayNameInConversation(c, A, "Priya Raman")).toBe("Priya Raman")
     expect(displayNameInConversation(c, B, "Rahul Mehta")).toBe("Rahul Mehta")
   })
 
-  it("falls back to the pseudonym, not to a stranger, when a revealed user has no name", () => {
-    // Someone they have been talking to for a week does not silently become
-    // "Someone" because a name is missing.
-    const c = conv({ user1_revealed: true })
+  it("falls back to the pseudonym, not to a stranger, when a swapped user has no name", () => {
+    const c = conv({ user1_revealed: true, user2_revealed: true })
     expect(displayNameInConversation(c, A, null)).toBe("Wandering Kestrel")
     expect(displayNameInConversation(c, A, "   ")).toBe("Wandering Kestrel")
   })
@@ -86,56 +82,66 @@ describe("displayNameInConversation", () => {
   })
 
   it("refuses to name someone who is not in the conversation", () => {
-    // Naming them would be inventing an identity for somebody this
-    // conversation has nothing to say about.
     expect(displayNameInConversation(conv(), "stranger", "Priya Raman")).toBe(UNNAMED)
   })
 
-  it("never returns the real name while unrevealed, whatever is passed in", () => {
-    /*
-     * The property, stated directly. Every caller passes the real name in --
-     * that is safe only because this function decides whether it comes back
-     * out. If this ever fails, something upstream is leaking.
-     */
+  it("never returns the real name while not swapped, whatever is passed in", () => {
     const names = ["Priya Raman", "priya@example.com", "P"]
-    for (const name of names) {
-      expect(displayNameInConversation(conv(), A, name)).not.toContain(name)
+    for (const c of [conv(), conv({ user1_revealed: true })]) {
+      for (const name of names) expect(displayNameInConversation(c, A, name)).not.toContain(name)
     }
   })
 
-  it("trims a name rather than emitting padded whitespace", () => {
-    const c = conv({ user1_revealed: true })
-    expect(displayNameInConversation(c, A, "  Priya Raman  ")).toBe("Priya Raman")
+  it("never returns the surname of a swapped person", () => {
+    const c = conv({ user1_revealed: true, user2_revealed: true })
+    expect(displayNameInConversation(c, A, "  Priya   Raman  ")).toBe("Priya")
+    expect(displayNameInConversation(c, A, "Priya Raman")).not.toContain("Raman")
   })
 })
 
 describe("mayShowRealName", () => {
-  it("is false for a matched pair who have not revealed", () => {
+  it("is false for a matched pair who have not swapped", () => {
     expect(mayShowRealName(conv(), A)).toBe(false)
   })
 
-  it("is true once revealed, and true for a never-pseudonymous conversation", () => {
-    expect(mayShowRealName(conv({ user1_revealed: true }), A)).toBe(true)
+  it("is false on a one-sided tap, for either side", () => {
+    expect(mayShowRealName(conv({ user1_revealed: true }), A)).toBe(false)
+    expect(mayShowRealName(conv({ user1_revealed: true }), B)).toBe(false)
+  })
+
+  it("is true once both swapped, and true for a never-pseudonymous conversation", () => {
+    expect(mayShowRealName(conv({ user1_revealed: true, user2_revealed: true }), A)).toBe(true)
     expect(mayShowRealName(conv({ user1_pseudonym: null }), A)).toBe(true)
   })
 
   it("is false for a non-participant", () => {
-    expect(mayShowRealName(conv(), "stranger")).toBe(false)
+    expect(mayShowRealName(conv({ user1_revealed: true, user2_revealed: true }), "stranger")).toBe(false)
   })
 
   it("agrees with displayNameInConversation on every combination", () => {
-    /*
-     * Two functions, one rule. They are used at different call sites -- one
-     * returns a string, the other decides whether to attach a photo or a
-     * profile -- so they must not be able to disagree.
-     */
     for (const pseudonym of ["Wandering Kestrel", null]) {
-      for (const revealed of [true, false]) {
-        const c = conv({ user1_pseudonym: pseudonym, user1_revealed: revealed })
-        const shown = displayNameInConversation(c, A, "Priya Raman")
-        expect(mayShowRealName(c, A)).toBe(shown === "Priya Raman")
+      for (const mine of [true, false]) {
+        for (const theirs of [true, false]) {
+          const c = conv({ user1_pseudonym: pseudonym, user1_revealed: mine, user2_revealed: theirs })
+          const shown = displayNameInConversation(c, A, "Priya Raman")
+          expect(mayShowRealName(c, A)).toBe(shown !== "Wandering Kestrel")
+        }
       }
     }
+  })
+})
+
+describe("theyAskedToSwap", () => {
+  it("is true only while the other side has tapped and the viewer has not", () => {
+    expect(theyAskedToSwap(conv({ user2_revealed: true }), A)).toBe(true)
+    expect(theyAskedToSwap(conv({ user1_revealed: true }), B)).toBe(true)
+  })
+
+  it("is false before anyone taps, after the viewer taps, once swapped, and with nothing to swap", () => {
+    expect(theyAskedToSwap(conv(), A)).toBe(false)
+    expect(theyAskedToSwap(conv({ user1_revealed: true }), A)).toBe(false)
+    expect(theyAskedToSwap(conv({ user1_revealed: true, user2_revealed: true }), A)).toBe(false)
+    expect(theyAskedToSwap(conv({ user1_pseudonym: null, user2_pseudonym: null, user2_revealed: true }), A)).toBe(false)
   })
 })
 

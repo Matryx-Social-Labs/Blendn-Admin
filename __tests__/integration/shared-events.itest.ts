@@ -28,7 +28,8 @@ let t: Person
 let host: Person
 let named: string // t revealed there
 let anon: string // both there, t a pseudonym: never listed
-let viaDm: string // t a pseudonym in the room, but revealed to v in the DM that room opened
+let viaDm: string // t a pseudonym in the room; the DM that room opened is swapped, which lists nothing
+let recent: string // t revealed there, the newest shared night
 let onlyT: string // v was never there
 let upcoming: string // both checked in, t revealed, not over yet
 let hosted: string // t revealed; host's own org ran it
@@ -75,6 +76,7 @@ beforeAll(async () => {
   named = await past(10, [v.id, t.id, host.id], { revealed: [t.id] })
   anon = await past(8, [v.id, t.id, host.id])
   viaDm = await past(6, [v.id, t.id])
+  recent = await past(5, [v.id, t.id], { revealed: [t.id] })
   onlyT = await past(4, [t.id], { revealed: [t.id] })
   hosted = await past(3, [t.id, host.id], { revealed: [t.id], org: o.id })
   named2 = await past(12, [t.id, host.id], { revealed: [t.id] })
@@ -87,9 +89,8 @@ beforeAll(async () => {
   }
   await db.event_match_preferences.create({ data: { event_id: upcoming, user_id: t.id, revealed: true } })
 
-  // The mutual like at viaDm opened a pseudonymous conversation, and t showed v their name in it.
+  // The mutual like at viaDm opened a pseudonymous conversation, and both swapped names in it.
   const [user1_id, user2_id] = conversationPair(v.id, t.id)
-  const tIs1 = user1_id === t.id
   await db.private_conversations.create({
     data: {
       user1_id,
@@ -97,8 +98,8 @@ beforeAll(async () => {
       origin_event_id: viaDm,
       user1_pseudonym: "Zq Dm One",
       user2_pseudonym: "Zq Dm Two",
-      user1_revealed: tIs1,
-      user2_revealed: !tIs1,
+      user1_revealed: true,
+      user2_revealed: true,
     },
   })
 
@@ -127,10 +128,10 @@ afterAll(async () => {
 })
 
 describe("opened from a room they are named in", () => {
-  it("lists the past events where they were named to you, newest first: their reveal there, or to you in that room's DM", async () => {
+  it("lists the past events where they were named to you, newest first: their reveal there, never a DM swap (identity model)", async () => {
     const r = await list(roomHandle(roomShown, t.id), v)
     expect(r.status).toBe(200)
-    expect(ids(r)).toEqual([viaDm, named])
+    expect(ids(r)).toEqual([recent, named])
     expect(r.body.data.pagination).toMatchObject({ totalCount: 2, hasMore: false, nextCursor: null })
     expect(r.body.data.events[1]).toMatchObject({ id: named, title: expect.any(String), startTime: expect.any(String) })
   })
@@ -167,7 +168,7 @@ describe("a friend who lets friends recognise them in rooms", () => {
   it("lists every past event you shared, the pseudonymous one too: their own standing consent", async () => {
     await befriend(v, t)
     await db.profiles.update({ where: { id: t.id }, data: { friends_see_me_in_rooms: true } })
-    expect(ids(await list(t.id, v))).toEqual([viaDm, anon, named])
+    expect(ids(await list(t.id, v))).toEqual([recent, viaDm, anon, named])
   })
 
   it("control: a friend with the switch off is still a pseudonym at the anonymous one", async () => {
@@ -222,14 +223,14 @@ describe("blocks and leaving hide everything", () => {
   })
 
   it("control: the same pair, unblocked and open, is listed", async () => {
-    expect((await sharedEvents(v.id, t.id, { limit: 20, after: null })).events.map((e) => e.id)).toEqual([viaDm, named])
+    expect((await sharedEvents(v.id, t.id, { limit: 20, after: null })).events.map((e) => e.id)).toEqual([recent, named])
   })
 })
 
 describe("the list itself", () => {
   it("pages newest first by its cursor, with the whole count on every page", async () => {
     const first = await list(roomHandle(roomShown, t.id), v, "?limit=1")
-    expect(ids(first)).toEqual([viaDm])
+    expect(ids(first)).toEqual([recent])
     expect(first.body.data.pagination).toMatchObject({ limit: 1, hasMore: true, totalCount: 2 })
     const second = await list(roomHandle(roomShown, t.id), v, `?limit=1&cursor=${first.body.data.pagination.nextCursor}`)
     expect(ids(second)).toEqual([named])

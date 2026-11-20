@@ -237,7 +237,7 @@ describe("accepting opens a conversation that can be told apart from a match", (
     const call = txn.slice(txn.indexOf("openConversation("))
     // The last argument of the call, the transaction's client (it may sit in a
     // ternary: a pair who are friends or already talk get no new conversation).
-    expect(call).toMatch(/boardRequestId: requestId \},\s*tx\s*\)/)
+    expect(call).toMatch(/revealed: \[boardRequest\.from_user_id, boardRequest\.to_user_id\],\s*\},\s*tx\s*\)/)
   })
 
   it("lets a decision happen after doors", () => {

@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { leaveConversationIn } from "@/lib/leave-conversation"
 import { evictBlockedFromBlends } from "@/lib/crews/like"
-import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymous } from "@/lib/conversation-identity"
+import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymous, theyAskedToSwap } from "@/lib/conversation-identity"
 import { db } from "@/lib/db"
 import { friendOffersFor } from "@/lib/friend-offer"
 import { lensForEvent } from "@/lib/tonight"
@@ -100,9 +100,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       theyRevealed,
       /** Whether to offer "add as friend": a match, both revealed (lib/friend-offer.ts). */
       friend,
-      revealRequested: isUser1
-        ? conversation.user1_reveal_requested
-        : conversation.user2_reveal_requested,
+      /** They tapped Swap names and you have not: "they want to swap". */
+      revealRequested: theyAskedToSwap(conversation, authUser.userId),
       createdAt: conversation.created_at,
       lastMessageAt: conversation.last_message_at,
     })

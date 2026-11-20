@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client"
 
-import { firstName, holdingPair, matchSelect, mayShowRealName, UNNAMED } from "./conversation-identity"
+import { firstName, holdingPair, matchSelect, isPseudonymous, UNNAMED } from "./conversation-identity"
 import { blockedEitherWay, conversationPair } from "./conversations"
 import { db } from "./db"
 import { inRoomWhere } from "./event-kind"
@@ -44,15 +44,12 @@ import { ownerAdmits } from "./room-kind"
  * You see someone's real identity when one of these is true, and not otherwise:
  *
  * - **It is you.**
- * - **You are in a conversation, and it names them.** An accepted message
- *   request already required co-presence and consent from the other side. A
- *   mutual like at a shared event opens a conversation where each side keeps the
- *   room's pseudonym until they choose to show their name (`mayShowRealName`,
- *   lib/conversation-identity.ts), and so does a board post's. **A like alone
- *   identifies nobody; the conversation decides.** This gate used to say
- *   "identity is exchanged" at the like, true until the reveal model (#201),
- *   and the inbox sent the raw id beside the pseudonym, so one profile read
- *   skipped the reveal (SCRUM-752).
+ * - **You are in a conversation that never was pseudonymous** -- an accepted
+ *   message request, which already required co-presence and consent from the
+ *   other side. A match's or a board post's conversation does NOT count, even
+ *   once both have swapped names: a swap shows the first name and photo in
+ *   that chat only, never the profile by id (identity model, owner
+ *   2026-11-11). **A like alone identifies nobody, and neither does a swap.**
  * - **They chose to be public in a room you were in.** `event_check_ins.revealed`
  *   is someone opting out of the pseudonym for that event, so it would be
  *   strange to keep hiding them from the people who were there.
@@ -67,8 +64,8 @@ import { ownerAdmits } from "./room-kind"
  * Co-presence alone is deliberately *not* enough. Sharing a room is what lets
  * you send a request; it is not consent to be identified.
  *
- * **A block in either direction beats all four.** Reveal is otherwise one-way
- * and non-retractable; blocking is the single way to un-tell one person.
+ * **A block in either direction beats all four.** A swap is otherwise kept;
+ * blocking (which closes the chat) is the single way to un-tell one person.
  *
  * **Asked about a room handle, the answer is in that room's terms**
  * (`IdentityScope`, `identityForRef`): revealed in *that* room, or a friend
@@ -234,8 +231,11 @@ async function identityFor(
      * friends would make them recognisable to each other in every room after
      * — undoing `friends_see_me_in_rooms` for anyone who ever said hello.
      * Closed still counts as closed above: leaving beats everything.
+     *
+     * Nor does a pseudonymous one (a match, a board post), swapped or not: the
+     * swap names them in that chat, not on their profile.
      */
-    else if (!c.origin_friendship && mayShowRealName(c, other)) open.add(other)
+    else if (!c.origin_friendship && !isPseudonymous(c)) open.add(other)
   }
   const friendVisible = new Set(
     friendsOptedIn.map((f) => (f.user1_id === viewerId ? f.user2_id : f.user1_id))

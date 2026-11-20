@@ -67,7 +67,8 @@ describe("no notification body carries an identity", () => {
     const body = src.slice(start, start + 700)
     expect(body).not.toMatch(/title: `/)
     expect(body).not.toMatch(/body: `/)
-    expect(body).not.toContain("Name")
+    // "Swap names" is copy; a name variable is the leak.
+    expect(body).not.toMatch(/\b(name|realName|displayName|userName)\b/)
     expect(body).not.toContain("pseudonym")
   })
 
@@ -114,33 +115,26 @@ describe("the match notification goes to the person who does not know yet", () =
   })
 })
 
-describe("the reveal notifications go to the other side", () => {
+describe("the swap notifications go to the other side", () => {
   const src = read("app/api/mobile/conversations/[conversationId]/reveal/route.ts")
+  const post = src.slice(src.indexOf("export async function POST"), src.indexOf("export async function DELETE"))
 
-  it("notifies them, never the person who acted", () => {
-    // Two call sites, both resolving `themId` from the caller's own side.
-    const calls = src.match(/notify(Reveal|RevealRequest)\(themId, conversationId\)/g)
-    expect(calls).toHaveLength(2)
+  it("notifies them, never the person who acted: asked on a first tap, told on the swap", () => {
+    expect(post).toMatch(/\(swapped \? notifyReveal : notifyRevealRequest\)\(themId, conversationId\)/)
+    expect(post).toMatch(/const themId = isUser1 \? conversation\.user2_id : conversation\.user1_id/)
   })
 
-  it("is fire-and-forget on both paths", () => {
-    expect(src.match(/notifyReveal(Request)?\([^)]*\)\.catch\(/g)).toHaveLength(2)
+  it("is fire-and-forget, and only on the call whose UPDATE flipped the row", () => {
+    expect(post).toMatch(/if \(count === 1\) \{[\s\S]{0,200}\(themId, conversationId\)\.catch\(/)
   })
 
-  it("does not fire when the request was refused", () => {
-    /*
-     * Asking somebody already revealed returns 400 before the write. A
-     * notification there would tell them somebody asked for something they had
-     * already given.
-     */
-    const refusal = src.indexOf("They have already revealed")
-    const notify = src.indexOf("notifyRevealRequest(")
-    expect(refusal).toBeLessThan(notify)
+  it("does not fire when the tap was refused for a missing photo", () => {
+    expect(post.indexOf("reveal_incomplete")).toBeGreaterThan(-1)
+    expect(post.indexOf("reveal_incomplete")).toBeLessThan(post.indexOf("notifyRevealRequest)("))
   })
 
-  it("does not fire when the reveal was refused for a missing photo", () => {
-    const gate = src.indexOf("reveal_incomplete")
-    const notify = src.indexOf("notifyReveal(themId")
-    expect(gate).toBeLessThan(notify)
+  it("taking a tap back pushes nothing", () => {
+    const del = src.slice(src.indexOf("export async function DELETE"))
+    expect(del).not.toMatch(/notify/)
   })
 })

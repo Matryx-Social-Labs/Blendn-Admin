@@ -1,12 +1,11 @@
 import { answersFor, operatesEvent, type PersonAnswers, type RoomLens, type WorkIntent } from "@/lib/tonight"
 import { ConversationClosedError, closedPairKeys, openConversation } from "@/lib/conversations"
-import { lockPair, pairIsLinked, releaseHeldRequests } from "@/lib/friends"
+import { lockPair, pairIsLinked } from "@/lib/friends"
 import { notStrangersTo } from "@/lib/room-people"
 import { exposuresFor, recordImpressions } from "./exposure"
 import { db } from "@/lib/db"
 import { inRoomWhere } from "@/lib/event-kind"
 import { notifyMatch } from "@/lib/push-notifications"
-import { emitPrivateRevealed } from "@/lib/private-revealed"
 import {
   effectiveIntents,
   rankMatches,
@@ -888,25 +887,18 @@ export async function openIfMutual(eventId: string, actorId: string, otherId: st
       if (!back || linked) return null
 
       /*
-       * The pseudonyms and room-reveal state, snapshotted at the moment of the
-       * match.
+       * The pseudonyms, snapshotted at the moment of the match: a DM outlives
+       * its event and the chat lifecycle sweeper deletes old groups, so a
+       * lookup would go null exactly when the history matters.
        *
-       * Both come from this event: the pseudonym because a DM outlives its event
-       * and the chat lifecycle sweeper deletes old groups, so a lookup would go
-       * null exactly when the history matters; the reveal because somebody
-       * already public in this room has nothing left to reveal to a person who
-       * saw their card, and pretending otherwise would be theatre.
+       * Nobody starts swapped, not even somebody named in this room: being
+       * public in the room is not consent to be named in the DM (identity
+       * model; advisor Q2, 2026-11-20). Each side taps Swap names itself.
        */
-      const [pseudonymRows, revealedRows] = await Promise.all([
-        tx.chat_group_members.findMany({
-          where: { chat_group: { event_id: eventId }, user_id: { in: [likerId, likedId] } },
-          select: { user_id: true, anonymous_name: true },
-        }),
-        tx.event_match_preferences.findMany({
-          where: { event_id: eventId, user_id: { in: [likerId, likedId] }, revealed: true },
-          select: { user_id: true },
-        }),
-      ])
+      const pseudonymRows = await tx.chat_group_members.findMany({
+        where: { chat_group: { event_id: eventId }, user_id: { in: [likerId, likedId] } },
+        select: { user_id: true, anonymous_name: true },
+      })
       const conversation = await openConversation(
         likerId,
         likedId,
@@ -914,7 +906,6 @@ export async function openIfMutual(eventId: string, actorId: string, otherId: st
           eventId,
           // A pseudonym this room never gave is "Attendee", never null: a null reads as real names.
           pseudonyms: Object.fromEntries(pseudonymRows.map((p) => [p.user_id, p.anonymous_name || "Attendee"])),
-          revealed: revealedRows.map((r) => r.user_id),
         },
         tx
       )
@@ -950,50 +941,3 @@ export async function openIfMutual(eventId: string, actorId: string, otherId: st
   }
 }
 
-/**
- * Going public in a room carries into the DMs already opened from it.
- *
- * Somebody who reveals mid-event has shown their name and face to everyone
- * there — including people they already matched with — so a DM still calling
- * them by their pseudonym would protect nothing. Monotonic: `revealed: false`
- * in the filter leaves a revealed side alone, and nothing here ever hides a
- * name again (D-10: a reveal can't be unseen).
- */
-export async function revealConversationsFrom(eventId: string, userIds: readonly string[]): Promise<void> {
-  if (userIds.length === 0) return
-  const ids = [...userIds]
-  // Read first: updateMany does not say which rows it moved, and only those are told.
-  const pending = await db.private_conversations.findMany({
-    where: {
-      origin_event_id: eventId,
-      closed_at: null,
-      OR: [
-        { user1_id: { in: ids }, user1_revealed: false },
-        { user2_id: { in: ids }, user2_revealed: false },
-      ],
-    },
-    select: { id: true, user1_id: true, user2_id: true, user1_revealed: true, user2_revealed: true },
-  })
-  await Promise.all([
-    db.private_conversations.updateMany({
-      where: { origin_event_id: eventId, user1_id: { in: ids }, user1_revealed: false, closed_at: null },
-      data: { user1_revealed: true },
-    }),
-    db.private_conversations.updateMany({
-      where: { origin_event_id: eventId, user2_id: { in: ids }, user2_revealed: false, closed_at: null },
-      data: { user2_revealed: true },
-    }),
-  ])
-  for (const c of pending) {
-    const flipped1 = !c.user1_revealed && ids.includes(c.user1_id)
-    const flipped2 = !c.user2_revealed && ids.includes(c.user2_id)
-    const bothNow = (c.user1_revealed || flipped1) && (c.user2_revealed || flipped2)
-    // The other side of each flip; both sides once the pair is mutual (the friend offer opens).
-    const told = bothNow ? [c.user1_id, c.user2_id] : [...(flipped1 ? [c.user2_id] : []), ...(flipped2 ? [c.user1_id] : [])]
-    emitPrivateRevealed(c.id, told)
-  }
-  // A friend request held for one of these pairs may be deliverable now. Never
-  // allowed to fail the reveal that caused it: a request this misses is still
-  // delivered by the next read.
-  await releaseHeldRequests(ids).catch(() => undefined)
-}
