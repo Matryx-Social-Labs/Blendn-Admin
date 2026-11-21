@@ -31,6 +31,8 @@ export const routes = {
   hide: require("@/app/api/mobile/crews/[crewId]/hide/route") as typeof import("@/app/api/mobile/crews/[crewId]/hide/route"),
   hidden: require("@/app/api/mobile/crews/hidden/route") as typeof import("@/app/api/mobile/crews/hidden/route"),
   personLike: require("@/app/api/mobile/events/[eventId]/matches/likes/route") as typeof import("@/app/api/mobile/events/[eventId]/matches/likes/route"),
+  waves: require("@/app/api/mobile/events/[eventId]/waves/route") as typeof import("@/app/api/mobile/events/[eventId]/waves/route"),
+  wavesWaiting: require("@/app/api/mobile/waves/route") as typeof import("@/app/api/mobile/waves/route"),
   prefs: require("@/app/api/mobile/events/[eventId]/matches/preferences/route") as typeof import("@/app/api/mobile/events/[eventId]/matches/preferences/route"),
   blends: require("@/app/api/mobile/blends/route") as typeof import("@/app/api/mobile/blends/route"),
   chatGroups: require("@/app/api/mobile/chat/groups/route") as typeof import("@/app/api/mobile/chat/groups/route"),
@@ -130,6 +132,15 @@ export const api = {
       body: { userId, ...(asCrewId && { asCrewId }) },
       params: { eventId },
     }),
+  /** A wave at a person by room handle; with `asCrewId`, on that crew's behalf. */
+  wave: (as: Person, eventId: string, toUserId: string, asCrewId?: string) =>
+    call(routes.waves.POST, `/api/mobile/events/${eventId}/waves`, as, {
+      method: "POST",
+      body: { toUserId, ...(asCrewId && { asCrewId }) },
+      params: { eventId },
+    }),
+  waves: (as: Person, eventId: string) => call(routes.waves.GET, `/api/mobile/events/${eventId}/waves`, as, { params: { eventId } }),
+  wavesWaiting: (as: Person) => call(routes.wavesWaiting.GET, "/api/mobile/waves", as),
   prefs: (as: Person, eventId: string, body: Record<string, unknown>) =>
     call(routes.prefs.PUT, `/api/mobile/events/${eventId}/matches/preferences`, as, { method: "PUT", body, params: { eventId } }),
   blends: (as: Person) => call(routes.blends.GET, "/api/mobile/blends", as),

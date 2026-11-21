@@ -6,7 +6,8 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { eventRoomBan } from "@/lib/room-kind"
 import { operatesEvent } from "@/lib/tonight"
-import { wavesWaiting } from "@/lib/waves"
+import { crewWavesWaiting } from "@/lib/crews/waves"
+import { roomIsOpen, wavesWaiting } from "@/lib/waves"
 
 /**
  * Banter's pinned rows (B-A, SCRUM-1042): one per open room where somebody's
@@ -26,8 +27,9 @@ export async function GET(request: NextRequest) {
     const viewerId = authUser.userId
     // Shut to you: a room you run or host, or one whose host banned you (its list answers the same).
     const shut = async (eventId: string) => (await operatesEvent(viewerId, eventId)) || (await eventRoomBan(eventId, viewerId)) !== null
-    const rooms = await wavesWaiting(viewerId, shut)
-    return successResponse({ rooms })
+    // Crews' waves in their own list (S5 b2): a room only crews waved in has no person `latest` for an installed build.
+    const [rooms, crewRooms] = await Promise.all([wavesWaiting(viewerId, shut), crewWavesWaiting(viewerId, (id) => roomIsOpen(id), shut)])
+    return successResponse({ rooms, crewRooms })
   } catch (error) {
     logger.error("Waves waiting error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to load waves")

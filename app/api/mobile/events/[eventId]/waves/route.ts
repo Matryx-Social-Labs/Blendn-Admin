@@ -29,6 +29,9 @@ import { hasVisibleWaveFrom, hasWaved, receivedWaves, recordWave, roomIsOpen, wa
 import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { visibleInRoom } from "@/lib/identity"
 import { readJson, isUuid } from "@/lib/api-input"
+import { isRefusal, refusalResponse } from "@/lib/crews/crews"
+import { likePersonAsCrew } from "@/lib/crews/like"
+import { crewWavesAt } from "@/lib/crews/waves"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -36,7 +39,11 @@ interface RouteParams {
 
 // User ids are cuid, not uuid — do not tighten this to z.string().uuid(). And
 // the roster sends room handles (`rh_…`, SCRUM-371), which are neither.
-const waveSchema = z.object({ toUserId: z.string().min(1) })
+const waveSchema = z.object({
+  toUserId: z.string().min(1),
+  /** Wave on your crew's behalf (crews 5-A, S5): a crew → person wave, lib/crews/like.ts decides. */
+  asCrewId: z.string().uuid().optional(),
+})
 
 /** The live ping across rooms (W2): one per pair per this long, whichever room. A wave back is never held by it. */
 const WAVE_WINDOW_MS = 10 * 60 * 1000
@@ -96,6 +103,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (banned) return banned
     const toUserId = roomMemberFromRef(eventId, parsed.data.toUserId, authUser.userId)
     const fromUserId = authUser.userId
+
+    /*
+     * For your crew: the crew like's door and rules (`likePersonAsCrew`), its
+     * 30 a day counted before anybody is looked at (SCRUM-1050), and the C7
+     * answer — every refusal about them reads as a wave that stood.
+     */
+    if (parsed.data.asCrewId) {
+      const overDay = await rateLimit(request, userLimit("crewLikeDay", "crew-like-day", fromUserId))
+      if (overDay) return overDay
+      if (!toUserId || toUserId === fromUserId) return successResponse({ sent: true, mutual: false })
+      const outcome = await likePersonAsCrew(fromUserId, eventId, parsed.data.asCrewId, toUserId, { wave: true })
+      if (isRefusal(outcome)) return refusalResponse(outcome)
+      return successResponse(outcome.blend ? { sent: true, mutual: true, blend: outcome.blend } : { sent: true, mutual: false })
+    }
 
     if (toUserId === fromUserId) {
       return errorResponse("You cannot wave at yourself", 400, ErrorCode.VALIDATION_FAILED)
@@ -241,11 +262,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return errorResponse("Check in to see who waved", 403, ErrorCode.NOT_CHECKED_IN)
     }
     // The room closed: nothing left to answer.
-    if (!open) return successResponse({ open: false, total: 0, waves: [], nextCursor: null })
+    if (!open) return successResponse({ open: false, total: 0, waves: [], nextCursor: null, crewTotal: 0, crewWaves: [] })
 
-    const page = await receivedWaves(viewerId, eventId, { cursor: request.nextUrl.searchParams.get("cursor") })
+    const cursor = request.nextUrl.searchParams.get("cursor")
+    const [page, crewWaves] = await Promise.all([
+      receivedWaves(viewerId, eventId, { cursor }),
+      // The crews that waved, apart from the people and on the first page only: they are few (`CREW_WAVES_MAX`).
+      cursor ? Promise.resolve([]) : crewWavesAt(viewerId, eventId),
+    ])
     if ("refused" in page) return errorResponse("Invalid cursor", 400, ErrorCode.VALIDATION_FAILED)
-    return successResponse({ open: true, ...page })
+    return successResponse({ open: true, ...page, crewTotal: crewWaves.length, crewWaves })
   } catch (error) {
     logger.error("Wave list error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to load waves")
