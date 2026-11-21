@@ -3,14 +3,18 @@ import type { Prisma } from "@prisma/client"
 
 import { CREW } from "../constants"
 import { db } from "../db"
+import { pseudonymsForEvent } from "../anonymous-names"
+import { SYSTEM_USER_ID } from "../event-kind"
 import { namesInRoom } from "../identity"
 import { logger } from "../logger"
 import { sendBulkPushNotifications } from "../push-notifications"
 import { deliverToRoom } from "../room-delivery"
 import { leaveRoomSockets } from "../room-close"
+import { roomHandle } from "../room-handle"
 import { eventRoomBan, ownerAdmits, ownerRoomClosesAt } from "../room-kind"
 import { CREWS_OFF, isRefusal, NO_CREW, NO_EVENT, type CrewRefusal } from "./crews"
 import { blocksExclude } from "./blocks"
+import { hidesCrew } from "./hides"
 import { LISTED_IN_ROSTER, strangersApartBetween } from "../room-people"
 import {
   crewEvent,
@@ -61,6 +65,20 @@ import {
  * A Blend that has closed stays the pair's one row for the occurrence: a like
  * after it answers `blend: null`, never a closed room.
  *
+ * ## A wave is a like the other side is shown (crews 5-A, S5)
+ *
+ * `POST …/crews/:id/wave` writes the same row with `is_wave`: the same
+ * uniques, the same lock, the same Blend. The difference is who is told. The
+ * receiving crew's chat gets "Nebula waved at your crew" (authored by the
+ * system user, so no stranger's name is resolved in it) and its card pins
+ * `wavedAtYou`; a like stays secret until mutual. A like from an installed
+ * build and a wave from the other side make one Mix (decided per advisor,
+ * 2026-11-21): a like is already consent to one. A like row of yours that a
+ * wave repeats becomes a wave, and is told then. No push for a single wave;
+ * the Mix push is "Nebula and Orbit both waved" when a wave made it. A crew's
+ * wave at one PERSON is not built yet: it stays a like (C7), so nothing here
+ * writes `is_wave` on a crew → person row.
+ *
  * ## Who is in a Blend: who was here when it matched (C3)
  *
  * Its room gets a member row for each person on either side checked in at the
@@ -87,6 +105,8 @@ const NO_ROOM_FOR_ONE: CrewRefusal = {
 
 export interface LikeOutcome {
   liked: true
+  /** A wave (`POST …/wave`): the receiving side was told, or had been. */
+  waved?: true
   /** Present when this like made a Blend (or found the one it would have made). */
   blend: { blendId: string; chatGroupId: string } | null
 }
@@ -116,6 +136,18 @@ interface Sides {
   b: readonly string[]
 }
 
+/** What a like or wave says, and to whom. */
+interface Telling {
+  wave: boolean
+  /** The liker's own crew chat ("liked/waved at Orbit for the crew"); null for a like of a person (C7). */
+  likerCrewRoom: { id: string; name: string } | null
+  likedLabel: string | null
+  /** A wave's received line, in the target crew's chat. */
+  target: { room: { id: string; name: string } | null; content: string; metadata: Prisma.InputJsonObject } | null
+  /** The two names the Mix push puts together, when a wave makes it. */
+  mixNames: [string, string]
+}
+
 /** A crew here now: its row, its active members, and those of them here. Null if it is not here. */
 async function crewHereNow(crewId: string, occurrenceId: string) {
   const present = (await presentMembersAt(occurrenceId, [crewId])).get(crewId) ?? []
@@ -137,12 +169,16 @@ export async function likeCrew(
   likerId: string,
   eventId: string,
   toCrewId: string,
-  asCrewId?: string
+  asCrewId?: string,
+  opts: { wave?: boolean } = {}
 ): Promise<LikeOutcome | CrewRefusal> {
+  const wave = opts.wave === true
   const here = await hereFor(likerId, eventId)
   if (isRefusal(here)) return here
   const target = await crewHereNow(toCrewId, here.occurrenceId)
   if (!target || target.members.includes(likerId)) return NO_CREW
+  // A crew you hid is not there for you: the same 404 as one that is not here.
+  if (await hidesCrew(likerId, toCrewId)) return NO_CREW
 
   if (asCrewId) {
     if (asCrewId === toCrewId) return NO_CREW
@@ -153,7 +189,14 @@ export async function likeCrew(
     if (blocksExclude(mine.members, target.members, await strangersApartBetween(mine.members, target.members))) return NO_CREW
     const [a, b] = mine.id < target.id ? [mine.id, target.id] : [target.id, mine.id]
     const sides = { a: mine.members, b: target.members }
-    const outcome = await like(here, likerId, { crewId: mine.id }, { crewId: target.id }, { a_crew_id: a, b_crew_id: b }, sides, mine.room, target.name)
+    const telling: Telling = {
+      wave,
+      likerCrewRoom: mine.room,
+      likedLabel: target.name,
+      target: { room: target.room, content: `${mine.name} waved at your crew`, metadata: { kind: "crew_waved", eventId, fromCrewId: mine.id } },
+      mixNames: [mine.name, target.name],
+    }
+    const outcome = await like(here, likerId, { crewId: mine.id }, { crewId: target.id }, { a_crew_id: a, b_crew_id: b }, sides, telling)
     return outcome ?? NO_CREW
   }
 
@@ -162,7 +205,20 @@ export async function likeCrew(
   if (!crewMayMeetSolo(target, target.members.length, me.intents)) return NO_CREW
   if (blocksExclude([likerId], target.members, await strangersApartBetween([likerId], target.members))) return NO_CREW
   const sides = { a: target.members, b: [likerId] }
-  const outcome = await like(here, likerId, { userId: likerId }, { crewId: target.id }, { a_crew_id: target.id, b_user_id: likerId }, sides, null, null)
+  // Their pseudonym in this room, never a name (Q3), and the handle "Wave back" answers with (`POST …/matches/likes` + asCrewId).
+  const pseudonym = wave ? ((await pseudonymsForEvent(eventId, [likerId])).get(likerId) ?? "Someone here") : ""
+  const telling: Telling = {
+    wave,
+    likerCrewRoom: null,
+    likedLabel: null,
+    target: {
+      room: target.room,
+      content: `${pseudonym} waved at the crew`,
+      metadata: { kind: "crew_waved", eventId, fromUserId: roomHandle(eventId, likerId) },
+    },
+    mixNames: ["Someone here", target.name],
+  }
+  const outcome = await like(here, likerId, { userId: likerId }, { crewId: target.id }, { a_crew_id: target.id, b_user_id: likerId }, sides, telling)
   return outcome ?? NO_CREW
 }
 
@@ -211,8 +267,7 @@ export async function likePersonAsCrew(
     { userId: personId },
     { a_crew_id: mine.id, b_user_id: personId },
     { a: mine.members, b: [personId] },
-    null,
-    null
+    { wave: false, likerCrewRoom: null, likedLabel: null, target: null, mixNames: [mine.name, "someone here"] }
   )
   return outcome ?? { ...NOTHING_TOLD }
 }
@@ -241,8 +296,7 @@ async function like(
   to: Side,
   pair: { a_crew_id: string; b_crew_id?: string; b_user_id?: string },
   sides: Sides,
-  likerCrewRoom: { id: string; name: string } | null,
-  likedLabel: string | null
+  telling: Telling
 ): Promise<LikeOutcome | null> {
   const pairKey = `${pair.a_crew_id}:${pair.b_crew_id ?? pair.b_user_id}`
   const result = await db.$transaction(async (tx) => {
@@ -263,12 +317,20 @@ async function like(
           ...("crewId" in from ? { from_crew_id: from.crewId } : { from_user_id: from.userId }),
           ...("crewId" in to ? { to_crew_id: to.crewId } : { to_user_id: to.userId }),
           liked_by_user_id: likerId,
+          is_wave: telling.wave,
         },
       ],
       skipDuplicates: true,
     })
-    const back = await tx.crew_likes.findFirst({ where: likeWhere(here.occurrenceId, to, from), select: { id: true } })
-    if (!back) return { fresh: fresh > 0, blend: null }
+    // A wave over this side's own like from before (an installed build's) is a wave from now: told once, here.
+    const upgraded =
+      telling.wave && fresh === 0
+        ? (await tx.crew_likes.updateMany({ where: { ...likeWhere(here.occurrenceId, from, to), is_wave: false }, data: { is_wave: true } })).count
+        : 0
+    const told = telling.wave && fresh + upgraded > 0
+    const back = await tx.crew_likes.findFirst({ where: likeWhere(here.occurrenceId, to, from), select: { is_wave: true } })
+    if (!back) return { fresh: fresh > 0, told, mutual: false, bothWaved: false, blend: null }
+    const bothWaved = telling.wave && back.is_wave
 
     const existing = await tx.blends.findFirst({
       where: { occurrence_id: here.occurrenceId, a_crew_id: pair.a_crew_id, b_crew_id: pair.b_crew_id ?? null, b_user_id: pair.b_user_id ?? null },
@@ -277,7 +339,7 @@ async function like(
     if (existing) {
       // One Blend per pair per occurrence: a closed one is not reopened, and is not handed back.
       const open = !existing.closed_at && existing.closes_at > new Date() ? existing.room : null
-      return { fresh: fresh > 0, blend: open ? { blendId: existing.id, chatGroupId: open.id, created: false } : null }
+      return { fresh: fresh > 0, told, mutual: true, bothWaved, blend: open ? { blendId: existing.id, chatGroupId: open.id, created: false } : null }
     }
 
     const blend = await tx.blends.create({
@@ -312,25 +374,38 @@ async function like(
       },
       select: { id: true },
     })
-    return { fresh: fresh > 0, blend: { blendId: blend.id, chatGroupId: room.id, created: true } }
+    return { fresh: fresh > 0, told, mutual: true, bothWaved, blend: { blendId: blend.id, chatGroupId: room.id, created: true } }
   })
   if (!result) return null
 
-  if (result.fresh && likerCrewRoom && likedLabel) await sayInCrew(likerCrewRoom, likerId, likedLabel)
-  if (result.blend?.created) await announceBlend(result.blend, likerId)
-  return { liked: true, blend: result.blend && { blendId: result.blend.blendId, chatGroupId: result.blend.chatGroupId } }
+  const { likerCrewRoom, likedLabel, target } = telling
+  if ((result.fresh || result.told) && likerCrewRoom && likedLabel) await sayInCrew(likerCrewRoom, likerId, likedLabel, telling.wave)
+  /*
+   * The received line only while it is news: a wave that met theirs (a new
+   * Mix, one already open, or one that closed) is told by the Mix, not by a
+   * line. ponytail: a line that fails to write is not retried (the wave is
+   * already stored, so a second tap is not "told"); the pinned card still says it.
+   */
+  if (result.told && !result.mutual && target?.room) await tellCrewWaved(target.room, target.content, target.metadata)
+  // "Both waved" only when both did: a like answered by a wave is the like's push, which says nothing of who did what.
+  if (result.blend?.created) await announceBlend(result.blend, likerId, result.bothWaved ? telling.mixNames : null)
+  return {
+    liked: true,
+    ...(telling.wave && { waved: true as const }),
+    blend: result.blend && { blendId: result.blend.blendId, chatGroupId: result.blend.chatGroupId },
+  }
 }
 
-/** "Rohan liked Crew Nebula for the crew", in the liker's own crew chat — transparency, not a vote. */
-async function sayInCrew(room: { id: string; name: string }, likerId: string, likedLabel: string): Promise<void> {
+/** "Rohan liked (waved at) Crew Nebula for the crew", in the liker's own crew chat — transparency, not a vote. */
+async function sayInCrew(room: { id: string; name: string }, likerId: string, likedLabel: string, wave: boolean): Promise<void> {
   try {
     const message = await db.chat_messages.create({
       data: {
         chat_group_id: room.id,
         user_id: likerId,
         type: "system",
-        content: `liked ${likedLabel} for the crew`,
-        metadata: { kind: "crew_like" },
+        content: wave ? `waved at ${likedLabel} for the crew` : `liked ${likedLabel} for the crew`,
+        metadata: { kind: wave ? "crew_wave" : "crew_like" },
       },
     })
     await db.chat_groups.update({ where: { id: room.id }, data: { last_message_at: message.created_at } })
@@ -351,11 +426,38 @@ async function sayInCrew(room: { id: string; name: string }, likerId: string, li
 }
 
 /**
+ * "Nebula waved at your crew · Wave back", in the waved-at crew's chat. Authored
+ * by the system user: a crew room names any author by first name
+ * (`namesInRoom`), and the waver is a stranger to it. No push (the person
+ * Wave's rule: none for a single wave). Never throws: the wave stands, and
+ * the pinned card says it too.
+ */
+async function tellCrewWaved(room: { id: string; name: string }, content: string, metadata: Prisma.InputJsonObject): Promise<void> {
+  try {
+    const message = await db.chat_messages.create({
+      data: { chat_group_id: room.id, user_id: SYSTEM_USER_ID, type: "system", content: content, metadata: metadata },
+    })
+    await db.chat_groups.update({ where: { id: room.id }, data: { last_message_at: message.created_at } })
+    await deliverToRoom({
+      chatGroupId: room.id,
+      scope: { kind: "crew", groupId: room.id },
+      groupName: room.name,
+      senderId: SYSTEM_USER_ID,
+      senderAnonName: "Blend’n",
+      message,
+      preview: message.content,
+    })
+  } catch (error) {
+    logger.warn("Crew wave line failed", { error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
+/**
  * "It's a Blend", to everyone the room admits but the person whose like made
  * it — they have the response. Names nobody and says nothing of who liked
  * first: everyone on both sides is told the same thing at the same moment.
  */
-async function announceBlend(blend: { blendId: string; chatGroupId: string }, likerId: string): Promise<void> {
+async function announceBlend(blend: { blendId: string; chatGroupId: string }, likerId: string, waved: [string, string] | null): Promise<void> {
   try {
     const rows = await db.chat_group_members.findMany({ where: { chat_group_id: blend.chatGroupId }, select: { user_id: true } })
     const admitted = (await ownerAdmits(blend.chatGroupId, rows.map((r) => r.user_id))) ?? new Set<string>()
@@ -364,7 +466,7 @@ async function announceBlend(blend: { blendId: string; chatGroupId: string }, li
     await sendBulkPushNotifications({
       userIds,
       title: "It’s a Mix",
-      body: "Your crew and another matched tonight. Say hi in the Mix.",
+      body: waved ? `${waved[0]} and ${waved[1]} both waved. Say hi in the Mix.` : "Your crew and another matched tonight. Say hi in the Mix.",
       data: { type: "blend", blendId: blend.blendId, chatGroupId: blend.chatGroupId },
     })
   } catch (error) {

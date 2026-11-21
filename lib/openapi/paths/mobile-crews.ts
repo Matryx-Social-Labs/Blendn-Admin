@@ -101,7 +101,13 @@ const CrewCardSchema = z
     presentCount: z.number().int().describe("\"Here now · N of size\" — always ≥ 2"),
     tags: z.array(Tag),
     intent: z.array(Intent),
-    youLiked: z.boolean().describe("Whether your side liked this crew tonight. Never whether they liked you"),
+    youLiked: z.boolean().describe("Whether your side liked or waved at this crew tonight. Never whether they liked you"),
+    youWaved: z.boolean().describe("Whether your side waved at this crew tonight (\"✓ Waved\"). A like from an installed build is `youLiked` only"),
+    wavedAtYou: z
+      .boolean()
+      .describe(
+        "Whether this crew waved at your side tonight (crews 5-A). A wave is shown to the crew it is for; a like never is. Cards that waved at you and you have not answered come first (\"Wave back\")"
+      ),
     overlaps: z
       .array(OverlapSchema)
       .describe(
@@ -476,6 +482,83 @@ registry.registerPath({
   },
   responses: {
     200: { description: "Liked", ...json(wrap(z.object({ liked: z.literal(true), blend: BlendRef.nullable() }))) },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/events/{eventId}/crews/{crewId}/wave",
+  tags,
+  summary: "Wave for {crew}: wave at a crew here now",
+  description:
+    "The like above, shown to the crew it is for (crews 5-A): the same body, guardrails, refusals, Mix and limits — likes and waves share " +
+    "the 30 a day. Their crew chat gets a system line, \"Nebula waved at your crew\" (`metadata: { kind: \"crew_waved\", eventId, fromCrewId }`), " +
+    "or for a person's wave \"<their pseudonym here> waved at the crew\" (`fromUserId`: their handle in this room, which Wave back sends " +
+    "to `POST /events/:id/matches/likes` with `asCrewId`). Their card has `wavedAtYou`, pinned first. Your own crew chat says \"waved at " +
+    "<crew> for the crew\" (`kind: crew_wave`). No push for a single wave. A wave or a like back opens the one Mix, and a wave that makes " +
+    "it pushes \"<A> and <B> both waved. Say hi in the Mix.\" instead of the line. Waving twice is waving once; a wave over your side's " +
+    "own earlier like tells them once. A crew you hid is the same 404 as one not here.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ eventId: z.string().uuid(), crewId: z.string().uuid() }),
+    body: json(z.object({ asCrewId: z.string().uuid().optional() })),
+  },
+  responses: {
+    200: {
+      description: "Waved",
+      ...json(wrap(z.object({ liked: z.literal(true), waved: z.literal(true), blend: BlendRef.nullable() }))),
+    },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/crews/{crewId}/hide",
+  tags,
+  summary: "Block a crew: hide it from you for good",
+  description:
+    "Owner 2026-11-13: a crew's Block hides that crew from you, never a block of its members. Only you: the crew is not told, your " +
+    "crewmates still see it, and a Mix it makes with your crew opens for you as for everyone. Its card is gone from every room for you, " +
+    "and your like or wave at it is the 404 of a crew not here. Hiding twice is hiding once. 404 for a crew that is not there, has " +
+    "ended, or is yours. \"Hide this crew tonight\" is the app's alone.",
+  security: bearerAuth,
+  request: { params: z.object({ crewId: z.string().uuid() }) },
+  responses: { 200: { description: "Hidden", ...json(wrap(z.object({ hidden: z.literal(true) }))) }, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/mobile/crews/{crewId}/hide",
+  tags,
+  summary: "Show a hidden crew again",
+  description: "From Settings → Blocked. `{ hidden: false }` whether or not it was hidden.",
+  security: bearerAuth,
+  request: { params: z.object({ crewId: z.string().uuid() }) },
+  responses: { 200: { description: "Shown", ...json(wrap(z.object({ hidden: z.literal(false) }))) }, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/crews/hidden",
+  tags,
+  summary: "The crews you hid (Settings → Blocked)",
+  description: "Newest first, `page`/`limit` paged. A crew that has ended is not listed.",
+  security: bearerAuth,
+  request: { query: z.object({ page: z.coerce.number().int().optional(), limit: z.coerce.number().int().optional() }) },
+  responses: {
+    200: {
+      description: "Hidden crews",
+      ...json(
+        wrap(
+          z.object({
+            crews: z.array(z.object({ crewId: z.string().uuid(), name: z.string(), emblemSeed: z.string(), hiddenAt: z.string().datetime() })),
+            pagination: z.object({ page: z.number().int(), limit: z.number().int(), totalCount: z.number().int(), totalPages: z.number().int(), hasMore: z.boolean() }),
+          })
+        )
+      ),
+    },
     ...standardErrors,
   },
 })

@@ -149,6 +149,7 @@ model User {
   crew_likes_as_solo crew_likes[]    @relation("CrewLikeFromUser")
   crew_likes_got     crew_likes[]    @relation("CrewLikeToUser")
   crew_likes_made    crew_likes[]    @relation("CrewLikeBy")
+  crew_hides         crew_hides[]
   blends_as_solo     blends[]        @relation("BlendSolo")
   blend_reveals      blend_reveals[]
 
@@ -3771,6 +3772,8 @@ model crews {
   /// The crew chat (kind `crew`), made with the crew.
   room        chat_groups?
   plans       crew_plans[]
+  /// People who hid this crew from themselves for good ("Block" on a crew).
+  hidden_by   crew_hides[]
 
   @@index([created_by])
 }
@@ -3872,6 +3875,8 @@ model crew_likes {
   to_crew_id       String?  @db.Uuid
   to_user_id       String?
   liked_by_user_id String
+  /// A wave (crews 5-A): the receiving side is shown it. False is a like (secret until mutual). Either matches the other.
+  is_wave          Boolean  @default(false)
   created_at       DateTime @default(now()) @db.Timestamptz(6)
 
   occurrence event_occurrences @relation(fields: [occurrence_id], references: [id], onDelete: Restrict)
@@ -3891,6 +3896,19 @@ model crew_likes {
   @@index([from_user_id])
   @@index([to_user_id])
   @@index([liked_by_user_id])
+}
+
+/// "Block" on a crew (owner 2026-11-13): this person never sees that crew again. Only the hider; the crew is not told.
+model crew_hides {
+  user_id    String
+  crew_id    String   @db.Uuid
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  user User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  crew crews @relation(fields: [crew_id], references: [id], onDelete: Cascade)
+
+  @@id([user_id, crew_id])
+  @@index([crew_id])
 }
 
 /// A mutual like: two crews, or a crew and one person, at one occurrence.

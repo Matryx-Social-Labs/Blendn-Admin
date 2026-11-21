@@ -3382,6 +3382,9 @@ messages in a crew chat stay, as in any room.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/events/:eventId/crews/:crewId/like` | Like a crew here: `{ asCrewId? }` — as one of your crews here, or as yourself → `{ liked: true, blend }` |
+| POST | `/events/:eventId/crews/:crewId/wave` | "Wave for {crew}": the like, shown to them → `{ liked: true, waved: true, blend }` |
+| POST / DELETE | `/crews/:crewId/hide` | Block a crew = hide it from you for good / show it again → `{ hidden }` |
+| GET | `/crews/hidden` | Settings → Blocked: the crews you hid, `page`/`limit` |
 | POST | `/events/:eventId/matches/likes` | With `asCrewId`: like one person on your crew's behalf → `{ liked: true, blend }` |
 | PUT | `/events/:eventId/matches/preferences` | `openToCrews` — "Open to joining a crew tonight" (until the end of your occurrence) |
 | POST | `/blends/:blendId/reveal` | One tap reveals your crew **in this Mix** → `{ revealed: true }` |
@@ -3396,6 +3399,29 @@ like that stood would tell the crew what the answer hides. Nobody else is told: 
 host turned crews off, every crew like is 403. **30 crew likes a day** per person
 (both doors: a crew, and a person with `asCrewId`), counted before anything is
 looked at, as a `429` rate limit (SCRUM-1050).
+
+**Crew waves** (crews 5-A, SCRUM-1094). `…/wave` is the like with the other
+side told: the same row (`crew_likes.is_wave`), body, guardrails, refusals and
+Mix, and the same 30 a day (likes and waves together, never also in the person
+Wave's W3/W4). The waved-at crew's chat gets a system line from the system
+user — *"Nebula waved at your crew"*, `metadata: { kind: "crew_waved", eventId,
+fromCrewId }`; for a person, *"Lunar Fox waved at the crew"* by their pseudonym
+here, with `fromUserId` = their handle in the event room, which Wave back sends
+to `POST /events/:id/matches/likes` with `asCrewId`. Their card gets
+`wavedAtYou: true` and comes first until they answer; yours `youWaved: true`.
+Your own crew chat says *"waved at Orbit for the crew"* (`kind: crew_wave`). No
+push for a single wave. A wave or a like back makes the one Mix; when a wave
+made it the push is *"Orbit and Nebula both waved. Say hi in the Mix."* and no
+received line is written. A wave over your side's own like from an installed
+build turns it into a wave and tells them once. A crew's wave at one **person**
+is not built yet (`matches/likes` with `asCrewId` stays a secret like, C7).
+
+**Block on a crew** (owner 2026-11-13) hides that crew from you for good:
+`POST /crews/:id/hide`. Only you — the crew is not told, your crewmates still
+see it, and a Mix it makes with your crew opens for you too. Its card is gone
+from your rooms and your like or wave at it is the 404 of a crew not here.
+`DELETE` shows it again; `GET /crews/hidden` lists them (a crew that ended is
+not listed). Erased with your account. "Hide this crew tonight" is the app's.
 
 **Crew ↔ crew has no size guard** (owner 2026-11-14): two crews of any size
 Mix, and the Mix room is the members of both sides here when it matched — up to

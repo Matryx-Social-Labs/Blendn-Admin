@@ -20,6 +20,7 @@ const NOT_THE_GATE: Record<string, string> = {
   "events/[eventId]/checkins": IN_THE_ROOM,
   "events/[eventId]/checkout": "leaving: refusing it would hold a person in a closed room",
   "events/[eventId]/crews/[crewId]/like": IN_THE_ROOM,
+  "events/[eventId]/crews/[crewId]/wave": IN_THE_ROOM,
   "events/[eventId]/crews": IN_THE_ROOM,
   "events/[eventId]/friends-here": IN_THE_ROOM,
   "events/[eventId]/matches/likes": IN_THE_ROOM,
