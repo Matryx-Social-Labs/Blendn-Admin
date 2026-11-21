@@ -144,7 +144,17 @@ function SortableMediaItem({
             <FormLabel>URL</FormLabel>
             <div className="flex flex-col gap-2">
               <FormControl>
-                <Input placeholder="https://…" {...field} />
+                <Input
+                  placeholder="https://…"
+                  {...field}
+                  onChange={(e) => {
+                    field.onChange(e)
+                    // A typed URL is another file: the measured size was the upload's (SCRUM-1066).
+                    form.setValue(`media_items.${index}.width`, undefined)
+                    form.setValue(`media_items.${index}.height`, undefined)
+                    form.setValue(`media_items.${index}.duration_ms`, undefined)
+                  }}
+                />
               </FormControl>
               <Input
                 type="file"
