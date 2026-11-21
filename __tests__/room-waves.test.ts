@@ -56,9 +56,15 @@ jest.mock("@/lib/waves", () => ({
   hasWaved: async (e: string, f: string, t: string) => waves.has(`${e}|${f}|${t}`),
   // The viewer's list rule is the integration suite's; here a stored wave is a visible one.
   hasVisibleWaveFrom: async (viewer: string, e: string, from: string) => waves.has(`${e}|${from}|${viewer}`),
-  recordWave: async (e: string, f: string, t: string) => {
+  // As lib/waves.ts orders it: the duplicate first, then the pair window (W2) for a new wave only, then the row.
+  recordWave: async (e: string, f: string, t: string, { answering }: { answering: boolean }) => {
     const k = `${e}|${f}|${t}`
     if (waves.has(k)) return { recorded: false, capped: null }
+    if (!answering) {
+      const { hit } = jest.requireActual("@/lib/rate-limit-store")
+      const { count, resetAt } = await hit(`rl:wave:${f}:${t}`, 10 * 60 * 1000)
+      if (count > 1) return { recorded: false, capped: { cap: "pair", retryAfter: Math.ceil((resetAt - Date.now()) / 1000) } }
+    }
     waves.add(k)
     return { recorded: true }
   },
