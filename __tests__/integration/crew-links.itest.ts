@@ -16,7 +16,7 @@ import { resetMemoryStore } from "@/lib/rate-limit-store"
 import { GET as preview } from "@/app/api/mobile/crews/links/[token]/preview/route"
 
 import { db, makeUser, testId } from "./helpers"
-import { api, cleanupCrewWorld, crewOf, person, world as crewWorld, type Person } from "./crew-world"
+import { api, befriend, cleanupCrewWorld, crewOf, person, world as crewWorld, type Person } from "./crew-world"
 
 beforeEach(() => resetMemoryStore())
 afterAll(() => cleanupCrewWorld())
@@ -105,6 +105,29 @@ describe("A crew invite link", () => {
     expect(await db.crew_members.count({ where: { crew_id: c.crewId, user_id: blocker.id } })).toBe(0)
     // Control: the link is unspent, and works for somebody else.
     expect((await api.joinLink(await person("lkb-ok"), token)).status).toBe(200)
+  })
+
+  it("a person the owner removed comes back only by the owner's own link, and the marker stays otherwise", async () => {
+    const c = await crew("lkm")
+    const third = await person("lkm-third", "Kavya Nair")
+    await befriend(c.owner, third)
+    await api.invite(c.owner, c.crewId, [third.id])
+    expect((await api.join(third, c.crewId)).status).toBe(200)
+    const members = (await api.detail(c.owner, c.crewId)).body.data.members as { name: string; userId: string }[]
+    const handle = members.find((m) => m.name === "Kavya")!.userId
+    expect((await api.remove(c.owner, c.crewId, handle)).status).toBe(200)
+    const marker = () => db.crew_invites.count({ where: { crew_id: c.crewId, invited_user_id: third.id, removed_at: { not: null } } })
+    expect(await marker()).toBe(1)
+
+    const matesLink = (await api.makeLink(c.mate, c.crewId)).body.data.token
+    const refused = await api.joinLink(third, matesLink)
+    expect(refused).toEqual(await api.joinLink(third, UNKNOWN))
+    expect((await api.openLink(third, matesLink)).status).toBe(404)
+    expect(await marker()).toBe(1)
+
+    const ownersLink = (await api.makeLink(c.owner, c.crewId)).body.data.token
+    expect((await api.joinLink(third, ownersLink)).status).toBe(200)
+    expect(await marker()).toBe(0)
   })
 
   it("a full crew is a 409 and the link is not spent; a lapsed link is a 404", async () => {

@@ -26,6 +26,8 @@ import { lockCrew } from "./sweep"
  *   revoked, lapsed, its sharer gone, the crew ended or hidden, the holder kept
  *   apart from anybody in it — is the one 404 (`NO_LINK`), and spends nothing.
  * - The sharer or the crew's owner may revoke it.
+ * - Somebody the owner removed comes back only by the OWNER's link (the
+ *   invite's rule, C10): anybody else's is the 404, and the marker stays.
  */
 
 /** The friend link's one 404, word for word: `errorCode` NOT_FOUND, `reasonCode` INVITE_UNAVAILABLE. */
@@ -74,6 +76,25 @@ async function openLink(token: string, now: Date = new Date()) {
   if (!link) return null
   const members = await activeMembers(link.crew_id)
   return members.includes(link.created_by) ? { link, members } : null
+}
+
+/**
+ * A removal marker the sharer may not lift: the owner removed them, and the
+ * link is not the owner's. Read with the transaction under its crew lock.
+ */
+async function removedFor(
+  client: Pick<typeof db, "crew_invites" | "crew_members">,
+  crewId: string,
+  sharerId: string,
+  userId: string
+): Promise<{ markerId: string; liftable: boolean } | null> {
+  const marker = await client.crew_invites.findFirst({
+    where: { crew_id: crewId, invited_user_id: userId, removed_at: { not: null } },
+    select: { id: true },
+  })
+  if (!marker) return null
+  const owner = await client.crew_members.count({ where: { crew_id: crewId, user_id: sharerId, role: "owner" } })
+  return { markerId: marker.id, liftable: owner > 0 }
 }
 
 const expiresAt = (createdAt: Date) => new Date(createdAt.getTime() + CREW.LINK_TTL_MS).toISOString()
@@ -151,6 +172,8 @@ export async function crewLinkPreview(token: string, viewerId: string | null): P
 export async function crewLinkFor(viewerId: string, token: string) {
   const found = await openLink(token)
   if (!found || (await blocksBetween([viewerId], found.members)).size > 0) return null
+  const removed = await removedFor(db, found.link.crew_id, found.link.created_by, viewerId)
+  if (removed && !removed.liftable) return null
   return {
     crewId: found.link.crew_id,
     ...previewOf(found),
@@ -200,6 +223,10 @@ export async function joinByLink(
         return { chatGroupId: room.id, befriended: false }
       }
       if ((await blocksBetween([userId], active, tx)).size > 0) return NO_LINK
+      const removed = await removedFor(tx, crewId, sharerId, userId)
+      if (removed && !removed.liftable) return NO_LINK
+      // The owner's own link is the owner asking them back, as the owner's invite clears the marker.
+      if (removed) await tx.crew_invites.delete({ where: { id: removed.markerId } })
 
       await lockPair(tx, userId, sharerId)
       const admitted = await admitLocked(tx, crewId, userId, members.length, opts, now)

@@ -643,7 +643,8 @@ export async function admitLocked(
   await tx.crew_members.create({
     data: { crew_id: crewId, user_id: userId, consented_reveal_at: now, keep_me_anonymous: opts.keepMeAnonymous },
   })
-  await tx.crew_invites.deleteMany({ where: { crew_id: crewId, invited_user_id: userId } })
+  // Their invite, never a removal marker: only the owner lifts that, and the caller has decided it was lifted.
+  await tx.crew_invites.deleteMany({ where: { crew_id: crewId, invited_user_id: userId, removed_at: null } })
   const room = await tx.chat_groups.findUniqueOrThrow({ where: { crew_id: crewId }, select: { id: true } })
   // A member who left and came back: the same row, open again — unless it
   // carries a ban (a suspension writes one), which only a person lifts.
