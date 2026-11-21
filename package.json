@@ -3,11 +3,11 @@
   "version": "0.69.0",
   "private": true,
   "scripts": {
-    "dev": "ts-node --project tsconfig.server.json server.ts",
+    "dev": "ts-node -r @aikidosec/firewall/instrument --project tsconfig.server.json server.ts",
     "dev:next": "next dev",
     "build": "next build && npm run build:server",
     "build:server": "tsc -p tsconfig.server.json",
-    "start": "node dist/server.js",
+    "start": "node -r @aikidosec/firewall/instrument dist/server.js",
     "lint": "eslint .",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
@@ -38,6 +38,7 @@
     "seed": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts"
   },
   "dependencies": {
+    "@aikidosec/firewall": "1.8.46",
     "@asteasolutions/zod-to-openapi": "^9.1.0",
     "@auth/prisma-adapter": "^2.11.1",
     "@aws-sdk/client-s3": "^3.1141.0",
