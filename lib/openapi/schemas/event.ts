@@ -777,7 +777,14 @@ export const RoomPreviewResponseSchema = z
   .openapi("RoomPreviewResponse")
 
 export const WaveRequestSchema = z
-  .object({ toUserId: ThisRoomRefSchema })
+  .object({
+    toUserId: ThisRoomRefSchema,
+    asCrewId: z
+      .string()
+      .uuid()
+      .optional()
+      .describe("Wave on your crew's behalf (crews 5-A): one of your crews here, 2+ of you in, \"Room for one more\" on and 6 or fewer. Answered `{ sent: true, mutual }` and, on a Mix, `blend`."),
+  })
   .openapi("WaveRequest")
 
 export const WaveResponseSchema = z
@@ -789,6 +796,8 @@ export const WaveResponseSchema = z
     conversationId: z.string().optional(),
     /** On a mutual only: both room pseudonyms, never names (the "You both waved" moment). */
     pseudonyms: z.object({ you: z.string(), them: z.string() }).optional(),
+    /** A crew's wave (`asCrewId`) that met theirs: the Mix it opened. */
+    blend: z.object({ blendId: z.string().uuid(), chatGroupId: z.string().uuid() }).optional(),
   })
   .openapi("WaveResponse")
 
@@ -801,12 +810,26 @@ export const ReceivedWaveSchema = z
   })
   .openapi("ReceivedWave")
 
+export const CrewWaveSchema = z
+  .object({
+    crewId: z.string().uuid().describe("Wave back is `POST /events/{eventId}/crews/{crewId}/wave` as yourself."),
+    name: z.string(),
+    emblemSeed: z.string(),
+    wavedAt: z.string().datetime(),
+    wavedBack: z.boolean().describe("You answered it: your wave or like at that crew, that night."),
+  })
+  .openapi("CrewWave")
+
 export const ReceivedWavesResponseSchema = z
   .object({
     open: z.boolean().describe("False once the room has closed: nothing left to answer, and the list is empty."),
-    total: z.number().int().describe("Every wave you may see here, not just this page."),
+    total: z.number().int().describe("Every wave from a PERSON you may see here, not just this page."),
     waves: z.array(ReceivedWaveSchema),
     nextCursor: z.string().nullable(),
+    crewTotal: z.number().int().describe("Crews that waved at you here (on the first page; 0 with a cursor)."),
+    crewWaves: z
+      .array(CrewWaveSchema)
+      .describe("Crews that waved at you here, newest first, at most 50, unpaged: on the first page only. Never a crew that ended, one you hid, or one with anybody kept apart from you."),
   })
   .openapi("ReceivedWavesResponse")
 
@@ -823,6 +846,9 @@ export const WavesWaitingResponseSchema = z
           .describe("The newest three waiting, newest first, for the row's pile: the room handle and the room name only, as the list shows them."),
       })
     ),
+    crewRooms: z
+      .array(z.object({ eventId: z.string().uuid(), waiting: z.number().int().describe("Crews here whose wave you have not answered."), latest: CrewWaveSchema }))
+      .describe("Rooms where a crew's wave is waiting for you, apart from `rooms` (a room only crews waved in has no person `latest`). Merge by `eventId`."),
   })
   .openapi("WavesWaitingResponse")
 

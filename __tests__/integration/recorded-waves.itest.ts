@@ -127,6 +127,8 @@ describe("one wave per pair per room, recorded", () => {
       total: 1,
       nextCursor: null,
       waves: [{ userId: roomHandle(eventId, ana.id), displayName: ana.pseudonym, wavedAt: expect.any(String), wavedBack: false }],
+      crewTotal: 0,
+      crewWaves: [],
     })
     expect(JSON.stringify(list.body)).not.toContain(ana.id)
     expect((await received(ana)).body.data.total).toBe(0)
@@ -355,7 +357,7 @@ describe("a received wave can be answered until the room closes, even after leav
     expect(back.status).toBe(403)
     expect(back.body.errorCode).toBe("NOT_CHECKED_IN")
     const list = await call(wavesRoute.GET, `/api/mobile/events/${closedId}/waves`, b, { params: { eventId: closedId } })
-    expect(list.body.data).toEqual({ open: false, total: 0, waves: [], nextCursor: null })
+    expect(list.body.data).toEqual({ open: false, total: 0, waves: [], nextCursor: null, crewTotal: 0, crewWaves: [] })
   })
 })
 

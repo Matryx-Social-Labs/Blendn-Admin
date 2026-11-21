@@ -1259,7 +1259,12 @@ page: `{ open, total, waves: [{ userId, displayName, wavedAt, wavedBack }], next
 pair that left each other, friends, anybody you reported, suspended, hidden from
 the roster, banned from the room. `wavedBack` is true once you answered (a wave
 back, or a like of yours from before). After the room closes: `open: false`, an
-empty list. A host or staff: `403 NOT_CHECKED_IN`.
+empty list. A host or staff: `403 NOT_CHECKED_IN`. Crews that waved at you
+(crews 5-A) come apart, on the first page only: `crewTotal` and `crewWaves:
+[{ crewId, name, emblemSeed, wavedAt, wavedBack }]`, newest first, at most 50
+— never a crew that ended, one you hid, or one with anybody kept apart from you
+— so `total` still matches `waves` for a build that knows no crew row. Wave
+back at a crew is `POST /events/:eventId/crews/:crewId/wave` as yourself.
 
 `GET /waves` — Banter's pinned rows: `{ rooms: [{ eventId, waiting, latest, latestFaces }] }`,
 one per open room with an unanswered wave, `latest` shaped as above. Open counts
@@ -1268,7 +1273,9 @@ with the day before, whatever its `end_time` says.
 `latestFaces` is the newest three waiting, newest first, for the row's pile:
 `{ userId, displayName }` only (the room handle and the roster's name), under
 the list's rules. `latest` stays for installed builds. Never a room
-you run or host or were banned from. At most 20 rooms.
+you run or host or were banned from. At most 20 rooms. Crews' waves are in
+`crewRooms: [{ eventId, waiting, latest }]` (`latest` a `crewWaves` row), by the
+same rules: merge by `eventId` (a room only crews waved in has no person `latest`).
 
 Deck cards (`GET .../matches`) carry `youWaved` and `wavedAtYou` (waves only,
 never a like) for Wave / Wave back / ✓ Waved, `wavedAtYouAt` (when they waved,
@@ -3406,6 +3413,7 @@ messages in a crew chat stay, as in any room.
 | POST / DELETE | `/crews/:crewId/hide` | Block a crew = hide it from you for good / show it again → `{ hidden }` |
 | GET | `/crews/hidden` | Settings → Blocked: the crews you hid, `page`/`limit` |
 | POST | `/events/:eventId/matches/likes` | With `asCrewId`: like one person on your crew's behalf → `{ liked: true, blend }` |
+| POST | `/events/:eventId/waves` | With `asCrewId`: wave at one person on your crew's behalf → `{ sent: true, mutual, blend? }` |
 | PUT | `/events/:eventId/matches/preferences` | `openToCrews` — "Open to joining a crew tonight" (until the end of your occurrence) |
 | POST | `/blends/:blendId/reveal` | One tap reveals your crew **in this Mix** → `{ revealed: true }` |
 | GET | `/blends` | My open Mixes: room, clock, both sides' people |
@@ -3433,8 +3441,18 @@ Your own crew chat says *"waved at Orbit for the crew"* (`kind: crew_wave`). No
 push for a single wave. A wave or a like back makes the one Mix; when a wave
 made it the push is *"Orbit and Nebula both waved. Say hi in the Mix."* and no
 received line is written. A wave over your side's own like from an installed
-build turns it into a wave and tells them once. A crew's wave at one **person**
-is not built yet (`matches/likes` with `asCrewId` stays a secret like, C7).
+build turns it into a wave and tells them once.
+
+A crew's wave at one **person** (S5 b2) is `POST /events/:eventId/waves {
+toUserId, asCrewId }`: the crew → person like with `is_wave`, shown to that
+person alone — `crewWaves` on their room list, `crewRooms` on `GET /waves`, a
+`room:crew_wave` ping and `wavedAtYou` on the crew's card — and never a line in
+your crew's chat nor a push (C7). The like's guardrails and the 30 a day apply,
+and refusals about your own crew say so (403). Every refusal about THEM — not
+here, not open to crews, a block across the crew, a friend, banned, a forged
+handle — is `{ sent: true, mutual: false }` with nothing stored. Their wave
+back at your crew opens the Mix (`blend` in the response when yours met theirs).
+`matches/likes` with `asCrewId` stays the secret like for installed builds.
 
 **Block on a crew** (owner 2026-11-13) hides that crew from you for good:
 `POST /crews/:id/hide`. Only you — the crew is not told, your crewmates still
@@ -3442,6 +3460,30 @@ see it, and a Mix it makes with your crew opens for you too. Its card is gone
 from your rooms and your like or wave at it is the 404 of a crew not here.
 `DELETE` shows it again; `GET /crews/hidden` lists them (a crew that ended is
 not listed). Erased with your account. "Hide this crew tonight" is the app's.
+
+### Crew invite links (crews 3-B, S7)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/crews/:crewId/links` | Any member: a link → `201 { token, url, expiresAt }` |
+| DELETE | `/crews/:crewId/links/:token` | Revoke an unused link: its sharer or the owner → `{ revoked: true }` |
+| GET | `/crews/links/:token` | The invite card: `{ crewId, name, emblemSeed, size, invitedBy: { name, photoUrl }, bio, tags, expiresAt, member }` |
+| POST | `/crews/links/:token` | Join by it: `{ revealConsent: true, keepMeAnonymous? }` → `{ crewId, chatGroupId }` |
+| GET | `/crews/links/:token/preview` | No sign-in (20/min per IP): `{ name, emblemSeed, size, invitedBy: { name, photoUrl } }` |
+
+`url` is `https://www.blendn.app/c/<token>` — `/c/`, never `/f/`, which an
+installed build reads as a friend's link. A link works **once, for 7 days**, and
+only while its sharer is still an active member of a standing, unhidden crew (a
+sharer who leaves takes their links with them). Up to **10 links a day** per
+person, every crew (`429`). An open link holds **no seat**: the 25 are counted at
+the join, under the crew lock, and a full crew is `409` with the link unspent; so
+is being in 10 crews. Joining makes you and the sharer **friends** in the same
+transaction. Already in: your room back, nothing spent. Every way a link cannot
+be used — malformed, unknown, used, revoked, lapsed, its sharer gone, the crew
+ended or hidden, you kept apart (a block or a closed conversation) from anybody
+in it — is the friend link's one `404` (`errorCode: NOT_FOUND`, `reasonCode:
+INVITE_UNAVAILABLE`), and spends nothing. Links you shared or joined by are
+deleted with your account. Decided per advisor, 2026-11-21.
 
 **Crew ↔ crew has no size guard** (owner 2026-11-14): two crews of any size
 Mix, and the Mix room is the members of both sides here when it matched — up to
