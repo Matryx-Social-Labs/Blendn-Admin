@@ -369,6 +369,8 @@ export async function DELETE(request: NextRequest) {
        */
       db.venue_regular_optins.deleteMany({ where: { user_id: authUser.userId } }),
       db.venue_offer_mutes.deleteMany({ where: { user_id: authUser.userId } }),
+      // The crews they hid ("Block" on a crew): a choice about what they see, and nobody is left to see.
+      db.crew_hides.deleteMany({ where: { user_id: authUser.userId } }),
       /*
        * The offers they were sent stay as counts, and nothing more (review
        * M3): no account on them, the times cut to the day, and no trace of

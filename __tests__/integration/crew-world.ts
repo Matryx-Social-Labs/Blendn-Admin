@@ -27,6 +27,9 @@ export const routes = {
   reveal: require("@/app/api/mobile/blends/[blendId]/reveal/route") as typeof import("@/app/api/mobile/blends/[blendId]/reveal/route"),
   eventCrews: require("@/app/api/mobile/events/[eventId]/crews/route") as typeof import("@/app/api/mobile/events/[eventId]/crews/route"),
   crewLike: require("@/app/api/mobile/events/[eventId]/crews/[crewId]/like/route") as typeof import("@/app/api/mobile/events/[eventId]/crews/[crewId]/like/route"),
+  crewWave: require("@/app/api/mobile/events/[eventId]/crews/[crewId]/wave/route") as typeof import("@/app/api/mobile/events/[eventId]/crews/[crewId]/wave/route"),
+  hide: require("@/app/api/mobile/crews/[crewId]/hide/route") as typeof import("@/app/api/mobile/crews/[crewId]/hide/route"),
+  hidden: require("@/app/api/mobile/crews/hidden/route") as typeof import("@/app/api/mobile/crews/hidden/route"),
   personLike: require("@/app/api/mobile/events/[eventId]/matches/likes/route") as typeof import("@/app/api/mobile/events/[eventId]/matches/likes/route"),
   prefs: require("@/app/api/mobile/events/[eventId]/matches/preferences/route") as typeof import("@/app/api/mobile/events/[eventId]/matches/preferences/route"),
   blends: require("@/app/api/mobile/blends/route") as typeof import("@/app/api/mobile/blends/route"),
@@ -112,6 +115,15 @@ export const api = {
       body: asCrewId ? { asCrewId } : {},
       params: { eventId, crewId },
     }),
+  waveCrew: (as: Person, eventId: string, crewId: string, asCrewId?: string) =>
+    call(routes.crewWave.POST, `/api/mobile/events/${eventId}/crews/${crewId}/wave`, as, {
+      method: "POST",
+      body: asCrewId ? { asCrewId } : {},
+      params: { eventId, crewId },
+    }),
+  hide: (as: Person, crewId: string, method: "POST" | "DELETE" = "POST") =>
+    call(routes.hide[method], `/api/mobile/crews/${crewId}/hide`, as, { method, params: { crewId } }),
+  hidden: (as: Person) => call(routes.hidden.GET, "/api/mobile/crews/hidden", as),
   likePerson: (as: Person, eventId: string, userId: string, asCrewId?: string) =>
     call(routes.personLike.POST, `/api/mobile/events/${eventId}/matches/likes`, as, {
       method: "POST",
