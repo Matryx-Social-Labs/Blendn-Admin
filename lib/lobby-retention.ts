@@ -18,7 +18,7 @@ import { deleteFile, isConfigured, sealedChatKey } from "./tigris"
  * requests, and then this hard-deletes them: room messages (an event's and a
  * post's), Lobby posts with their asks (`board_requests` cascades) and their
  * photos in storage, the posts' rooms, the host's pinned posts. Alert switches
- * go at the close itself: they have nothing to keep.
+ * and seen markers go at the close itself: they have nothing to keep.
  *
  * **What the room felt stays** (owner, 2026-11-06). An event's `event_feedback`
  * rows are kept, detached from their message and from whoever corrected them,
@@ -83,6 +83,8 @@ export interface PurgePass {
   photos: number
   hostPosts: number
   alertPreferences: number
+  /** Lobby seen markers (`board_seen`), at the close like the alert switches. */
+  seenMarkers: number
   /** Feedback rows detached from a purged message (kept, anonymous). */
   feedback: number
   /** Member rows whose room pseudonym was blanked (the rows are kept). */
@@ -191,7 +193,7 @@ const membersToBlank = (since: Date, going: string[]) => Prisma.sql`
 
 /** One bounded pass. Idempotent: every delete is of rows the selects just found past their time. */
 export async function purgeClosedLobbies(now: Date = new Date(), mode: PurgeMode = purgeModeFromEnv()): Promise<PurgePass> {
-  const pass: PurgePass = { mode, messages: 0, posts: 0, photos: 0, hostPosts: 0, alertPreferences: 0, feedback: 0, pseudonyms: 0, excerpts: 0, kept: 0, hasMore: false }
+  const pass: PurgePass = { mode, messages: 0, posts: 0, photos: 0, hostPosts: 0, alertPreferences: 0, seenMarkers: 0, feedback: 0, pseudonyms: 0, excerpts: 0, kept: 0, hasMore: false }
   if (mode === "off") return pass
   const since = new Date(now.getTime() - RETENTION_DAYS * DAY_MS)
   // Before anything goes: in delete mode the posts' select waits for this row. A dry run counts as if
@@ -203,9 +205,10 @@ export async function purgeClosedLobbies(now: Date = new Date(), mode: PurgeMode
   pass.hasMore = messages.length === MESSAGE_BATCH || posts.length === POST_BATCH
 
   if (mode === "log") {
-    const [hostPosts, prefs, feedback, pseudonyms, excerpts] = await Promise.all([
+    const [hostPosts, prefs, seen, feedback, pseudonyms, excerpts] = await Promise.all([
       db.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM board_host_posts h JOIN events e ON e.id = h.event_id WHERE ${closesAt} < ${since}`,
       db.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM board_alert_preferences a JOIN events e ON e.id = a.event_id WHERE ${closesAt} < ${now}`,
+      db.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM board_seen s JOIN events e ON e.id = s.event_id WHERE ${closesAt} < ${now}`,
       db.event_feedback.count({ where: { message_id: { in: messages.map((m) => m.id) } } }),
       db.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM (${membersToBlank(since, messages.map((m) => m.id))}) b`,
       db.message_reports.count({ where: dismissedPastTheirTime(since) }),
@@ -217,6 +220,7 @@ export async function purgeClosedLobbies(now: Date = new Date(), mode: PurgeMode
       photos: [...messages.map((m) => m.media_url), ...posts.map((p) => p.photo_url)].filter((u) => u && sealedChatKey(u)).length,
       hostPosts: Number(hostPosts[0]?.n ?? 0),
       alertPreferences: Number(prefs[0]?.n ?? 0),
+      seenMarkers: Number(seen[0]?.n ?? 0),
       feedback,
       pseudonyms: Number(pseudonyms[0]?.n ?? 0),
       excerpts,
@@ -252,6 +256,7 @@ export async function purgeClosedLobbies(now: Date = new Date(), mode: PurgeMode
 
   pass.hostPosts = await db.$executeRaw`DELETE FROM board_host_posts h USING events e WHERE e.id = h.event_id AND ${closesAt} < ${since}`
   pass.alertPreferences = await db.$executeRaw`DELETE FROM board_alert_preferences a USING events e WHERE e.id = a.event_id AND ${closesAt} < ${now}`
+  pass.seenMarkers = await db.$executeRaw`DELETE FROM board_seen s USING events e WHERE e.id = s.event_id AND ${closesAt} < ${now}`
   pass.excerpts = (await db.message_reports.updateMany({ where: dismissedPastTheirTime(since), data: { excerpt: null, description: null } })).count
   return pass
 }

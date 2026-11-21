@@ -55,6 +55,12 @@ export interface EventHost {
    * and offer the claim, and an organiser's event should not.
    */
   isPlatform: boolean
+  /**
+   * What the name is (Flow 5 C6, SCRUM-1095): an organisation, a venue's own room (a venue day), the platform
+   * standing in, or — for an event with no organisation — the creating user. Room info's "Host" row is drawn only
+   * for `org`, so a person is never labelled an event's host.
+   */
+  kind: "org" | "venue" | "platform" | "person"
 }
 
 export function eventHost(event: HostSource): EventHost {
@@ -65,11 +71,11 @@ export function eventHost(event: HostSource): EventHost {
    * ("Indiranagar Hospitality Group" is not what anybody calls The Humming Tree).
    */
   if (event.kind === "venue_day") {
-    return { name: event.venue_name?.trim() || PLATFORM_HOST, isPlatform: true }
+    return { name: event.venue_name?.trim() || PLATFORM_HOST, isPlatform: true, kind: "venue" }
   }
 
   const org = event.organizer_org?.display_name?.trim()
-  if (org) return { name: org, isPlatform: false }
+  if (org) return { name: org, isPlatform: false, kind: "org" }
 
   /*
    * A curated event outranks the creating user, even though a user exists.
@@ -78,10 +84,10 @@ export function eventHost(event: HostSource): EventHost {
    * a public card would be both wrong and a small privacy leak -- it is the one
    * place a founder's real name would appear on an attendee-facing surface.
    */
-  if (event.curated_at) return { name: PLATFORM_HOST, isPlatform: true }
+  if (event.curated_at) return { name: PLATFORM_HOST, isPlatform: true, kind: "platform" }
 
   const person = event.organizer?.name?.trim()
-  if (person) return { name: person, isPlatform: false }
+  if (person) return { name: person, isPlatform: false, kind: "person" }
 
-  return { name: PLATFORM_HOST, isPlatform: true }
+  return { name: PLATFORM_HOST, isPlatform: true, kind: "platform" }
 }

@@ -268,8 +268,8 @@ async function transformEvent(
     organizer: (() => {
       const host = eventHost(event)
       return host.isPlatform
-        ? { id: null, name: host.name, image: null }
-        : { id: event.organizer.id, name: host.name, image: event.organizer.image }
+        ? { id: null, name: host.name, image: null, kind: host.kind }
+        : { id: event.organizer.id, name: host.name, image: event.organizer.image, kind: host.kind }
     })(),
     /*
      * How the real organiser ever finds out.

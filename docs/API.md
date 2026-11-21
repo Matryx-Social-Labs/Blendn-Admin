@@ -614,7 +614,8 @@ GET /api/mobile/me/rsvps?page=1&limit=20
       "venueName": "…", "address": "…", "city": "Bengaluru",
       "latitude": 12.97, "longitude": 77.59,
       "rsvpStatus": "waitlisted", "rsvpAt": "2026-09-20T10:12:00.000Z",
-      "changedAt": null, "changedFields": [] }
+      "changedAt": null, "changedFields": [],
+      "lobby": { "newCount": 3 } }
   ],
   "pagination": { "page": 1, "limit": 20, "totalCount": 3, "totalPages": 1, "hasMore": false, "nextCursor": null }
 } }
@@ -622,6 +623,13 @@ GET /api/mobile/me/rsvps?page=1&limit=20
 
 - **`/me` only**, like attendance: where somebody is going is the same
   correlation, in the future tense.
+- **`lobby`** (additive, SCRUM-1095): `{ newCount }` while the event's Lobby is
+  open (before the doors), `null` from the doors on. `newCount` is the live posts
+  by others your Lobby would show (blocked people and friends left out, as in
+  the list; no spare tickets where the Lobby hides them) created after your
+  seen marker (`POST /events/:eventId/board/seen`), or all of them if you never
+  sent one. Your own posts never count. `0` is sent, not omitted: the app draws
+  "Lobby · N new" only for `newCount > 0`. One grouped query for the page.
 - **`categories`** (additive, 2026-10-24): each event's categories as
   `GET /users/:userId/favorites` sends them, `[{ id, name, slug, icon }]`, read
   in the same query. The app draws the row's category plate from `slug`.
@@ -968,7 +976,7 @@ and `/event/<id>` and their link-preview cards. No auth, no CORS; `lib/share-pub
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/events` | List events (paginated, filterable) |
-| GET | `/events/:eventId` | Get event details. Also carries `area` (the confirmed venue's area, else the city; null when neither is known), `doorPolicy`, `details` (or null) and `amenities`, none of which the list has. `chatGroup` is `{ id, name, status, member_count }` — snake_case — or null; `member_count` is `stats.hereCount`, in the room now (the column of that name only ever went up, and is not read). `categories[]` are the leaves as stored, `{ id, name, slug, description, icon }`, with no `parent`. `distance` is kilometres from `lat`/`lon`, and `null` (never absent) without them. `organizer.id` is null when the host is the platform. Also `changedAt`, `changedFields`, `changedFrom`, `days`, `dayCount` and `dayNumber` ([Flow 3](#the-event-what-changed-the-days-and-why-a-link-is-refused-flow-3)) |
+| GET | `/events/:eventId` | Get event details. Also carries `area` (the confirmed venue's area, else the city; null when neither is known), `doorPolicy`, `details` (or null) and `amenities`, none of which the list has. `chatGroup` is `{ id, name, status, member_count }` — snake_case — or null; `member_count` is `stats.hereCount`, in the room now (the column of that name only ever went up, and is not read). `categories[]` are the leaves as stored, `{ id, name, slug, description, icon }`, with no `parent`. `distance` is kilometres from `lat`/`lon`, and `null` (never absent) without them. `organizer.id` is null when the host is the platform. `organizer.kind` (SCRUM-1095) says what the name is: `org` (an organisation), `venue` (a venue day, its venue), `platform` (Blendn standing in), or `person` (an event with no organisation: its creating user). Draw a "Host" only for `org`; `GET /events` rows carry the same. Also `changedAt`, `changedFields`, `changedFrom`, `days`, `dayCount` and `dayNumber` ([Flow 3](#the-event-what-changed-the-days-and-why-a-link-is-refused-flow-3)) |
 | POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`). On a native ticketed event (`TICKETING` on), 403 `tickets_required` unless the caller holds a ticket whose order is paid or is the event's staff (SCRUM-1014). `left` names the rooms it took you out of (see "One room at a time, and the switch"). Optional `withCrewId` tells that crew you're in ("With {crew}", answered by `crewTold`) |
 | GET | `/events/:eventId/people` | People from a night you attended, for the Recap — see below |
 | POST | `/events/:eventId/checkout` | Check out of event |
@@ -1088,6 +1096,17 @@ ALREADY_CHECKED_IN` ("You’re checked in here. Check out first.") while the cal
 is checked in to the event; nothing changes. Check out first.
 
 An event with no stated capacity is unbounded, exactly as before.
+
+**A late cancel is recorded, not deleted** (SCRUM-1095). Before the doors
+(start − 90 min) `DELETE /events/:eventId/rsvp` deletes the row as it always
+did. From the doors on, on an event that is not cancelled, a `going`, `maybe` or
+`waitlisted` row becomes `not_going` with `cancelled_at` set (the same for a
+`not_going` POST from one of those), so the turn-out forecast and the show rate
+can tell "can't make it" from a no-show; saying `going`/`maybe` again clears it.
+A plain `not_going` is still deleted by a DELETE, a recorded late cancel is
+kept by a repeated one, and the response is unchanged (`rsvpStatus: null`). The
+row is off `GET /me/rsvps` either way; hosts see counts only. Either call sends
+`event:rsvpUpdate` `{ eventId, rsvpCount }` to the event's room (SOCKET_EVENTS.md).
 
 **A cancelled event takes no new RSVP** (SCRUM-892). `going` and `maybe` (and an
 empty body, which means `going`) answer **409** `errorCode: CONFLICT` with
@@ -4310,6 +4329,7 @@ screens call it the Lobby (SCRUM-1026).
 | GET | `/events/:eventId/board/preview` | Anyone the event is open to: counts; the latest two posts only for a reader |
 | GET | `/events/:eventId/board/summary` | A reader, or anybody checked in: "From the Lobby" for the room |
 | GET, PUT | `/events/:eventId/board/alerts` | A reader: your three alert switches for this event |
+| POST | `/events/:eventId/board/seen` | A reader: `{ at? }`, the newest post's `createdAt` on the page you were shown; moves your seen marker forward (never back; a future time is now; none is now). Answers `{ seenAt }`. Read by `lobby.newCount` on `GET /me/rsvps` |
 | POST | `/events/:eventId/board/:postId/requests` | Same as posting, plus not blocked, not a `chat` post, not a full offer, and not asked before |
 | GET | `/board/requests` | Yours, both directions |
 | PATCH | `/board/requests/:requestId` | `{ action: accept \| decline \| withdraw }` |

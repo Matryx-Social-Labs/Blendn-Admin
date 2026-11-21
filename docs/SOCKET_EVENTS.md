@@ -150,6 +150,7 @@ already know each other's ids.
 | `event:checkin` | `{ eventId, userId?, checkInTime, hereCount? }` | Someone checked in. No name: this room is open to anyone viewing the event. `userId` is their room handle, **absent on a friend's copy, and on every copy but the arriver's own when the arriver has "Show online status" off** (SCRUM-905: an unlisted arrival carries no handle to anyone else; a friend knows which pseudonym is theirs, so the handle beside a chat line timed to this arrival would name it); the count still moves. `event:checkout` is the same. |
 | `event:checkout` | `{ eventId, userId?, checkOutTime, hereCount? }` | Someone checked out. `userId` is absent on the copies `event:checkin`'s is (a friend's, or a leaver with "Show online status" off); the count still moves. |
 | `event:interestUpdate` | `{ eventId, userId, interested, interestCount }` | Interest toggled |
+| `event:rsvpUpdate` | `{ eventId, rsvpCount }` | The going count after an RSVP or a withdrawal (`POST`/`DELETE /events/:eventId/rsvp`). A count only: no person (SCRUM-1095) |
 
 ### Dashboard Ops Events (rooms: `event:{eventId}:ops`, `event:{eventId}:ops:venue`; dashboard sessions only)
 

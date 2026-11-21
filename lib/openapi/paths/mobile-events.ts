@@ -479,7 +479,9 @@ registry.registerPath({
   summary: "Cancel RSVP",
   description:
     "409 `errorCode` `tickets_required` on a native ticketed event while TICKETING is on: the RSVP is the ticket's. " +
-    "409 `CONFLICT` + `reasonCode` `ALREADY_CHECKED_IN` (\"You’re checked in here. Check out first.\") while the caller is checked in here.",
+    "409 `CONFLICT` + `reasonCode` `ALREADY_CHECKED_IN` (\"You’re checked in here. Check out first.\") while the caller is checked in here. " +
+    "Before the doors (start − 90 min) the RSVP is deleted. From the doors on, on an event that is not cancelled, a going/maybe/waitlisted RSVP is kept as `not_going` with `cancelled_at` (a late cancel, SCRUM-1095); the response is the same. " +
+    "Sends `event:rsvpUpdate` `{ eventId, rsvpCount }` to the event's room.",
   security: bearerAuth,
   request: { params: z.object({ eventId: z.string().uuid() }) },
   responses: {

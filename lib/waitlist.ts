@@ -1,3 +1,4 @@
+import { doorsAt } from "@/lib/chat-window"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { sendPushNotification } from "@/lib/push-notifications"
@@ -56,29 +57,28 @@ export async function placeRsvp(
   userId: string,
   requested: "going" | "maybe" | "not_going"
 ): Promise<{ status: "going" | "maybe" | "not_going" | "waitlisted"; goingCount: number }> {
-  const event = await db.events.findUnique({
-    where: { id: eventId },
-    select: { max_capacity: true },
-  })
+  const [event, existing, goingCount] = await Promise.all([
+    db.events.findUnique({ where: { id: eventId }, select: { max_capacity: true, start_time: true, status: true } }),
+    db.event_rsvps.findUnique({
+      where: { event_id_user_id: { event_id: eventId, user_id: userId } },
+      select: { status: true, cancelled_at: true },
+    }),
+    db.event_rsvps.count({ where: { event_id: eventId, status: "going" } }),
+  ])
 
-  let status: "going" | "maybe" | "not_going" | "waitlisted" = requested
+  const status: "going" | "maybe" | "not_going" | "waitlisted" =
+    requested !== "going" ? requested : existing?.status === "going" ? "going" : rsvpPlacement(goingCount, event?.max_capacity ?? null)
 
-  if (requested === "going") {
-    const [existing, goingCount] = await Promise.all([
-      db.event_rsvps.findUnique({
-        where: { event_id_user_id: { event_id: eventId, user_id: userId } },
-        select: { status: true },
-      }),
-      db.event_rsvps.count({ where: { event_id: eventId, status: "going" } }),
-    ])
-
-    status = existing?.status === "going" ? "going" : rsvpPlacement(goingCount, event?.max_capacity ?? null)
-  }
+  // A "not going" from somebody who was committed, once the doors are open, is a late cancel (`cancelled_at`); an
+  // earlier one keeps its time, and saying anything else clears it.
+  const now = new Date()
+  const late = status === "not_going" && !!event && isCommitted(existing?.status) && lateCancelCounts(event, now)
+  const cancelled_at = status !== "not_going" ? null : late ? now : (existing?.cancelled_at ?? null)
 
   await db.event_rsvps.upsert({
     where: { event_id_user_id: { event_id: eventId, user_id: userId } },
     create: { event_id: eventId, user_id: userId, status },
-    update: { status, updated_at: new Date() },
+    update: { status, updated_at: now, cancelled_at },
   })
 
   // Dropping out of `going` frees a seat for whoever is waiting.
@@ -88,6 +88,37 @@ export async function placeRsvp(
     status,
     goingCount: await db.event_rsvps.count({ where: { event_id: eventId, status: "going" } }),
   }
+}
+
+const COMMITTED = ["going", "maybe", "waitlisted"] as const
+const isCommitted = (status: string | undefined) => (COMMITTED as readonly string[]).includes(status ?? "")
+
+/** A withdrawal is a late cancel once the doors are open, on a night that is still on (a called-off one has no turn-out). */
+const lateCancelCounts = (event: { start_time: Date; status: string }, now: Date) => event.status !== "cancelled" && now >= doorsAt(event)
+
+/**
+ * Withdraw an RSVP (`DELETE /events/:id/rsvp`), then give the seat to the waitlist.
+ *
+ * Before the doors the row is deleted, as it always was. Once they are open (`doorsAt`, check-in) a commitment is
+ * kept as `not_going` with `cancelled_at`, so the turn-out forecast and the show rate can tell "can't make it" from a
+ * no-show (SCRUM-1095, ROADMAP Going 2). Hosts read counts only. A plain `not_going` is deleted either way; a late
+ * cancel already recorded is kept, so a repeated DELETE never erases it.
+ */
+export async function withdrawRsvp(eventId: string, userId: string): Promise<void> {
+  const event = await db.events.findUnique({ where: { id: eventId }, select: { start_time: true, status: true } })
+  const now = new Date()
+  const mine = { event_id: eventId, user_id: userId }
+  if (event && lateCancelCounts(event, now)) {
+    await db.event_rsvps.updateMany({
+      where: { ...mine, status: { in: [...COMMITTED] } },
+      data: { status: "not_going", cancelled_at: now, updated_at: now },
+    })
+    // A plain "not going" is withdrawn as before; a late cancel already recorded stays (a repeated DELETE).
+    await db.event_rsvps.deleteMany({ where: { ...mine, status: "not_going", cancelled_at: null } })
+  } else {
+    await db.event_rsvps.deleteMany({ where: mine })
+  }
+  await promoteFromWaitlist(eventId)
 }
 
 /**

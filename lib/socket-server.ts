@@ -177,6 +177,8 @@ export interface ServerToClientEvents {
     interestCount: number
     userId: string
   }) => void
+  /** The going count after an RSVP or a withdrawal (`emitEventRsvpUpdate`). */
+  "event:rsvpUpdate": (data: { eventId: string; rsvpCount: number }) => void
 
   // Chat-related
   "chat:message": (data: {
@@ -1633,6 +1635,14 @@ export function emitRoomWave(
   if (!io) return
   // The recipient is never the sender, so the sender is always a handle here.
   io.to(`user:${toUserId}`).emit("room:wave", { ...wave, fromUserId: roomHandle(wave.eventId, wave.fromUserId) })
+}
+
+/**
+ * The going count after an RSVP changes (SCRUM-1095, ROADMAP Going 4), to the event's counter room as
+ * `event:interestUpdate` already goes. A count and nothing else: nobody's id, so no per-recipient shaping.
+ */
+export function emitEventRsvpUpdate(eventId: string, rsvpCount: number): void {
+  currentIo()?.to(`event:${eventId}`).emit("event:rsvpUpdate", { eventId, rsvpCount })
 }
 
 /**

@@ -29,6 +29,7 @@ const sealed = () => {
 afterAll(async () => {
   await db.message_reports.deleteMany({ where: { reporter_id: { in: users } } })
   await db.board_alert_preferences.deleteMany({ where: { event_id: { in: events } } })
+  await db.board_seen.deleteMany({ where: { event_id: { in: events } } })
   await db.board_host_posts.deleteMany({ where: { event_id: { in: events } } })
   await db.board_requests.deleteMany({ where: { event_id: { in: events } } })
   await cleanup(users, events)
@@ -106,6 +107,8 @@ beforeAll(async () => {
   await db.board_host_posts.create({ data: { event_id: recent.id, body: "Doors at 7" } })
   await db.board_alert_preferences.create({ data: { user_id: author, event_id: old.id, replies: true } })
   await db.board_alert_preferences.create({ data: { user_id: author, event_id: recent.id, replies: true } })
+  await db.board_seen.create({ data: { user_id: author, event_id: old.id, seen_at: ago(200) } })
+  await db.board_seen.create({ data: { user_id: author, event_id: recent.id, seen_at: ago(30) } })
 
   /*
    * Who was in the rooms, by the names the rooms gave them: the author, whose
@@ -198,9 +201,10 @@ describe("the purge", () => {
     expect(await db.board_requests.count({ where: { post_id: ids.postAskReported } })).toBe(1)
   })
 
-  it("takes the host's note at 180 days and the alert switches at the close", async () => {
+  it("takes the host's note at 180 days, and the alert switches and seen markers at the close", async () => {
     expect(await db.board_host_posts.count({ where: { event_id: old.id } })).toBe(0)
     expect(await db.board_alert_preferences.count({ where: { event_id: { in: [old.id, recent.id] } } })).toBe(0)
+    expect(await db.board_seen.count({ where: { event_id: { in: [old.id, recent.id] } } })).toBe(0)
   })
 
   it("keeps every member row of a purged room, with its pseudonym blanked", async () => {

@@ -315,8 +315,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       organizer: (() => {
         const host = eventHost(event)
         return host.isPlatform
-          ? { id: null, name: host.name, image: null }
-          : { id: event.organizer.id, name: host.name, image: event.organizer.image }
+          ? { id: null, name: host.name, image: null, kind: host.kind }
+          : { id: event.organizer.id, name: host.name, image: event.organizer.image, kind: host.kind }
       })(),
       /*
        * "Running this event? Claim it" — null unless this is a curated event
