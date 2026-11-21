@@ -225,14 +225,14 @@ export async function joinByLink(
       if ((await blocksBetween([userId], active, tx)).size > 0) return NO_LINK
       const removed = await removedFor(tx, crewId, sharerId, userId)
       if (removed && !removed.liftable) return NO_LINK
-      // The owner's own link is the owner asking them back, as the owner's invite clears the marker.
-      if (removed) await tx.crew_invites.delete({ where: { id: removed.markerId } })
 
       await lockPair(tx, userId, sharerId)
       const admitted = await admitLocked(tx, crewId, userId, members.length, opts, now)
       if (isRefusal(admitted)) return admitted
       // Not connectable (blocked, a closed match) or still pseudonymous to each other: nothing is written.
       if (!(await befriendIn(tx, userId, sharerId))) throw new LinkRefused()
+      // The owner's own link is the owner asking them back, as the owner's invite clears the marker — once they are in.
+      if (removed) await tx.crew_invites.delete({ where: { id: removed.markerId } })
       await tx.crew_invite_tokens.update({ where: { id: link.id }, data: { used_at: now, used_by: userId } })
       return { chatGroupId: admitted.chatGroupId, befriended: true }
     })
