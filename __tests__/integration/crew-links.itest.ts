@@ -126,6 +126,14 @@ describe("A crew invite link", () => {
     expect(await marker()).toBe(1)
 
     const ownersLink = (await api.makeLink(c.owner, c.crewId)).body.data.token
+    // A full crew refuses the owner's link too, and the marker stays: lifted only by a join that lands.
+    const fillers = await Promise.all(Array.from({ length: CREW.MAX_MEMBERS - 2 }, (_, i) => makeUser(testId(`lkm-fill${i}`))))
+    crewWorld.users.push(...fillers)
+    await db.crew_members.createMany({ data: fillers.map((id) => ({ crew_id: c.crewId, user_id: id, consented_reveal_at: new Date() })) })
+    expect((await api.joinLink(third, ownersLink)).status).toBe(409)
+    expect(await marker()).toBe(1)
+
+    await db.crew_members.deleteMany({ where: { crew_id: c.crewId, user_id: { in: fillers } } })
     expect((await api.joinLink(third, ownersLink)).status).toBe(200)
     expect(await marker()).toBe(0)
   })
