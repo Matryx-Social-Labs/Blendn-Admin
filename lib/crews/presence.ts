@@ -9,6 +9,7 @@ import { sendBulkPushNotifications } from "../push-notifications"
 import { deliverToRoom } from "../room-delivery"
 import { isRoomMuted } from "../room-mute"
 import { blocksBetween, blocksExclude } from "./blocks"
+import { hiddenOf } from "./hides"
 import { UNNAMED } from "../conversation-identity"
 import { idForViewer } from "../room-handle"
 import { strangersApartBetween } from "../room-people"
@@ -113,8 +114,16 @@ export interface CrewCard {
   presentCount: number
   tags: { slug: string; label: string }[]
   intent: string[]
-  /** Whether your side has liked them tonight. Never whether they liked you. */
+  /** Whether your side has liked or waved at them tonight. Never whether they liked you. */
   youLiked: boolean
+  /** Whether your side has waved at them tonight ("✓ Waved"). A like from before is `youLiked` only. */
+  youWaved: boolean
+  /**
+   * Whether they waved at your side tonight (crews 5-A): a crew wave is shown
+   * to the crew it is for, a like never is. Cards they waved at and you have
+   * not answered come first ("Wave back").
+   */
+  wavedAtYou: boolean
   /**
    * Up to two lines of what the crew holds in common with your side — "Both
    * crews are into techno", "Two RCB crews" — crew-held only, never a member
@@ -134,6 +143,29 @@ export interface CrewCard {
  */
 
 /** A page of cards: at most `CREW.CARDS_MAX`, `CREW.CARDS_DEFAULT` unless asked. */
+/**
+ * Your side's likes and waves at these crews tonight, and their waves at your
+ * side: your crews here, or you alone. Their LIKES are never read (a like is
+ * secret until mutual).
+ */
+async function gesturesBetween(occurrenceId: string, viewerId: string, mine: string[], crewIds: string[]) {
+  if (crewIds.length === 0) return { liked: new Set<string>(), waved: new Set<string>(), wavedAtYou: new Set<string>() }
+  const mySide = mine.length ? { from_crew_id: { in: mine } } : { from_user_id: viewerId }
+  const toMySide = mine.length ? { to_crew_id: { in: mine } } : { to_user_id: viewerId }
+  const [out, back] = await Promise.all([
+    db.crew_likes.findMany({ where: { occurrence_id: occurrenceId, to_crew_id: { in: crewIds }, ...mySide }, select: { to_crew_id: true, is_wave: true } }),
+    db.crew_likes.findMany({
+      where: { occurrence_id: occurrenceId, is_wave: true, from_crew_id: { in: crewIds }, ...toMySide },
+      select: { from_crew_id: true },
+    }),
+  ])
+  return {
+    liked: new Set(out.map((l) => l.to_crew_id as string)),
+    waved: new Set(out.filter((l) => l.is_wave).map((l) => l.to_crew_id as string)),
+    wavedAtYou: new Set(back.map((l) => l.from_crew_id as string)),
+  }
+}
+
 export interface CardPage {
   limit: number
   offset: number
@@ -221,7 +253,9 @@ export async function crewsAtEvent(
   // Kept apart: blocks and closed pairs, AND friendships across the two sides (D18): a friend
   // across would be a stranger to the other inside a pseudonymous crew room.
   const blocked = await strangersApartBetween(mySide, [...new Set(others.flatMap((c) => members.get(c.id) ?? []))])
-  let visible = others.filter((c) => !blocksExclude(mySide, members.get(c.id) ?? [], blocked))
+  // A crew you hid ("Block" on a crew) is never on your cards; a crewmate's hide is theirs alone.
+  const hidden = await hiddenOf(viewerId, others.map((c) => c.id))
+  let visible = others.filter((c) => !hidden.has(c.id) && !blocksExclude(mySide, members.get(c.id) ?? [], blocked))
 
   let viewerIntents: string[] = []
   if (mine.length === 0) {
@@ -267,26 +301,16 @@ export async function crewsAtEvent(
           roomSize,
         })
       : new Map<string, RankedCrew>()
+  // Both ways, tonight, across every visible crew (the pin reorders pages): bounded by the crews here.
+  const { liked, waved, wavedAtYou } = await gesturesBetween(occurrenceId, viewerId, mine.map((c) => c.id), visible.map((c) => c.id))
+  const pinned = (id: string) => (wavedAtYou.has(id) && !liked.has(id) ? 1 : 0)
   const scoreOf = (id: string) => ranked.get(id)?.score ?? 0
   visible.sort(
-    (a, b) => scoreOf(b.id) - scoreOf(a.id) || presentCount(b.id) - presentCount(a.id) || (a.id < b.id ? -1 : 1)
+    (a, b) =>
+      pinned(b.id) - pinned(a.id) || scoreOf(b.id) - scoreOf(a.id) || presentCount(b.id) - presentCount(a.id) || (a.id < b.id ? -1 : 1)
   )
   const shown = visible.slice(page.offset, page.offset + page.limit)
   const nights = await nightsTogether(shown.map((c) => c.id))
-
-  // What your side liked tonight, of this page: your crews here, or you.
-  const liked = new Set(
-    (
-      await db.crew_likes.findMany({
-        where: {
-          occurrence_id: occurrenceId,
-          to_crew_id: { in: shown.map((c) => c.id) },
-          ...(mine.length ? { from_crew_id: { in: mine.map((c) => c.id) } } : { from_user_id: viewerId }),
-        },
-        select: { to_crew_id: true },
-      })
-    ).map((l) => l.to_crew_id)
-  )
 
   return {
     crewsEnabled: true,
@@ -300,6 +324,8 @@ export async function crewsAtEvent(
       tags: tagView(c.tags),
       intent: c.intent,
       youLiked: liked.has(c.id),
+      youWaved: waved.has(c.id),
+      wavedAtYou: wavedAtYou.has(c.id),
       overlaps: ranked.get(c.id)?.overlaps ?? [],
       badges: crewBadges(nights.get(c.id) ?? 0),
     })),

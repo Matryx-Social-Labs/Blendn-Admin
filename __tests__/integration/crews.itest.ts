@@ -629,7 +629,7 @@ describe("\"We’re here\" and presence at an event (CR-I04, CR-I05)", () => {
     // card's keys are exactly these. `overlaps` and `badges` (step 10) are
     // crew-held lines and crew nights, never a member (crew-signals.itest.ts).
     expect(Object.keys(card).sort()).toEqual([
-      "badges", "bio", "crewId", "emblemSeed", "intent", "name", "overlaps", "presentCount", "size", "tags", "youLiked",
+      "badges", "bio", "crewId", "emblemSeed", "intent", "name", "overlaps", "presentCount", "size", "tags", "wavedAtYou", "youLiked", "youWaved",
     ])
     expect(JSON.stringify(card)).not.toMatch(new RegExp([p1.id, p2.id, p3.id, "Asha"].join("|")))
     expect(seen.body.data).toMatchObject({ total: 1, hasMore: false })
