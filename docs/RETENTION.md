@@ -167,6 +167,17 @@ content. One refused by moderation is never stored, and no report copies an
 answer (a person report keeps only the reporter's reason and description), so
 an open report holds nothing here.
 
+**Waves and likes go at 30 days** (SCRUM-1094 c, 2026-11-21): every person
+wave and old like (`event_waves`, `event_likes`), answered or not, is deleted 30
+days after the event's last night (`purgeEventGestures`, same sweeper). Nothing
+reads them once the room closes; a returned wave already opened its
+conversation, which stays. The host's connection counts come from them, so the
+event's insight counts are frozen first (`event_insight_tallies`) and the delete
+waits for them. Not behind `LOBBY_PURGE`: no report copies a wave. Crew likes
+that made no Blend go 12 hours after their night (`purgeLapsedCrewLikes`), and
+crew invite links once their 7-day week is over, used, revoked or lapsed
+(`purgeLapsedCrewLinks`).
+
 **Stored media is `no-cache`.** Every profile photo and chat image is the
 server's sealed copy (`sealUpload`), stored with `Cache-Control: no-cache`, so
 deleting it (account deletion, a removed photo, a moderation takedown) stops it
