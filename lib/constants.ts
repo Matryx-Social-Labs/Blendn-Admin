@@ -250,4 +250,8 @@ export const CREW = {
    * asking again is a new ask.
    */
   REINVITE_AFTER_DECLINE_MS: 30 * 24 * 60 * 60 * 1000,
+  /** A crew invite link (S7) works once, for this long (decided per advisor, 2026-11-21). */
+  LINK_TTL_MS: 7 * 24 * 60 * 60 * 1000,
+  /** Links one member may make in `CREATE_WINDOW_MS`, every crew: each is a way in for a stranger. */
+  LINKS_PER_WINDOW: 10,
 } as const

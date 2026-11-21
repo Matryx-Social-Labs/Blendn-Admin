@@ -445,7 +445,7 @@ export async function requestFriend(
  * can still be connected (`readPair`: alive, not blocked, not closed). False
  * (and the requests cleared) if not.
  */
-async function befriendIn(tx: Prisma.TransactionClient, a: string, b: string): Promise<boolean> {
+export async function befriendIn(tx: Prisma.TransactionClient, a: string, b: string): Promise<boolean> {
   // The whole eligibility question, not only a block: an unmatch, a deleted
   // account or a block that landed after the accept's first check. Both an
   // accept and the auto-accept of a request that was waiting come through here.

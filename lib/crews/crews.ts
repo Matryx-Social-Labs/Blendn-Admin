@@ -215,7 +215,7 @@ const FULL: CrewRefusal = { refusal: `A crew has at most ${CREW.MAX_MEMBERS} peo
  * whether somebody uses the app.
  */
 const NOT_FRIENDS: CrewRefusal = { refusal: "You can only invite your friends into a crew.", status: 404 }
-const ADULTS: CrewRefusal = { refusal: "Crews are for people 18 and over who have finished setting up.", status: 403 }
+export const ADULTS: CrewRefusal = { refusal: "Crews are for people 18 and over who have finished setting up.", status: 403 }
 const OWNS_ENOUGH: CrewRefusal = { refusal: `You can own up to ${CREW.MAX_OWNED} crews at a time.`, status: 409 }
 const IN_ENOUGH: CrewRefusal = { refusal: `You can be in up to ${CREW.MAX_JOINED} crews at a time.`, status: 409 }
 const MADE_ENOUGH: CrewRefusal = { refusal: "That’s enough new crews for today — try again tomorrow.", status: 429 }
@@ -618,28 +618,45 @@ export async function acceptCrewInvite(
       blocksBetween([userId], active, tx),
     ])
     if (!active.includes(invite.invited_by) || !friends || apart.size > 0) return NO_CREW
-    if (members.length >= CREW.MAX_MEMBERS) return FULL
-    await lockPerson(tx, userId)
-    if ((await crewCounts(tx, userId)).joined >= CREW.MAX_JOINED) return IN_ENOUGH
-
-    await tx.crew_members.create({
-      data: { crew_id: crewId, user_id: userId, consented_reveal_at: now, keep_me_anonymous: opts.keepMeAnonymous },
-    })
-    await tx.crew_invites.delete({ where: { id: invite.id } })
-    const room = await tx.chat_groups.findUniqueOrThrow({ where: { crew_id: crewId }, select: { id: true } })
-    // A member who left and came back: the same row, open again — unless it
-    // carries a ban (a suspension writes one), which only a person lifts.
-    await tx.chat_group_members.upsert({
-      where: { chat_group_id_user_id: { chat_group_id: room.id, user_id: userId } },
-      create: { chat_group_id: room.id, user_id: userId },
-      update: {},
-    })
-    await tx.chat_group_members.updateMany({
-      where: { chat_group_id: room.id, user_id: userId, status: { not: "banned" } },
-      data: { status: "active", left_at: null },
-    })
-    return { chatGroupId: room.id }
+    return admitLocked(tx, crewId, userId, members.length, opts, now)
   })
+}
+
+/**
+ * The join itself, inside the caller's transaction holding the crew lock,
+ * once the caller has decided this person may come in (an invite, or a link:
+ * lib/crews/links.ts): the seats, their own crews cap, the member row with the
+ * reveal consent, any invite of theirs gone, and the crew room's member row.
+ */
+export async function admitLocked(
+  tx: Prisma.TransactionClient,
+  crewId: string,
+  userId: string,
+  memberCount: number,
+  opts: { keepMeAnonymous: boolean },
+  now: Date
+): Promise<{ chatGroupId: string } | CrewRefusal> {
+  if (memberCount >= CREW.MAX_MEMBERS) return FULL
+  await lockPerson(tx, userId)
+  if ((await crewCounts(tx, userId)).joined >= CREW.MAX_JOINED) return IN_ENOUGH
+
+  await tx.crew_members.create({
+    data: { crew_id: crewId, user_id: userId, consented_reveal_at: now, keep_me_anonymous: opts.keepMeAnonymous },
+  })
+  await tx.crew_invites.deleteMany({ where: { crew_id: crewId, invited_user_id: userId } })
+  const room = await tx.chat_groups.findUniqueOrThrow({ where: { crew_id: crewId }, select: { id: true } })
+  // A member who left and came back: the same row, open again — unless it
+  // carries a ban (a suspension writes one), which only a person lifts.
+  await tx.chat_group_members.upsert({
+    where: { chat_group_id_user_id: { chat_group_id: room.id, user_id: userId } },
+    create: { chat_group_id: room.id, user_id: userId },
+    update: {},
+  })
+  await tx.chat_group_members.updateMany({
+    where: { chat_group_id: room.id, user_id: userId, status: { not: "banned" } },
+    data: { status: "active", left_at: null },
+  })
+  return { chatGroupId: room.id }
 }
 
 /**
@@ -909,7 +926,7 @@ function notifyCrewInvite(recipientId: string, crewId: string): void {
 
 /** A refusal, answered the way every mobile route answers (`lib/api-response`). */
 export function refusalResponse(r: CrewRefusal) {
-  if (!r.field) return errorResponse(r.refusal, r.status, r.errorCode)
+  if (!r.field) return errorResponse(r.refusal, r.status, r.errorCode, r.reasonCode)
   // The field twice: `field` for the form, and `errors` as every validation answer carries it.
   return NextResponse.json(
     {

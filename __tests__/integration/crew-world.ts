@@ -28,6 +28,10 @@ export const routes = {
   eventCrews: require("@/app/api/mobile/events/[eventId]/crews/route") as typeof import("@/app/api/mobile/events/[eventId]/crews/route"),
   crewLike: require("@/app/api/mobile/events/[eventId]/crews/[crewId]/like/route") as typeof import("@/app/api/mobile/events/[eventId]/crews/[crewId]/like/route"),
   crewWave: require("@/app/api/mobile/events/[eventId]/crews/[crewId]/wave/route") as typeof import("@/app/api/mobile/events/[eventId]/crews/[crewId]/wave/route"),
+  links: require("@/app/api/mobile/crews/[crewId]/links/route") as typeof import("@/app/api/mobile/crews/[crewId]/links/route"),
+  link: require("@/app/api/mobile/crews/[crewId]/links/[token]/route") as typeof import("@/app/api/mobile/crews/[crewId]/links/[token]/route"),
+  byLink: require("@/app/api/mobile/crews/links/[token]/route") as typeof import("@/app/api/mobile/crews/links/[token]/route"),
+  linkPreview: require("@/app/api/mobile/crews/links/[token]/preview/route") as typeof import("@/app/api/mobile/crews/links/[token]/preview/route"),
   hide: require("@/app/api/mobile/crews/[crewId]/hide/route") as typeof import("@/app/api/mobile/crews/[crewId]/hide/route"),
   hidden: require("@/app/api/mobile/crews/hidden/route") as typeof import("@/app/api/mobile/crews/hidden/route"),
   personLike: require("@/app/api/mobile/events/[eventId]/matches/likes/route") as typeof import("@/app/api/mobile/events/[eventId]/matches/likes/route"),
@@ -123,6 +127,12 @@ export const api = {
       body: asCrewId ? { asCrewId } : {},
       params: { eventId, crewId },
     }),
+  makeLink: (as: Person, crewId: string) => call(routes.links.POST, `/api/mobile/crews/${crewId}/links`, as, { method: "POST", params: { crewId } }),
+  revokeLink: (as: Person, crewId: string, token: string) =>
+    call(routes.link.DELETE, `/api/mobile/crews/${crewId}/links/${token}`, as, { method: "DELETE", params: { crewId, token } }),
+  openLink: (as: Person, token: string) => call(routes.byLink.GET, `/api/mobile/crews/links/${token}`, as, { params: { token } }),
+  joinLink: (as: Person, token: string, body: Record<string, unknown> = { revealConsent: true }) =>
+    call(routes.byLink.POST, `/api/mobile/crews/links/${token}`, as, { method: "POST", body, params: { token } }),
   hide: (as: Person, crewId: string, method: "POST" | "DELETE" = "POST") =>
     call(routes.hide[method], `/api/mobile/crews/${crewId}/hide`, as, { method, params: { crewId } }),
   hidden: (as: Person) => call(routes.hidden.GET, "/api/mobile/crews/hidden", as),
