@@ -284,6 +284,12 @@ registry.registerPath({
                   categories: z.array(RowCategorySchema).describe("The event's categories, as the favourites list sends them. Additive."),
                   changedAt: ChangedAtSchema,
                   changedFields: ChangedFieldsSchema,
+                  lobby: z
+                    .object({ newCount: z.number().int().min(0) })
+                    .nullable()
+                    .describe(
+                      "While the Lobby is open (before the doors): live posts by others since your seen marker (`POST /events/:id/board/seen`), all of them with none; blocked people and friends left out, your own never counted. `null` from the doors on (SCRUM-1095)."
+                    ),
                 })
               ),
               pagination: PagedPaginationSchema,

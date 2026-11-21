@@ -9,6 +9,7 @@ import { keysetPage, pagedPagination, paginationSkip, parsePageOrCursor } from "
 import { isUuid } from "@/lib/api-input"
 import { realEventsWhere } from "@/lib/event-kind"
 import { changeSelect, changeSummaryForResponse } from "@/lib/event-change"
+import { lobbyNewCounts } from "@/lib/lobby-news"
 
 export const dynamic = "force-dynamic"
 
@@ -102,6 +103,7 @@ export async function GET(request: NextRequest) {
               city: true,
               latitude: true,
               longitude: true,
+              ticketing_mode: true,
               ...changeSelect,
               media: { orderBy: { order: "asc" }, take: 1 },
               // As `GET /users/:id/favorites` sends them: the app draws a row's category plate from these.
@@ -117,6 +119,7 @@ export async function GET(request: NextRequest) {
     ])
     const paged = keysetPage(rows, limit, (r) => ({ at: r.event.start_time, id: r.id }))
     const rsvps = paged.items
+    const lobbyNew = await lobbyNewCounts(authUser.userId, rsvps.map((r) => r.event))
 
     const events = rsvps.map(({ status, created_at, event }) => ({
       id: event.id,
@@ -141,6 +144,8 @@ export async function GET(request: NextRequest) {
       rsvpStatus: status,
       rsvpAt: created_at,
       categories: event.categories.map((c) => c.category),
+      // "Lobby · N new": posts by others since you last saw the Lobby, while it is open; null otherwise.
+      lobby: lobbyNew.has(event.id) ? { newCount: lobbyNew.get(event.id) } : null,
     }))
 
     return successResponse({

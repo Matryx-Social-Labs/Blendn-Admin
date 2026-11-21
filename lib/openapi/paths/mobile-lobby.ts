@@ -298,3 +298,22 @@ registry.registerPath({
   request: { params: eventParams, body: { content: { "application/json": { schema: AlertsSchema.partial() } } } },
   responses: { 200: { description: "The switches now", content: { "application/json": { schema: wrap(AlertsSchema) } } }, ...standardErrors },
 })
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/events/{eventId}/board/seen",
+  tags: ["Mobile Events"],
+  summary: "Mark this Lobby seen up to a post",
+  description:
+    LIFECYCLE +
+    "A reader only. `at` is the newest post's `createdAt` on the page you were shown (the server's clock); none means now, and a time in the future is now. The marker only moves forward. `lobby.newCount` on `GET /me/rsvps` counts the posts after it, on any phone (SCRUM-1095).",
+  security: bearerAuth,
+  request: {
+    params: eventParams,
+    body: { required: false, content: { "application/json": { schema: z.object({ at: z.string().datetime({ offset: true }).optional() }).strict() } } },
+  },
+  responses: {
+    200: { description: "Your marker now", content: { "application/json": { schema: wrap(z.object({ seenAt: z.string().datetime() })) } } },
+    ...standardErrors,
+  },
+})
