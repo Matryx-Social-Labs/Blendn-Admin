@@ -142,16 +142,18 @@ model User {
   referrals_made             referrals[]         @relation("ReferralInviter")
 
   // Crews — see `crews`
-  crews_created      crews[]         @relation("CrewCreator")
-  crew_plans_made    crew_plans[]    @relation("CrewPlanner")
+  crews_created      crews[]              @relation("CrewCreator")
+  crew_plans_made    crew_plans[]         @relation("CrewPlanner")
   crew_memberships   crew_members[]
-  crew_invites_got   crew_invites[]  @relation("CrewInvitee")
-  crew_invites_sent  crew_invites[]  @relation("CrewInviter")
-  crew_likes_as_solo crew_likes[]    @relation("CrewLikeFromUser")
-  crew_likes_got     crew_likes[]    @relation("CrewLikeToUser")
-  crew_likes_made    crew_likes[]    @relation("CrewLikeBy")
+  crew_invites_got   crew_invites[]       @relation("CrewInvitee")
+  crew_invites_sent  crew_invites[]       @relation("CrewInviter")
+  crew_likes_as_solo crew_likes[]         @relation("CrewLikeFromUser")
+  crew_likes_got     crew_likes[]         @relation("CrewLikeToUser")
+  crew_likes_made    crew_likes[]         @relation("CrewLikeBy")
   crew_hides         crew_hides[]
-  blends_as_solo     blends[]        @relation("BlendSolo")
+  crew_links_made    crew_invite_tokens[] @relation("CrewLinkBy")
+  crew_links_used    crew_invite_tokens[] @relation("CrewLinkUsedBy")
+  blends_as_solo     blends[]             @relation("BlendSolo")
   blend_reveals      blend_reveals[]
 
   // Regulars and offers (step 12) — see `venue_offers`
@@ -1735,16 +1737,16 @@ model private_messages {
 }
 
 model event_rsvps {
-  id         String      @id @default(uuid()) @db.Uuid
-  event_id   String      @db.Uuid
-  user_id    String
-  status     rsvp_status @default(going)
-  created_at DateTime    @default(now()) @db.Timestamptz(6)
-  updated_at DateTime    @default(now()) @db.Timestamptz(6)
+  id           String      @id @default(uuid()) @db.Uuid
+  event_id     String      @db.Uuid
+  user_id      String
+  status       rsvp_status @default(going)
+  created_at   DateTime    @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime    @default(now()) @db.Timestamptz(6)
   /// When a commitment (going, maybe, waitlisted) was withdrawn once the doors were open: the row stays as
   /// `not_going` rather than being deleted, so a late "can't make it" is not read as a no-show (`withdrawRsvp`,
   /// lib/waitlist.ts). NULL otherwise, including a `not_going` said before the doors.
-  cancelled_at DateTime? @db.Timestamptz(6)
+  cancelled_at DateTime?   @db.Timestamptz(6)
 
   event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
   user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
@@ -3768,18 +3770,20 @@ model crews {
   /// every surface outside the crew — cards, likes, Blends. Audited.
   hidden_at    DateTime?           @db.Timestamptz(6)
 
-  creator     User           @relation("CrewCreator", fields: [created_by], references: [id], onDelete: Restrict)
+  creator     User                 @relation("CrewCreator", fields: [created_by], references: [id], onDelete: Restrict)
   members     crew_members[]
   invites     crew_invites[]
-  likes_sent  crew_likes[]   @relation("CrewLikeFrom")
-  likes_got   crew_likes[]   @relation("CrewLikeTo")
-  blends_as_a blends[]       @relation("BlendSideA")
-  blends_as_b blends[]       @relation("BlendSideB")
+  likes_sent  crew_likes[]         @relation("CrewLikeFrom")
+  likes_got   crew_likes[]         @relation("CrewLikeTo")
+  blends_as_a blends[]             @relation("BlendSideA")
+  blends_as_b blends[]             @relation("BlendSideB")
   /// The crew chat (kind `crew`), made with the crew.
   room        chat_groups?
   plans       crew_plans[]
   /// People who hid this crew from themselves for good ("Block" on a crew).
   hidden_by   crew_hides[]
+  /// Invite links a member shared (S7).
+  links       crew_invite_tokens[]
 
   @@index([created_by])
 }
@@ -3905,6 +3909,33 @@ model crew_likes {
 }
 
 /// "Block" on a crew (owner 2026-11-13): this person never sees that crew again. Only the hider; the crew is not told.
+/// A crew invite link (crews 3-B, S7): `https://www.blendn.app/c/<token>`, for
+/// a person who is not the sharer's Blend'n friend yet. Single use, 7 days
+/// (`CREW.LINK_TTL_MS`), good only while its sharer is still in the crew.
+/// Joining by it also makes the joiner and the sharer friends, in the same
+/// transaction (lib/crews/links.ts). An open link holds no seat: the 25 are
+/// counted at the join.
+model crew_invite_tokens {
+  id         String    @id @default(uuid()) @db.Uuid
+  crew_id    String    @db.Uuid
+  /// 22 characters of base64url, as a friend link's (`newInviteToken`).
+  token      String    @unique
+  created_by String
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  used_at    DateTime? @db.Timestamptz(6)
+  used_by    String?
+  revoked_at DateTime? @db.Timestamptz(6)
+
+  crew         crews @relation(fields: [crew_id], references: [id], onDelete: Cascade)
+  sharer       User  @relation("CrewLinkBy", fields: [created_by], references: [id], onDelete: Cascade)
+  used_by_user User? @relation("CrewLinkUsedBy", fields: [used_by], references: [id], onDelete: SetNull)
+
+  /// The sharer's links today (`CREW.LINKS_PER_DAY`).
+  @@index([created_by, created_at])
+  @@index([crew_id])
+  @@index([used_by])
+}
+
 model crew_hides {
   user_id    String
   crew_id    String   @db.Uuid
@@ -4315,15 +4346,15 @@ model board_requests {
   from_user_id String
   to_user_id   String
 
-  status  board_request_status @default(pending)
+  status          board_request_status @default(pending)
   /// What they said when asking. Optional — "can I join?" needs no essay, and
   /// requiring one would make the ask heavier than the thing being asked for.
-  message String?
+  message         String?
   /// The asker's app showed "If they say yes, you'll both see each other's first
   /// name and photo" before sending (`namesOnAccept: true`). With the accepter's
   /// own `namesOnAccept`, the accept opens the chat already swapped; otherwise
   /// it opens unswapped. False for every ask from an older app.
-  names_on_accept Boolean @default(false)
+  names_on_accept Boolean              @default(false)
 
   created_at         DateTime  @default(now()) @db.Timestamptz(6)
   decided_at         DateTime? @db.Timestamptz(6)

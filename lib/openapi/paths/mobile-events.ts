@@ -691,6 +691,7 @@ registry.registerPath({
     "Otherwise `room:wave` goes to the recipient. No push for a single wave.\n\n" +
     "**Limits, read before anything about the recipient:** 20 per room per hour, 60 a day; 5 per room per hour and 15 a day for an account under 24 h; 5 per room per hour once 20 of your waves in the last 24 h are unanswered. Counted from stored waves, so a refused wave never counts.\n\n" +
     "`toUserId` must be the handle this event's roster gave you (SCRUM-371). A raw user id, another event's handle or a forged one is answered exactly as somebody not in the room (403 `RECIPIENT_NOT_HERE`). Your own id is 400.\n\n" +
+    "**For your crew (`asCrewId`, crews 5-A):** a crew → person wave, stored as the crew like with `is_wave` and shown to that person alone (`crewWaves` on `GET` here, `crewRooms` on `GET /waves`, a `room:crew_wave` ping, `wavedAtYou` on the crew's card); never a line in your crew's chat, never a push. The crew like's rules, limits (the 30 a day) and refusals about your own crew apply (403 not checked in, crew not here, no room for one more). Every refusal about THEM — not here, not open to crews, a block across the crew, a friend, banned, a forged handle — is `{ sent: true, mutual: false }`, storing nothing. Their wave back at the crew opens the Mix (`blend`).\n\n" +
     "**Error codes:** `VALIDATION_FAILED` (400, waving at yourself), `NOT_CHECKED_IN` (403, you: not in the room, staff, a host, or the room closed), `RECIPIENT_NOT_HERE` (403 — not in the room, hidden, banned, a friend, a host, or a block either way; and also when YOU have Show online off, since a hidden person waves at nobody (SCRUM-1056); deliberately indistinguishable), `RATE_LIMITED` (429, a limit above, with `retryAfter`; says nothing about them), `WAVE_TOO_SOON` (429, a new wave at the same person within 10 minutes in another room, with `retryAfter`)",
   security: bearerAuth,
   request: {
@@ -710,7 +711,8 @@ registry.registerPath({
   summary: "Who waved at you in this room",
   description: ROOM_BAN_GATE +
     "Newest first, 20 a page (`cursor` from `nextCursor`). Room handles and the roster's name only, never an id or a photo. Hidden: anybody blocked either way, a pair that left each other, friends, anybody you reported, suspended, hidden from the roster or banned from the room. A like is never listed. " +
-    "Readable by a guest who was checked in here while the room is open; after it closes `open: false` and an empty list. A host or staff gets 403 `NOT_CHECKED_IN`.",
+    "Readable by a guest who was checked in here while the room is open; after it closes `open: false` and an empty list. A host or staff gets 403 `NOT_CHECKED_IN`. " +
+    "Crews that waved at you (crews 5-A) are apart, in `crewWaves` / `crewTotal` on the first page, so `total` still matches `waves` for builds that know no crew row.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -729,7 +731,7 @@ registry.registerPath({
   tags: ["Mobile Events"],
   summary: "Rooms where a wave is waiting for you (Banter's pinned rows)",
   description:
-    "One entry per open room with an unanswered wave: how many, the newest, and the newest three for the row's pile (`latestFaces`: handle and name only), as `GET /events/{eventId}/waves` names them. Never a room you run or host or were banned from, never a closed room: closed counts from the run's last held day, so a festival whose last day was called off closes with the day before. At most 20 rooms.",
+    "One entry per open room with an unanswered wave: how many, the newest, and the newest three for the row's pile (`latestFaces`: handle and name only), as `GET /events/{eventId}/waves` names them. Never a room you run or host or were banned from, never a closed room: closed counts from the run's last held day, so a festival whose last day was called off closes with the day before. At most 20 rooms. Crews' waves are in `crewRooms`, by the same rules.",
   security: bearerAuth,
   responses: {
     200: { description: "Waiting waves by room", content: { "application/json": { schema: wrap(WavesWaitingResponseSchema) } } },

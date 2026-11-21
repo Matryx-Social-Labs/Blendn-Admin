@@ -371,6 +371,8 @@ export async function DELETE(request: NextRequest) {
       db.venue_offer_mutes.deleteMany({ where: { user_id: authUser.userId } }),
       // The crews they hid ("Block" on a crew): a choice about what they see, and nobody is left to see.
       db.crew_hides.deleteMany({ where: { user_id: authUser.userId } }),
+      // Crew links they shared (dead already: the sharer is no member) or joined by: nobody's way in, and no record of who came.
+      db.crew_invite_tokens.deleteMany({ where: { OR: [{ created_by: authUser.userId }, { used_by: authUser.userId }] } }),
       /*
        * The offers they were sent stay as counts, and nothing more (review
        * M3): no account on them, the times cut to the day, and no trace of

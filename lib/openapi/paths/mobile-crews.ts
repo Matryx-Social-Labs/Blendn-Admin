@@ -646,3 +646,100 @@ registry.registerPath({
     ...standardErrors,
   },
 })
+
+// Crew invite links (crews 3-B, S7)
+const LinkToken = z.object({ token: z.string().describe("22 characters of base64url, from the link's `/c/<token>`.") })
+const LinkPreview = z.object({
+  name: z.string(),
+  emblemSeed: z.string(),
+  size: z.number().int().describe("Its active members."),
+  invitedBy: z.object({ name: z.string().describe("The sharer's first name."), photoUrl: z.string().nullable() }),
+})
+const LINK_404 =
+  "Every way a link cannot be used — malformed, unknown, used, revoked, past its 7 days, its sharer no longer in the crew, the crew ended or hidden, " +
+  "or you kept apart (a block or a closed conversation) from anybody in it — is the one 404 (`errorCode: NOT_FOUND`, `reasonCode: INVITE_UNAVAILABLE`, " +
+  "\"This invite link doesn’t work any more\"), the friend link's word for word."
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/crews/{crewId}/links",
+  tags,
+  summary: "Make a crew invite link",
+  description:
+    "Any active member. `{ token, url: https://www.blendn.app/c/<token>, expiresAt }`: single use, 7 days, and good only while you stay in the crew. " +
+    "Up to 10 a day per person, every crew (429 past it). An open link holds no seat: the 25 are counted when somebody joins. 404 if you are not in it.",
+  security: bearerAuth,
+  request: { params: z.object({ crewId: z.string().uuid() }) },
+  responses: {
+    201: { description: "Made", ...json(wrap(z.object({ token: z.string(), url: z.string().url(), expiresAt: z.string().datetime() }))) },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/mobile/crews/{crewId}/links/{token}",
+  tags,
+  summary: "Revoke a crew invite link",
+  description: "Its sharer or the crew's owner, while it is unused. `{ revoked: true }`; 404 otherwise.",
+  security: bearerAuth,
+  request: { params: z.object({ crewId: z.string().uuid() }).merge(LinkToken) },
+  responses: { 200: { description: "Revoked", ...json(wrap(z.object({ revoked: z.literal(true) }))) }, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/crews/links/{token}",
+  tags,
+  summary: "Open a crew invite link (the invite card)",
+  description: "The card for a signed-in holder: the preview, the crew's line and tags, when the link lapses, and whether you are in already. " + LINK_404,
+  security: bearerAuth,
+  request: { params: LinkToken },
+  responses: {
+    200: {
+      description: "The invite card",
+      ...json(
+        wrap(
+          LinkPreview.extend({
+            crewId: z.string().uuid(),
+            bio: z.string().nullable(),
+            tags: z.array(z.object({ slug: z.string(), label: z.string() })),
+            expiresAt: z.string().datetime(),
+            member: z.boolean(),
+          })
+        )
+      ),
+    },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/crews/links/{token}",
+  tags,
+  summary: "Join a crew by its invite link",
+  description:
+    "`{ revealConsent: true, keepMeAnonymous? }`, as the invite's join. You join and become the sharer's friend in one transaction, and the link is spent. " +
+    "Already in: your crew's room back, nothing spent. 409 when the crew is full or you are in 10 crews (nothing spent); 403 under 18 or not set up. " +
+    LINK_404,
+  security: bearerAuth,
+  request: { params: LinkToken, body: json(z.object({ revealConsent: z.literal(true), keepMeAnonymous: z.boolean().optional() })) },
+  responses: {
+    200: { description: "Joined", ...json(wrap(z.object({ crewId: z.string().uuid(), chatGroupId: z.string().uuid() }))) },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/crews/links/{token}/preview",
+  tags,
+  summary: "A crew invite link, before sign-in",
+  description:
+    "No account needed (20 a minute per IP). The crew's name, emblem and size and the sharer's first name and photo: no members, line or tags. " +
+    "A signed-in caller kept apart from anybody in the crew gets the 404 too. " +
+    LINK_404,
+  request: { params: LinkToken },
+  responses: { 200: { description: "The preview", ...json(wrap(LinkPreview)) }, ...standardErrors },
+})

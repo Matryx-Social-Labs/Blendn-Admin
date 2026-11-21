@@ -47,6 +47,7 @@ const mockDb = {
   venue_regular_optins: { deleteMany: jest.fn() },
   venue_offer_mutes: { deleteMany: jest.fn() },
   crew_hides: { deleteMany: jest.fn() },
+  crew_invite_tokens: { deleteMany: jest.fn() },
   user_oauth_accounts: { deleteMany: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
   account: { deleteMany: jest.fn() },
   session: { deleteMany: jest.fn() },

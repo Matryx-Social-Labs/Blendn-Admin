@@ -10,6 +10,7 @@ import { logger } from "../logger"
 import { sendBulkPushNotifications } from "../push-notifications"
 import { deliverToRoom } from "../room-delivery"
 import { leaveRoomSockets } from "../room-close"
+import { emitCrewWave } from "../socket-server"
 import { roomHandle } from "../room-handle"
 import { eventRoomBan, ownerAdmits, ownerRoomClosesAt } from "../room-kind"
 import { CREWS_OFF, isRefusal, NO_CREW, NO_EVENT, type CrewRefusal } from "./crews"
@@ -75,9 +76,12 @@ import {
  * build and a wave from the other side make one Mix (decided per advisor,
  * 2026-11-21): a like is already consent to one. A like row of yours that a
  * wave repeats becomes a wave, and is told then. No push for a single wave;
- * the Mix push is "Nebula and Orbit both waved" when a wave made it. A crew's
- * wave at one PERSON is not built yet: it stays a like (C7), so nothing here
- * writes `is_wave` on a crew → person row.
+ * the Mix push is "Nebula and Orbit both waved" when a wave made it.
+ *
+ * A crew's wave at one PERSON (`POST /events/:id/waves` + `asCrewId`) is shown
+ * to that person alone — their room list's `crewWaves`, Banter's `crewRooms`
+ * (lib/crews/waves.ts), a `room:crew_wave` ping and the card's `wavedAtYou` —
+ * and never in the crew's chat: the like's C7 rule holds for the waver.
  *
  * ## Who is in a Blend: who was here when it matched (C3)
  *
@@ -87,8 +91,6 @@ import {
  */
 
 const NO_PERSON: CrewRefusal = { refusal: "User not found", status: 404 }
-/** Every person-level refusal of a crew → person like (C7): what a like that stood answers. */
-const NOTHING_TOLD = { liked: true, blend: null } as const
 const NOT_IN: CrewRefusal = { refusal: "Check in before liking anyone here.", status: 403 }
 const MY_CREW_NOT_HERE: CrewRefusal = {
   refusal: "Your crew isn’t here yet — two of you need to be checked in.",
@@ -144,6 +146,8 @@ interface Telling {
   likedLabel: string | null
   /** A wave's received line, in the target crew's chat. */
   target: { room: { id: string; name: string } | null; content: string; metadata: Prisma.InputJsonObject } | null
+  /** A crew's wave at one person: the ping to them (`room:crew_wave`). */
+  toPerson?: { userId: string; crewId: string; crewName: string }
   /** The two names the Mix push puts together, when a wave makes it. */
   mixNames: [string, string]
 }
@@ -235,8 +239,12 @@ export async function likePersonAsCrew(
   likerId: string,
   eventId: string,
   asCrewId: string,
-  personId: string
+  personId: string,
+  opts: { wave?: boolean } = {}
 ): Promise<LikeOutcome | CrewRefusal> {
+  const wave = opts.wave === true
+  // Every refusal about THEM (C7): what a like or wave that stood answers, `waved` included.
+  const nothingTold: LikeOutcome = { liked: true as const, blend: null, ...(wave && { waved: true as const }) }
   const here = await hereFor(likerId, eventId)
   if (isRefusal(here)) return here
   const mine = await crewHereNow(asCrewId, here.occurrenceId)
@@ -248,10 +256,10 @@ export async function likePersonAsCrew(
     db.event_check_ins.findFirst({ where: { user_id: personId, ...hereNowAt(here.occurrenceId), user: LISTED_IN_ROSTER }, select: { id: true } }),
     intentsAt(eventId, personId),
   ])
-  if (!theirCheckIn || !them.openToCrews || !crewMayMeetSolo(mine, mine.members.length, them.intents)) return { ...NOTHING_TOLD }
-  if (blocksExclude(mine.members, [personId], await strangersApartBetween(mine.members, [personId]))) return { ...NOTHING_TOLD }
+  if (!theirCheckIn || !them.openToCrews || !crewMayMeetSolo(mine, mine.members.length, them.intents)) return nothingTold
+  if (blocksExclude(mine.members, [personId], await strangersApartBetween(mine.members, [personId]))) return nothingTold
   // A person a host banned from the room is not here to be liked: the same answer, never which (review H2).
-  if (await eventRoomBan(eventId, personId)) return { ...NOTHING_TOLD }
+  if (await eventRoomBan(eventId, personId)) return nothingTold
 
   /*
    * No line in the crew chat for a like of a person. A line only for a like
@@ -267,9 +275,16 @@ export async function likePersonAsCrew(
     { userId: personId },
     { a_crew_id: mine.id, b_user_id: personId },
     { a: mine.members, b: [personId] },
-    { wave: false, likerCrewRoom: null, likedLabel: null, target: null, mixNames: [mine.name, "someone here"] }
+    {
+      wave,
+      likerCrewRoom: null,
+      likedLabel: null,
+      target: null,
+      toPerson: { userId: personId, crewId: mine.id, crewName: mine.name },
+      mixNames: [mine.name, "someone here"],
+    }
   )
-  return outcome ?? { ...NOTHING_TOLD }
+  return outcome ?? nothingTold
 }
 
 /** The where for a like, by its two sides. */
@@ -387,6 +402,10 @@ async function like(
    * already stored, so a second tap is not "told"); the pinned card still says it.
    */
   if (result.told && !result.mutual && target?.room) await tellCrewWaved(target.room, target.content, target.metadata)
+  if (result.told && !result.mutual && telling.toPerson) {
+    const { userId, crewId, crewName } = telling.toPerson
+    emitCrewWave(userId, { eventId: here.eventId, fromCrewId: crewId, fromName: crewName })
+  }
   // "Both waved" only when both did: a like answered by a wave is the like's push, which says nothing of who did what.
   if (result.blend?.created) await announceBlend(result.blend, likerId, result.bothWaved ? telling.mixNames : null)
   return {

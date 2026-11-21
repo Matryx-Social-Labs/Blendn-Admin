@@ -165,12 +165,14 @@ export interface ServerToClientEvents {
    * (no id, no name) and only to the people it concerns, never to the room.
    */
   "room:friends": (data: { eventId: string }) => void
-  /** Somebody in the room waved. Ephemeral; nothing is stored. `fromUserId` is their handle here. */
+  /** Somebody in the room waved at you (recorded: `GET /events/:id/waves`). `fromUserId` is their handle here. */
   "room:wave": (data: {
     eventId: string
     fromUserId: string
     fromName: string
   }) => void
+  /** A crew here waved at you (recorded: `crewWaves` on the same list). The crew only, never who tapped. */
+  "room:crew_wave": (data: { eventId: string; fromCrewId: string; fromName: string }) => void
   "event:interestUpdate": (data: {
     eventId: string
     interested: boolean
@@ -1635,6 +1637,14 @@ export function emitRoomWave(
   if (!io) return
   // The recipient is never the sender, so the sender is always a handle here.
   io.to(`user:${toUserId}`).emit("room:wave", { ...wave, fromUserId: roomHandle(wave.eventId, wave.fromUserId) })
+}
+
+/**
+ * A crew waved at you (crews 5-A, S5): `room:crew_wave`, a new event so a build that reads `room:wave` as a person
+ * never draws a crew as one. The crew's id and name only, never who tapped (C7 keeps the crew's side quiet too).
+ */
+export function emitCrewWave(toUserId: string, wave: { eventId: string; fromCrewId: string; fromName: string }): void {
+  currentIo()?.to(`user:${toUserId}`).emit("room:crew_wave", wave)
 }
 
 /**
