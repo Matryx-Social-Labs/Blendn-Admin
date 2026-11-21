@@ -57,6 +57,9 @@ interface EventEditorData {
     title?: string | null
     description?: string | null
     order?: number | null
+    width?: number | null
+    height?: number | null
+    duration_ms?: number | null
   }>
 }
 
@@ -163,6 +166,10 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
           thumbnail_url: item.thumbnail_url ?? undefined,
           title: item.title ?? undefined,
           description: item.description ?? undefined,
+          // Carried through: a save recreates every media row, so a size not sent back is lost.
+          width: item.width ?? undefined,
+          height: item.height ?? undefined,
+          duration_ms: item.duration_ms ?? undefined,
         })) ?? [],
     }
   }, [initialEvent])
@@ -204,6 +211,9 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
           thumbnail_url: item.thumbnail_url || undefined,
           title: item.title || undefined,
           description: item.description || undefined,
+          width: item.width,
+          height: item.height,
+          duration_ms: item.duration_ms,
           order: index,
         })),
         // Explicit null, not undefined: `undefined` disappears in JSON and the

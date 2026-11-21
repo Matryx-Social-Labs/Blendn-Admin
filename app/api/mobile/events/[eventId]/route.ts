@@ -358,6 +358,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         title: m.title,
         description: m.description,
         order: m.order,
+        width: m.width,
+        height: m.height,
+        durationMs: m.duration_ms,
       })),
       /*
        * `member_count` is the Room's number, inside now, as every surface says
