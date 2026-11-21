@@ -142,6 +142,25 @@ describe("withdrawing (DELETE /events/:id/rsvp)", () => {
     expect(await rowOf(eventId, me.id)).toEqual({ status: "going", cancelled_at: null })
   })
 
+  it("is never a late cancel for somebody who came (checked in, then out): deleted, and a not_going POST gets no cancelled_at", async () => {
+    const eventId = await eventStarting(30 * 60 * 1000)
+    const came = await person("gl-came")
+    const cameToo = await person("gl-came-post")
+    const occurrence = await db.event_occurrences.findFirstOrThrow({ where: { event_id: eventId }, select: { id: true } })
+    for (const p of [came, cameToo]) {
+      await going(eventId, p.id)
+      await db.event_check_ins.create({
+        data: { event_id: eventId, occurrence_id: occurrence.id, user_id: p.id, status: "checked_out", check_in_time: new Date(Date.now() - 20 * 60 * 1000), check_out_time: new Date() },
+      })
+    }
+
+    expect((await call(rsvp.DELETE, "rsvp", eventId, came.token, "DELETE")).status).toBe(200)
+    expect((await call(rsvp.POST, "rsvp", eventId, cameToo.token, "POST", { status: "not_going" })).status).toBe(200)
+
+    expect(await rowOf(eventId, came.id)).toBeNull()
+    expect(await rowOf(eventId, cameToo.id)).toEqual({ status: "not_going", cancelled_at: null })
+  })
+
   it("POST not_going before the doors is a plain not_going (no cancelled_at)", async () => {
     const eventId = await eventStarting(48 * HOUR)
     const me = await person("gl-post-early")

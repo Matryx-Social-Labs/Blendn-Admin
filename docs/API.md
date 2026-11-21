@@ -1100,8 +1100,9 @@ An event with no stated capacity is unbounded, exactly as before.
 **A late cancel is recorded, not deleted** (SCRUM-1095). Before the doors
 (start − 90 min) `DELETE /events/:eventId/rsvp` deletes the row as it always
 did. From the doors on, on an event that is not cancelled, a `going`, `maybe` or
-`waitlisted` row becomes `not_going` with `cancelled_at` set (the same for a
-`not_going` POST from one of those), so the turn-out forecast and the show rate
+`waitlisted` row from somebody who has not checked in here becomes `not_going`
+with `cancelled_at` set (the same for a `not_going` POST from one of those;
+anyone who came is deleted as before, their check-in is the record), so the turn-out forecast and the show rate
 can tell "can't make it" from a no-show; saying `going`/`maybe` again clears it.
 A plain `not_going` is still deleted by a DELETE, a recorded late cancel is
 kept by a repeated one, and the response is unchanged (`rsvpStatus: null`). The

@@ -72,7 +72,7 @@ export async function placeRsvp(
   // A "not going" from somebody who was committed, once the doors are open, is a late cancel (`cancelled_at`); an
   // earlier one keeps its time, and saying anything else clears it.
   const now = new Date()
-  const late = status === "not_going" && !!event && isCommitted(existing?.status) && lateCancelCounts(event, now)
+  const late = status === "not_going" && !!event && isCommitted(existing?.status) && (await lateCancelCounts(eventId, userId, event, now))
   const cancelled_at = status !== "not_going" ? null : late ? now : (existing?.cancelled_at ?? null)
 
   await db.event_rsvps.upsert({
@@ -93,22 +93,30 @@ export async function placeRsvp(
 const COMMITTED = ["going", "maybe", "waitlisted"] as const
 const isCommitted = (status: string | undefined) => (COMMITTED as readonly string[]).includes(status ?? "")
 
-/** A withdrawal is a late cancel once the doors are open, on a night that is still on (a called-off one has no turn-out). */
-const lateCancelCounts = (event: { start_time: Date; status: string }, now: Date) => event.status !== "cancelled" && now >= doorsAt(event)
+/**
+ * A withdrawal is a late cancel once the doors are open, on a night that is still on (a called-off one has no
+ * turn-out), from somebody who did not come: anyone checked in here, still or since, came, and their check-in is
+ * the record (decided per advisor, SCRUM-1095).
+ */
+async function lateCancelCounts(eventId: string, userId: string, event: { start_time: Date; status: string }, now: Date): Promise<boolean> {
+  if (event.status === "cancelled" || now < doorsAt(event)) return false
+  const came = await db.event_check_ins.findFirst({ where: { event_id: eventId, user_id: userId, status: { in: ["checked_in", "checked_out"] } }, select: { id: true } })
+  return came === null
+}
 
 /**
  * Withdraw an RSVP (`DELETE /events/:id/rsvp`), then give the seat to the waitlist.
  *
  * Before the doors the row is deleted, as it always was. Once they are open (`doorsAt`, check-in) a commitment is
- * kept as `not_going` with `cancelled_at`, so the turn-out forecast and the show rate can tell "can't make it" from a
- * no-show (SCRUM-1095, ROADMAP Going 2). Hosts read counts only. A plain `not_going` is deleted either way; a late
+ * kept as `not_going` with `cancelled_at` (unless they came, `lateCancelCounts`), so the turn-out forecast and the
+ * show rate can tell "can't make it" from a no-show (SCRUM-1095, ROADMAP Going 2). Hosts read counts only. A plain `not_going` is deleted either way; a late
  * cancel already recorded is kept, so a repeated DELETE never erases it.
  */
 export async function withdrawRsvp(eventId: string, userId: string): Promise<void> {
   const event = await db.events.findUnique({ where: { id: eventId }, select: { start_time: true, status: true } })
   const now = new Date()
   const mine = { event_id: eventId, user_id: userId }
-  if (event && lateCancelCounts(event, now)) {
+  if (event && (await lateCancelCounts(eventId, userId, event, now))) {
     await db.event_rsvps.updateMany({
       where: { ...mine, status: { in: [...COMMITTED] } },
       data: { status: "not_going", cancelled_at: now, updated_at: now },
