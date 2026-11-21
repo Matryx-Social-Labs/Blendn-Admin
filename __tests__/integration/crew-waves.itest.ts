@@ -171,6 +171,21 @@ describe("Block on a crew: hide it from you for good", () => {
     expect((await cardsFor(hider, w.eventId)).map((c) => c.crewId)).toContain(w.orbit.crewId)
   })
 
+  it("never confirms or names a crew with somebody kept apart from you", async () => {
+    const w = await world("hide3")
+    const outsider = w.comet.people[0]
+    expect((await api.hide(outsider, w.orbit.crewId)).status).toBe(200)
+    await api.block(w.orbit.people[1], outsider.id)
+    // Listed no longer, and a fresh hide is the 404 of a crew not there.
+    expect((await api.hidden(outsider)).body.data.crews).toEqual([])
+    const fresh = await person("hide3-fresh")
+    await api.block(fresh, w.nebula.people[0].id)
+    const refused = await api.hide(fresh, w.nebula.crewId)
+    expect(refused).toEqual(await api.hide(fresh, "00000000-0000-4000-8000-000000000000"))
+    // Control: an unrelated crew still hides.
+    expect((await api.hide(fresh, w.orbit.crewId)).status).toBe(200)
+  })
+
   it("is not for your own crew, or a crew that is not there", async () => {
     const w = await world("hide2")
     expect((await api.hide(w.nebula.people[1], w.nebula.crewId)).status).toBe(404)

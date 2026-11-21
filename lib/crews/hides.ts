@@ -1,7 +1,9 @@
 // Relative imports throughout — see lib/conversations.ts.
 import { db } from "../db"
 import { paginationMeta, paginationSkip, type PaginationMeta, type PaginationParams } from "../pagination"
+import { blocksBetween, blocksExclude } from "./blocks"
 import { NO_CREW, type CrewRefusal } from "./crews"
+import { membersOf } from "./presence"
 
 /**
  * "Block" on a crew (owner 2026-11-13): hide that crew from YOU for good. Never
@@ -25,13 +27,24 @@ export async function hiddenOf(userId: string, crewIds: readonly string[]): Prom
   return new Set(rows.map((r) => r.crew_id))
 }
 
-/** Hide a standing crew you are not in. Hiding twice is hiding once. */
+/** The crews of `crewIds` with anybody kept apart from `userId` (a block or a closed conversation, either way). */
+async function keptApartCrews(userId: string, crewIds: readonly string[]): Promise<Set<string>> {
+  const members = await membersOf(crewIds)
+  const blocked = await blocksBetween([userId], [...new Set([...members.values()].flat())])
+  return new Set([...members].filter(([, ids]) => blocksExclude([userId], ids, blocked)).map(([id]) => id))
+}
+
+/**
+ * Hide a standing crew you are not in. Hiding twice is hiding once. A crew with
+ * anybody kept apart from you is the 404 of a crew not there: the door must not
+ * confirm a crew the cards would never show you (security review of #1003).
+ */
 export async function hideCrew(userId: string, crewId: string): Promise<{ hidden: true } | CrewRefusal> {
   const crew = await db.crews.findFirst({
     where: { id: crewId, dissolved_at: null, members: { none: { user_id: userId } } },
     select: { id: true },
   })
-  if (!crew) return NO_CREW
+  if (!crew || (await keptApartCrews(userId, [crewId])).size > 0) return NO_CREW
   await db.crew_hides.createMany({ data: [{ user_id: userId, crew_id: crewId }], skipDuplicates: true })
   return { hidden: true }
 }
@@ -49,7 +62,13 @@ export interface HiddenCrew {
   hiddenAt: string
 }
 
-/** Settings → Blocked: the crews you hid, newest first, a page at a time. A crew that has ended is not listed. */
+/**
+ * Settings → Blocked: the crews you hid, newest first, a page at a time. A crew
+ * that has ended is not listed, and neither is one with anybody now kept apart
+ * from you: its name is not yours to read. ponytail: that one is dropped from
+ * the page after the count, so a page can come back short; filter in SQL if
+ * blocked people ever pile up in hidden crews.
+ */
 export async function hiddenCrews(userId: string, page: PaginationParams): Promise<{ crews: HiddenCrew[]; pagination: PaginationMeta }> {
   const where = { user_id: userId, crew: { dissolved_at: null } }
   const [total, rows] = await Promise.all([
@@ -62,8 +81,9 @@ export async function hiddenCrews(userId: string, page: PaginationParams): Promi
       select: { created_at: true, crew: { select: { id: true, name: true, emblem_seed: true } } },
     }),
   ])
+  const apart = await keptApartCrews(userId, rows.map((r) => r.crew.id))
   return {
-    crews: rows.map((r) => ({ crewId: r.crew.id, name: r.crew.name, emblemSeed: r.crew.emblem_seed, hiddenAt: r.created_at.toISOString() })),
+    crews: rows.filter((r) => !apart.has(r.crew.id)).map((r) => ({ crewId: r.crew.id, name: r.crew.name, emblemSeed: r.crew.emblem_seed, hiddenAt: r.created_at.toISOString() })),
     pagination: paginationMeta(page.page, page.limit, total),
   }
 }
