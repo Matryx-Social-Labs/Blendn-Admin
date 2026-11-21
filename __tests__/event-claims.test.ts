@@ -201,7 +201,7 @@ describe("who to show as the host", () => {
       curated_at: new Date(),
       organizer_org: { display_name: "The Humming Tree" },
       organizer: { name: "An Admin" },
-    })).toEqual({ name: "The Humming Tree", isPlatform: false })
+    })).toEqual({ name: "The Humming Tree", isPlatform: false, kind: "org" })
   })
 
   it("never shows the curating admin’s name on a public card", () => {
@@ -222,7 +222,7 @@ describe("who to show as the host", () => {
   it("shows the creating user for an event that predates organisations", () => {
     expect(eventHost({
       curated_at: null, organizer_org: null, organizer: { name: "Priya" },
-    })).toEqual({ name: "Priya", isPlatform: false })
+    })).toEqual({ name: "Priya", isPlatform: false, kind: "person" })
   })
 
   it("tells the client when it is the platform standing in", () => {
@@ -239,7 +239,7 @@ describe("who to show as the host", () => {
       organizer_org: { display_name: "Indiranagar Hospitality Group" },
       organizer: { name: "Blendn" },
     })
-    expect(host).toEqual({ name: "The Humming Tree", isPlatform: true })
+    expect(host).toEqual({ name: "The Humming Tree", isPlatform: true, kind: "venue" })
     expect(eventHost({ kind: "venue_day", venue_name: null, organizer: { name: "A Founder" } }).name).toBe(PLATFORM_HOST)
   })
 })

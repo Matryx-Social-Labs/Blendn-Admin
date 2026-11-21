@@ -1,5 +1,6 @@
 import { logger } from "@/lib/logger"
-import { placeRsvp, promoteFromWaitlist } from "@/lib/waitlist"
+import { placeRsvp, withdrawRsvp } from "@/lib/waitlist"
+import { emitEventRsvpUpdate } from "@/lib/socket-server"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -79,6 +80,7 @@ export async function POST(
     // number. `placeRsvp` waitlists instead of refusing, and promotes whoever
     // is next when this RSVP frees a seat.
     const { status: placed, goingCount } = await placeRsvp(eventId, user.userId, status)
+    emitEventRsvpUpdate(eventId, goingCount)
 
     return successResponse({ rsvpStatus: placed, rsvpCount: goingCount })
   } catch (error) {
@@ -111,16 +113,13 @@ export async function DELETE(
     const refused = await checkedInRefusal(eventId, user.userId)
     if (refused) return refused
 
-    await db.event_rsvps.deleteMany({
-      where: { event_id: eventId, user_id: user.userId },
-    })
-
-    // Cancelling releases a seat, so somebody on the waitlist gets it.
-    await promoteFromWaitlist(eventId)
+    // Deleted before the doors, recorded as a late cancel after them; either way the seat goes to the waitlist.
+    await withdrawRsvp(eventId, user.userId)
 
     const rsvpCount = await db.event_rsvps.count({
       where: { event_id: eventId, status: "going" },
     })
+    emitEventRsvpUpdate(eventId, rsvpCount)
 
     return successResponse({ rsvpStatus: null, rsvpCount })
   } catch (error) {

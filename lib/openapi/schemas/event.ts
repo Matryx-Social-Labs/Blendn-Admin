@@ -218,6 +218,10 @@ const OrganizerSchema = z.object({
   }),
   name: z.string(),
   image: z.string().nullable(),
+  kind: z.enum(["org", "venue", "platform", "person"]).openapi({
+    description:
+      "What `name` is (SCRUM-1095): an organisation, a venue day's venue, the platform standing in, or the creating user of an event with no organisation. Draw a \"Host\" only for `org`.",
+  }),
   // No email. A host's public identity is their name and picture; the address
   // was returned by the detail endpoint only, and is no longer sent.
 })
