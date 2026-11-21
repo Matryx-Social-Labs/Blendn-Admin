@@ -3225,13 +3225,16 @@ then on — a reveal already made can't be unseen (D-10).
 **The name and bio** — 2–32 characters (not unique) and ≤ 140 — are shown to
 strangers on the crew card. They are **folded** first (`lib/moderation/fold.ts`):
 compatibility forms to ordinary ones (fullwidth `９８４５`, ligatures, `․` to
-`.`), any script's digits to 0–9 (`९८४५`), Cyrillic and Greek look-alikes to
-Latin — and the folded form is what is stored. A name with an invisible
+`.`), any script's digits to 0–9 (`९८४५`), and Cyrillic and Greek look-alikes to
+Latin inside a word that mixes them with Latin (`Lоt` with a Cyrillic `о` is
+stored `Lot`). A word in one alphabet is stored as typed (`Москва` stays
+`Москва`), but every check reads it with its look-alikes folded too, so a word
+spelled wholly in look-alike letters is still refused. A name with an invisible
 character (zero-width space, bidi override; an emoji's own joiner aside) is
 400; a bio has them stripped. Then the moderation pipeline and a **strict**
 contact-detail check (`findProfileContactInfo`): phone numbers, any @handle,
-emails and web addresses, written out or spelled ("nine eight four…", "at
-gmail dot com", "dot in"). A refusal is 400 with a sentence naming what was
+emails and web addresses, written out or spelled ("nine eight four…",
+"ninefour fivezero…", "at gmail dot com", "dot in"). A refusal is 400 with a sentence naming what was
 found, and nothing is stored. Intent is the person intent enum.
 
 **Tags are the crew's own hashtags** (owner 2026-11-14; until then ten curated

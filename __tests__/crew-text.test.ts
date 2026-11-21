@@ -15,7 +15,7 @@ jest.mock("@/lib/moderation/openai-moderation", () => ({
 }))
 
 import { findProfileContactInfo, findContactInfo } from "@/lib/moderation/contact-info"
-import { foldText, hasInvisibleChars } from "@/lib/moderation/fold"
+import { foldForStorage, foldText, hasInvisibleChars } from "@/lib/moderation/fold"
 import { CREW_TAG_IDEAS, createCrewSchema, crewTextRefusal, inviteSchema, tagView, updateCrewSchema } from "@/lib/crews/crews"
 import { characters } from "@/lib/utils"
 import { CREW } from "@/lib/constants"
@@ -186,6 +186,35 @@ describe("folded before any check reads it, and stored folded (C12)", () => {
   })
 })
 
+describe("look-alikes fold only inside a mixed-script word when stored; the checks read everything folded", () => {
+  const base = { revealConsent: true as const, inviteUserIds: [] }
+
+  it("stores Cyrillic and Greek words as typed, and folds a word that mixes them with Latin", () => {
+    expect(foldForStorage("Москва и Αθήνα")).toBe("Москва и Αθήνα")
+    expect(foldForStorage("Saturday Lоt")).toBe("Saturday Lot")
+    expect(foldForStorage("Мoscow crew")).toBe("Moscow crew")
+    // Digits and invisible characters fold everywhere, as before.
+    expect(foldForStorage("Москва ९८​")).toBe("Москва 98")
+    expect(createCrewSchema.parse({ ...base, name: "Москва Lot", bio: "Квиз по средам" })).toMatchObject({
+      name: "Москва Lot",
+      bio: "Квиз по средам",
+    })
+  })
+
+  it("still refuses a word spelled wholly in look-alike letters (the negative control)", async () => {
+    // A slur in Cyrillic look-alikes only (к і к е): one script, so stored as typed, and read as Latin.
+    const cyr = "\u043a\u0456\u043a\u0435 squad"
+    expect(foldForStorage(cyr)).toBe(cyr)
+    expect(foldText(cyr)).toBe("kike squad")
+    expect((await crewTextRefusal({ name: cyr }))?.refusal).toBe("This can’t be a crew’s name.")
+    expect((await crewTextRefusal({ tags: ["fun", cyr.split(" ")[0]] }))?.refusal).toBe("This can’t be a crew’s tag.")
+  })
+
+  it("reads contact details through all-Cyrillic look-alikes", async () => {
+    expect((await crewTextRefusal({ bio: "рriуа аt gmаil" }))?.refusal).toMatch(/email address/)
+  })
+})
+
 describe("a crew’s own hashtags (owner pick A, 2026-11-14)", () => {
   const base = { revealConsent: true as const, inviteUserIds: [], name: "Lot" }
   const tags = (t: unknown) => {
@@ -221,8 +250,8 @@ describe("a crew’s own hashtags (owner pick A, 2026-11-14)", () => {
     const hindi = foldText("कैफ़ेहॉपिंग")
     expect(tags(["#कैफ़ेहॉपिंग"])).toEqual([hindi])
     expect(tags(["chai🍵", "👯‍♀️", "🇮🇳", "late_night", "東京"])).toEqual(["chai🍵", "👯‍♀️", "🇮🇳", "late_night", "東京"])
-    // Folded as a name is: look-alike Cyrillic reads as Latin, as the checks and the screen see it.
-    expect(tags(["Москва", "café", "24x7", "1️⃣"])).toEqual([foldText("Москва"), "café", "24x7", "1️⃣"])
+    // A word in one alphabet is stored as typed; look-alikes fold only inside a word that mixes them.
+    expect(tags(["Москва", "café", "24x7", "1️⃣", "Mоscow"])).toEqual(["Москва", "café", "24x7", "1️⃣", "Moscow"])
   })
 
   it("refuses links, @handles and e-mails by their characters", () => {

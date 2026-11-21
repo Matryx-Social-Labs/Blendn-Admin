@@ -13,7 +13,7 @@ import { db } from "../db"
 import { friendIdsOf } from "../friends"
 import { logger } from "../logger"
 import { findProfileContactInfo } from "../moderation/contact-info"
-import { foldText, hasInvisibleChars } from "../moderation/fold"
+import { foldForStorage, foldText, hasInvisibleChars } from "../moderation/fold"
 import { checkIdentityKeywords } from "../moderation/keyword-filter"
 import { checkTextContents, notChecked, type ModerationCheck } from "../moderation/openai-moderation"
 import type { ModerationResult } from "../moderation/types"
@@ -105,7 +105,7 @@ const TAG_CHARS = /^[\p{L}\p{M}\p{N}_\p{Extended_Pictographic}\p{Emoji_Modifier}
 const crewTag = z
   .string()
   .max(CREW.TAG_MAX * 4)
-  .transform((s) => foldText(s).trim().replace(/^#+/, "").replace(/\s+/g, ""))
+  .transform((s) => foldForStorage(s).trim().replace(/^#+/, "").replace(/\s+/g, ""))
   .refine((t) => isLegacyTag(t) || (characters(t) >= 1 && characters(t) <= CREW.TAG_MAX && TAG_CHARS.test(t)), {
     message: `A tag is 1–${CREW.TAG_MAX} letters, numbers, _ or emoji — no links, @ or contact details`,
   })
@@ -131,14 +131,14 @@ export const tagView = (tags: readonly string[]) =>
 const crewName = z
   .string()
   .refine((s) => !hasInvisibleChars(s), { message: "A crew name can’t contain invisible characters" })
-  .transform((s) => foldText(s).trim().replace(/\s+/g, " "))
+  .transform((s) => foldForStorage(s).trim().replace(/\s+/g, " "))
   .refine((s) => characters(s) >= CREW.NAME_MIN && characters(s) <= CREW.NAME_MAX, {
     message: `A crew name is ${CREW.NAME_MIN}–${CREW.NAME_MAX} characters`,
   })
 
 const crewBio = z
   .string()
-  .transform((s) => foldText(s).trim())
+  .transform((s) => foldForStorage(s).trim())
   .refine((s) => characters(s) <= CREW.BIO_MAX, { message: `A crew bio is at most ${CREW.BIO_MAX} characters` })
 
 const crewFields = {
@@ -276,7 +276,9 @@ function readingsOf(fields: CrewTexts) {
     const text = fields[field]
     if (!text || text.length === 0) return []
     const parts = typeof text === "string" ? [text] : [...text]
-    return [{ field, parts, texts: parts.length > 1 ? [...parts, parts.join(" ")] : parts }]
+    // Read fully folded (lib/moderation/fold.ts): a word stored in one alphabet may still be Latin look-alikes.
+    const texts = parts.map(foldText)
+    return [{ field, parts, texts: texts.length > 1 ? [...texts, texts.join(" ")] : texts }]
   })
 }
 

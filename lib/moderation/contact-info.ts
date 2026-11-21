@@ -102,6 +102,28 @@ function digitWordFor(token: string): string | undefined {
 }
 
 /**
+ * The words a glued number is read from: the ten names and "oh". Not the
+ * homophones (`to`, `for`, `won`, `ate`, `tree`, `o`): glued, they are the
+ * insides of ordinary words ("tooth", "forte", "often").
+ */
+const GLUED_WORDS = ["zero", "oh", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+const GLUED = new RegExp(`^(?:${GLUED_WORDS.join("|")}){2,}$`)
+const GLUED_WORD = new RegExp(GLUED_WORDS.join("|"), "g")
+
+/**
+ * A token made wholly of two or more digit names, as its digits:
+ * `ninefourfive` → `945`. In the same four forms as `digitWordFor`, so
+ * `niiinefour` and `f1vezero` read too.
+ */
+function gluedDigitsFor(token: string): string | undefined {
+  const collapse = (t: string) => t.replace(/(.)\1+/g, "$1")
+  for (const form of [token, collapse(token), unleet(token), collapse(unleet(token))]) {
+    if (GLUED.test(form)) return form.replace(GLUED_WORD, (w) => DIGIT_WORDS[w])
+  }
+  return undefined
+}
+
+/**
  * Everything that is a digit once you stop pretending it is a letter.
  *
  * Only the substitutions that are safe on a whole string happen here — `|` and
@@ -127,7 +149,7 @@ function digitsIn(text: string): string {
       out += token
       continue
     }
-    const asDigit = digitWordFor(token)
+    const asDigit = digitWordFor(token) ?? gluedDigitsFor(token)
     if (asDigit) {
       out += asDigit
       continue
