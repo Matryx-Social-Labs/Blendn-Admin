@@ -1,7 +1,6 @@
 "use client"
 
 import { useId, useState } from "react"
-import Image from "next/image"
 import type { UseFieldArrayReturn, UseFormReturn } from "react-hook-form"
 import {
   DndContext,
@@ -38,7 +37,7 @@ import {
   IconPlus,
   IconTrash,
 } from "@tabler/icons-react"
-import { DevicePreview } from "@/components/event-form/device-preview"
+import { MediaFitPreview } from "@/components/event-form/media-fit-preview"
 import { FormSection } from "@/components/event-form/form-section"
 import type { EventFormValues } from "@/components/event-form/schema"
 
@@ -95,6 +94,11 @@ function SortableMediaItem({
   const isUploading = uploadProgress !== undefined
   const previewUrl = form.watch(`media_items.${index}.url`)
   const mediaType = form.watch(`media_items.${index}.type`)
+  const thumbnail = form.watch(`media_items.${index}.thumbnail_url`)
+  const width = form.watch(`media_items.${index}.width`)
+  const height = form.watch(`media_items.${index}.height`)
+  const focalX = form.watch(`media_items.${index}.focal_x`)
+  const focalY = form.watch(`media_items.${index}.focal_y`)
 
   return (
     <div ref={setNodeRef} style={style} className="space-y-3 rounded-lg border p-4">
@@ -170,6 +174,9 @@ function SortableMediaItem({
                     form.setValue(`media_items.${index}.width`, undefined)
                     form.setValue(`media_items.${index}.height`, undefined)
                     form.setValue(`media_items.${index}.duration_ms`, undefined)
+                    // …and so was its subject (SCRUM-1106).
+                    form.setValue(`media_items.${index}.focal_x`, undefined)
+                    form.setValue(`media_items.${index}.focal_y`, undefined)
                   }}
                 />
               </FormControl>
@@ -223,31 +230,9 @@ function SortableMediaItem({
                   </span>
                 </div>
               )}
-              {previewUrl && mediaType === "image" && (
-                <>
-                  <Image
-                    src={previewUrl}
-                    alt={`Media ${index + 1}`}
-                    width={800}
-                    height={160}
-                    unoptimized
-                    className="max-h-40 w-full rounded-md border object-cover"
-                  />
-                  {/*
-                    The same crops as the cover, because the feed cycles this
-                    whole set on an active card — a gallery image is not a
-                    detail-page extra, it is another thing that has to survive
-                    the featured slot.
-                  */}
-                  <DevicePreview src={previewUrl} />
-                </>
-              )}
               {/*
-                Video got no preview at all, so the only way to find out whether
-                a pasted URL played was to publish the event and open the app.
-                `muted` because a form that makes noise when you paste into it is
-                hostile, and `preload="metadata"` so this costs a header rather
-                than the clip.
+                Video keeps its player: the only way to find out whether a pasted
+                URL plays, short of publishing. Muted, metadata only.
               */}
               {previewUrl && mediaType === "video" && (
                 <video
@@ -256,7 +241,25 @@ function SortableMediaItem({
                   muted
                   playsInline
                   preload="metadata"
-                  className="max-h-40 w-full rounded-md border bg-muted object-cover"
+                  className="max-h-40 w-full rounded-md border bg-muted object-contain"
+                />
+              )}
+              {/*
+                The upload in the app's five cards, and where its subject is
+                (SCRUM-1106). A gallery image is not a detail-page extra: the
+                feed cycles the whole set on an active card.
+              */}
+              {previewUrl && (mediaType === "image" || mediaType === "video") && (
+                <MediaFitPreview
+                  src={previewUrl}
+                  type={mediaType}
+                  poster={mediaType === "video" ? thumbnail || null : null}
+                  size={width && height ? { width, height } : null}
+                  focal={focalX != null && focalY != null ? { x: focalX, y: focalY } : null}
+                  onFocalChange={(point) => {
+                    form.setValue(`media_items.${index}.focal_x`, point?.x, { shouldDirty: true })
+                    form.setValue(`media_items.${index}.focal_y`, point?.y, { shouldDirty: true })
+                  }}
                 />
               )}
             </div>

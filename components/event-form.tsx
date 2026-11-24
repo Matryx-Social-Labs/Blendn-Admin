@@ -132,6 +132,8 @@ export function EventForm({
           form.setValue(`media_items.${index}.width`, patch.width)
           form.setValue(`media_items.${index}.height`, patch.height)
           form.setValue(`media_items.${index}.duration_ms`, patch.duration_ms)
+          form.setValue(`media_items.${index}.focal_x`, patch.focal_x)
+          form.setValue(`media_items.${index}.focal_y`, patch.focal_y)
           if (patch.thumbnail_url !== undefined) form.setValue(`media_items.${index}.thumbnail_url`, patch.thumbnail_url)
         },
         upload: uploadFile,

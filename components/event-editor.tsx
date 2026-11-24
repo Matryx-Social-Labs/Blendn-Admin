@@ -60,6 +60,8 @@ interface EventEditorData {
     width?: number | null
     height?: number | null
     duration_ms?: number | null
+    focal_x?: number | null
+    focal_y?: number | null
   }>
 }
 
@@ -170,6 +172,8 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
           width: item.width ?? undefined,
           height: item.height ?? undefined,
           duration_ms: item.duration_ms ?? undefined,
+          focal_x: item.focal_x ?? undefined,
+          focal_y: item.focal_y ?? undefined,
         })) ?? [],
     }
   }, [initialEvent])
@@ -214,6 +218,8 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
           width: item.width,
           height: item.height,
           duration_ms: item.duration_ms,
+          focal_x: item.focal_x,
+          focal_y: item.focal_y,
           order: index,
         })),
         // Explicit null, not undefined: `undefined` disappears in JSON and the

@@ -7,7 +7,7 @@
  */
 import { uploadMediaItem, type UploadMediaDeps } from "@/components/event-form/upload-media-item"
 
-type Item = { id: string; type: "image" | "video" | "document"; url: string; thumbnail_url?: string; width?: number; height?: number; duration_ms?: number }
+type Item = { id: string; type: "image" | "video" | "document"; url: string; thumbnail_url?: string; width?: number; height?: number; duration_ms?: number; focal_x?: number; focal_y?: number }
 
 type Harness = { items: Item[]; uploads: string[] }
 
@@ -37,6 +37,14 @@ const clip = new File(["mp4"], "new.mp4", { type: "video/mp4" })
 const still = new File(["jpg"], "new.jpg", { type: "image/jpeg" })
 
 describe("uploadMediaItem", () => {
+  it("forgets the old file's focal point: the subject of another picture is somewhere else (SCRUM-1106)", async () => {
+    const { h, deps } = harness([{ id: "a", type: "video", url: "https://cdn.test/old.mp4", focal_x: 0.9, focal_y: 0.1 }])
+    await uploadMediaItem(clip, "a", deps)
+    expect(h.items[0].focal_x).toBeUndefined()
+    expect(h.items[0].focal_y).toBeUndefined()
+    expect("focal_x" in h.items[0]).toBe(true)
+  })
+
   it("replaces the old clip's poster with the new clip's first frame", async () => {
     const { h, deps } = harness([{ id: "a", type: "video", url: "https://cdn.test/old.mp4", thumbnail_url: "https://cdn.test/old-poster.jpg" }], { size: { width: 1080, height: 1920, duration_ms: 9000 } })
     const result = await uploadMediaItem(clip, "a", deps)

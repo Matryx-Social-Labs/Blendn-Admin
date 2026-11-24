@@ -151,6 +151,8 @@ export const SPONSORED_MESSAGE_INTERVALS = [20, 30, 60] as const
  * the page loaded.
  */
 const mediaSide = z.number().int().min(1).max(MEDIA.MAX_SIDE_PX).nullish()
+/** 0–1 of the picture from its left or top edge (SCRUM-1106). */
+const focalAxis = z.number().min(0).max(1).nullish()
 
 /*
  * `width`, `height` and `duration_ms` are measured by the dashboard from the
@@ -174,10 +176,17 @@ const mediaItemSchema = z
       .min(1)
       .max(MEDIA.MAX_CLIP_MS + MEDIA.CLIP_TOLERANCE_MS, `Clips play up to ${MEDIA.MAX_CLIP_MS / 1000} seconds`)
       .nullish(),
+    // Where the subject is, picked in the dashboard (SCRUM-1106): the app crops around it. Both or neither.
+    focal_x: focalAxis,
+    focal_y: focalAxis,
   })
   .refine((item) => (item.width == null) === (item.height == null), {
     message: "A media size needs both a width and a height",
     path: ["height"],
+  })
+  .refine((item) => (item.focal_x == null) === (item.focal_y == null), {
+    message: "A focal point needs both an x and a y",
+    path: ["focal_y"],
   })
 
 export const sponsoredMessageCreateSchema = z.object({
