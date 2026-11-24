@@ -240,6 +240,19 @@ type VenueKey = keyof typeof VENUES
 
 type PhotoKey = Exclude<keyof typeof PHOTOS, "_clip">
 
+/** The one seeded clip, cut and measured once (`seed-blr-photos.json` `_clip`). */
+interface SeedClip {
+  url: string
+  poster: string
+  alt: string
+  width: number
+  height: number
+  duration_ms: number
+}
+
+/** Gallery photos are fetched cropped to this square (`photoUrl`). */
+const GALLERY_SIDE = 1600
+
 interface Social {
   going?: Person[]
   maybe?: Person[]
@@ -1290,7 +1303,7 @@ interface Photo {
 }
 
 /** Square master, per docs/MEDIA.md: organisers upload one square and the app crops per slot. */
-const photoUrl = (id: string) => `https://images.unsplash.com/${id}?w=1600&h=1600&fit=crop&q=80&fm=jpg`
+const photoUrl = (id: string) => `https://images.unsplash.com/${id}?w=${GALLERY_SIDE}&h=${GALLERY_SIDE}&fit=crop&q=80&fm=jpg`
 
 /**
  * Cover and gallery for an event, mirrored into our bucket when Tigris is
@@ -1318,10 +1331,9 @@ async function mediaFor(spec: EventSpec) {
   for (const [i, p] of rest.entries()) {
     gallery.push({ url: await hosted(photoUrl(p.id), `seed/${spec.slug}/gallery-${i + 1}.jpg`, "image/jpeg"), alt: p.alt })
   }
-  const clipSource = (PHOTOS as unknown as { _clip?: { url: string; alt: string } })._clip
-  const clip = spec.video && clipSource
-    ? { url: await hosted(clipSource.url, `seed/${spec.slug}/clip.mp4`, "video/mp4"), alt: clipSource.alt }
-    : null
+  // Already in our bucket: a 12 s faststart cut of the Pexels source with its own first frame (task 30). Written
+  // as is, not mirrored per event — a mirror keeps whatever an old key holds, and the old key held the 20 s file.
+  const clip = spec.video ? (PHOTOS as unknown as { _clip: SeedClip })._clip : null
   return { cover, gallery, clip, hotlinked: stayedHotlinked(objects) }
 }
 
@@ -1643,16 +1655,29 @@ async function seedCity(city: SeedCity, clock: Clock, events: EventSpec[], venue
     await db.event_media.deleteMany({ where: { event_id: event.id } })
     await db.event_media.createMany({
       data: [
-        // No poster: only the clip's own first frame is right (docs/MEDIA.md), and the cover is another picture at
-        // another ratio that showed around the letterboxed clip in the app's hero (SCRUM-1066).
+        // The poster is the clip's own first frame (docs/MEDIA.md): the cover is another picture at another ratio
+        // that showed around the letterboxed clip in the app's hero (SCRUM-1066).
         ...(media.clip
-          ? [{ event_id: event.id, type: "video" as const, url: media.clip.url, thumbnail_url: null, title: media.clip.alt, description: "Last week's set", order: 0 }]
+          ? [{
+              event_id: event.id,
+              type: "video" as const,
+              url: media.clip.url,
+              thumbnail_url: media.clip.poster,
+              width: media.clip.width,
+              height: media.clip.height,
+              duration_ms: media.clip.duration_ms,
+              title: media.clip.alt,
+              description: "Last week's set",
+              order: 0,
+            }]
           : []),
         ...media.gallery.map((g, i) => ({
           event_id: event.id,
           type: "image" as const,
           url: g.url,
-          thumbnail_url: g.url.replace("w=1600&h=1600", "w=400&h=400"),
+          thumbnail_url: g.url.replace(`w=${GALLERY_SIDE}&h=${GALLERY_SIDE}`, "w=400&h=400"),
+          width: GALLERY_SIDE,
+          height: GALLERY_SIDE,
           title: g.alt,
           description: null,
           order: i + 1,

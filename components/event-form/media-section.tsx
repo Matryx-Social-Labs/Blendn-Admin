@@ -72,7 +72,7 @@ function SortableMediaItem({
   onRemove: () => void
   uploadProgress: number | undefined
   /** Resolves to why the file was refused, shown beside the input, or null. */
-  onUpload: (file: File, index: number) => Promise<string | null>
+  onUpload: (file: File, itemId: string) => Promise<string | null>
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: fieldItem.id })
@@ -184,7 +184,9 @@ function SortableMediaItem({
                   const file = input.files?.[0]
                   if (!file) return
                   setRefusal(null)
-                  const reason = await onUpload(file, index)
+                  const itemId = form.getValues(`media_items.${index}.id`)
+                  if (!itemId) return
+                  const reason = await onUpload(file, itemId)
                   input.value = ""
                   setRefusal(reason)
                 }}
@@ -285,8 +287,8 @@ function SortableMediaItem({
               <p className="text-xs text-muted-foreground">
                 Filled in automatically from the clip&apos;s first frame when you
                 upload a file — leave it alone and the clip will start without a
-                visible jump. Set it yourself only if you want a different
-                still, and prefer a frame from the clip: a poster that is a
+                visible jump. Uploading another file replaces it. Set it yourself only if
+                you want a different still, and prefer a frame from the clip: a poster that is a
                 different picture visibly swaps the moment the video starts.
                 <br />
                 For a clip added by URL we cannot read the frame, so paste a
@@ -338,9 +340,10 @@ export function MediaSection({
 }: {
   form: UseFormReturn<EventFormValues>
   mediaFieldArray: UseFieldArrayReturn<EventFormValues, "media_items">
-  mediaUploadProgress: Record<number, number>
+  /** By the item's id (`media_items[].id`), not its index. */
+  mediaUploadProgress: Record<string, number>
   /** Resolves to why the file was refused, shown beside the input, or null. */
-  onUpload: (file: File, index: number) => Promise<string | null>
+  onUpload: (file: File, itemId: string) => Promise<string | null>
 }) {
   const sensors = useSensors(useSensor(PointerSensor))
 
@@ -388,7 +391,7 @@ export function MediaSection({
                 index={index}
                 form={form}
                 onRemove={() => mediaFieldArray.remove(index)}
-                uploadProgress={mediaUploadProgress[index]}
+                uploadProgress={mediaUploadProgress[form.getValues(`media_items.${index}.id`) ?? ""]}
                 onUpload={onUpload}
               />
             ))}
