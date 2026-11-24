@@ -84,7 +84,7 @@ export function publicLookup(resolve: Resolve = resolveAll) {
     })
 }
 
-function open(url: URL, signal: AbortSignal): Promise<IncomingMessage> {
+function connect(url: URL, signal: AbortSignal): Promise<IncomingMessage> {
   return new Promise((resolve, reject) => {
     const request = httpsRequest(
       url,
@@ -100,7 +100,7 @@ function open(url: URL, signal: AbortSignal): Promise<IncomingMessage> {
 async function openFollowing(link: string, signal: AbortSignal): Promise<IncomingMessage> {
   let url = openableUrl(link)
   for (let hop = 0; url && hop <= MAX_REDIRECTS; hop++) {
-    const response = await open(url, signal)
+    const response = await connect(url, signal)
     const status = response.statusCode ?? 0
     if (status === 200) return response
     response.destroy()
