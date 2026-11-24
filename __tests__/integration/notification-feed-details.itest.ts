@@ -131,7 +131,10 @@ describe("friend_request rows", () => {
     // What is new.
     expect(row.open).toBe(true)
     expect(row.display.title).toMatch(/wants to be friends$/)
-    expect(row.display.visual).toEqual({ type: "photo", uri: expect.stringContaining("a/1.jpg") })
+    // The photo carries the name the title uses, so the app draws the initial under it while it loads (SCRUM-1088).
+    const name = row.display.title!.replace(/ wants to be friends$/, "")
+    expect(name).toBe("Person nf-asker")
+    expect(row.display.visual).toEqual({ type: "photo", uri: expect.stringContaining("a/1.jpg"), name })
 
     // "Not now": hidden, and no longer waiting.
     await db.friend_requests.update({ where: { id: request.id }, data: { dismissed_at: new Date() } })
@@ -500,9 +503,15 @@ describe("open: what is still the reader's to answer", () => {
   it("message_request: open while pending, closed once answered", async () => {
     const me = await person("nf-mr-me")
     const them = await person("nf-mr-them")
+    await db.user.update({ where: { id: them }, data: { image: "https://cdn.test/profile/mr/1.jpg" } })
     const request = await db.message_requests.create({ data: { sender_id: them, recipient_id: me, message: "hello there" } })
     await notify(me, "message_request", { requestId: request.id })
-    expect((await rowOf(me, "message_request")).open).toBe(true)
+    const waiting = await rowOf(me, "message_request")
+    expect(waiting.open).toBe(true)
+    // The sender's photo carries the sender's name, the one the title uses.
+    const senderName = (await db.user.findUniqueOrThrow({ where: { id: them }, select: { name: true } })).name!
+    expect(waiting.display.title).toBe(`${senderName} wants to message you`)
+    expect(waiting.display.visual).toEqual({ type: "photo", uri: expect.stringContaining("mr/1.jpg"), name: senderName })
     await db.message_requests.update({ where: { id: request.id }, data: { status: "accepted" } })
     expect((await rowOf(me, "message_request")).open).toBe(false)
     // Somebody else's request id is not the reader's to answer.

@@ -780,12 +780,14 @@ event's change and a report's outcome have no switch here. Stored as
 - **`display`** `{ title?, context?, visual? }`, only where the reader may already
   see the person or thing, resolved in one query per kind for the page:
   - `friend_request` while it waits: `title` "{full name} wants to be friends"
-    (SCRUM-1091; it was the first name), `visual` `{ type: "photo", uri }`, or
+    (SCRUM-1091; it was the first name), `visual` `{ type: "photo", uri, name }`
+    (`name` the one the title uses: draw their initial under the photo while it
+    loads, SCRUM-1088), or
     `{ type: "initial", name }` for an asker with no photo (draw their initial on
     their hue, as `personFace`), the asker exactly as `GET /friends/requests` shows
     them to the same person.
   - `message_request` while it waits: `title` "{full name} wants to message you",
-    `visual` the sender's photo, else `initial`, the sender as `GET /message-requests`
+    `visual` the sender's photo (`{ type: "photo", uri, name }`), else `initial`, the sender as `GET /message-requests`
     shows them to the same person. Answered or gone: no `display`.
   - `crew_invite`: `title` "Crew invite: {crew}" whenever `context` names the crew.
   - `crew_here`: `title` "Someone from {crew} is here" (the stored title is the bare
