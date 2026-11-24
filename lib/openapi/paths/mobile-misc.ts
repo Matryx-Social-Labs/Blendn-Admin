@@ -908,7 +908,7 @@ const NotificationSchema = z.object({
         .string()
         .optional()
         .describe(
-          "The row's own words, in place of the stored title: \"{full name} wants to be friends\" and \"{full name} wants to message you\" while the ask waits; \"Crew invite: {crew}\" while the crew may be named; \"Someone from {crew} is here\" for a member of a crew still standing."
+          "The row's own words, in place of the stored title: \"{full name} wants to be friends\" and \"{full name} wants to message you\" while the ask waits; \"Crew invite: {crew}\" while the crew may be named; \"Someone from {crew} is here\" (\"{n} from {crew} are here\" when `data.count` > 1) for a member of a crew still standing; a crew's plan (`data.kind: \"crew_plan\"`) is not an arrival and gets none."
         ),
       context: z
         .string()

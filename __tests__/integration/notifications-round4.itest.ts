@@ -55,6 +55,7 @@ interface Row {
   id: string
   kind: string
   title: string
+  body: string
   data: Record<string, unknown> | null
   open?: boolean
   display?: { title?: string; context?: string; visual?: Record<string, unknown> }
@@ -231,9 +232,25 @@ describe("named asks (Flow 9 A)", () => {
     const row = (await feedOf(me)).notifications.find((n) => n.kind === "crew_here")!
     expect(row.display?.title).toBe("Someone from Saint-Jean-sur-Richelieu Riso is here")
 
+    // More than one in: the count, as the approved Flow 9 board draws it.
+    await sendPushNotification({ userId: me, title: crew.name, body: "Priya and Arjun are in.", data: { type: "crew_here", crewId: crew.id, count: "2" } })
+    const two = (await feedOf(me)).notifications.find((n) => n.kind === "crew_here" && n.body.startsWith("Priya and"))!
+    expect(two.display?.title).toBe("2 from Saint-Jean-sur-Richelieu Riso are here")
+
+    // A plan is not an arrival (SCRUM-1098): its row keeps the stored words, with the crew's emblem.
+    await sendPushNotification({
+      userId: me,
+      title: crew.name,
+      body: "Arjun wants to go together. Open the crew to see the night.",
+      data: { type: "crew_here", kind: "crew_plan", crewId: crew.id },
+    })
+    const planned = (await feedOf(me)).notifications.find((n) => n.kind === "crew_here" && n.body.startsWith("Arjun wants"))!
+    expect(planned.display?.title).toBeUndefined()
+    expect(planned.display?.visual).toEqual({ type: "emblem", seed: "s2" })
+
     // Left the crew: the row keeps its stored words and says nothing more.
     await db.crew_members.deleteMany({ where: { crew_id: crew.id, user_id: me } })
-    expect((await feedOf(me)).notifications.find((n) => n.kind === "crew_here")!.display?.title).toBeUndefined()
+    for (const n of (await feedOf(me)).notifications.filter((n) => n.kind === "crew_here")) expect(n.display?.title).toBeUndefined()
   })
 })
 

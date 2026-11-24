@@ -522,15 +522,16 @@ export async function crewHere(
       },
     })
   }
-  for (const [body, userIds] of bodies) {
+  for (const [body, { userIds, count }] of bodies) {
     await sendBulkPushNotifications({
       userIds,
       title: crew.name,
       body,
-      data: { type: "crew_here", crewId: crew.id, chatGroupId: room.id, occurrenceId },
+      // `count`: how many the body names, for the bell's "2 from {crew} are here" (Flow 9 A).
+      data: { type: "crew_here", crewId: crew.id, chatGroupId: room.id, occurrenceId, count: String(count) },
     }).catch((error: unknown) => logger.warn("Push notification failed", { context: "crew here", error: String(error) }))
   }
-  const notified = [...bodies.values()].reduce((n, ids) => n + ids.length, 0)
+  const notified = [...bodies.values()].reduce((n, { userIds }) => n + userIds.length, 0)
   return { notified, repeated: false }
 }
 
@@ -547,8 +548,8 @@ async function crewInBodies(
   roomId: string,
   occurrenceId: string,
   recipients: readonly string[]
-): Promise<Map<string, string[]>> {
-  const out = new Map<string, string[]>()
+): Promise<Map<string, { userIds: string[]; count: number }>> {
+  const out = new Map<string, { userIds: string[]; count: number }>()
   if (recipients.length === 0) return out
   const [present, told] = await Promise.all([presentMembersAt(occurrenceId, [crewId]), toldIn([roomId], occurrenceId)])
   const presentIds = present.get(crewId) ?? []
@@ -559,7 +560,8 @@ async function crewInBodies(
     const shown = inIds.filter((id) => id !== r && !apart.has(`${r}|${id}`)).map((id) => names.get(id) ?? UNNAMED)
     if (shown.length === 0) continue
     const body = crewInBody(shown, presentIds.includes(r))
-    out.set(body, [...(out.get(body) ?? []), r])
+    // One body names one number of people, so a body's recipients share its count.
+    out.set(body, { userIds: [...(out.get(body)?.userIds ?? []), r], count: shown.length })
   }
   return out
 }

@@ -277,7 +277,7 @@ registry.registerPath({
   description:
     CREW_404 +
     "Any active member marks the event's next night not yet over (`{ eventId }`). Once per crew per night: one crew-chat line (type `system`, " +
-    "metadata `{ kind: \"crew_plan\", eventId, occurrenceId }`) and one push (kind `crew_here`, \"{first name} wants to go together. Open the crew " +
+    "metadata `{ kind: \"crew_plan\", eventId, occurrenceId }`) and one push (kind `crew_here` with `data.kind: \"crew_plan\"`, never titled as an arrival on the bell; \"{first name} wants to go together. Open the crew " +
     "to see the night.\" — never the place) to every other member who has not muted the crew chat or blocked the planner. A second mark: " +
     "`repeated: true`, nobody told. 404 for an event you may not take part in (the RSVP door: private and not let in, under its age " +
     "line, a closed city), a draft or a venue day; 403 crews off; 400 no night left; 429 after " +
@@ -389,7 +389,7 @@ registry.registerPath({
     "Writes a line in the crew chat (type `system`, metadata `{ kind: \"crew_here\", eventId, occurrenceId }`) and pushes every other " +
     "member who has not muted the crew chat or blocked you — once per person per crew per occurrence (`repeated: true` after that; the " +
     "line itself is the record, so it holds across restarts). Somebody who turned notifications off gets the bell line, not a push. " +
-    "The push names who is in with the crew by first name (\"Priya and Arjun are in. Hold to Blend’n when you get there.\"; a member " +
+    "The push (`data`: `crewId`, `chatGroupId`, `occurrenceId`, `count` — how many it names) names who is in with the crew by first name (\"Priya and Arjun are in. Hold to Blend’n when you get there.\"; a member " +
     "already in gets the names only), never who is not, never a place, and never anybody kept apart from that recipient. " +
     "`POST /events/{eventId}/checkin` with `withCrewId` runs this same write. 403 when the host turned crews off.",
   security: bearerAuth,

@@ -790,8 +790,11 @@ event's change and a report's outcome have no switch here. Stored as
     `visual` the sender's photo (`{ type: "photo", uri, name }`), else `initial`, the sender as `GET /message-requests`
     shows them to the same person. Answered or gone: no `display`.
   - `crew_invite`: `title` "Crew invite: {crew}" whenever `context` names the crew.
-  - `crew_here`: `title` "Someone from {crew} is here" (the stored title is the bare
-    crew name) for a member of a crew neither dissolved nor hidden.
+  - `crew_here`: `title` "Someone from {crew} is here", or "{n} from {crew} are here"
+    when the row names more than one (`data.count`), for a member of a crew neither
+    dissolved nor hidden (the stored title is the bare crew name). A crew's plan rides
+    the same kind with `data.kind: "crew_plan"` and is not an arrival: no `title`, its
+    stored words stand (SCRUM-1098).
   - `match`: `visual` `{ type: "creature", pseudonym }`, the other side's room
     pseudonym, and `context` the same pseudonym. Never a name or a photo.
   - `crew_invite`, `crew_here`: `visual` `{ type: "emblem", seed }`, the crew's
@@ -865,7 +868,8 @@ it is answered in Banter and is a plain history line in Notifications:
   (`lib/badge-count.ts` serves both, four statements however many recipients).
 - A crew arrival (`crew_here`) is one updating push per crew (`crew-here:{crewId}`,
   replaced in place on a Flow 9 build) and one bell row per crew a night: the next
-  arrival replaces the last row (`data.occurrenceId`).
+  arrival replaces the last row (`data.occurrenceId`). `data.count` is how many the
+  push names. A plan (`data.kind: "crew_plan"`) replaces no arrival and is replaced by none.
 - A second crew invite from the same inviter within 24 h is spared its push only;
   its bell row is written, so it waits in Notifications like the first.
 
@@ -3321,7 +3325,7 @@ account id.
 and checks **nobody else** in: every member checks in by their own GPS. It
 writes a line in the crew chat (type `system`, `"We're here 👋"`, metadata
 `{ kind: "crew_here", eventId, occurrenceId }`) and sends `crew_here`
-(`crewId`, `chatGroupId`) to every other member who has not muted the crew
+(`crewId`, `chatGroupId`, `occurrenceId`, `count`: how many it names) to every other member who has not muted the crew
 chat or blocked the tapper — **once per person per crew per occurrence**; a
 second tap answers `repeated: true` and tells nobody. The line itself is the
 record (read and written in one transaction under a lock), so it holds across
@@ -3352,8 +3356,8 @@ event, not a venue day, that they may take part in by the RSVP's own door
 an age line they are under or a closed city is 404, nothing written). One plan per crew per night
 (`crew_plans`, unique): the first mark writes a crew-chat line (type `system`,
 `"Going together 🗓"`, metadata `{ kind: "crew_plan", eventId, occurrenceId }`)
-and sends one push — kind `crew_here` (it opens the crew chat; the "Your crew"
-category), titled with the crew's name, *"Priya wants to go together. Open the
+and sends one push — kind `crew_here` with `data.kind: "crew_plan"` (it opens the
+crew chat; the "Your crew" category; the bell never titles it as an arrival), titled with the crew's name, *"Priya wants to go together. Open the
 crew to see the night."*, never the place — to every other member who has not
 muted the crew chat or blocked the planner. A second mark answers `repeated:
 true` and tells nobody. 403 crews off, 400 no night left, 429 after 3 nights
@@ -4946,8 +4950,8 @@ them any more. Rows written before that are hidden, and retention removes them.
 | An organizer announcement | Everyone in the room | Stacked with its event, never replaced |
 | Friend request / accepted, match, reveal, Lobby, message request | The person it is about, immediately | One each |
 | A crew invite | The friend invited (`crew_invite`, `crewId`), naming nobody | One each |
-| "Going together" | Every other crew member who has not muted the crew chat or blocked the planner (`crew_here`, `crewId`, `chatGroupId`), once per crew per night; "Priya wants to go together. Open the crew to see the night." — no place | One each |
-| "We're here" / "With {crew}" at the hold | Every other crew member who has not muted the crew chat or blocked the tapper (`crew_here`, `crewId`, `chatGroupId`), once per person per night; "Priya and Arjun are in. Hold to Blend’n when you get there." — who is in by first name, never who is not, no place | One each |
+| "Going together" | Every other crew member who has not muted the crew chat or blocked the planner (`crew_here`, `kind: "crew_plan"`, `crewId`, `chatGroupId`), once per crew per night; "Priya wants to go together. Open the crew to see the night." — no place | One each |
+| "We're here" / "With {crew}" at the hold | Every other crew member who has not muted the crew chat or blocked the tapper (`crew_here`, `crewId`, `chatGroupId`, `occurrenceId`, `count`), once per person per night; "Priya and Arjun are in. Hold to Blend’n when you get there." — who is in by first name, never who is not, no place | One each |
 | A Mix | Everyone the Mix room lets in, but the person whose like made it (`blend`, `blendId`, `chatGroupId`); no name, nothing about who liked first | One each |
 | An event you checked in to ends | Everyone with a check-in row, once per event, within ~5 minutes of the end (only events that ended in the last 6 hours). `data: { type: "rating_request", eventId }` → the app opens `/rate/[eventId]`. People with a mutual like to rate (blocks excluded) get "rate the people you met"; the rest "rate the night"; somebody who already rated and has nobody to rate is skipped | `rate:{eventId}` on `events`, replaced in place |
 
