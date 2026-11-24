@@ -17,6 +17,8 @@ import { eventListSelect } from "@/lib/services/events.service"
  * checks exist only in migration SQL, so only a db:migrate database has them.
  */
 // eslint-disable-next-line @typescript-eslint/no-require-imports
+const eventsRoute = require("@/app/api/events/route") as typeof import("@/app/api/events/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const eventRoute = require("@/app/api/events/[id]/route") as typeof import("@/app/api/events/[id]/route")
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const detailRoute = require("@/app/api/mobile/events/[eventId]/route") as typeof import("@/app/api/mobile/events/[eventId]/route")
@@ -127,5 +129,34 @@ describe("from the dashboard's save to the app's detail", () => {
     expect(await db.event_media.findMany({ where: { event_id: eventId }, select: { duration_ms: true } })).toEqual([
       { duration_ms: 15_200 },
     ])
+  })
+
+  it("PATCH with no session is 401 and writes nothing", async () => {
+    const eventId = await ownedEvent()
+    mockGetAuth.mockResolvedValue(null)
+    expect((await save(eventId, [clip])).status).toBe(401)
+    expect(await db.event_media.count({ where: { event_id: eventId } })).toBe(0)
+  })
+
+  it("POST writes the size with a new event", async () => {
+    await ownedEvent()
+    const title = testId("media-new")
+    const res = await eventsRoute.POST(
+      new Request("http://localhost/api/events", {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          description: "integration fixture",
+          start_time: new Date(Date.now() + 86_400_000).toISOString(),
+          end_time: new Date(Date.now() + 90_000_000).toISOString(),
+          timezone: "Asia/Kolkata",
+          media_items: [clip],
+        }),
+      }) as never
+    )
+    expect(res.status).toBeLessThan(300)
+    const created = await db.events.findFirstOrThrow({ where: { title }, select: { id: true, media: true } })
+    events.push(created.id)
+    expect(created.media).toEqual([expect.objectContaining({ width: 1080, height: 1920, duration_ms: 15_200 })])
   })
 })

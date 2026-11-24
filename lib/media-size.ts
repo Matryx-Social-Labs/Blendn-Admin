@@ -24,6 +24,8 @@ const TIMEOUT_MS = 15_000
 /** The shape sent, from what the browser reported. */
 export function mediaSize(width: number, height: number, durationSeconds?: number): MediaSize | null {
   if (!(width > 0 && height > 0)) return null
+  // Past what the save accepts: go without a size, as a pasted URL does.
+  if (Math.max(width, height) > MEDIA.MAX_SIDE_PX) return null
   const size: MediaSize = { width: Math.round(width), height: Math.round(height) }
   return durationSeconds !== undefined && Number.isFinite(durationSeconds) && durationSeconds > 0
     ? { ...size, duration_ms: Math.round(durationSeconds * 1000) }

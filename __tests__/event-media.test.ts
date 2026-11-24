@@ -109,4 +109,9 @@ describe("mediaSize (what the dashboard sends from a picked file)", () => {
   it("is nothing when the file decoded to no picture", () => {
     expect(mediaSize(0, 0, 4)).toBeNull()
   })
+
+  it("is nothing past the side limit: the save must not fail for a panorama", () => {
+    expect(mediaSize(MEDIA.MAX_SIDE_PX + 1, 400)).toBeNull()
+    expect(mediaSize(MEDIA.MAX_SIDE_PX, 400)).toEqual({ width: MEDIA.MAX_SIDE_PX, height: 400 })
+  })
 })
