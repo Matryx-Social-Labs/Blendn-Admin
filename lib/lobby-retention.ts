@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client"
 import { CHAT_WINDOW_HOURS } from "./chat-window"
 import { db } from "./db"
 import { tallyFeedback } from "./feedback-digest"
-import { freezeInsightTallies } from "./insight-tallies"
+import { FREEZE_BATCH, freezeInsightTallies } from "./insight-tallies"
 import { logger } from "./logger"
 import { deleteFile, isConfigured, sealedChatKey } from "./tigris"
 
@@ -326,4 +326,39 @@ export async function purgeTonightAnswers(now: Date = new Date()): Promise<{ ans
           AND EXISTS (SELECT 1 FROM event_insight_tallies t WHERE t.event_id = e.id)
         LIMIT ${ANSWER_BATCH})`
   return { answers, hasMore: answers === ANSWER_BATCH }
+}
+
+/**
+ * Person waves and the old likes (`event_waves`, `event_likes`), 30 days after
+ * the event's last night (SCRUM-1094 c), answered or not. Nothing in the app
+ * reads them once the room closes, a day after the end: an unanswered one is
+ * somebody's private interest, and a returned one already opened the
+ * conversation that lives on without it. Two dashboard readers count from
+ * them: the host's connections, whose event is frozen first
+ * (`event_insight_tallies`; the delete waits for it, as the Tonight answers'
+ * does), and the admin funnel's "matched", which reads the conversations
+ * instead (lib/loop-closure.ts). Not behind `LOBBY_PURGE`: no report copies a
+ * wave. Crew likes have their own, shorter rule (`purgeLapsedCrewLikes`).
+ */
+export const GESTURE_DAYS = 30
+const GESTURE_BATCH = 5_000
+
+export async function purgeEventGestures(now: Date = new Date()): Promise<{ waves: number; likes: number; hasMore: boolean }> {
+  const since = new Date(now.getTime() - GESTURE_DAYS * DAY_MS)
+  await freezeInsightTallies(since)
+  // any-kind: a venue day's room waves too, and its counts are frozen like any event's.
+  const due = await db.$queryRaw<{ id: string }[]>`
+    SELECT e.id FROM events e
+     WHERE e.end_time < ${since}
+       AND NOT EXISTS (SELECT 1 FROM event_occurrences o WHERE o.event_id = e.id AND o.end_time >= ${since})
+       AND EXISTS (SELECT 1 FROM event_insight_tallies t WHERE t.event_id = e.id)
+       AND (EXISTS (SELECT 1 FROM event_waves w WHERE w.event_id = e.id) OR EXISTS (SELECT 1 FROM event_likes l WHERE l.event_id = e.id))
+     LIMIT ${FREEZE_BATCH}`
+  if (due.length === 0) return { waves: 0, likes: 0, hasMore: false }
+  const ids = due.map((d) => d.id)
+  const waves = await db.$executeRaw`
+    DELETE FROM event_waves WHERE id IN (SELECT id FROM event_waves WHERE event_id = ANY(${ids}::uuid[]) LIMIT ${GESTURE_BATCH})`
+  const likes = await db.$executeRaw`
+    DELETE FROM event_likes WHERE id IN (SELECT id FROM event_likes WHERE event_id = ANY(${ids}::uuid[]) LIMIT ${GESTURE_BATCH})`
+  return { waves, likes, hasMore: due.length === FREEZE_BATCH || waves === GESTURE_BATCH || likes === GESTURE_BATCH }
 }

@@ -1,5 +1,5 @@
 import type { ModerationResult } from "./types"
-import { hit, forget } from "@/lib/rate-limit-store"
+import { hitRolling, forget } from "@/lib/rate-limit-store"
 import {
   SPAM_BURST_LIMIT,
   SPAM_BURST_WINDOW_MS,
@@ -144,21 +144,25 @@ export async function checkSpam(
    * limit is one bucket for the account instead of one per replica. Somebody
    * flooding a room across four instances was previously allowed four times the
    * burst.
+   *
+   * Rolling, not fixed (anti-spam leftovers, 2026-11-24): a fixed window let
+   * ten through across its edge. The key is not the fixed counter's old one
+   * (`spam:burst:`), whose type in Redis differs, so a deploy never collides.
    */
-  const { count, resetAt } = await hit(`spam:burst:${key}`, SPAM_BURST_WINDOW_MS)
-  if (count > SPAM_BURST_LIMIT) {
+  const burst = await hitRolling(`spam:rolling:${key}`, SPAM_BURST_WINDOW_MS, SPAM_BURST_LIMIT)
+  if (!burst.allowed) {
     history.messages.push({ content: normalizedContent, timestamp: now })
     return {
       action: "hide",
       source: "spam",
       categories: { spam: 0.95 },
       confidence: 0.95,
-      reason: `Burst rate exceeded (${count} messages in ${SPAM_BURST_WINDOW_MS / 1000}s)`,
+      reason: `Burst rate exceeded (more than ${SPAM_BURST_LIMIT} messages in ${SPAM_BURST_WINDOW_MS / 1000}s)`,
       // Static on purpose: the countdown is `retryAfter`, and a number in the sentence would be stale a second later.
       message: "Slow down a moment, then try again.",
       reasonCode: "SPAM_BURST",
-      // When the window ends and this person can send again (SV13).
-      retryAfter: Math.max(1, Math.ceil((resetAt - now) / 1000)),
+      // When the oldest of the five leaves the window and this person can send again (SV13).
+      retryAfter: Math.max(1, Math.ceil(((burst.retryAt ?? now) - now) / 1000)),
     }
   }
 
@@ -196,13 +200,13 @@ export async function checkSpam(
 export async function resetSpamHistory(userId: string, chatGroupId: string): Promise<void> {
   const key = `${userId}:${chatGroupId}`
   historyMap.delete(key)
-  await forget(`spam:burst:${key}`)
+  await forget(`spam:rolling:${key}`)
 }
 
 /** Clear all spam history (useful for testing) */
 export async function clearAllSpamHistory(): Promise<void> {
   // Both halves, for the same reason `resetSpamHistory` does: clearing the Map
   // alone leaves every burst window running, and the next caller inherits it.
-  await Promise.all([...historyMap.keys()].map((key) => forget(`spam:burst:${key}`)))
+  await Promise.all([...historyMap.keys()].map((key) => forget(`spam:rolling:${key}`)))
   historyMap.clear()
 }

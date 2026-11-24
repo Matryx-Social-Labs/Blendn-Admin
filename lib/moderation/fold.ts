@@ -7,8 +7,9 @@
  * a dot, a right-to-left override that renders a number backwards. Each one
  * passed the crew-name checks (PR #630 security review). Folding first means
  * the keyword filter, the contact-detail detector and OpenAI all read the
- * same thing the screen will show — and the folded form is what is stored, so
- * nothing slips past the check by being re-rendered differently later.
+ * same thing the screen will show. What is stored is `foldForStorage`: the
+ * same, except that a word in one alphabet keeps its letters ("Москва" stays
+ * Cyrillic); the checks read `foldText` of it, so nothing slips past them.
  *
  * Three steps, in order:
  *
@@ -68,6 +69,28 @@ export function foldText(text: string): string {
     out.push(DIGIT.test(ch) ? asciiDigit(ch) : (CONFUSABLE[ch] ?? ch))
   }
   return out.join("")
+}
+
+const LATIN = /\p{Script=Latin}/u
+const LOOKALIKE = /[\p{Script=Cyrillic}\p{Script=Greek}]/u
+
+/**
+ * The text as it is stored and shown: `foldText`, except that look-alike
+ * letters fold only inside a word that mixes Latin with Cyrillic or Greek
+ * ("Lоt" with a Cyrillic о is "Lot"). A word in one alphabet stays as typed, so
+ * "Москва" is not stored as "Mockba". Safe because every check reads
+ * `foldText` of it: a word spelled wholly in look-alikes still reads as Latin
+ * to the keyword filter and the contact reading. Digits and invisible
+ * characters fold everywhere, as in `foldText`.
+ */
+export function foldForStorage(text: string): string {
+  return text
+    .normalize("NFKC")
+    .replace(INVISIBLE, "")
+    .replace(/[\p{L}\p{M}\p{N}]+/gu, (word) => {
+      const mixed = LATIN.test(word) && LOOKALIKE.test(word)
+      return [...word].map((ch) => (DIGIT.test(ch) ? asciiDigit(ch) : mixed ? (CONFUSABLE[ch] ?? ch) : ch)).join("")
+    })
 }
 
 /** Whether the text carries an invisible format character (an emoji's joiner aside). */

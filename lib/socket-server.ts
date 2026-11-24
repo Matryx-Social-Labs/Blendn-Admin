@@ -17,6 +17,7 @@ import { hereCountCoalesced } from "./attendee-counts"
 import { roomHandle, type RoomScope } from "./room-handle"
 import { ownerAdmits, roomOwnerDenial, roomScope, withOwnerDoor } from "./room-kind"
 import { readableUrl } from "./tigris"
+import { mayEmitTyping } from "./typing-gate"
 import { isUuid } from "./api-input"
 import { createEventBudget } from "./socket-budget"
 import { namesInRoom, recognisedInRoomBy } from "./identity"
@@ -539,6 +540,7 @@ export async function emitChatTyping(
   chatGroupId: string,
   isTyping: boolean
 ): Promise<void> {
+  if (!mayEmitTyping(socket, "chat", chatGroupId, isTyping)) return
   try {
     const membership = await readTypingMembership(socket.data.userId, chatGroupId)
     if (!membership || membership.status !== "active") return
@@ -627,6 +629,7 @@ export async function emitPrivateTyping(
   conversationId: string,
   isTyping: boolean
 ): Promise<void> {
+  if (!mayEmitTyping(socket, "conversation", conversationId, isTyping)) return
   try {
     /*
      * Resolved through the conversation, not read straight off the profile.

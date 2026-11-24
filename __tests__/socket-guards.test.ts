@@ -225,9 +225,10 @@ describe("emitChatTyping", () => {
     mockDb.chat_group_members.findUnique.mockResolvedValue(member("Neon Phoenix", "active"))
     const { socket, roomEmit } = makeSocket()
 
+    await emitChatTyping(socket, CHAT_ID, true)
     await emitChatTyping(socket, CHAT_ID, false)
 
-    expect(roomEmit).toHaveBeenCalledWith(
+    expect(roomEmit).toHaveBeenLastCalledWith(
       "chat:typing",
       expect.objectContaining({ isTyping: false, userName: "Neon Phoenix" })
     )

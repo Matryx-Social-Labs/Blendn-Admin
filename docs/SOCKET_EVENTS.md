@@ -93,6 +93,10 @@ the door. An event's room is unchanged: its door is the join.
 > broadcasts `chat:message` to the room. Sending `chat:message` over the socket
 > does nothing.
 
+**Typing is gated per socket** (2026-11-24): a start within 2 seconds of the last
+one let through for that room or conversation is silently dropped, and a stop is
+relayed only when it ends a start that was. Send one start per burst of typing.
+
 `chat:startTyping`/`chat:stopTyping` are silently dropped for members who are
 `muted` or `banned`, so a member banned mid-session stops broadcasting typing
 state without being disconnected. They also never reach anyone the typist has

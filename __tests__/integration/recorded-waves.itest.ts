@@ -16,7 +16,7 @@ import { logger } from "@/lib/logger"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
 import { roomHandle } from "@/lib/room-handle"
-import { WAVE_LIMITS, waveCapFor } from "@/lib/waves"
+import { WAVE_LIMITS, recordWave, waveCapFor } from "@/lib/waves"
 import { matchesForEvent } from "@/lib/matches"
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, putInRoom, testId } from "./helpers"
 
@@ -143,12 +143,26 @@ describe("one wave per pair per room, recorded", () => {
     expect(await rowsBetween(ana, ben)).toBe(1)
   })
 
-  it("W1 under a race: two waves at once leave one row", async () => {
-    const ana = await person("rw-race-a")
-    const ben = await person("rw-race-b")
-    const both = await Promise.all([wave(ana, ben), wave(ana, ben)])
-    expect(both.map((r) => r.status)).toEqual([200, 200])
-    expect(await rowsBetween(ana, ben)).toBe(1)
+  it("W1 under a race: two waves at once leave one row, and both are answered as sent (SCRUM-1058)", async () => {
+    // Six pairs at once, so the race between the "already waved" read and the store is actually run.
+    const pairs = await Promise.all([0, 1, 2, 3, 4, 5].map(async (i) => [await person(`rw-race-a${i}`), await person(`rw-race-b${i}`)] as const))
+    const answers = await Promise.all(pairs.flatMap(([ana, ben]) => [wave(ana, ben), wave(ana, ben)]))
+    expect(answers.map((r) => r.status)).toEqual(Array(12).fill(200))
+    for (const [ana, ben] of pairs) expect(await rowsBetween(ana, ben)).toBe(1)
+  })
+
+  it("the pair window (W2) is counted under the lock: a duplicate never counts, a new wave elsewhere is held, an answer is not", async () => {
+    const ana = await person("rw-w2-a")
+    const ben = await person("rw-w2-b")
+    const other = await makeEvent(users[0])
+    events.push(other)
+    expect(await recordWave(eventId, ana.id, ben.id, { answering: false })).toEqual({ recorded: true })
+    expect(await recordWave(eventId, ana.id, ben.id, { answering: false })).toEqual({ recorded: false, capped: null })
+    expect(await recordWave(other, ana.id, ben.id, { answering: false })).toEqual({
+      recorded: false,
+      capped: { cap: "pair", retryAfter: expect.any(Number) },
+    })
+    expect(await recordWave(other, ana.id, ben.id, { answering: true })).toEqual({ recorded: true })
   })
 
   it("the database refuses a duplicate and a self-wave whoever writes", async () => {
