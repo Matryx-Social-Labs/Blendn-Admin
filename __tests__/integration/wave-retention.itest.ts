@@ -95,6 +95,7 @@ it("waits for the counts: an event whose tally is missing keeps its rows", async
   let purge = purgeEventGestures
   jest.isolateModules(() => {
     jest.doMock("@/lib/insight-tallies", () => ({ freezeInsightTallies: async () => 0 }))
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     purge = (require("@/lib/lobby-retention") as typeof import("@/lib/lobby-retention")).purgeEventGestures
   })
   const purged = await purge()

@@ -2500,7 +2500,7 @@ If OpenAI times out (>1s), message is broadcast and moderation falls back to asy
 **Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `CHAT_LOCKED` (403), `NOT_CHECKED_IN` (403), `LEFT_ROOM` (403), `NOT_LIVE` (403, a venue's room after your Go Live ended), `SPAM_BLOCKED` (429), `MODERATION_UNAVAILABLE` (503, busy event rooms only, above)
 
 **`SPAM_BLOCKED` says when to try again** (SV13): a send refused for a burst (5 in
-10 seconds) carries `retryAfter`, whole seconds until that window ends, in the
+10 seconds) carries `retryAfter`, whole seconds until the oldest of the five is 10 seconds old (a rolling window: never more than five in any 10 seconds, and a refused try is not counted), in the
 body and in `Retry-After`, as a `RATE_LIMITED` 429 does. A message refused for
 too many links has none: sending it again would not pass. The same on the event
 chat and DM sends (`docs/API.md`, *Direct messages*). `errorCode` is unchanged;

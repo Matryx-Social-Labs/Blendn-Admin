@@ -69,6 +69,11 @@ describe("digit words glued into one word (follow-up from #981)", () => {
     expect(kinds("nineohfour fivezero onetwo three")).toContain("phone")
   })
 
+  it("reads a glued oh inside a run as zeros: it is no way to break one (security review)", () => {
+    expect(kinds("98 ohoh 12345")).toContain("phone")
+    expect(kinds("98450 ohohoh 12")).toContain("phone")
+  })
+
   it("never splits an ordinary word, and never uses the homophones glued", () => {
     // to/too/for/won/ate/tree/o stay spaced-only: glued, they are ordinary words.
     for (const text of ["often tooth forte tonight", "toto fortoo wonate", "someone ninety tenfold", "fiver sevens eighteen nineteen", "ohoh ohohoh ohoh"]) {

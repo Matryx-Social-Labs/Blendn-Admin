@@ -113,12 +113,12 @@ const GLUED_WORD = new RegExp(GLUED_WORDS.join("|"), "g")
 /**
  * A token made wholly of two or more digit names, as its digits:
  * `ninefourfive` → `945`. In the same four forms as `digitWordFor`, so
- * `niiinefour` and `f1vezero` read too. "ohoh" is an exclamation, not a number.
+ * `niiinefour` and `f1vezero` read too.
  */
 function gluedDigitsFor(token: string): string | undefined {
   const collapse = (t: string) => t.replace(/(.)\1+/g, "$1")
   for (const form of [token, collapse(token), unleet(token), collapse(unleet(token))]) {
-    if (GLUED.test(form) && !/^(?:oh)+$/.test(form)) return form.replace(GLUED_WORD, (w) => DIGIT_WORDS[w])
+    if (GLUED.test(form)) return form.replace(GLUED_WORD, (w) => DIGIT_WORDS[w])
   }
   return undefined
 }
@@ -196,7 +196,8 @@ export function findContactInfo(content: string): ContactInfoFinding[] {
   if (!content?.trim()) return findings
 
   const runs = digitsIn(content).split(/\s+/).filter(Boolean)
-  if (runs.some((run) => run.length >= MIN_PHONE_DIGITS)) {
+  // Not nothing but zeros: "ohoh ohohoh ohoh" is an exclamation. Inside a run an "oh" is a zero like any other.
+  if (runs.some((run) => run.length >= MIN_PHONE_DIGITS && /[1-9]/.test(run))) {
     findings.push({
       kind: "phone",
       hint: "This looks like a phone number.",
