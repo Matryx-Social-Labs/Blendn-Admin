@@ -10,7 +10,7 @@ import { createCrew, createCrewSchema, inviteToCrew, isRefusal, openInviteWhere 
 import { requestFriend } from "../lib/friends"
 import { areaSlug } from "../lib/venue-area"
 import PHOTOS from "./seed-blr-photos.json"
-import { cover, mirrorToTigris } from "./seed-media"
+import { cover } from "./seed-media"
 import { environmentRefusal } from "./test-accounts"
 
 /**
@@ -391,10 +391,23 @@ async function interestEvents(base: Base, driverId: string) {
 async function videoOnlyEvent(base: Base) {
   const start = tomorrowIst(19, 0)
   const event = await upsertEvent({ ...base, slug: `${SLUG}video-only`, title: "Audit FX Video Only", start, end: endOf(start), place: KORAMANGALA, venueId: null, coverless: true })
-  const clip = (PHOTOS as unknown as { _clip: { url: string; alt: string } })._clip
-  const url = await mirrorToTigris(clip.url, `seed/${SLUG}video-only/clip.mp4`, "video/mp4")
+  // The scenario seed's clip, already in our bucket with its own first frame (task 30); a cover as the poster was
+  // another picture that swapped when the clip started (SCRUM-1066).
+  const clip = (PHOTOS as unknown as { _clip: { url: string; poster: string; alt: string; width: number; height: number; duration_ms: number } })._clip
   await db.event_media.deleteMany({ where: { event_id: event.id } })
-  await db.event_media.create({ data: { event_id: event.id, type: "video", url, thumbnail_url: cover(`${SLUG}video-poster`), title: clip.alt, order: 0 } })
+  await db.event_media.create({
+    data: {
+      event_id: event.id,
+      type: "video",
+      url: clip.url,
+      thumbnail_url: clip.poster,
+      width: clip.width,
+      height: clip.height,
+      duration_ms: clip.duration_ms,
+      title: clip.alt,
+      order: 0,
+    },
+  })
   return event
 }
 

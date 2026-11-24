@@ -432,8 +432,13 @@
     }
   ],
   "_clip": {
-    "url": "https://videos.pexels.com/video-files/7270104/7270104-hd_1280_720_25fps.mp4",
-    "alt": "DJ in sunglasses performing in a dark club with red and purple lights (Pexels, 20 s)",
-    "bytes": 7189614
+    "url": "https://blendn-media-staging.fly.storage.tigris.dev/seed/_clips/dj-red-purple-12s.mp4",
+    "poster": "https://blendn-media-staging.fly.storage.tigris.dev/seed/_clips/dj-red-purple-12s-poster.jpg",
+    "source": "https://videos.pexels.com/video-files/7270104/7270104-hd_1280_720_25fps.mp4",
+    "alt": "DJ in sunglasses performing in a dark club with red and purple lights (Pexels, cut to 12 s)",
+    "width": 1280,
+    "height": 720,
+    "duration_ms": 12000,
+    "bytes": 3047455
   }
 }

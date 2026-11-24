@@ -25,8 +25,9 @@ import { eventReadiness } from "@/lib/event-readiness"
 import { AdvancedSection } from "@/components/event-form/advanced-section"
 import { uploadFile } from "@/components/event-form/upload"
 import { captureVideoPoster } from "@/lib/video-poster"
-import { clipTooLong, readMediaSize } from "@/lib/media-size"
-import { DEFAULT_CHECK_IN_RADIUS_M, MEDIA } from "@/lib/constants"
+import { readMediaSize } from "@/lib/media-size"
+import { uploadMediaItem } from "@/components/event-form/upload-media-item"
+import { DEFAULT_CHECK_IN_RADIUS_M } from "@/lib/constants"
 import { Refusal } from "@/lib/refusal"
 
 export type { EventFormValues } from "@/components/event-form/schema"
@@ -115,73 +116,46 @@ export function EventForm({
 
   const [isUploadingCover, setIsUploadingCover] = useState(false)
   const [coverUploadProgress, setCoverUploadProgress] = useState(0)
-  const [mediaUploadProgress, setMediaUploadProgress] = useState<Record<number, number>>({})
+  const [mediaUploadProgress, setMediaUploadProgress] = useState<Record<string, number>>({})
 
   // ── Upload helpers ──────────────────────────────────────────────────────────
 
-  const handleMediaUpload = async (file: File, index: number): Promise<string | null> => {
+  /** Keyed by the item's id, so the bar follows its item through a drag. */
+  const handleMediaUpload = async (file: File, itemId: string): Promise<string | null> => {
+    const setProgress = (percent: number) => setMediaUploadProgress((p) => ({ ...p, [itemId]: percent }))
     try {
-      setMediaUploadProgress((p) => ({ ...p, [index]: 0 }))
-      const type = form.getValues(`media_items.${index}.type`)
-      /*
-       * Measured before the upload (SCRUM-1066): the app chooses a card's fit
-       * from the size before the bytes land, and a clip over the limit is
-       * refused here rather than after twelve megabytes went up.
-       */
-      const size = type === "image" || type === "video" ? await readMediaSize(file, type) : null
-      if (type === "video" && size?.duration_ms && clipTooLong(size.duration_ms)) {
-        return `This clip is ${(size.duration_ms / 1000).toFixed(1)} seconds. Clips play up to ${MEDIA.MAX_CLIP_MS / 1000} seconds: trim it and upload again.`
+      setProgress(0)
+      const result = await uploadMediaItem(file, itemId, {
+        items: () => form.getValues("media_items") ?? [],
+        write: (index, patch) => {
+          form.setValue(`media_items.${index}.url`, patch.url, { shouldValidate: true })
+          form.setValue(`media_items.${index}.width`, patch.width)
+          form.setValue(`media_items.${index}.height`, patch.height)
+          form.setValue(`media_items.${index}.duration_ms`, patch.duration_ms)
+          if (patch.thumbnail_url !== undefined) form.setValue(`media_items.${index}.thumbnail_url`, patch.thumbnail_url)
+        },
+        upload: uploadFile,
+        readSize: readMediaSize,
+        /*
+         * A clip's poster is its own opening frame, taken from the file just
+         * picked: every surface paints the poster and mounts the player over
+         * it, so a different picture (the cover) visibly swaps when the clip
+         * starts. Non-fatal: a codec the browser cannot decode still uploads.
+         */
+        capturePoster: captureVideoPoster,
+        onProgress: setProgress,
+      })
+      if (result.kind === "refused") return result.reason
+      if (result.kind === "done") {
+        if (result.posterMissing) toast.info("Add a poster image for this clip so it does not flash when it loads.")
+        toast.success("Media uploaded")
       }
-      const url = await uploadFile(file, (percent) =>
-        setMediaUploadProgress((p) => ({ ...p, [index]: percent }))
-      )
-      form.setValue(`media_items.${index}.url`, url, { shouldValidate: true })
-      form.setValue(`media_items.${index}.width`, size?.width)
-      form.setValue(`media_items.${index}.height`, size?.height)
-      form.setValue(`media_items.${index}.duration_ms`, size?.duration_ms)
-      if (type === "image" && !form.getValues(`media_items.${index}.thumbnail_url`)) {
-        form.setValue(`media_items.${index}.thumbnail_url`, url)
-      }
-
-      /*
-       * A video's poster is its own opening frame, taken here.
-       *
-       * Every surface paints the poster and mounts the player over it. When the
-       * poster is a *different* picture — the event cover, which is the
-       * fallback — the instant the clip produces its first frame the image
-       * changes, and it reads as the screen settling and then re-settling.
-       * Making the poster the first frame means nothing about the picture
-       * changes at all, only which layer draws it.
-       *
-       * Done from the file the organiser has just picked, so it costs no
-       * network: the alternative is a server round trip, a worker and a queue
-       * for a frame the browser already has.
-       *
-       * Deliberately non-fatal. A codec the browser cannot decode, or a poster
-       * they have already chosen, must not fail an upload that otherwise
-       * worked — the manual field is still there and the cover still backs it.
-       */
-      if (type === "video" && !form.getValues(`media_items.${index}.thumbnail_url`)) {
-        try {
-          const poster = await captureVideoPoster(file)
-          const posterUrl = await uploadFile(
-            new File([poster], `${file.name.replace(/\.[^.]+$/, "")}-poster.jpg`, {
-              type: "image/jpeg",
-            })
-          )
-          form.setValue(`media_items.${index}.thumbnail_url`, posterUrl)
-        } catch {
-          toast.info("Add a poster image for this clip so it does not flash when it loads.")
-        }
-      }
-
-      toast.success("Media uploaded")
     } catch (err) {
       toast.error(err instanceof Refusal ? err.message : "Failed to upload media")
     } finally {
       setMediaUploadProgress((p) => {
         const next = { ...p }
-        delete next[index]
+        delete next[itemId]
         return next
       })
     }

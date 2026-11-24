@@ -371,11 +371,20 @@ const TIGRIS_HOSTED = new Set([
  * the case that actually needs testing: a still card next to a playing one,
  * which is where a mismatched poster or a wrong aspect shows up.
  */
-const CLIPS: Record<string, string> = {
-  "sunset-sessions-humming-tree":
-    "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4",
-  "basement-six-residents":
-    "https://test-videos.co.uk/vids/jellyfish/mp4/h264/720/Jellyfish_720_10s_1MB.mp4",
+const CLIPS: Record<string, { url: string; width: number; height: number; duration_ms: number }> = {
+  // Sizes probed with ffprobe (task 30): the app picks a card's fit from them before the bytes land.
+  "sunset-sessions-humming-tree": {
+    url: "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4",
+    width: 1280,
+    height: 720,
+    duration_ms: 10000,
+  },
+  "basement-six-residents": {
+    url: "https://test-videos.co.uk/vids/jellyfish/mp4/h264/720/Jellyfish_720_10s_1MB.mp4",
+    width: 1280,
+    height: 720,
+    duration_ms: 10010,
+  },
 }
 
 /**
@@ -387,16 +396,16 @@ const CLIPS: Record<string, string> = {
  * cover around a letterboxed clip was SCRUM-1066.
  */
 async function seededMedia(spec: (typeof EVENTS)[number]) {
-  if (!spec.media) return { coverUrl: null, clipUrl: null, hotlinked: [] as string[] }
+  if (!spec.media) return { coverUrl: null, clipUrl: null, clip: null, hotlinked: [] as string[] }
   const ours = TIGRIS_HOSTED.has(spec.slug)
   const coverKey = `seed/${spec.slug}/cover.jpg`
   const clipKey = `seed/${spec.slug}/clip.mp4`
   const coverUrl = ours ? await mirrorToTigris(cover(spec.media), coverKey, "image/jpeg") : cover(spec.media)
   const clip = CLIPS[spec.slug]
-  const clipUrl = !clip ? null : ours ? await mirrorToTigris(clip, clipKey, "video/mp4") : clip
+  const clipUrl = !clip ? null : ours ? await mirrorToTigris(clip.url, clipKey, "video/mp4") : clip.url
   // Only ours can have stayed hotlinked; the rest are meant to be.
   const hotlinked = ours ? stayedHotlinked([{ key: coverKey, url: coverUrl }, { key: clipKey, url: clipUrl }]) : []
-  return { coverUrl, clipUrl, hotlinked }
+  return { coverUrl, clipUrl, clip: clip ?? null, hotlinked }
 }
 
 /** Say it once, loudly, at the end of a run — see `stayedHotlinked` (SCRUM-288). */
@@ -433,7 +442,7 @@ async function refreshTimes() {
   for (const spec of EVENTS) {
     const start = hoursFromNow(spec.startsIn)
     const end = hoursFromNow(spec.startsIn + spec.hours)
-    const { coverUrl, clipUrl, hotlinked: left } = await seededMedia(spec)
+    const { coverUrl, clipUrl, clip, hotlinked: left } = await seededMedia(spec)
     const result = await refreshSeededEvent(
       db,
       spec.slug,
@@ -444,10 +453,10 @@ async function refreshTimes() {
     if (result.status !== "moved") continue
 
     hotlinked.push(...left)
-    if (clipUrl) {
+    if (clipUrl && clip) {
       await db.event_media.updateMany({
         where: { event_id: result.eventId, type: "video" },
-        data: { url: clipUrl, thumbnail_url: null },
+        data: { url: clipUrl, thumbnail_url: null, width: clip.width, height: clip.height, duration_ms: clip.duration_ms },
       })
     }
     if (start <= now && end > now) live.push(spec.slug)
@@ -622,7 +631,7 @@ async function main() {
   // ── events ───────────────────────────────────────────────────────────────
   const hotlinked: string[] = []
   for (const spec of EVENTS) {
-    const { coverUrl, clipUrl, hotlinked: left } = await seededMedia(spec)
+    const { coverUrl, clipUrl, clip, hotlinked: left } = await seededMedia(spec)
     hotlinked.push(...left)
 
     const city = CITY[spec.city as keyof typeof CITY]
@@ -728,7 +737,7 @@ async function main() {
      * around the letterboxed clip in the app's hero (SCRUM-1066). The app
      * shows a posterless clip on its dark surface until the first frame.
      */
-    if (clipUrl) {
+    if (clipUrl && clip) {
       const existing = await db.event_media.findFirst({
         where: { event_id: event.id, type: "video" },
       })
@@ -737,6 +746,9 @@ async function main() {
         type: "video" as const,
         url: clipUrl,
         thumbnail_url: null,
+        width: clip.width,
+        height: clip.height,
+        duration_ms: clip.duration_ms,
         order: 0,
       }
       if (existing) await db.event_media.update({ where: { id: existing.id }, data })
