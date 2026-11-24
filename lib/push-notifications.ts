@@ -146,9 +146,10 @@ function deliveryForFlow9(data: NotificationData): Delivery {
     // Only the host's latest note is true.
     case "board_host_post":
       return replaced("events", data.eventId && `lobby-host:${data.eventId}`)
-    // One updating push per crew a night (owner 2026-11-14): the next arrival replaces the last.
+    // One updating push per crew a night (owner 2026-11-14): the next arrival replaces the last. A plan is not an
+    // arrival (`kind: "crew_plan"`, SCRUM-1098): it replaces nothing, and no arrival replaces it.
     case "crew_here":
-      return replaced("crew", data.crewId && `crew-here:${data.crewId}`)
+      return data.kind === "crew_plan" ? { channelId: "crew" } : replaced("crew", data.crewId && `crew-here:${data.crewId}`)
     case "crew_invite":
     case "blend":
       return { channelId: "crew" }

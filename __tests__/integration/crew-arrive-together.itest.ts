@@ -117,6 +117,11 @@ describe("With {crew} at the hold (S1)", () => {
     // second arrival replaces the first, so her bell holds the latest only.
     expect((await pushesTo(meera.id)).map((p) => p.body)).toEqual(["Priya and Arjun are in. Hold to Blend’n when you get there."])
     for (const p of await pushesTo(meera.id)) expect(p.body).not.toContain(VENUE)
+    // The row carries how many it names, for the bell's "2 from {crew} are here"; never a plan's mark.
+    const count = (userId: string) => db.notifications.findFirstOrThrow({ where: { kind: "crew_here", user_id: userId }, select: { data: true } }).then((n) => n.data)
+    expect(await count(meera.id)).toMatchObject({ count: "2" })
+    expect(await count(priya.id)).toMatchObject({ count: "1" })
+    expect(await count(meera.id)).not.toHaveProperty("kind")
   })
 
   it("a crew that is not yours, or no crew at all: the check-in is the same, and nobody is told", async () => {

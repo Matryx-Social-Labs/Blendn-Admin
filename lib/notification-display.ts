@@ -91,6 +91,12 @@ const uuidOf = (payload: unknown, key: string) => {
 const faceOf = (name: string, photo: string | null): NotificationVisual =>
   photo ? { type: "photo", uri: getAccessibleMediaUrl(photo), name } : { type: "initial", name }
 
+/** "Someone from {crew} is here", or "2 from {crew} are here" when the row names more than one (`count`, Flow 9 A). */
+function arrivalTitle(crew: string, payload: unknown): string {
+  const count = Number(idOf(payload, "count"))
+  return Number.isInteger(count) && count > 1 ? `${count} from ${crew} are here` : `Someone from ${crew} is here`
+}
+
 const unique = <T>(xs: readonly (T | null)[]): T[] => [...new Set(xs.filter((x): x is T => x !== null))]
 
 /** The decoration of each row by id, for the rows that have one. */
@@ -222,14 +228,16 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
   }
   // A Blend has no emblem of its own, and a crew's would be the wrong one: it carries no visual and the app draws its glyph (SCRUM-861).
   // The stored title is the bare crew name; the row says what happened, to a member of a crew still standing.
+  // A crew's plan rides the same kind (`kind: "crew_plan"`) and is not an arrival: it keeps its stored words (SCRUM-1098).
   for (const row of rows.filter((r) => r.kind === "crew_here")) {
     const crewId = uuidOf(row.payload, "crewId") ?? ""
     const seed = emblemOf.get(crewId)
     const crew = crewOf.get(crewId)
-    const titled = !!crew && !crew.dissolved_at && !crew.hidden_at && joined.has(crewId)
+    const arrival = asRecord(row.payload).kind !== "crew_plan"
+    const titled = arrival && !!crew && !crew.dissolved_at && !crew.hidden_at && joined.has(crewId)
     if (seed || titled)
       set(row.id, {
-        display: { ...(titled && { title: `Someone from ${crew.name} is here` }), ...(seed && { visual: { type: "emblem", seed } }) },
+        display: { ...(titled && { title: arrivalTitle(crew.name, row.payload) }), ...(seed && { visual: { type: "emblem", seed } }) },
       })
   }
 
