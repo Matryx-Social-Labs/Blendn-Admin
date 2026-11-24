@@ -850,6 +850,12 @@ model event_media {
   title         String?
   description   String?
   order         Int        @default(0)
+  /// Pixel size as displayed, measured by the dashboard on upload (SCRUM-1066).
+  /// Both or neither (`event_media_size_both`); null for a pasted URL.
+  width         Int?
+  height        Int?
+  /// A clip's length, only on a video (`event_media_duration_on_video`).
+  duration_ms   Int?
   created_at    DateTime   @default(now()) @db.Timestamptz(6)
   updated_at    DateTime   @default(now()) @db.Timestamptz(6)
 

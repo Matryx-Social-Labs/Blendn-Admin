@@ -132,6 +132,15 @@ the card sits on its poster for an extra round trip on every scroll past.
 manifest, the segmenter and the multiple renditions all cost more than they save
 at this length. Revisit if long-form video ever ships.
 
+**Every row says its size (SCRUM-1066).** `event_media.width`, `height` and,
+for a clip, `duration_ms`, measured by the dashboard from the picked file before
+it uploads (`lib/media-size.ts`) and sent on `GET /events` and
+`GET /events/:eventId`. The app chooses a card's fit from them before the bytes
+land, and times the Featured lap from `duration_ms`. A clip over 15 s is refused
+at the pick and again on save, with 500 ms of tolerance for an export's padding
+(`MEDIA.CLIP_TOLERANCE_MS`); the measured length is stored unclamped. A pasted URL has no size (a typed URL clears the
+measured one), and nor do rows from before: the app measures on load for those.
+
 **A poster is expected, and is never the cover.** `event_media.thumbnail_url`
 should be set for a video row: it is what shows while the first frame decodes.
 `lib/feedMedia.ts` uses it and nothing else — the event's cover is another

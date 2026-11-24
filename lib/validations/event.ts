@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import { BBOX_WITH_RADIUS, bboxParam, notBboxAndRadius } from "@/lib/map-bbox"
 import { httpsUrl } from "@/lib/https-url"
+import { MEDIA } from "@/lib/constants"
 
 export const eventQuerySchema = z.object({
   // Pagination
@@ -149,15 +150,35 @@ export const SPONSORED_MESSAGE_INTERVALS = [20, 30, 60] as const
  * here. Unknown keys are dropped, not refused: the editor round-trips whatever
  * the page loaded.
  */
-const mediaItemSchema = z.object({
-  id: z.string().max(100).optional(),
-  type: z.enum(["image", "video", "document"]),
-  url: httpsUrl(),
-  thumbnail_url: httpsUrl().nullish().or(z.literal("")),
-  title: z.string().max(200).nullish(),
-  description: z.string().max(2000).nullish(),
-  order: z.number().int().min(0).max(1000).nullish(),
-})
+const mediaSide = z.number().int().min(1).max(MEDIA.MAX_SIDE_PX).nullish()
+
+/*
+ * `width`, `height` and `duration_ms` are measured by the dashboard from the
+ * file the organizer picked (SCRUM-1066), so the app can choose a card's fit
+ * before the bytes land. Absent for a pasted URL and for rows from before.
+ */
+const mediaItemSchema = z
+  .object({
+    id: z.string().max(100).optional(),
+    type: z.enum(["image", "video", "document"]),
+    url: httpsUrl(),
+    thumbnail_url: httpsUrl().nullish().or(z.literal("")),
+    title: z.string().max(200).nullish(),
+    description: z.string().max(2000).nullish(),
+    order: z.number().int().min(0).max(1000).nullish(),
+    width: mediaSide,
+    height: mediaSide,
+    duration_ms: z
+      .number()
+      .int()
+      .min(1)
+      .max(MEDIA.MAX_CLIP_MS + MEDIA.CLIP_TOLERANCE_MS, `Clips play up to ${MEDIA.MAX_CLIP_MS / 1000} seconds`)
+      .nullish(),
+  })
+  .refine((item) => (item.width == null) === (item.height == null), {
+    message: "A media size needs both a width and a height",
+    path: ["height"],
+  })
 
 export const sponsoredMessageCreateSchema = z.object({
   /*
