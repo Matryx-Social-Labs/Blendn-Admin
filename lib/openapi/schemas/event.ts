@@ -471,6 +471,8 @@ export const EventDetailSchema = z
         width: z.number().int().nullable().openapi({ description: "Pixels as displayed, measured on upload. With `height`, or both null (pasted URL, older rows)." }),
         height: z.number().int().nullable(),
         durationMs: z.number().int().nullable().openapi({ description: "A clip's measured length, ≤ 15500 (nominally 15 s); only on a video, else null." }),
+        focalX: z.number().min(0).max(1).nullable().openapi({ description: "Where the subject is, 0–1 from the left. With `focalY`, or both null (the default focus, 50% across, 40% down). Clips crop around it; stills only within fit rule B's ±15%." }),
+        focalY: z.number().min(0).max(1).nullable().openapi({ description: "0–1 from the top. See `focalX`." }),
       })
     ),
     // The row as selected, so snake_case — unlike every other key here.

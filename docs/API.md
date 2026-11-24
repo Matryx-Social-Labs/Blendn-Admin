@@ -1555,9 +1555,18 @@ organizer picked, and a clip over 15 s is refused (`400`) with 500 ms
 of tolerance (a "15 second" export often measures 15.02 to 15.2 s). The measured
 value is stored as it is, so a set `duration_ms` is at most 15500: do not assume 15000.
 
+**And its focal point (SCRUM-1106).** `focal_x`/`focal_y` on `GET /events`,
+`focalX`/`focalY` on `GET /events/:eventId`: where the subject is, 0–1 of the
+picture from its left and top, both or neither, picked by the organizer in the
+dashboard. `null` means no point was picked: crop at the default focus (50%
+across, 40% down). A clip fills every card and is cropped around the point; a
+still is cropped around it only when fit rule B crops at all (its ratio within
+±15% of the card's), and is otherwise shown whole. Keep the point as near the
+card's centre as the picture allows (`focusPosition` in `lib/media-fit.ts`).
+
 ```json
 { "id": "…", "type": "video", "url": "https://…/clip.mp4", "thumbnail_url": "https://…/clip-poster.jpg",
-  "order": 0, "width": 1080, "height": 1920, "duration_ms": 12400 }
+  "order": 0, "width": 1080, "height": 1920, "duration_ms": 12400, "focal_x": 0.62, "focal_y": 0.25 }
 ```
 
 **Each category on an event now carries its `parent`** (or `null` at top level).

@@ -115,3 +115,38 @@ describe("mediaSize (what the dashboard sends from a picked file)", () => {
     expect(mediaSize(MEDIA.MAX_SIDE_PX, 400)).toEqual({ width: MEDIA.MAX_SIDE_PX, height: 400 })
   })
 })
+
+/**
+ * The focal point (SCRUM-1106, queue task 30): where the subject is, 0–1 of
+ * the picture from its left and top, both or neither. Picked in the dashboard;
+ * the app crops a clip (and a still within rule B's ±15%) around it.
+ */
+describe("media item focal point, on the write", () => {
+  it("accepts a point inside the picture, its corners included", () => {
+    expect(parseMedia({ ...clip, focal_x: 0.62, focal_y: 0.4 }).success).toBe(true)
+    expect(parseMedia({ ...clip, focal_x: 0, focal_y: 1 }).success).toBe(true)
+  })
+
+  it("accepts no point (the app's default focus)", () => {
+    expect(parseMedia({ ...clip, focal_x: null, focal_y: null }).success).toBe(true)
+  })
+
+  it("refuses half a point", () => {
+    expect(parseMedia({ ...clip, focal_x: 0.5 }).success).toBe(false)
+    expect(parseMedia({ ...clip, focal_y: 0.5 }).success).toBe(false)
+  })
+
+  it("refuses a point outside the picture", () => {
+    for (const v of [-0.01, 1.01, Number.NaN]) {
+      expect(parseMedia({ ...clip, focal_x: v, focal_y: 0.5 }).success).toBe(false)
+      expect(parseMedia({ ...clip, focal_x: 0.5, focal_y: v }).success).toBe(false)
+    }
+  })
+
+  it("writes the point when both halves are there, and leaves both columns out otherwise", () => {
+    expect(eventMediaRows([{ ...clip, focal_x: 0.62, focal_y: 0 }])[0]).toMatchObject({ focal_x: 0.62, focal_y: 0 })
+    const [none] = eventMediaRows([{ ...clip, focal_x: 0.62, focal_y: null }])
+    expect(none).not.toHaveProperty("focal_x")
+    expect(none).not.toHaveProperty("focal_y")
+  })
+})

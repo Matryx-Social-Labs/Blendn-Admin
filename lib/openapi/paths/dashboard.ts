@@ -246,6 +246,8 @@ registry.registerPath({
               width: z.number().int().optional().openapi({ description: "Measured from the picked file; with `height`, or neither" }),
               height: z.number().int().optional(),
               duration_ms: z.number().int().max(15500).optional().openapi({ description: "A clip's measured length: nominally 15 s, over 15500 is 400. Dropped on a non-video" }),
+              focal_x: z.number().min(0).max(1).optional().openapi({ description: "Where the subject is, 0–1 from the left; with `focal_y`, or neither (400)" }),
+              focal_y: z.number().min(0).max(1).optional(),
             })).optional(),
           }),
         },

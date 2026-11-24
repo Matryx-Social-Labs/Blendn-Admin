@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
-import { DevicePreview } from "@/components/event-form/device-preview"
+import { MediaFitPreview } from "@/components/event-form/media-fit-preview"
 import { renderableImageUrl } from "@/components/event-form/publish-rail"
 import { uploadFile } from "@/components/event-form/upload"
 import type { EventFormValues } from "@/components/event-form/schema"
@@ -106,8 +106,12 @@ export function CoverImageSection({
               <FormMessage />
             </div>
           </div>
-          {/* The three crops, only once there is something to crop. */}
-          {coverPreviewUrl ? <DevicePreview src={coverPreviewUrl} /> : null}
+          {/*
+            The cover in the app's cards, once there is one. No focal point: the
+            cover has no column for one (decided, task 30), and a square cover is
+            never cut anyway (rule B).
+          */}
+          {coverPreviewUrl ? <MediaFitPreview src={coverPreviewUrl} type="image" /> : null}
         </FormItem>
       )}
     />

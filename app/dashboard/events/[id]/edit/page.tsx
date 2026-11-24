@@ -166,6 +166,8 @@ export default async function EditEventPage({ params }: EventPageProps) {
           width: item.width,
           height: item.height,
           duration_ms: item.duration_ms,
+          focal_x: item.focal_x,
+          focal_y: item.focal_y,
         })),
       }}
       />

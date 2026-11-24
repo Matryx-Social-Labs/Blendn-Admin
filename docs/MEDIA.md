@@ -1,76 +1,65 @@
 # Media — what organizers upload, and what the app draws
 
-One asset per event has to fill three slots with three different shapes. This
-file is the arithmetic behind the answer, so that the organizer guidance, the
-seed data and the dashboard's preview all quote the same numbers instead of
-three people each rounding differently.
+One upload has to land in five cards of different shapes. This file is the
+arithmetic behind that, so that the organizer guidance, the seed data and the
+dashboard's preview all quote the same numbers instead of three people each
+rounding differently.
 
-## The three slots, measured
+## The cards, in points
 
-From frame `1141:4644`, not from a guess:
+From the redesign (pulse-media board 13), as the app draws them today:
 
-| Slot | Points | Aspect |
+| Card | Points | Fit |
 |---|---|---|
-| Featured card | 331.5 × 450 | **0.737** — portrait |
-| Upcoming card image | 318 × 165.38 | **1.923** — a wide band |
-| Nearby large | 366 × 342 | **1.070** — near square |
+| Pulse lead | 345 × 256 | a clip fills it; a still by rule B |
+| Event hero | 345 × 345 | a clip fills it; a still by rule B |
+| Venue hero | 393 × 300 | a clip fills it; a still by rule B |
+| Thumb | 64 × 64 | a clip fills it; a still by rule B |
+| Story card | 1080 × 1920 | the picture whole, always (the share image) |
 
-That spread is the whole problem. The widest slot is 2.6× the aspect of the
-tallest one, and **no single crop of a single asset can fill both** — one keeps
-the full height and loses the sides, the other keeps the full width and loses
-half the height.
+`MEDIA_CARDS` in `lib/media-fit.ts` holds these; `__tests__/media-fit.test.ts`
+fails if the two disagree.
 
-## The answer: a square master, and a published safe area
+## How a picture is fitted
 
-Organizers upload **one square image**. The app centre-crops it per slot.
+- **Stills, fit rule B (owner 2026-11-17).** A still is cropped only when its
+  ratio is within **±15%** of the card's. Otherwise it is shown **whole**, over a
+  blurred, dimmed copy of itself, never another picture. A flyer is never cut.
+  (`fitFor` in the app's `components/ds/LinkPreviewCard.tsx`, and in
+  `lib/media-fit.ts` here.)
+- **Clips fill every card (owner 2026-11-18)**, cropped to the card's shape, as
+  Instagram, Netflix, Airbnb and TikTok do. No bars, no blur.
+- **The crop keeps the focal point in view (SCRUM-1106).** `event_media.focal_x`
+  / `focal_y`, 0–1 of the picture from its left and top, both or neither
+  (`event_media_focal_both`). The organizer clicks the subject in the dashboard.
+  With no point the app crops at **50% across, 40% down**, because faces sit
+  high. The crop puts the point as near the card's centre as the picture allows
+  and never shows past its edge (`focusPosition`).
 
-- The portrait slot keeps the full height and crops to **73.7%** of the width.
-- The wide slot keeps the full width and crops to **52%** of the height.
+So a square master is never cut on a still: it is within 15% of the hero and the
+thumb, which are square, and further than that from the lead and venue hero,
+which then show it whole. A still only needs a focal point when its own shape is
+close to, but not the same as, a card's (a 4:3 photo in the 345 × 256 lead).
+The dashboard shows the picker only then, and always for a clip.
 
-So the region that survives **every** crop is the centre **73.7% × 52%**.
+## The dashboard's preview
 
-```
-┌─────────────────────────┐  ← square master
-│         cropped         │
-│   ┌─────────────────┐   │
-│   │   SAFE AREA     │   │  73.7% of width
-│   │  73.7% × 52%    │   │  52% of height
-│   └─────────────────┘   │
-│         cropped         │
-└─────────────────────────┘
-```
+Every gallery item, and the cover, draws the upload in all five cards beside the
+field, each saying whether it is cropped at the point or shown whole
+(`components/event-form/media-fit-preview.tsx`, option A per advisor,
+board `pulse-media/t30-focal/`). Telling an organizer "within 15%" is a number;
+showing them their own photo in the card is a correction they need only once.
 
-**Anything that must be legible — a face, a headline, a logo, a date — belongs
-inside the safe area.** Outside it, the asset is decoration that some slots show
-and others do not.
+### Why square
 
-This is what the dashboard's device preview exists to make obvious. Telling an
-organizer "73.7% by 52%" is a number; showing them their own poster with the
-title sliced off is a correction they only need once.
-
-### Why square rather than 2:1
-
-Eventbrite asks for 2:1 at 2160×1080, and every banner-shaped platform asks for
-something similar — because a banner is the only shape they draw. We draw a
-portrait card as the *hero*, so a 2:1 upload would arrive 1.9× too wide for the
-most prominent slot on the screen and lose two thirds of itself to the crop.
-
-Square is also the shape organizers already have. Every social platform accepts
-it, so it is the one asset a venue is most likely to own without commissioning
-anything.
+Square is the shape organizers already have: every social platform accepts it,
+so it is the one asset a venue is most likely to own without commissioning
+anything. And rule B shows it whole wherever it does not fit, so it is never cut.
 
 ## Pixels
 
-At @3x on a 440pt phone — the largest we currently render:
-
-| Slot | Points | Pixels |
-|---|---|---|
-| Featured | 374 × 508 | 1122 × **1524** |
-| Nearby large | 392 × 366 | 1176 × 1098 |
-| Upcoming | 344 × 179 | 1032 × 537 |
-
-The binding number is **1524** — the Featured card's height, which comes from
-the master's *full* height because that slot crops width only.
+At @3x, the largest card is the venue hero, 393 × 300 points: 1179 × 900 pixels.
+A square master must be at least that wide to fill it without upscaling.
 
 | | |
 |---|---|
@@ -79,14 +68,14 @@ the master's *full* height because that slot crops width only.
 | Format | JPEG or PNG; JPEG for photographs |
 | Max file size | 8 MB |
 
-Below 1600 the hero card upscales, and an upscaled photograph on a 450pt card is
-the most visible quality failure in the product — it is the first thing anybody
-sees.
+The minimum leaves room over the 1179 pixels the widest card needs; an upscaled
+photograph on the lead card is the most visible quality failure in the product —
+it is the first thing anybody sees.
 
 ## Video
 
-Clips play **inside** the cards, over the still. Same three slots, same crops,
-so the same square master and the same safe area apply.
+Clips play **inside** the cards, over the still, and fill each card, cropped
+around the focal point (above).
 
 | | |
 |---|---|
@@ -159,7 +148,7 @@ that is mount/unmount rather than play/pause.
 | `components/event-form/cover-image-section.tsx` | Cover guidance. **Pinned by `__tests__/media-guidance.test.ts`** |
 | `components/event-form/media-section.tsx` | Gallery guidance, the poster field, and the file picker's `accept`. Same test |
 | `scripts/seed-*.ts` | Seeded events must carry assets at these sizes, or staging tests the wrong thing |
-| `components/event-form/device-preview.tsx` | Renders the real crops with the safe area drawn on. **Pinned by `__tests__/device-preview.test.ts`** — a preview drawing the wrong safe area is worse than none, because an organizer trusts it and composes to it |
+| `components/event-form/media-fit-preview.tsx` | Draws the upload in the five cards and takes the focal point. Its numbers are `lib/media-fit.ts`, **pinned by `__tests__/media-fit.test.ts`** — a preview that crops differently from the phone is worse than none, because an organizer trusts it and composes to it |
 | `lib/feedMedia.ts` (app) | Chooses the asset; enforces the poster rule |
 
 If any of them disagrees with this file, this file is what the app actually
@@ -180,7 +169,7 @@ takes the clip's own `thumbnail_url` and never the event's cover (SCRUM-1066),
 so any frame showing video is also, implicitly, a frame requiring its own still
 behind it. The organizer form asks for the poster and says so.
 
-**Square masters, always.** Every slot crops from one square — the widest is
-2.6× the aspect of the narrowest, which is why there is no single rectangle that
-serves them. A landscape hero in a frame is a landscape hero that will lose its
-left and right edges on the feed. Compose inside the safe area.
+**Square masters, and the whole picture.** A still is cropped only within 15%
+of a card's shape and otherwise shown whole over a blurred copy of itself, so a
+frame should never assume a landscape still fills a square card. A clip always
+fills, cropped around the organizer's focal point.

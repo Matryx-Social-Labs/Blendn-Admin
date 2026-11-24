@@ -121,6 +121,9 @@ export const eventListSelect = {
       width: true,
       height: true,
       duration_ms: true,
+      // Where the subject is (SCRUM-1106): the card crops around it. Both or neither; null = default focus.
+      focal_x: true,
+      focal_y: true,
     },
     orderBy: { order: "asc" },
     take: 5,

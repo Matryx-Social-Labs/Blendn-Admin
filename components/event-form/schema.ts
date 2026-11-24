@@ -95,6 +95,9 @@ export const eventFormSchema = z.object({
         width: z.number().int().positive().optional(),
         height: z.number().int().positive().optional(),
         duration_ms: z.number().int().positive().optional(),
+        /** Where the subject is, 0–1 (the focal picker). Reset when the file or URL changes. */
+        focal_x: z.number().min(0).max(1).optional(),
+        focal_y: z.number().min(0).max(1).optional(),
       })
     )
     .optional(),
