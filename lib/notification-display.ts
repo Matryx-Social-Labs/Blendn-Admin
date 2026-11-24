@@ -41,7 +41,8 @@ import { acceptableInviteCrewIds } from "@/lib/crews/views"
  */
 
 export type NotificationVisual =
-  | { type: "photo"; uri: string }
+  /** `name` is the one the row's title uses, so the app draws their initial under the photo while it loads (SCRUM-1088). */
+  | { type: "photo"; uri: string; name: string }
   /** A named person with no photo: the app draws their initial on their hue, as `personFace` does (#570). */
   | { type: "initial"; name: string }
   | { type: "creature"; pseudonym: string }
@@ -88,7 +89,7 @@ const uuidOf = (payload: unknown, key: string) => {
 
 /** A named person's face: their photo, else their initial. Never for anybody anonymous (that is a creature). */
 const faceOf = (name: string, photo: string | null): NotificationVisual =>
-  photo ? { type: "photo", uri: getAccessibleMediaUrl(photo) } : { type: "initial", name }
+  photo ? { type: "photo", uri: getAccessibleMediaUrl(photo), name } : { type: "initial", name }
 
 const unique = <T>(xs: readonly (T | null)[]): T[] => [...new Set(xs.filter((x): x is T => x !== null))]
 
