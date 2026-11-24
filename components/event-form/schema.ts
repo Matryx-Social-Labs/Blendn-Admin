@@ -98,6 +98,16 @@ export const eventFormSchema = z.object({
         /** Where the subject is, 0–1 (the focal picker). Reset when the file or URL changes. */
         focal_x: z.number().min(0).max(1).optional(),
         focal_y: z.number().min(0).max(1).optional(),
+        /** A clip's copies, from its check (`check-clip.ts`). */
+        renditions: z
+          .array(z.object({ url: z.string(), width: z.number(), height: z.number(), bytes: z.number() }))
+          .optional(),
+        /** Why a check refused this clip. Stops the save; never sent. */
+        clip_refusal: z.string().optional(),
+      }).superRefine((item, ctx) => {
+        if (item.type === "video" && item.clip_refusal) {
+          ctx.addIssue({ code: "custom", path: ["url"], message: item.clip_refusal })
+        }
       })
     )
     .optional(),

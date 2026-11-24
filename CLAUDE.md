@@ -210,6 +210,7 @@ and therefore in every deployed environment:
 | `event_media_size_both` | a media row's pixel `width` and `height` are both positive or both NULL (COALESCE spelled out: `100 > 0 AND NULL > 0` would pass) |
 | `event_media_duration_on_video` | a media row's `duration_ms` is positive and only on a `video`; the 15 s ceiling is the app's (`lib/media-size.ts`, `lib/validations/event.ts`) |
 | `event_media_focal_both` | a media row's focal point (`focal_x`, `focal_y`) is both or neither, each 0–1 (COALESCE spelled out, as `event_media_size_both`). Picked in the dashboard (`lib/media-fit.ts`) |
+| `event_media_renditions_on_video` | a media row's `renditions` (a clip's copies, from the media worker: `lib/media-clip.ts`, `services/media-worker`) are a JSON array and only on a `video` |
 | `events_venue_day_not_ticketed` | a venue day is never ticketed |
 | `events_ticketing_native_needs_enablement` | a native event was turned on by `enableTicketing` (`lib/ticketing-enable.ts`): it has `ticketing_enabled_at` |
 | `events_ticket_fee_rule_with_enabled_at` | `ticket_fee_rule` and `ticketing_enabled_at` are set together: the price rule is decided once, in the database, never by a request |

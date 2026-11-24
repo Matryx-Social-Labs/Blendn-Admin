@@ -43,6 +43,7 @@ const NOT_ABOUT_PEOPLE: Record<string, string[]> = {
   "lib/event-media.ts": ["height"],
   "lib/media-size.ts": ["height"],
   "lib/media-fit.ts": ["height"],
+  "lib/media-clip.ts": ["height"],
   "lib/openapi/paths/dashboard.ts": ["height"],
   "lib/openapi/schemas/event.ts": ["height"],
   "lib/services/events.service.ts": ["height"],

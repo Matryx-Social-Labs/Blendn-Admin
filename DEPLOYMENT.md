@@ -370,6 +370,8 @@ so it is never related to session or login state.
 | `TIGRIS_BUCKET` | No | Bucket for uploads (default: blendn-media) |
 | `TIGRIS_PRIVATE_BUCKET` | No | Private bucket for claim evidence, read only through signed URLs (default: `<TIGRIS_BUCKET>-private`, created on boot) |
 | `TIGRIS_REGION` | No | Bucket region (default: auto) |
+| `MEDIA_WORKER_URL` | No | The media worker's private address (`services/media-worker/README.md`). Clips are not checked unless this and its secret are both set |
+| `MEDIA_WORKER_SECRET` | No | Shared with the media worker (min 32 chars) |
 | `OPENAI_API_KEY` | No | AI moderation. Without it, moderation falls back to keyword matching only |
 | `RESEND_API_KEY` | No | Transactional email. Without it onboarding and invites still work, but nothing is sent — the dashboard shows the link/password to pass on by hand |
 | `EMAIL_FROM` | No | Sender, `"Blend'n" <hello@blendn.app>`. Quote the display name — the apostrophe is legal unquoted per RFC 5322 but quoting is free. Required alongside `RESEND_API_KEY`; email is off unless both are set |

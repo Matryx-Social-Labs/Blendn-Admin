@@ -349,6 +349,9 @@ jobs:
       # (SCRUM-357) — see the "Start the OSM stub" step and e2e/fixtures/.
       GEOCODE_UPSTREAM: http://127.0.0.1:4599
       FOOTPRINT_UPSTREAM: http://127.0.0.1:4599/api/interpreter
+      # Turns the editor's clip check on. Nothing listens: e2e/clip-check.spec.ts stubs the dashboard's own route.
+      MEDIA_WORKER_URL: http://127.0.0.1:9
+      MEDIA_WORKER_SECRET: ci-e2e-media-worker-secret-32-characters
 
     steps:
       - uses: actions/checkout@v7

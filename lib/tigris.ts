@@ -218,6 +218,20 @@ export async function getPresignedUploadUrl(
   }
 }
 
+/**
+ * A PUT for one public key and one content type, for another service to fill
+ * (the media worker holds no storage keys). Longer-lived than a person's
+ * upload URL is needed for: the job waits its turn and runs first.
+ */
+export async function presignedPut(key: string, contentType: string): Promise<{ uploadUrl: string; publicUrl: string }> {
+  const uploadUrl = await getSignedUrl(
+    getS3Client(),
+    new PutObjectCommand({ Bucket: TIGRIS_BUCKET, Key: key, ContentType: contentType }),
+    { expiresIn: 900, signableHeaders: new Set(["content-type"]) }
+  )
+  return { uploadUrl, publicUrl: getPublicUrl(key) }
+}
+
 export type SealRefusal = "missing" | "too_small" | "too_large" | "wrong_type"
 export type SealedObject = { key: string; url: string; bytes: number; contentType: string }
 

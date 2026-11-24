@@ -1,6 +1,6 @@
 "use client"
 
-import { useId, useState } from "react"
+import { useId, useRef, useState } from "react"
 import type { UseFieldArrayReturn, UseFormReturn } from "react-hook-form"
 import {
   DndContext,
@@ -38,7 +38,10 @@ import {
   IconTrash,
 } from "@tabler/icons-react"
 import { MediaFitPreview } from "@/components/event-form/media-fit-preview"
+import { ClipCheckLine, ClipStills } from "@/components/event-form/clip-check"
+import type { ClipCheckState } from "@/components/event-form/check-clip"
 import { FormSection } from "@/components/event-form/form-section"
+import { httpsUrl } from "@/lib/https-url"
 import type { EventFormValues } from "@/components/event-form/schema"
 
 /**
@@ -55,6 +58,15 @@ const ACCEPT: Record<string, string> = {
   document: "application/pdf",
 }
 
+/** Checking clips with the media worker; null while it is off, and then none of it is drawn. */
+interface ClipChecks {
+  /** By the item's id. */
+  checks: Record<string, ClipCheckState>
+  /** `newClip`: the link just changed, so its opening frame becomes the poster. */
+  onCheck: (itemId: string, newClip: boolean) => void
+  onForget: (itemId: string) => void
+}
+
 // ── Sortable media item ───────────────────────────────────────────────────────
 
 function SortableMediaItem({
@@ -64,6 +76,7 @@ function SortableMediaItem({
   onRemove,
   uploadProgress,
   onUpload,
+  clips,
 }: {
   fieldItem: { id: string }
   index: number
@@ -72,6 +85,7 @@ function SortableMediaItem({
   uploadProgress: number | undefined
   /** Resolves to why the file was refused, shown beside the input, or null. */
   onUpload: (file: File, itemId: string) => Promise<string | null>
+  clips: ClipChecks | null
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: fieldItem.id })
@@ -91,6 +105,9 @@ function SortableMediaItem({
   const [refusal, setRefusal] = useState<string | null>(null)
   const refusalId = useId()
 
+  /** The URL was typed over since it was last checked: checked when the field is left, or the type becomes Video. */
+  const typed = useRef(false)
+
   const isUploading = uploadProgress !== undefined
   const previewUrl = form.watch(`media_items.${index}.url`)
   const mediaType = form.watch(`media_items.${index}.type`)
@@ -99,6 +116,18 @@ function SortableMediaItem({
   const height = form.watch(`media_items.${index}.height`)
   const focalX = form.watch(`media_items.${index}.focal_x`)
   const focalY = form.watch(`media_items.${index}.focal_y`)
+  const durationMs = form.watch(`media_items.${index}.duration_ms`)
+  const renditions = form.watch(`media_items.${index}.renditions`)
+  const clipRefusal = form.watch(`media_items.${index}.clip_refusal`)
+  const itemId = form.watch(`media_items.${index}.id`)
+  const clipState = itemId ? clips?.checks[itemId] : undefined
+
+  const checkTyped = () => {
+    const item = form.getValues(`media_items.${index}`)
+    if (!clips || !item || !typed.current || item.type !== "video" || !httpsUrl().safeParse(item.url).success) return
+    typed.current = false
+    clips.onCheck(item.id, true)
+  }
 
   return (
     <div ref={setNodeRef} style={style} className="space-y-3 rounded-lg border p-4">
@@ -138,6 +167,9 @@ function SortableMediaItem({
               onValueChange={(value) => {
                 setRefusal(null)
                 field.onChange(value)
+                // A refusal is about the clip: an image has none.
+                form.clearErrors(`media_items.${index}.url`)
+                checkTyped()
               }}
               value={field.value}
             >
@@ -168,8 +200,12 @@ function SortableMediaItem({
                 <Input
                   placeholder="https://…"
                   {...field}
+                  onBlur={() => {
+                    field.onBlur()
+                    checkTyped()
+                  }}
                   onChange={(e) => {
-                    field.onChange(e)
+                    typed.current = true
                     // A typed URL is another file: the measured size was the upload's (SCRUM-1066).
                     form.setValue(`media_items.${index}.width`, undefined)
                     form.setValue(`media_items.${index}.height`, undefined)
@@ -177,6 +213,12 @@ function SortableMediaItem({
                     // …and so was its subject (SCRUM-1106).
                     form.setValue(`media_items.${index}.focal_x`, undefined)
                     form.setValue(`media_items.${index}.focal_y`, undefined)
+                    form.setValue(`media_items.${index}.renditions`, undefined)
+                    form.setValue(`media_items.${index}.clip_refusal`, undefined)
+                    if (itemId) clips?.onForget(itemId)
+                    // Last: the change revalidates, and the old link's refusal must be gone by then.
+                    form.clearErrors(`media_items.${index}.url`)
+                    field.onChange(e)
                   }}
                 />
               </FormControl>
@@ -193,6 +235,8 @@ function SortableMediaItem({
                   setRefusal(null)
                   const itemId = form.getValues(`media_items.${index}.id`)
                   if (!itemId) return
+                  typed.current = false
+                  clips?.onForget(itemId)
                   const reason = await onUpload(file, itemId)
                   input.value = ""
                   setRefusal(reason)
@@ -202,6 +246,16 @@ function SortableMediaItem({
                 <p id={refusalId} role="alert" className="text-sm text-destructive">
                   {refusal}
                 </p>
+              )}
+              {/* Beside the inputs, not under the previews: a refused clip's reason is here too. */}
+              <FormMessage />
+              {clips && itemId && mediaType === "video" && previewUrl && (
+                <ClipCheckLine
+                  state={clipState}
+                  stored={renditions?.length && width && height && durationMs ? { width, height, durationMs } : null}
+                  refused={Boolean(clipRefusal)}
+                  onCheck={() => clips.onCheck(itemId, clipState?.kind === "failed" && clipState.newClip)}
+                />
               )}
               {/*
                 The spec for the type actually chosen, next to the control that
@@ -263,19 +317,15 @@ function SortableMediaItem({
                 />
               )}
             </div>
-            <FormMessage />
           </FormItem>
         )}
       />
 
       {/*
         The poster, and only for video.
-        `thumbnail_url` has been in the schema and on the write path the whole
-        time with no input to fill it, so every clip an organiser added fell
-        back to the event's cover image. The app's `feedClip` chain is
-        thumbnail_url -> cover_image_url -> **drop the clip**, so a video on an
-        event with no cover simply never played, and nothing here said so.
-        Hence the warning below rather than a silent optional field.
+        A clip's still is its own `thumbnail_url` and never the event's cover
+        (SCRUM-1066): the app shows a dark frame until a clip without one plays,
+        which is what the help below says.
       */}
       {mediaType === "video" && (
         <FormField
@@ -294,11 +344,18 @@ function SortableMediaItem({
                 you want a different still, and prefer a frame from the clip: a poster that is a
                 different picture visibly swaps the moment the video starts.
                 <br />
-                For a clip added by URL we cannot read the frame, so paste a
-                poster here. If it is empty the event&apos;s cover image is used
-                — <strong>and if the event has no cover image either, the clip
-                is not shown at all.</strong>
+                {clips
+                  ? "For a clip added by URL, it is filled in when the clip is checked. "
+                  : "For a clip added by URL we cannot read the frame, so paste a poster here. "}
+                <strong>With no poster, the clip shows a dark frame until it plays.</strong>
               </p>
+              {clipState?.kind === "done" && clipState.stills.length > 0 && (
+                <ClipStills
+                  stills={clipState.stills}
+                  value={field.value || ""}
+                  onPick={(url) => form.setValue(`media_items.${index}.thumbnail_url`, url, { shouldDirty: true })}
+                />
+              )}
               <FormMessage />
             </FormItem>
           )}
@@ -340,6 +397,7 @@ export function MediaSection({
   mediaFieldArray,
   mediaUploadProgress,
   onUpload,
+  clips,
 }: {
   form: UseFormReturn<EventFormValues>
   mediaFieldArray: UseFieldArrayReturn<EventFormValues, "media_items">
@@ -347,6 +405,7 @@ export function MediaSection({
   mediaUploadProgress: Record<string, number>
   /** Resolves to why the file was refused, shown beside the input, or null. */
   onUpload: (file: File, itemId: string) => Promise<string | null>
+  clips: ClipChecks | null
 }) {
   const sensors = useSensors(useSensor(PointerSensor))
 
@@ -396,6 +455,7 @@ export function MediaSection({
                 onRemove={() => mediaFieldArray.remove(index)}
                 uploadProgress={mediaUploadProgress[form.getValues(`media_items.${index}.id`) ?? ""]}
                 onUpload={onUpload}
+                clips={clips}
               />
             ))}
           </div>

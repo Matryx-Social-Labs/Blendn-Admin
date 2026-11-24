@@ -473,6 +473,10 @@ export const EventDetailSchema = z
         durationMs: z.number().int().nullable().openapi({ description: "A clip's measured length, ≤ 15500 (nominally 15 s); only on a video, else null." }),
         focalX: z.number().min(0).max(1).nullable().openapi({ description: "Where the subject is, 0–1 from the left. With `focalY`, or both null (the default focus, 50% across, 40% down). Clips crop around it; stills only within fit rule B's ±15%." }),
         focalY: z.number().min(0).max(1).nullable().openapi({ description: "0–1 from the top. See `focalX`." }),
+        renditions: z
+          .array(z.object({ url: z.string(), width: z.number().int(), height: z.number().int(), bytes: z.number().int() }))
+          .nullable()
+          .openapi({ description: "A clip's H.264 faststart copies, smallest first: at most 540 px on the short side, silent, about 2 MB; then at most 1080 px, with sound. Null on anything but a checked clip: play `url`." }),
       })
     ),
     // The row as selected, so snake_case — unlike every other key here.

@@ -150,3 +150,27 @@ describe("media item focal point, on the write", () => {
     expect(none).not.toHaveProperty("focal_y")
   })
 })
+
+/** A clip's copies (SCRUM-1106): only on a clip, exactly their four keys, round-tripped by the editor. */
+describe("media item renditions, on the write", () => {
+  const copy = { url: "https://media.example.com/small.mp4", width: 540, height: 960, bytes: 1_500_000 }
+
+  it("accepts a checked clip's copies, and none", () => {
+    expect(parseMedia({ ...clip, renditions: [copy] }).success).toBe(true)
+    expect(parseMedia({ ...clip, renditions: null }).success).toBe(true)
+  })
+
+  it("refuses a copy that is not a sized https file, and more than four", () => {
+    for (const bad of [{ ...copy, url: "http://media.example.com/a.mp4" }, { ...copy, width: 0 }, { ...copy, bytes: 1.5 }, { url: copy.url }]) {
+      expect(parseMedia({ ...clip, renditions: [bad] }).success).toBe(false)
+    }
+    expect(parseMedia({ ...clip, renditions: Array(5).fill(copy) }).success).toBe(false)
+  })
+
+  it("writes only the four keys, on a clip, and leaves the column out otherwise", () => {
+    expect(eventMediaRows([{ ...clip, renditions: [{ ...copy, extra: 1 } as typeof copy] }])[0].renditions).toEqual([copy])
+    for (const item of [{ ...clip, renditions: [] }, { ...clip, renditions: null }, { ...clip, type: "image" as const, renditions: [copy] }]) {
+      expect(eventMediaRows([item])[0]).not.toHaveProperty("renditions")
+    }
+  })
+})

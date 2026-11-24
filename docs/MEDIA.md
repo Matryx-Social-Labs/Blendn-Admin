@@ -99,8 +99,29 @@ at 0.1s rather than 0, because seeking to exactly zero returns a pre-keyframe
 frame on some encoders — black, or a smear of macroblocks.
 
 A clip added by **URL** cannot be read this way: the canvas is tainted
-cross-origin and `toBlob` throws. Those need a poster pasted by hand, and the
-form says so.
+cross-origin and `toBlob` throws. The media worker takes its frame instead
+(below); where the worker is off it needs a poster pasted by hand, and the form
+says so.
+
+The first frame is the default, not the only choice: after a check the form
+offers five more stills from the clip, and says that any other one jumps to the
+clip's opening when it plays (per advisor, 2026-11-25).
+
+### Checking a clip (the media worker)
+
+`services/media-worker` is a Railway service of its own, because it opens links
+people paste. The editor calls it through `POST /api/media/clip`
+(`lib/media-clip.ts`) when a clip's URL is left or an upload lands, and fills in
+the size, the length, the poster and `event_media.renditions`:
+`[{url, width, height, bytes}]`, smallest first. Both copies are H.264
+faststart at 30 fps or less and never scaled up: one at most 540 px on its short
+side, silent, about 2 MB, for mobile data; one at most 1080 px, with sound.
+`url` stays what the organizer gave, so a client without renditions plays that.
+
+A clip over 15.5 s or 50 MB, a file that is not MP4/MOV, and a link that cannot
+be opened are refused in words under the URL, and stop the save. A worker that
+is off, asleep too long or busy stops nothing: the clip saves unchecked, and the
+form offers the check again.
 
 ### What the clients do, and why
 
@@ -118,8 +139,8 @@ must fetch the end of the file before it can show a frame, which on a feed means
 the card sits on its poster for an extra round trip on every scroll past.
 
 **Short MP4, not HLS.** A ten-second loop does not earn an adaptive ladder — the
-manifest, the segmenter and the multiple renditions all cost more than they save
-at this length. Revisit if long-form video ever ships.
+manifest and the segmenter cost more than they save at this length. The two
+plain MP4 copies above are the whole ladder. Revisit if long-form video ever ships.
 
 **Every row says its size (SCRUM-1066).** `event_media.width`, `height` and,
 for a clip, `duration_ms`, measured by the dashboard from the picked file before
@@ -128,7 +149,7 @@ it uploads (`lib/media-size.ts`) and sent on `GET /events` and
 land, and times the Featured lap from `duration_ms`. A clip over 15 s is refused
 at the pick and again on save, with 500 ms of tolerance for an export's padding
 (`MEDIA.CLIP_TOLERANCE_MS`); the measured length is stored unclamped. A pasted URL has no size (a typed URL clears the
-measured one), and nor do rows from before: the app measures on load for those.
+measured one) until the media worker checks it, and nor do rows from before: the app measures on load for those.
 
 **A poster is expected, and is never the cover.** `event_media.thumbnail_url`
 should be set for a video row: it is what shows while the first frame decodes.
