@@ -61,9 +61,30 @@ export function escalates(category: IssueCategory): boolean {
   return ESCALATING_CATEGORIES.includes(category)
 }
 
+/**
+ * What a positive message liked (SCRUM-1101, owner approval 5): at most five
+ * labels, across a concert, a meetup and a flea market alike. A label says
+ * what, never who or in which words.
+ */
+export const FEEDBACK_TOPICS = [
+  /** The crowd, making friends, meeting somebody. */
+  "people",
+  /** Music, DJ, band. */
+  "music",
+  /** Anything else staged: talks, sets, games, stalls, the match. */
+  "program",
+  "food_drink",
+  /** Venue, vibe, atmosphere. */
+  "place",
+] as const
+
+export type FeedbackTopic = (typeof FEEDBACK_TOPICS)[number]
+
 export interface Classification {
   sentiment: Sentiment
   category: IssueCategory
+  /** Only on a positive message that names one; null otherwise. */
+  topic: FeedbackTopic | null
   /** 0-1. Drives whether the UI presents this as certain or as a guess. */
   confidence: number
   /**
@@ -75,6 +96,10 @@ export interface Classification {
 
 export function isIssueCategory(value: string): value is IssueCategory {
   return (ISSUE_CATEGORIES as readonly string[]).includes(value)
+}
+
+export function isFeedbackTopic(value: unknown): value is FeedbackTopic {
+  return (FEEDBACK_TOPICS as readonly unknown[]).includes(value)
 }
 
 export function isSentiment(value: string): value is Sentiment {

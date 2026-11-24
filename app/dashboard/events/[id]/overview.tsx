@@ -6,6 +6,7 @@ import {
   AggregatesNote,
   DidPeopleMeetPanel,
   LobbyCountsPanel,
+  NightCrewsPanel,
   NightMoodPanel,
   TonightCountsPanel,
 } from "@/components/dashboard/event-insights-panels"
@@ -158,8 +159,9 @@ export function Overview({
           <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 @4xl/main:grid-cols-3">
             {mood ? <NightMoodPanel mood={mood} live={state === "live"} eventId={eventId} /> : null}
             <LobbyCountsPanel lobby={insights.lobby} pinnedSince={insights.pinnedSince} timezone={timezone} />
-            <TonightCountsPanel tonight={insights.tonight} crews={insights.crews} attendees={insights.attendees} />
+            <TonightCountsPanel tonight={insights.tonight} attendees={insights.attendees} />
           </div>
+          <NightCrewsPanel crews={insights.crews} attendees={insights.attendees} timezone={timezone} run={attendance ? !attendance.singleDay : false} />
           <AggregatesNote />
         </>
       ) : null}

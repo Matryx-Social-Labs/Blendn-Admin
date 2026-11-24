@@ -1,9 +1,9 @@
 // Relative imports, like the rest of lib/.
-import type { feedback_sentiment, issue_category } from "@prisma/client"
+import type { feedback_sentiment, feedback_topic, issue_category } from "@prisma/client"
 
 import { chatClosesAt } from "./chat-window"
 import { db } from "./db"
-import { discloseCategories, discloseGroup, discloseHeadcount, discloseStars, mayQuote, publishedRaters, spreadsByEventId, type DisclosedCategory, type FewCount, type HeldTotal, type StarSpread } from "./disclosure"
+import { discloseCategories, discloseGroup, discloseHeadcount, discloseStars, discloseTopics, mayQuote, publishedRaters, spreadsByEventId, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type StarSpread } from "./disclosure"
 import { publishedRatingGroups } from "./rating-batches"
 import { escalates } from "./sentiment/taxonomy"
 
@@ -54,6 +54,8 @@ export interface FeedbackDigest {
   /** Messages classified; for a venue, a floor once any mood is a few. */
   total: number | HeldTotal
   categories: DisclosedCategory[]
+  /** What the room liked, by people (`discloseTopics`). None for a venue, whose screens do not carry it. */
+  topics: DisclosedTopic[]
   /** All zero, and the average null, until `MIN_CELL` people have rated. */
   ratings: [number, number, number, number, number]
   averageRating: number | null
@@ -89,7 +91,7 @@ export async function buildFeedbackDigest(
   // What the tally needs, and nothing it does not: the words are read below, one page of them.
   const feedback = await db.event_feedback.findMany({
     where: { event_id: eventId },
-    select: { sentiment: true, category: true, message: { select: { user_id: true } } },
+    select: { sentiment: true, category: true, topic: true, message: { select: { user_id: true } } },
   })
 
   /*
@@ -99,10 +101,10 @@ export async function buildFeedbackDigest(
    */
   const [members, frozen] = await Promise.all([
     db.chat_group_members.count({ where: { chat_group: { event_id: eventId } } }),
-    db.event_feedback_tallies.findUnique({ where: { event_id: eventId }, select: { population: true, contributors: true } }),
+    db.event_feedback_tallies.findUnique({ where: { event_id: eventId }, select: { population: true, contributors: true, topics: true } }),
   ])
 
-  const tally = tallyFeedback(feedback.map((row) => ({ sentiment: row.sentiment, category: row.category, userId: row.message?.user_id ?? null })))
+  const tally = tallyFeedback(feedback.map((row) => ({ sentiment: row.sentiment, category: row.category, topic: row.topic, userId: row.message?.user_id ?? null })))
   const { counts, categoryCounts } = tally
   /*
    * How many people are in the room, and how many said something in each
@@ -113,6 +115,7 @@ export async function buildFeedbackDigest(
    */
   const population = frozen?.population ?? members
   const categoryContributors = frozen ? new Map(Object.entries(frozen.contributors as Record<string, number>)) : tally.contributors
+  const topicPeople = frozen ? new Map(Object.entries((frozen.topics ?? {}) as Record<string, number>)) : tally.topics
 
   // The categories a quote may come from: the same rule, per category, as before.
   const quotable = [...categoryContributors]
@@ -143,6 +146,7 @@ export async function buildFeedbackDigest(
      * safety_conduct" in a room of six is a sentence with an author.
      */
     categories: discloseCategories(categoryCounts, categoryContributors, population),
+    topics: venue ? [] : discloseTopics(topicPeople, population),
     // The stars too: under five raters they are individual scores (SCRUM-437).
     ...stars,
     ratingCount: venue ? discloseHeadcount(stars.ratingCount) : raters,
@@ -196,6 +200,7 @@ export function moodSplit(
 export interface TallyRow {
   sentiment: feedback_sentiment
   category: issue_category
+  topic: feedback_topic | null
   userId: string | null
 }
 
@@ -208,13 +213,19 @@ export interface TallyRow {
  * breakdown of the compliments is not a to-do list), asked for by name so the
  * live screen and this digest cannot drift apart. One rule for the digest, the
  * live screen and the purge's frozen tally.
+ *
+ * `topics` is the other half: distinct people per topic over the positive
+ * messages. A row a host corrected to another mood stops counting, whatever
+ * topic it was given.
  */
 export function tallyFeedback(rows: readonly TallyRow[]) {
   const counts = { positive: 0, neutral: 0, negative: 0 }
   const categoryCounts = new Map<string, number>()
   const people = new Map<string, Set<string>>()
+  const liked = new Map<string, Set<string>>()
   for (const row of rows) {
     counts[row.sentiment] += 1
+    if (row.sentiment === "positive" && row.topic && row.userId) liked.set(row.topic, (liked.get(row.topic) ?? new Set<string>()).add(row.userId))
     if (row.sentiment !== "negative" && !escalates(row.category)) continue
     categoryCounts.set(row.category, (categoryCounts.get(row.category) ?? 0) + 1)
     const who = people.get(row.category) ?? new Set<string>()
@@ -222,7 +233,8 @@ export function tallyFeedback(rows: readonly TallyRow[]) {
     people.set(row.category, who)
   }
   const contributors = new Map([...people].map(([category, who]) => [category, who.size]))
-  return { counts, categoryCounts, contributors }
+  const topics = new Map([...liked].map(([topic, who]) => [topic, who.size]))
+  return { counts, categoryCounts, contributors, topics }
 }
 
 /**

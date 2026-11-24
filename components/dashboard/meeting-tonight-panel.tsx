@@ -1,6 +1,7 @@
 import { Panel } from "@/components/dashboard/kit"
 import { MetricTile } from "@/components/dashboard/primitives"
 import { countLabel as count, formatNumber } from "@/lib/dashboard-format"
+import { cn } from "@/lib/utils"
 import type { FewCount, LiveSocial } from "@/lib/live-metrics"
 
 /** The three ways two people meet here, in the bar's order and colours (approval 1). */
@@ -17,7 +18,7 @@ const WAYS = [
  * just how many. Read once a minute; counts only, a few under five.
  */
 export function MeetingTonightPanel({ social }: { social: LiveSocial }) {
-  const { attendees, met, conversations, lobby, tonight, crews } = social
+  const { attendees, met, conversations, lobby, tonight } = social
 
   return (
     <Panel
@@ -60,13 +61,13 @@ export function MeetingTonightPanel({ social }: { social: LiveSocial }) {
         </>
       )}
 
-      <div className="grid grid-cols-2 gap-x-8 gap-y-1">
+      <div className={cn("grid gap-x-6 gap-y-1", tonight ? "grid-cols-3" : "grid-cols-2")}>
         <MetricTile className="min-w-0 px-0 py-1.5" label="Conversations" value={count(conversations)} hint="opened tonight" />
         <MetricTile className="min-w-0 px-0 py-1.5" label="Lobby" value={count(lobby.posts)} hint={lobbyHint(lobby)} />
         {tonight ? (
           <MetricTile
             className="min-w-0 px-0 py-1.5"
-            label="Tonight’s question"
+            label="Question"
             value={
               tonight.answered === "nearly_all"
                 ? "nearly all"
@@ -77,12 +78,6 @@ export function MeetingTonightPanel({ social }: { social: LiveSocial }) {
             hint="answered"
           />
         ) : null}
-        <MetricTile
-          className="min-w-0 px-0 py-1.5"
-          label="Crews here"
-          value={crews ? count(crews.here) : null}
-          hint={crews ? (crews.here === 0 ? "none here yet" : `${count(crews.people)} people`) : "between days"}
-        />
       </div>
     </Panel>
   )

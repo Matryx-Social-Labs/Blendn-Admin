@@ -184,7 +184,7 @@ describe("Post A's counts are frozen too (conversations, kept talking, crews tha
     expect(await eventInsights(eventId)).toEqual(before)
     expect(before.funnel).toMatchObject({ held: false, keptTalking: { count: 10 } })
     expect(before.conversations).toBe(5)
-    expect(before.crews).toEqual({ came: 2, people: 5 })
+    expect(before.crews).toEqual({ came: 2, people: 5, pct: 25, peak: null, back: null, mixes: 0 })
   })
 
   it("says 'not recorded', never 0, for a tally frozen before these were counted", async () => {

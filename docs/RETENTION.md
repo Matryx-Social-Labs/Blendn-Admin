@@ -119,10 +119,10 @@ Alert switches (`board_alert_preferences`) go at the close.
 
 **What the room felt is kept, anonymously** (owner, 2026-11-06). The purge does
 not delete `event_feedback`: before it takes an event's first message it freezes
-the event's figures in `event_feedback_tallies` (distinct people per category,
+the event's figures in `event_feedback_tallies` (distinct people per category and per positive topic,
 counted as the digest counts them, and the room's member count), then detaches
 each feedback row from its message (`message_id` null) and from the staff member
-who corrected it (`corrected_by` null). What stays is mood, category,
+who corrected it (`corrected_by` null). What stays is mood, category, topic,
 confidence, source and times: no user id, no words, no pseudonym. The Feedback
 tab (`buildFeedbackDigest`) reads the frozen figures once they exist, so every
 count, category and suppression reads the same after the purge as before; only

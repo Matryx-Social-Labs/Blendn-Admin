@@ -2,6 +2,7 @@ import Link from "next/link"
 import { IconLock } from "@tabler/icons-react"
 
 import { Panel } from "@/components/dashboard/kit"
+import { TalkingAbout } from "@/components/dashboard/talking-about"
 import { countLabel as count, formatNumber, splitShares } from "@/lib/dashboard-format"
 import { eventClock } from "@/lib/event-phase"
 import type { EventInsights, Stage } from "@/lib/event-insights"
@@ -93,7 +94,7 @@ function FunnelRow({ label, stage, whole }: { label: string; stage: Stage | null
 }
 
 /** The night's mood, from the Feedback digest; the quotes stay on Feedback. */
-export function NightMoodPanel({ mood, live, eventId }: { mood: Pick<FeedbackDigest, "counts" | "total" | "categories">; live: boolean; eventId: string }) {
+export function NightMoodPanel({ mood, live, eventId }: { mood: Pick<FeedbackDigest, "counts" | "total" | "categories" | "topics">; live: boolean; eventId: string }) {
   const { positive, neutral, negative } = mood.counts
   const total = mood.total
   const top = mood.categories[0]
@@ -120,6 +121,7 @@ export function NightMoodPanel({ mood, live, eventId }: { mood: Pick<FeedbackDig
           </p>
         </>
       )}
+      <TalkingAbout topics={mood.topics} />
       <p className="text-[0.78rem] text-muted-foreground">
         {top ? `Top complaint: ${top.category.replaceAll("_", " ")}${top.count !== null ? ` (${formatNumber(top.count)})` : ""}. ` : "No complaints classified. "}
         {live ? (
@@ -176,11 +178,11 @@ const INTENTS = [
   ["learn", "learn"],
 ] as const
 
-export function TonightCountsPanel({ tonight, crews, attendees }: Pick<EventInsights, "tonight" | "crews" | "attendees">) {
+export function TonightCountsPanel({ tonight, attendees }: Pick<EventInsights, "tonight" | "attendees">) {
   const answered = tonight?.answered
   return (
     <Panel title="Tonight’s question" action={<span className="shrink-0 text-[0.75rem] text-faint-foreground">never the answers</span>} bodyClassName="gap-3 pt-3">
-      <div className="grid grid-cols-2 gap-x-6">
+      <div>
         <Figure
           label="Answered"
           value={answered === undefined ? "—" : answered === "nearly_all" ? "nearly all" : count(answered)}
@@ -192,11 +194,6 @@ export function TonightCountsPanel({ tonight, crews, attendees }: Pick<EventInsi
                 : `of ${formatNumber(attendees)}`
           }
         />
-        <Figure
-          label="Crews"
-          value={crews === "not_recorded" ? "—" : count(crews.came)}
-          hint={crews === "not_recorded" ? "not recorded for this night" : crews.came === 0 ? "no crew came" : `${count(crews.people)} people`}
-        />
       </div>
       <p className="text-[0.75rem] text-muted-foreground">
         {tonight?.workIntent
@@ -205,6 +202,62 @@ export function TonightCountsPanel({ tonight, crews, attendees }: Pick<EventInsi
       </p>
     </Panel>
   )
+}
+
+/**
+ * The night's crews (S8, crews board 07-hosts A): did groups come, when were
+ * most of them here, and did they come back. Counts only, never a crew.
+ */
+export function NightCrewsPanel({ crews, attendees, timezone, run }: Pick<EventInsights, "crews" | "attendees"> & { timezone: string; run: boolean }) {
+  return (
+    <Panel title="Crews" action={<span className="shrink-0 text-[0.75rem] text-faint-foreground">counts only, never a crew</span>} bodyClassName="pt-3">
+      {crews === "not_recorded" ? (
+        <p className="text-[0.78rem] text-muted-foreground">Not recorded for this night.</p>
+      ) : crews.came === 0 ? (
+        <p className="text-[0.78rem] text-muted-foreground">No crew came: two or more of its members have to check in.</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-x-6 gap-y-4 @3xl/main:grid-cols-4">
+          <Figure
+            label="Came as a crew"
+            value={crews.pct !== null ? `${crews.pct}%` : crews.people === "nearly_all" ? "nearly all" : count(crews.people)}
+            hint={
+              crews.people === "nearly_all"
+                ? `of ${formatNumber(attendees)} people, ${crewCount(crews.came)}`
+                : crews.people === "few"
+                  ? `of ${formatNumber(attendees)} people`
+                  : `${formatNumber(crews.people)} of ${formatNumber(attendees)} people, ${crewCount(crews.came)}`
+            }
+          />
+          <Figure label="Peak crews" {...peakFigure(crews.peak, timezone, run)} />
+          <Figure label="Crews back again" {...backFigure(crews.back)} />
+          <Figure
+            label="Mixes made"
+            value={crews.mixes === "not_recorded" ? "—" : count(crews.mixes)}
+            hint={crews.mixes === "not_recorded" ? "not recorded for this night" : "crew met crew, or one more"}
+          />
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+type Crews = Exclude<EventInsights["crews"], "not_recorded">
+
+const crewCount = (came: Crews["came"]) => `${count(came)} crew${came === 1 ? "" : "s"}`
+
+function peakFigure(peak: Crews["peak"], timezone: string, run: boolean): { value: string; hint: string } {
+  if (peak === "not_recorded") return { value: "—", hint: "not recorded for this night" }
+  if (peak === null) return { value: "0", hint: "never two members at once" }
+  if (peak.at === null) return { value: count(peak.crews), hint: "at once" }
+  const clock = eventClock(timezone)
+  const at = new Date(peak.at)
+  return { value: count(peak.crews), hint: run ? `on ${clock.day(at)} at ${clock.time(at)}` : `at ${clock.time(at)}` }
+}
+
+function backFigure(back: Crews["back"]): { value: string; hint: string } {
+  if (back === "not_recorded") return { value: "—", hint: "not recorded for this night" }
+  if (back === null) return { value: "—", hint: "no earlier nights to compare" }
+  return { value: back === "nearly_all" ? "nearly all" : count(back), hint: "at one of your nights before" }
 }
 
 export function AggregatesNote() {

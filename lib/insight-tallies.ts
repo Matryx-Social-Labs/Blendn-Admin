@@ -1,6 +1,7 @@
 // Relative imports: run by the lifecycle sweeper, which server.ts reaches.
 import { Prisma, type work_intent } from "@prisma/client"
 
+import { crewPeak, crewsBack, mixesMade, type CrewPeak } from "./crews/night"
 import { connectionCounts, openedInRoom, type ConnectionCounts } from "./connection-metrics"
 import { db } from "./db"
 import { logger } from "./logger"
@@ -27,9 +28,11 @@ export interface InsightCounts {
   /**
    * Crews that came: two or more members checked in, and the people in them
    * (Post A). Who was in a crew is read when frozen, so it is frozen. Absent
-   * from tallies frozen before Post A.
+   * from tallies frozen before Post A. `peak`, `back` and `mixes` (S8, lib/crews/night.ts)
+   * are absent from tallies frozen before 2026-11-24. A null `back` has no
+   * earlier nights of this host to compare with; a null `peak`, no crew here.
    */
-  crews: { came: number; people: number }
+  crews: { came: number; people: number; peak: CrewPeak | null; back: { crews: number; people: number } | null; mixes: number }
 }
 
 /** Events frozen per pass. A pass is every 15 minutes, and a purge waits for the events it has not reached. */
@@ -38,7 +41,7 @@ export const FREEZE_BATCH = 200
 const n = (v: bigint | number | null | undefined) => Number(v ?? 0)
 
 export async function insightCountsOf(eventId: string): Promise<InsightCounts> {
-  const [connections, [lobby], [tonight], [rest]] = await Promise.all([
+  const [connections, [lobby], [tonight], [rest], peak, back, mixes] = await Promise.all([
     connectionCounts(eventId),
     // board-visibility: counts only, and a silenced ask (`silenced_at`) is left out, as it is for its author.
     db.$queryRaw<{ offer: bigint; seeking: bigint; chat: bigint; asks: bigint; accepted: bigint }[]>`
@@ -69,6 +72,9 @@ export async function insightCountsOf(eventId: string): Promise<InsightCounts> {
       SELECT (SELECT count(*) FROM private_conversations c WHERE ${openedInRoom(eventId)}) AS conversations,
              (SELECT count(DISTINCT crew_id) FROM came) AS came,
              (SELECT count(DISTINCT user_id) FROM came) AS people`,
+    crewPeak({ eventId }),
+    crewsBack(eventId),
+    mixesMade({ eventId }),
   ])
   return {
     connections,
@@ -78,7 +84,7 @@ export async function insightCountsOf(eventId: string): Promise<InsightCounts> {
       workIntent: { hire: n(tonight?.hire), find_work: n(tonight?.find_work), build: n(tonight?.build), learn: n(tonight?.learn) },
     },
     conversations: n(rest?.conversations),
-    crews: { came: n(rest?.came), people: n(rest?.people) },
+    crews: { came: n(rest?.came), people: n(rest?.people), peak, back, mixes },
   }
 }
 
