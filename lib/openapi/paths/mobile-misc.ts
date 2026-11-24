@@ -918,7 +918,9 @@ const NotificationSchema = z.object({
         ),
       visual: z
         .discriminatedUnion("type", [
-          z.object({ type: z.literal("photo"), uri: z.string() }),
+          z
+            .object({ type: z.literal("photo"), uri: z.string(), name: z.string() })
+            .describe("A named person's photo. `name` is the one the row's title uses: draw their initial under the photo while it loads."),
           z.object({ type: z.literal("initial"), name: z.string() }).describe("A named person with no photo: draw their initial on their hue (`personFace`)."),
           z.object({ type: z.literal("creature"), pseudonym: z.string() }),
           z.object({ type: z.literal("emblem"), seed: z.string() }),
