@@ -132,11 +132,19 @@ describe("a tally is counts only", () => {
     const { eventId, guests } = await endedRoom(TONIGHT_ANSWER_DAYS + 3)
     await db.event_match_preferences.create({ data: { event_id: eventId, user_id: guests[0], tonight_answer: "secret words", work_intent: "build" } })
     await acceptedAsk(eventId, guests[0], guests[1])
+    await crewOf([guests[0], guests[1]])
+    const occurrenceId = await occurrenceOf(eventId)
+    const from = Date.now() - (TONIGHT_ANSWER_DAYS + 3) * DAY - 3_600_000
+    await db.presence_sessions.createMany({
+      data: guests.slice(0, 2).map((user_id) => ({ event_id: eventId, occurrence_id: occurrenceId, user_id, arrived_at: new Date(from), departed_at: new Date(from + 1_800_000) })),
+    })
     for (let i = 0; i < 10 && !(await tallyOf(eventId)); i++) await freezeInsightTallies(new Date(Date.now() - TONIGHT_ANSWER_DAYS * DAY))
 
     const all = leaves((await tallyOf(eventId))?.counts)
     expect(all.length).toBeGreaterThan(0)
-    for (const v of all) expect(typeof v).toBe("number")
+    // Counts, what there was none of (null), and the one moment there is: a crew peak, to ten minutes.
+    for (const v of all) expect(v === null || typeof v === "number" || /^\d{4}-\d\d-\d\dT\d\d:\d0:00\.000Z$/.test(String(v))).toBe(true)
+    expect(all.filter((v) => typeof v === "string")).toHaveLength(1)
   })
 })
 
