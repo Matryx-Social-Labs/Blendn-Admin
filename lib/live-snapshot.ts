@@ -5,7 +5,7 @@
 // paths.
 import { db } from "./db"
 import { logger } from "./logger"
-import { discloseCategories } from "./disclosure"
+import { discloseCategories, discloseTopics } from "./disclosure"
 import { occupancyFrom } from "./occupancy"
 import { headcount } from "./presence-sessions"
 import { tallyFeedback } from "./feedback-digest"
@@ -259,7 +259,7 @@ export async function readLiveSnapshot(
       : Promise.resolve(0),
     db.event_feedback.findMany({
       where: { event_id: eventId, created_at: { gte: thirtyMinutesAgo } },
-      select: { sentiment: true, category: true, message: { select: { user_id: true } } },
+      select: { sentiment: true, category: true, topic: true, message: { select: { user_id: true } } },
     }),
     // Who a complaint could be from, as the digest counts them: everyone with a member row, any status.
     chatGroupId ? db.chat_group_members.count({ where: { chat_group_id: chatGroupId } }) : Promise.resolve(0),
@@ -342,7 +342,8 @@ export async function readLiveSnapshot(
     counts: sentiment,
     categoryCounts,
     contributors: categoryContributors,
-  } = tallyFeedback(feedback.map((row) => ({ sentiment: row.sentiment, category: row.category, userId: row.message?.user_id ?? null })))
+    topics,
+  } = tallyFeedback(feedback.map((row) => ({ sentiment: row.sentiment, category: row.category, topic: row.topic, userId: row.message?.user_id ?? null })))
 
   const figures: LiveFigures = {
     eventId,
@@ -385,6 +386,7 @@ export async function readLiveSnapshot(
     snapshot: {
       ...figures,
       categories: discloseCategories(categoryCounts, categoryContributors, roomSize),
+      topics: discloseTopics(topics, roomSize),
       view: "host",
       social,
       alerts: deriveAlerts(figures, { scheduledEnd: event.end_time, scheduledStart: event.start_time, now }),

@@ -38,6 +38,7 @@ jest.mock("@/lib/sentiment/classify", () => {
           : m.text.includes("SAFETY")
             ? "safety_conduct"
             : "other",
+        topic: m.text.includes("MUSIC") ? "music" : null,
         confidence: 0.9,
         source: "llm" as const,
       }))
@@ -77,6 +78,20 @@ afterAll(async () => {
 })
 
 describe("the sweeper writes what the live screen reads", () => {
+  it("writes what a positive message liked, and the host's live view counts it by people", async () => {
+    const { eventId, groupId } = await roomWith(["GOOD MUSIC", "GOOD"])
+    for (let i = 0; i < 12; i++) {
+      const id = await makeUser(`snt-fan${i}`)
+      users.push(id)
+      await db.chat_group_members.create({ data: { chat_group_id: groupId, user_id: id, anonymous_name: `Fan ${i} ${groupId.slice(0, 6)}` } })
+      if (i < 5) await db.chat_messages.create({ data: { chat_group_id: groupId, user_id: id, content: "GOOD MUSIC", type: "text" } })
+    }
+    await sweepSentiment()
+    const rows = await db.event_feedback.findMany({ where: { event_id: eventId }, select: { topic: true } })
+    expect(rows.map((r) => r.topic).sort()).toEqual([...Array(6).fill("music"), null])
+    expect((await buildLiveSnapshot(eventId))?.topics).toEqual([{ topic: "music", people: 6 }])
+  })
+
   it("classifies open-room messages into event_feedback", async () => {
     const { eventId } = await roomWith(["BAD QUEUE at the door", "GOOD set tonight"])
 

@@ -33,6 +33,8 @@ run.
 | Messages/min, active chatters | `chat_messages` |
 | Open moderation flags | `moderation_flags` |
 | Mood: positive / neutral / negative | `event_feedback` (classified chat) |
+| Talking about: what positive messages liked, five labels, by distinct people (5 or more) | `event_feedback.topic` |
+| Crews tonight: here now, people in them, peak and time, Mixes | `crew_members` + `presence_sessions` + `blends` (`lib/crews/night.ts`) |
 | Categories: entry_queue, safety_conduct, other | classifier taxonomy |
 
 **Seven alert rules** (`deriveAlerts`), each persisted to `event_issues` with

@@ -8,7 +8,7 @@
  * server-only.
  */
 
-import { liveCountBucket, type DisclosedCategory, type FewCount, type HeldTotal, type LiveCountBucket } from "./disclosure"
+import { liveCountBucket, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type LiveCountBucket } from "./disclosure"
 
 export type { FewCount, HeldTotal }
 
@@ -81,11 +81,23 @@ export interface LiveSocial {
   lobby: { posts: number | HeldTotal; offer: FewCount; seeking: FewCount; chat: FewCount }
   /** Guests who answered Tonight's question; `"nearly_all"` when the rest are a few. Null: the room asks none. */
   tonight: { answered: FewCount | "nearly_all" } | null
-  /**
-   * Crews with two or more members here now, and the people in them; both a few
-   * while the people are (two crews already say four people). Null: no day resolves.
-   */
-  crews: { here: FewCount; people: FewCount } | null
+  /** "Crews tonight" (S8). Null: no day resolves. */
+  crews: LiveCrews | null
+}
+
+/** Crews as a host is shown them while the night runs: counts only, never a crew. */
+export interface LiveCrews {
+  /** Crews with two or more members here now, a few while the people in them are (two crews already say four people). */
+  here: FewCount
+  /** People in those crews, once each; `"nearly_all"` when the guests here who are in none are a few. */
+  people: FewCount | "nearly_all"
+  /** Guests here now, and the share of them in crews when `people` is a number. */
+  guests: number
+  pct: number | null
+  /** The most crews here at once today, and when, to ten minutes; `at` null while the crews are a few. Null: none yet. */
+  peak: { crews: FewCount; at: string | null } | null
+  /** Mixes made today: two crews, or a crew and one more. */
+  mixes: FewCount
 }
 
 /** What whoever runs the event (or an admin) is sent: the figures, and their alerts. */
@@ -98,6 +110,8 @@ export interface LiveSnapshot extends Omit<LiveFigures, "categories"> {
    * message. The exact counts stay in `LiveFigures`, for the alerts, and never leave the server.
    */
   categories: DisclosedCategory[]
+  /** "Talking about": what the positive messages of the last 30 minutes liked, by people. Never sent to a venue (`forVenue`). */
+  topics: DisclosedTopic[]
   alerts: LiveAlert[]
 }
 

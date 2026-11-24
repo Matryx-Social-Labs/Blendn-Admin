@@ -49,7 +49,7 @@ beforeAll(async () => {
     pseudonyms.push(name)
     await db.chat_group_members.create({ data: { chat_group_id: room, user_id: id, anonymous_name: name } })
   }
-  const said = async (who: number, content: string, sentiment: "positive" | "neutral" | "negative", category: string, corrected = false) => {
+  const said = async (who: number, content: string, sentiment: "positive" | "neutral" | "negative", category: string, corrected = false, topic: "music" | "place" | null = null) => {
     const m = await db.chat_messages.create({ data: { chat_group_id: room, user_id: people[who], content, created_at: ago(182.1) }, select: { id: true } })
     await db.event_feedback.create({
       data: {
@@ -57,6 +57,7 @@ beforeAll(async () => {
         message_id: m.id,
         sentiment,
         category: category as never,
+        topic,
         confidence: corrected ? 1 : 0.8,
         source: corrected ? "human" : "lexicon",
         ...(corrected && { corrected_by: host, corrected_at: ago(181.5) }),
@@ -69,13 +70,17 @@ beforeAll(async () => {
   // One person about safety: held back under the floor, but listed.
   await said(6, "Someone was pushing near the bar", "negative", "safety_conduct")
   await said(7, "Great night", "positive", "other")
+  // Six people about the music (one twice), one about the place: disclosed, and held back.
+  for (let i = 1; i < 7; i++) await said(i, "The DJ is amazing", "positive", "other", false, "music")
+  await said(1, "Still amazing, the DJ", "positive", "other", false, "music")
+  await said(0, "Lovely rooftop", "positive", "other", false, "place")
 })
 
 /** What the Feedback tab shows, less the quotes (they are words, and the words go). */
 const figures = async (view: "host" | "venue") => {
   const event = await db.events.findUniqueOrThrow({ where: { id: eventId }, select: { id: true, title: true, end_time: true, timezone: true } })
-  const { counts, total, categories, ratingCount, averageRating, messages } = await buildFeedbackDigest(event, view)
-  return { figures: { counts, total, categories, ratingCount, averageRating }, quotes: messages.length }
+  const { counts, total, categories, topics, ratingCount, averageRating, messages } = await buildFeedbackDigest(event, view)
+  return { figures: { counts, total, categories, topics, ratingCount, averageRating }, quotes: messages.length }
 }
 
 describe("feedback through the 180-day purge", () => {
@@ -83,7 +88,9 @@ describe("feedback through the 180-day purge", () => {
 
   it("shows real figures before it: a disclosed category, a held-back one, and quotes", async () => {
     before = { host: await figures("host"), venue: await figures("venue") }
-    expect(before.host.figures.total).toBe(9)
+    expect(before.host.figures.total).toBe(17)
+    expect(before.host.figures.topics).toEqual([{ topic: "music", people: 6 }])
+    expect(before.venue.figures.topics).toEqual([])
     expect(before.host.figures.categories).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ category: "entry_queue", count: 7, suppressed: false }),
@@ -104,10 +111,10 @@ describe("feedback through the 180-day purge", () => {
 
   it("keeps every feedback row, with nothing left that identifies a person", async () => {
     const rows = await db.event_feedback.findMany({ where: { event_id: eventId } })
-    expect(rows).toHaveLength(9)
+    expect(rows).toHaveLength(17)
     for (const row of rows) expect(row).toMatchObject({ message_id: null, corrected_by: null })
     const tally = await db.event_feedback_tallies.findUniqueOrThrow({ where: { event_id: eventId } })
-    expect(tally).toMatchObject({ population: 8, contributors: { entry_queue: 6, safety_conduct: 1 } })
+    expect(tally).toMatchObject({ population: 8, contributors: { entry_queue: 6, safety_conduct: 1 }, topics: { music: 6, place: 1 } })
     const kept = JSON.stringify({ rows, tally })
     for (const id of [host, ...people]) expect(kept).not.toContain(id)
     for (const name of pseudonyms) expect(kept).not.toContain(name)
@@ -122,7 +129,7 @@ describe("feedback through the 180-day purge", () => {
   it("is the same on the next pass", async () => {
     await purgeClosedLobbies(new Date(), "delete")
     expect((await figures("host")).figures).toEqual(before.host.figures)
-    expect(await db.event_feedback.count({ where: { event_id: eventId } })).toBe(9)
+    expect(await db.event_feedback.count({ where: { event_id: eventId } })).toBe(17)
   })
 })
 

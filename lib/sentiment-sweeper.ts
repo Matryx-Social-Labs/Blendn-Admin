@@ -193,15 +193,15 @@ async function writeFeedback(
   const last = new Map(results.map((r) => [r.id, r]))
   const rows = [...last.values()]
   return db.$queryRaw<{ message_id: string }[]>`
-    INSERT INTO event_feedback (id, event_id, message_id, sentiment, category, confidence, source)
-    SELECT gen_random_uuid(), v.event_id, v.message_id, v.sentiment::feedback_sentiment, v.category::issue_category, v.confidence, v.source::feedback_source
+    INSERT INTO event_feedback (id, event_id, message_id, sentiment, category, topic, confidence, source)
+    SELECT gen_random_uuid(), v.event_id, v.message_id, v.sentiment::feedback_sentiment, v.category::issue_category, v.topic::feedback_topic, v.confidence, v.source::feedback_source
       FROM unnest(
         ${rows.map((r) => r.eventId)}::uuid[], ${rows.map((r) => r.id)}::uuid[], ${rows.map((r) => r.sentiment)}::text[],
-        ${rows.map((r) => r.category)}::text[], ${rows.map((r) => r.confidence)}::float8[], ${rows.map((r) => r.source)}::text[]
-      ) AS v(event_id, message_id, sentiment, category, confidence, source)
+        ${rows.map((r) => r.category)}::text[], ${rows.map((r) => r.topic)}::text[], ${rows.map((r) => r.confidence)}::float8[], ${rows.map((r) => r.source)}::text[]
+      ) AS v(event_id, message_id, sentiment, category, topic, confidence, source)
       JOIN chat_messages m ON m.id = v.message_id
     ON CONFLICT (message_id) DO UPDATE
-      SET sentiment = EXCLUDED.sentiment, category = EXCLUDED.category, confidence = EXCLUDED.confidence, source = EXCLUDED.source
+      SET sentiment = EXCLUDED.sentiment, category = EXCLUDED.category, topic = EXCLUDED.topic, confidence = EXCLUDED.confidence, source = EXCLUDED.source
       WHERE event_feedback.source <> 'human'
     RETURNING message_id`
 }

@@ -318,6 +318,24 @@ export function discloseCategories(
     .sort((a, b) => (b.count ?? 0) - (a.count ?? 0))
 }
 
+/** A topic a host may read, and how many people are behind it. */
+export interface DisclosedTopic {
+  topic: string
+  people: number
+}
+
+/**
+ * What the room liked (SCRUM-1101): topics by how many distinct people named
+ * them (`tallyFeedback`), most first. Unlike a complaint, a topic under the
+ * floor is left out altogether: nobody has to act on it, and listing it would
+ * say that one to four people said so.
+ */
+export function discloseTopics(people: ReadonlyMap<string, number>, population: number): DisclosedTopic[] {
+  return Array.from(people, ([topic, n]) => ({ topic, people: discloseFigure({ count: n, contributors: n, population }).value }))
+    .filter((t): t is DisclosedTopic => t.people !== null)
+    .sort((a, b) => b.people - a.people || a.topic.localeCompare(b.topic))
+}
+
 /** `groupBy(["event_id", "rating"])` rows as one star spread per event. */
 export function spreadsByEvent(rows: RatingGroupRow[]): StarSpread[] {
   return [...spreadsByEventId(rows).values()]
@@ -483,6 +501,13 @@ export function discloseAnswered(answered: number, attendees: number): FewCount 
 /** Crews and the people in them: both a few while the people are, since two crews already say four people. */
 export function discloseCrews(crews: number, people: number): { crews: FewCount; people: FewCount } {
   return people > 0 && people < MIN_CELL ? { crews: "few", people: "few" } : { crews, people }
+}
+
+/** A crew peak: its crews a few while the people in them then were, and its time held with them. */
+export function disclosePeak(peak: { crews: number; people: number; at: string } | null): { crews: FewCount; at: string | null } | null {
+  if (!peak) return null
+  const { crews } = discloseCrews(peak.crews, peak.people)
+  return { crews, at: crews === "few" ? null : peak.at }
 }
 
 /**

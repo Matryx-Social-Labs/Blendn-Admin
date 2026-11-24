@@ -24,7 +24,9 @@ import {
 import type { IssueRow } from "@/lib/event-issues"
 import { earlierIssues } from "@/lib/issue-timestamp"
 import { IssueLog } from "@/components/dashboard/issue-log"
+import { CrewsTonightPanel } from "@/components/dashboard/crews-tonight-panel"
 import { MeetingTonightPanel } from "@/components/dashboard/meeting-tonight-panel"
+import { TalkingAbout } from "@/components/dashboard/talking-about"
 import { useOpsSnapshot } from "@/lib/use-ops-snapshot"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
 import { liveCountLabel } from "@/lib/disclosure"
@@ -243,7 +245,12 @@ export function LiveTab({
           </div>
 
           {/* How the room is meeting, under Alerts (Live A). The host's copy only: how people met stays the host's. */}
-          {snapshot.view === "host" && snapshot.social ? <MeetingTonightPanel social={snapshot.social} /> : null}
+          {snapshot.view === "host" && snapshot.social ? (
+            <>
+              <MeetingTonightPanel social={snapshot.social} />
+              <CrewsTonightPanel crews={snapshot.social.crews} timezone={timezone} />
+            </>
+          ) : null}
 
           {/*
             The same rules, recorded. Everything above is derived from the live
@@ -266,6 +273,7 @@ export function LiveTab({
           {snapshot.view === "host" ? (
             <>
               <SentimentBar snapshot={snapshot} />
+              <TalkingAbout topics={snapshot.topics} live />
               <CategoryBars
                 title="Complaints — last 30 min"
                 hint="negative + safety messages"

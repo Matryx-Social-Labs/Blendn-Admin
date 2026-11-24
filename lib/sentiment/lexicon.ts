@@ -1,5 +1,6 @@
 import {
   type Classification,
+  type FeedbackTopic,
   type IssueCategory,
   type Sentiment,
 } from "./taxonomy"
@@ -96,6 +97,21 @@ function detectCategory(text: string): IssueCategory | null {
   return null
 }
 
+/** Topic cues for a message already read as positive. */
+const TOPIC_CUES: Array<{ topic: FeedbackTopic; pattern: RegExp }> = [
+  { topic: "people", pattern: /\b(people|crowd|everyone here|made friends|new friends|met (so many|some|such))\b/i },
+  { topic: "music", pattern: /\b(music|dj|band|song(s)?|playlist|beats?|singer|vocals)\b/i },
+  { topic: "program", pattern: /\b(talk(s)?|speaker(s)?|panel|workshop|demo(s)?|stalls?|game(s)?|match|comedian|comic|show|performance|quiz)\b/i },
+  { topic: "food_drink", pattern: /\b(food|drinks?|beer|wine|cocktails?|coffee|snacks?|pizza|biryani|dessert)\b/i },
+  { topic: "place", pattern: /\b(venue|place|vibe(s)?|atmosphere|ambien[ct]e|rooftop|view|decor)\b/i },
+]
+
+/** The one topic a positive message names; two named, or none, is none (the main one is for tier 3 to say). */
+function detectTopic(text: string): FeedbackTopic | null {
+  const named = TOPIC_CUES.filter(({ pattern }) => pattern.test(text))
+  return named.length === 1 ? named[0].topic : null
+}
+
 /**
  * Returns a confident classification, or null meaning "escalate to tier 3".
  *
@@ -131,7 +147,7 @@ export function classifyWithLexicon(text: string): Classification | null {
   // No polarity signal AND no category cue is the case this tier exists for:
   // plain logistics chatter, confidently neutral, no LLM needed.
   if (!sentiment && !category) {
-    return { sentiment: "neutral", category: "other", confidence: 0.8, source: "lexicon" }
+    return { sentiment: "neutral", category: "other", topic: null, confidence: 0.8, source: "lexicon" }
   }
 
   // A category cue but no clear polarity is genuinely ambiguous — "the bar" is
@@ -141,6 +157,7 @@ export function classifyWithLexicon(text: string): Classification | null {
   return {
     sentiment,
     category: category ?? "other",
+    topic: sentiment === "positive" ? detectTopic(trimmed) : null,
     // Deliberately capped below what tier 3 can claim. A lexicon should never
     // present as more certain than a model that actually read the sentence.
     confidence: 0.7,
@@ -179,6 +196,7 @@ export function lexiconFallback(text: string): Classification {
     return {
       sentiment: "negative",
       category: "safety_conduct",
+      topic: null,
       confidence: 0.3,
       source: "lexicon",
     }
@@ -190,6 +208,7 @@ export function lexiconFallback(text: string): Classification {
     // flatten the mood bar with noise.
     sentiment: "neutral",
     category: category ?? "other",
+    topic: null,
     confidence: 0.3,
     source: "lexicon",
   }

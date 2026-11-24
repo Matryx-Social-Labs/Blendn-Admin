@@ -2,7 +2,9 @@ import { logger } from "../logger"
 
 import { classifyWithLexicon, lexiconFallback } from "./lexicon"
 import {
+  FEEDBACK_TOPICS,
   ISSUE_CATEGORIES,
+  isFeedbackTopic,
   isIssueCategory,
   isSentiment,
   type Classification,
@@ -32,16 +34,18 @@ const SYSTEM_PROMPT = `You label short chat messages sent by attendees during or
 For each message return:
 - sentiment: positive | neutral | negative — how the attendee feels about the event
 - category: one of ${ISSUE_CATEGORIES.join(", ")}
+- topic: for a positive message only, the one thing it likes, one of ${FEEDBACK_TOPICS.join(", ")}; otherwise null
 - confidence: 0-1, your genuine certainty
 
 Rules:
 - Logistics chatter with no opinion ("anyone getting there early?") is neutral / other.
 - Sarcasm and understatement are common. "great, only queued 40 minutes" is negative / entry_queue.
 - safety_conduct covers harassment, threats, aggression, or someone unwell. Use it whenever the message describes one, even if the tone is calm — a composed report is still a report.
+- topic: people is the crowd or meeting somebody; music is music, a DJ or a band; program is anything else staged (talks, sets, games, stalls, the match); food_drink is food and drink; place is the venue, vibe or atmosphere. If it likes two, give the main one. If it names none of them ("so good!"), null.
 - Use "other" only when no category genuinely fits, not when you are unsure between two.
 - Lower your confidence rather than guessing.
 
-Respond with JSON: {"results":[{"id":"...","sentiment":"...","category":"...","confidence":0.0}]}`
+Respond with JSON: {"results":[{"id":"...","sentiment":"...","category":"...","topic":null,"confidence":0.0}]}`
 
 function getApiKey(): string | undefined {
   return process.env.OPENAI_API_KEY
@@ -103,6 +107,7 @@ async function classifyBatchWithLlm(
         id?: string
         sentiment?: string
         category?: string
+        topic?: unknown
         confidence?: number
       }>
     }
@@ -122,6 +127,8 @@ async function classifyBatchWithLlm(
       out.set(row.id, {
         sentiment: row.sentiment,
         category: row.category,
+        // A topic is what a positive message liked; anything else the model says is no topic, never a dropped message.
+        topic: row.sentiment === "positive" && isFeedbackTopic(row.topic) ? row.topic : null,
         confidence: Math.max(0, Math.min(1, row.confidence ?? 0.5)),
         source: "llm",
       })

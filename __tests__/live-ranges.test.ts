@@ -39,6 +39,7 @@ function hostSnapshot(over: Partial<LiveSnapshot> = {}): LiveSnapshot {
   return {
     view: "host",
     social: null,
+    topics: [{ topic: "music", people: 6 }],
     eventId: "evt",
     at: "2026-10-01T20:00:00.000Z",
     inside: 12,

@@ -9,13 +9,16 @@ import { discloseGroup, MIN_CELL } from "@/lib/disclosure"
  * learns who just did it.
  */
 
+const AT = "2026-11-24T17:10:00.000Z"
+const crews = (over: Partial<NonNullable<LiveSocialCounts["crews"]>> = {}) => ({ here: 3, people: 9, guests: 40, peak: { crews: 5, people: 14, at: AT }, mixes: 6, ...over })
+
 function counts(over: Partial<LiveSocialCounts> = {}): LiveSocialCounts {
   return {
     connections: { attendees: 44, connections: 15, connected: 23, reachedOut: 30, byWay: { waves: 9, lobby: 4, requests: 2 }, keptTalking: 0 },
     conversations: 12,
     lobby: { offer: 6, seeking: 3, chat: 0 },
     tonight: { asked: true, answered: 31 },
-    crews: { here: 3, people: 9 },
+    crews: crews(),
     ...over,
   }
 }
@@ -63,17 +66,30 @@ describe("discloseSocial", () => {
   })
 
   it("counts crews exactly and the people in them as a few under five", () => {
-    expect(discloseSocial(counts()).crews).toEqual({ here: 3, people: 9 })
-    // Two crews here says at least four people; under five, the count of crews is held too.
-    expect(discloseSocial(counts({ crews: { here: 2, people: 4 } })).crews).toEqual({ here: "few", people: "few" })
+    expect(discloseSocial(counts()).crews).toEqual({ here: 3, people: 9, guests: 40, pct: 23, peak: { crews: 5, at: AT }, mixes: 6 })
+    // Two crews here says at least four people; under five, the count of crews is held too, and so is the share.
+    expect(discloseSocial(counts({ crews: crews({ here: 2, people: 4 }) })).crews).toMatchObject({ here: "few", people: "few", pct: null })
     expect(discloseSocial(counts({ crews: null })).crews).toBeNull()
+  })
+
+  it("holds the share in crews when the guests in none are a few: they would be named by it", () => {
+    expect(discloseSocial(counts({ crews: crews({ people: 37 }) })).crews).toMatchObject({ people: "nearly_all", pct: null })
+    // The control: five in none, so the share is said.
+    expect(discloseSocial(counts({ crews: crews({ people: 35 }) })).crews).toMatchObject({ people: 35, pct: 88 })
+  })
+
+  it("holds a peak's crews and its time while the people in them were a few, and Mixes under five", () => {
+    expect(discloseSocial(counts({ crews: crews({ peak: { crews: 2, people: 4, at: AT }, mixes: 4 }) })).crews).toMatchObject({ peak: { crews: "few", at: null }, mixes: "few" })
+    expect(discloseSocial(counts({ crews: crews({ peak: { crews: 2, people: 5, at: AT }, mixes: 0 }) })).crews).toMatchObject({ peak: { crews: 2, at: AT }, mixes: 0 })
+    expect(discloseSocial(counts({ crews: crews({ peak: null }) })).crews?.peak).toBeNull()
   })
 
   it("carries counts and words only: no id, no name, no answer", () => {
     const text = JSON.stringify(discloseSocial(counts()))
     expect(text).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/)
     for (const v of JSON.stringify(discloseSocial(counts())).match(/"[^"]*"(?=,|})/g) ?? []) {
-      expect(["\"few\"", "\"nearly_all\""]).toContain(v)
+      // The one other string: when the crews peaked, to ten minutes.
+      expect(["\"few\"", "\"nearly_all\"", `"${AT}"`]).toContain(v)
     }
   })
 })

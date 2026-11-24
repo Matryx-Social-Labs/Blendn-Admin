@@ -2651,6 +2651,8 @@ model event_feedback {
   message_id   String?            @unique @db.Uuid
   sentiment    feedback_sentiment
   category     issue_category
+  /// What a positive message liked; null when it named none of the five, or is not positive. A label, never words.
+  topic        feedback_topic?
   /// 0-1. Drives whether the UI presents this as certain or as a guess — a
   /// lexicon label and an LLM label must not look equally authoritative.
   confidence   Float
@@ -2679,6 +2681,8 @@ model event_feedback_tallies {
   population   Int
   /// `{ [category]: distinct people }`.
   contributors Json
+  /// `{ [topic]: distinct people }` over the positive messages; null on a tally frozen before topics (2026-11-24).
+  topics       Json?
   frozen_at    DateTime @default(now()) @db.Timestamptz(6)
 
   event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
@@ -2719,6 +2723,15 @@ enum issue_category {
   technical
   safety_conduct
   other
+}
+
+/// What the room liked (SCRUM-1101): at most five, across every kind of event.
+enum feedback_topic {
+  people
+  music
+  program
+  food_drink
+  place
 }
 
 enum feedback_source {

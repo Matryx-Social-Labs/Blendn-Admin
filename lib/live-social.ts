@@ -1,9 +1,10 @@
 // Relative imports: the ops loop in lib/socket-server.ts reaches this from server.ts.
 import { connectionCounts, MIN_ATTENDEES, openedInRoom, type ConnectionCounts } from "./connection-metrics"
-import { presentMembersAt } from "./crews/here"
+import { hereNowAt, presentMembersAt } from "./crews/here"
+import { crewPeak, mixesMade, type CrewPeak } from "./crews/night"
 import { db } from "./db"
-import { discloseAnswered, discloseCrews, discloseGroup, fewCount } from "./disclosure"
-import type { FewCount, LiveSocial } from "./live-metrics"
+import { discloseAnswered, discloseCrews, discloseGroup, disclosePeak, fewCount } from "./disclosure"
+import type { LiveCrews, LiveSocial } from "./live-metrics"
 import { lensForEvent } from "./tonight"
 
 /** The raw counts behind `LiveSocial`. Never leaves the server as is. */
@@ -12,7 +13,7 @@ export interface LiveSocialCounts {
   conversations: number
   lobby: { offer: number; seeking: number; chat: number }
   tonight: { asked: boolean; answered: number }
-  crews: { here: number; people: number } | null
+  crews: { here: number; people: number; guests: number; peak: CrewPeak | null; mixes: number } | null
 }
 
 const n = (v: bigint | number | null | undefined) => Number(v ?? 0)
@@ -32,17 +33,30 @@ export async function liveSocialCounts(eventId: string, occurrenceId: string | n
              (SELECT count(*) FROM board_posts WHERE event_id = ${eventId}::uuid AND deleted_at IS NULL AND kind = 'chat') AS chat,
              (SELECT count(*) FROM event_match_preferences WHERE event_id = ${eventId}::uuid AND tonight_answer IS NOT NULL) AS answered`,
     lensForEvent(eventId),
-    occurrenceId ? presentMembersAt(occurrenceId) : Promise.resolve(null),
+    occurrenceId ? crewsTonight(occurrenceId) : Promise.resolve(null),
   ])
-  // A crew is here when two or more of its members are (lib/crews/presence.ts).
-  const present = crews ? Array.from(crews.values()).filter((members) => members.length >= 2) : null
   return {
     connections,
     conversations: n(rest?.conversations),
     lobby: { offer: n(rest?.offer), seeking: n(rest?.seeking), chat: n(rest?.chat) },
     tonight: { asked: Boolean(lens?.question), answered: n(rest?.answered) },
-    crews: present ? { here: present.length, people: present.reduce((sum, m) => sum + m.length, 0) } : null,
+    crews,
   }
+}
+
+/** Today's crews (S8). A crew is here when two or more of its members are (lib/crews/presence.ts); a person counts once. */
+async function crewsTonight(occurrenceId: string): Promise<NonNullable<LiveSocialCounts["crews"]>> {
+  const now = new Date()
+  const [members, guests, recorded, mixes] = await Promise.all([
+    presentMembersAt(occurrenceId),
+    db.event_check_ins.count({ where: hereNowAt(occurrenceId, now) }),
+    crewPeak({ occurrenceId }),
+    mixesMade({ occurrenceId }),
+  ])
+  const present = Array.from(members.values()).filter((m) => m.length >= 2)
+  const here = present.length
+  const people = new Set(present.flat()).size
+  return { here, people, guests, peak: recorded, mixes }
 }
 
 /**
@@ -71,8 +85,18 @@ export function discloseSocial(c: LiveSocialCounts): LiveSocial {
     conversations: fewCount(c.conversations),
     lobby: { posts: posts.total, offer: posts.parts[0], seeking: posts.parts[1], chat: posts.parts[2] },
     tonight: c.tonight.asked ? { answered: discloseAnswered(c.tonight.answered, attendees) } : null,
-    crews: c.crews ? crewsHere(discloseCrews(c.crews.here, c.crews.people)) : null,
+    crews: c.crews ? discloseLiveCrews(c.crews) : null,
   }
 }
 
-const crewsHere = ({ crews, people }: { crews: FewCount; people: FewCount }) => ({ here: crews, people })
+function discloseLiveCrews(c: NonNullable<LiveSocialCounts["crews"]>): LiveCrews {
+  const people = discloseAnswered(c.people, c.guests)
+  return {
+    here: discloseCrews(c.here, c.people).crews,
+    people,
+    guests: c.guests,
+    pct: typeof people === "number" && c.guests > 0 ? Math.round((people / c.guests) * 100) : null,
+    peak: disclosePeak(c.peak),
+    mixes: fewCount(c.mixes),
+  }
+}

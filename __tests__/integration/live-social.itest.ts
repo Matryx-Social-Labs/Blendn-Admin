@@ -95,6 +95,13 @@ describe("the social block's counts", () => {
     })
   })
 
+  it("counts a person in two crews once, however many crews they are in", async () => {
+    const { eventId, occurrenceId, guests } = await room(3)
+    await crewOf([guests[0], guests[1]])
+    await crewOf([guests[0], guests[2]])
+    expect((await liveSocialCounts(eventId, occurrenceId)).crews).toMatchObject({ here: 2, people: 3, guests: 3 })
+  })
+
   it("knows a room that asks no question", async () => {
     const { eventId, occurrenceId } = await room(1, null)
     expect((await liveSocialCounts(eventId, occurrenceId)).tonight.asked).toBe(false)
