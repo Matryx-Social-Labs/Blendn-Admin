@@ -540,7 +540,7 @@ export async function emitChatTyping(
   chatGroupId: string,
   isTyping: boolean
 ): Promise<void> {
-  if (!mayEmitTyping(socket, `chat:${chatGroupId}`, isTyping)) return
+  if (!mayEmitTyping(socket, "chat", chatGroupId, isTyping)) return
   try {
     const membership = await readTypingMembership(socket.data.userId, chatGroupId)
     if (!membership || membership.status !== "active") return
@@ -629,7 +629,7 @@ export async function emitPrivateTyping(
   conversationId: string,
   isTyping: boolean
 ): Promise<void> {
-  if (!mayEmitTyping(socket, `conversation:${conversationId}`, isTyping)) return
+  if (!mayEmitTyping(socket, "conversation", conversationId, isTyping)) return
   try {
     /*
      * Resolved through the conversation, not read straight off the profile.

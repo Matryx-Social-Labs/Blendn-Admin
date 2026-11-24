@@ -1,3 +1,6 @@
+// Relative, not `@/`: reachable from server.ts (__tests__/server-import-boundary.test.ts).
+import { isUuid } from "./api-input"
+
 /**
  * What a socket may say about typing, before anything is read for it. A typing
  * start costs three to five reads (`emitChatTyping`, `emitPrivateTyping`), and
@@ -17,7 +20,10 @@ export const TYPING_ROOMS_MAX = 50
 
 const rooms = new WeakMap<object, Map<string, { startedAt: number; typing: boolean }>>()
 
-export function mayEmitTyping(socket: object, room: string, isTyping: boolean, now: number = Date.now()): boolean {
+/** `id` is whatever the client sent: anything but a UUID is dropped, and one room is one key however it is spelled. */
+export function mayEmitTyping(socket: object, kind: "chat" | "conversation", id: unknown, isTyping: boolean, now: number = Date.now()): boolean {
+  if (!isUuid(id)) return false
+  const room = `${kind}:${id.toLowerCase()}`
   const mine = rooms.get(socket) ?? new Map<string, { startedAt: number; typing: boolean }>()
   rooms.set(socket, mine)
   const last = mine.get(room)
