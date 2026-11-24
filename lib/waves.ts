@@ -56,8 +56,12 @@ const SUMMARY_ROOMS = 20
 /** B-A: the Banter row draws the newest three faces (board 03). */
 const PILE_FACES = 3
 
+/** The live ping across rooms (W2): one per pair per this long, whichever room. A wave back is never held by it. */
+const PAIR_WINDOW_MS = 10 * 60 * 1000
+
 export interface WaveCap {
-  cap: "room_hour" | "day"
+  /** `pair`: a new wave at the same person within `PAIR_WINDOW_MS`, in another room (W2, `WAVE_TOO_SOON`). */
+  cap: "room_hour" | "day" | "pair"
   /** Seconds until one more wave would be accepted. */
   retryAfter: number
 }
@@ -183,12 +187,32 @@ export type RecordOutcome = { recorded: true } | { recorded: false; capped: Wave
  * pass the caps (re-checked here, after the early check the route makes before
  * looking at the recipient). A second wave at the same person here is
  * `recorded: false, capped: null`: no row, and the route answers it as sent.
+ *
+ * The pair window (W2) is counted here too, after that duplicate check and
+ * every cap, and only for a new wave (`answering` false): counted before the
+ * lock, the second of two taps at once found the first one's count and was
+ * refused `WAVE_TOO_SOON` for a wave that was stored (SCRUM-1058).
  */
-export async function recordWave(eventId: string, fromId: string, toId: string, now: Date = new Date()): Promise<RecordOutcome> {
+export async function recordWave(
+  eventId: string,
+  fromId: string,
+  toId: string,
+  { answering }: { answering: boolean },
+  now: Date = new Date()
+): Promise<RecordOutcome> {
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`waves:${fromId}`}, 0))`
+    const stored = await tx.event_waves.findUnique({
+      where: { event_id_from_id_to_id: { event_id: eventId, from_id: fromId, to_id: toId } },
+      select: { id: true },
+    })
+    if (stored) return { recorded: false, capped: null }
     const capped = await waveCapFor(fromId, eventId, now, tx)
     if (capped) return { recorded: false, capped }
+    if (!answering) {
+      const { count, resetAt } = await hit(`rl:wave:${fromId}:${toId}`, PAIR_WINDOW_MS)
+      if (count > 1) return { recorded: false, capped: { cap: "pair", retryAfter: Math.max(1, Math.ceil((resetAt - now.getTime()) / 1000)) } }
+    }
     const { count } = await tx.event_waves.createMany({
       data: [{ event_id: eventId, from_id: fromId, to_id: toId, created_at: now }],
       skipDuplicates: true,

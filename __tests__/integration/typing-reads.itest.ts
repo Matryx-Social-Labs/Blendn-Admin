@@ -41,6 +41,22 @@ async function conversation(a: Person, b: Person, closed = false) {
 }
 
 describe("a private conversation's typing and read receipts", () => {
+  it("a second start at once, and a stop with no start, read nothing and say nothing", async () => {
+    const [me, them] = await Promise.all([person("tg-me", "Maya Typer"), person("tg-them")])
+    const { id } = await conversation(me, them)
+    const s = fakeSocket(me)
+    // One statement of our own, so a run that reads nothing still proves the counter is recording.
+    const reads = async (run: () => Promise<void>) =>
+      (await counter.during(async () => (await globalThis.prisma!.$queryRaw`SELECT 1`, run()))).sql.length - 1
+    expect(await reads(() => emitPrivateTyping(s.socket, id, false))).toBe(0)
+    expect(await reads(() => emitPrivateTyping(s.socket, id, true))).toBeGreaterThan(0)
+    expect(await reads(() => emitPrivateTyping(s.socket, id, true))).toBe(0)
+    // A room id that could never be one is keyed like any other: no read for its repeat.
+    expect(await reads(() => emitChatTyping(s.socket, id, true))).toBeGreaterThan(0)
+    expect(await reads(() => emitChatTyping(s.socket, id, true))).toBe(0)
+    expect(s.sent.map((m) => m.event)).toEqual(["private:typing"])
+  })
+
   it("read the conversation once, and say what they said", async () => {
     const [me, them, stranger] = await Promise.all([person("tr-me", "Maya Typer"), person("tr-them"), person("tr-stranger")])
     const { id } = await conversation(me, them)

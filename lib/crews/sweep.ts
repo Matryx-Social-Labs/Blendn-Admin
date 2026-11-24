@@ -283,3 +283,17 @@ export async function purgeLapsedCrewLikes(): Promise<number> {
       LIMIT ${REPAIR_BATCH * 5}
     )`
 }
+
+/**
+ * Crew invite links (`crew_invite_tokens`) once their week is over
+ * (`CREW.LINK_TTL_MS`), used, revoked or lapsed alike: past it nothing opens
+ * them (the same 404 as no link), and the row only says who invited whom. The
+ * sharer's daily count reads the last day, well inside the week. Bounded per
+ * pass, like every sweeper arm.
+ */
+export async function purgeLapsedCrewLinks(now: Date = new Date()): Promise<number> {
+  return db.$executeRaw`
+    DELETE FROM crew_invite_tokens WHERE id IN (
+      SELECT id FROM crew_invite_tokens WHERE created_at < ${new Date(now.getTime() - CREW.LINK_TTL_MS)} LIMIT ${REPAIR_BATCH * 5}
+    )`
+}
