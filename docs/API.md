@@ -1545,8 +1545,9 @@ Single-day events keep "Event has not started yet" / "Event has already ended".
 `duration_ms` is a clip's length, only ever on a `video` row. All three are
 `null` for media added by pasted URL and for rows from before 2026-11-21: fit by
 the loaded size then, as before. The dashboard measures them from the file the
-organizer picked, and a clip over 15 s is refused (`400`), so a set
-`duration_ms` is at most 15000.
+organizer picked, and a clip over 15 s is refused (`400`) with 500 ms
+of tolerance (a "15 second" export often measures 15.02 to 15.2 s). The measured
+value is stored as it is, so a set `duration_ms` is at most 15500: do not assume 15000.
 
 ```json
 { "id": "…", "type": "video", "url": "https://…/clip.mp4", "thumbnail_url": "https://…/clip-poster.jpg",

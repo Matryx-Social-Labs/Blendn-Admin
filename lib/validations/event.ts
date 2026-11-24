@@ -172,7 +172,7 @@ const mediaItemSchema = z
       .number()
       .int()
       .min(1)
-      .max(MEDIA.MAX_CLIP_MS, `Clips play up to ${MEDIA.MAX_CLIP_MS / 1000} seconds`)
+      .max(MEDIA.MAX_CLIP_MS + MEDIA.CLIP_TOLERANCE_MS, `Clips play up to ${MEDIA.MAX_CLIP_MS / 1000} seconds`)
       .nullish(),
   })
   .refine((item) => (item.width == null) === (item.height == null), {

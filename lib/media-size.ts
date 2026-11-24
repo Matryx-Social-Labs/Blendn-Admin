@@ -10,6 +10,8 @@
  * URL does.
  */
 
+import { MEDIA } from "@/lib/constants"
+
 export interface MediaSize {
   width: number
   height: number
@@ -28,6 +30,11 @@ export function mediaSize(width: number, height: number, durationSeconds?: numbe
     : size
 }
 
+/** Whether a clip is refused: past the limit by more than an export's padding. The write schema's rule, before the upload. */
+export function clipTooLong(durationMs: number): boolean {
+  return durationMs > MEDIA.MAX_CLIP_MS + MEDIA.CLIP_TOLERANCE_MS
+}
+
 export async function readMediaSize(file: File, type: "image" | "video"): Promise<MediaSize | null> {
   try {
     return type === "image" ? await readImageSize(file) : await readVideoSize(file)
@@ -37,7 +44,7 @@ export async function readMediaSize(file: File, type: "image" | "video"): Promis
 }
 
 async function readImageSize(file: File): Promise<MediaSize | null> {
-  const bitmap = await createImageBitmap(file)
+  const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" })
   try {
     return mediaSize(bitmap.width, bitmap.height)
   } finally {

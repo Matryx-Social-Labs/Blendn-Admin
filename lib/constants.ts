@@ -263,6 +263,8 @@ export const CREW = {
 export const MEDIA = {
   /** A clip plays at most this long; the Featured lap is timed to it. */
   MAX_CLIP_MS: 15_000,
+  /** A "15 second" export often measures 15.02 to 15.2 s (audio padding), so refuse only past this much over (decided per advisor). */
+  CLIP_TOLERANCE_MS: 500,
   /** Larger than any real upload, so a side past it is a bug, not a photo. */
   MAX_SIDE_PX: 20_000,
 } as const

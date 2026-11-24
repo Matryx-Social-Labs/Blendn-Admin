@@ -1,6 +1,6 @@
 import { MEDIA } from "@/lib/constants"
 import { eventMediaRows } from "@/lib/event-media"
-import { mediaSize } from "@/lib/media-size"
+import { clipTooLong, mediaSize } from "@/lib/media-size"
 import { eventWriteSchema } from "@/lib/validations/event"
 
 /**
@@ -38,14 +38,21 @@ describe("media item size, on the write", () => {
     }
   })
 
-  it("refuses a clip longer than 15 seconds, saying so", () => {
-    const result = parseMedia({ ...clip, duration_ms: MEDIA.MAX_CLIP_MS + 1 })
+  it("refuses a clip past 15.5 seconds, in words that say 15", () => {
+    const result = parseMedia({ ...clip, duration_ms: 15_501 })
     expect(result.success).toBe(false)
-    expect(result.error?.issues[0].message).toMatch(/15 seconds/)
+    expect(result.error?.issues[0].message).toBe("Clips play up to 15 seconds")
   })
 
-  it("accepts a clip of exactly 15 seconds", () => {
-    expect(parseMedia({ ...clip, duration_ms: MEDIA.MAX_CLIP_MS }).success).toBe(true)
+  it("accepts a '15 second' export, which often measures a little over (decided per advisor)", () => {
+    expect(parseMedia({ ...clip, duration_ms: 15_000 }).success).toBe(true)
+    expect(parseMedia({ ...clip, duration_ms: 15_500 }).success).toBe(true)
+    expect(clipTooLong(15_500)).toBe(false)
+    expect(clipTooLong(15_501)).toBe(true)
+  })
+
+  it("stores the measured length, never a clamped one", () => {
+    expect(eventMediaRows([{ ...clip, duration_ms: 15_400 }])[0].duration_ms).toBe(15_400)
   })
 
   it("refuses a zero or fractional length", () => {

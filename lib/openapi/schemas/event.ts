@@ -470,7 +470,7 @@ export const EventDetailSchema = z
         order: z.number().int(),
         width: z.number().int().nullable().openapi({ description: "Pixels as displayed, measured on upload. With `height`, or both null (pasted URL, older rows)." }),
         height: z.number().int().nullable(),
-        durationMs: z.number().int().nullable().openapi({ description: "A clip's length, ≤ 15000; only on a video, else null." }),
+        durationMs: z.number().int().nullable().openapi({ description: "A clip's measured length, ≤ 15500 (nominally 15 s); only on a video, else null." }),
       })
     ),
     // The row as selected, so snake_case — unlike every other key here.

@@ -25,7 +25,7 @@ import { eventReadiness } from "@/lib/event-readiness"
 import { AdvancedSection } from "@/components/event-form/advanced-section"
 import { uploadFile } from "@/components/event-form/upload"
 import { captureVideoPoster } from "@/lib/video-poster"
-import { readMediaSize } from "@/lib/media-size"
+import { clipTooLong, readMediaSize } from "@/lib/media-size"
 import { DEFAULT_CHECK_IN_RADIUS_M, MEDIA } from "@/lib/constants"
 import { Refusal } from "@/lib/refusal"
 
@@ -119,7 +119,7 @@ export function EventForm({
 
   // ── Upload helpers ──────────────────────────────────────────────────────────
 
-  const handleMediaUpload = async (file: File, index: number) => {
+  const handleMediaUpload = async (file: File, index: number): Promise<string | null> => {
     try {
       setMediaUploadProgress((p) => ({ ...p, [index]: 0 }))
       const type = form.getValues(`media_items.${index}.type`)
@@ -129,11 +129,8 @@ export function EventForm({
        * refused here rather than after twelve megabytes went up.
        */
       const size = type === "image" || type === "video" ? await readMediaSize(file, type) : null
-      if (type === "video" && size?.duration_ms && size.duration_ms > MEDIA.MAX_CLIP_MS) {
-        toast.error(
-          `This clip is ${(size.duration_ms / 1000).toFixed(1)} seconds. Clips play up to ${MEDIA.MAX_CLIP_MS / 1000} seconds: trim it and upload again.`
-        )
-        return
+      if (type === "video" && size?.duration_ms && clipTooLong(size.duration_ms)) {
+        return `This clip is ${(size.duration_ms / 1000).toFixed(1)} seconds. Clips play up to ${MEDIA.MAX_CLIP_MS / 1000} seconds: trim it and upload again.`
       }
       const url = await uploadFile(file, (percent) =>
         setMediaUploadProgress((p) => ({ ...p, [index]: percent }))
@@ -188,6 +185,7 @@ export function EventForm({
         return next
       })
     }
+    return null
   }
 
   // ── Location handler ────────────────────────────────────────────────────────

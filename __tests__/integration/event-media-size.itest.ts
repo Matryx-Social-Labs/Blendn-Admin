@@ -1,4 +1,12 @@
-import { db, closeDb, makeUser, makeEvent, cleanup } from "./helpers"
+import { NextRequest } from "next/server"
+
+jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
+const mockGetAuth = jest.fn()
+jest.mock("@/lib/auth", () => ({ getAuth: () => mockGetAuth() }))
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
+
+import { signAccessToken } from "@/lib/mobile-auth"
+import { db, closeDb, makeUser, makeEvent, cleanup, testId } from "./helpers"
 import { eventMediaRows } from "@/lib/event-media"
 import { eventListSelect } from "@/lib/services/events.service"
 
@@ -8,11 +16,19 @@ import { eventListSelect } from "@/lib/services/events.service"
  * shape checks in the migration refuse what the app must never write. The
  * checks exist only in migration SQL, so only a db:migrate database has them.
  */
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const eventRoute = require("@/app/api/events/[id]/route") as typeof import("@/app/api/events/[id]/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const detailRoute = require("@/app/api/mobile/events/[eventId]/route") as typeof import("@/app/api/mobile/events/[eventId]/route")
+
 const users: string[] = []
+const orgs: string[] = []
 const events: string[] = []
 
 afterAll(async () => {
-  await cleanup(users, events)
+  await db.events.deleteMany({ where: { id: { in: events } } })
+  await db.organisations.deleteMany({ where: { id: { in: orgs } } })
+  await cleanup(users, [])
   await closeDb()
 })
 
@@ -59,4 +75,57 @@ describe("the database refuses a size the app must never write", () => {
   it("a zero side", () => refused({ type: "image", width: 0, height: 100 }))
   it("a length on a still", () => refused({ type: "image", duration_ms: 3000 }))
   it("a zero length", () => refused({ type: "video", duration_ms: 0 }))
+})
+
+describe("from the dashboard's save to the app's detail", () => {
+  async function ownedEvent() {
+    const host = await makeUser("media-host", "organizer")
+    users.push(host)
+    const org = await db.organisations.create({ data: { kind: "company", display_name: testId("media-org"), status: "verified" } })
+    orgs.push(org.id)
+    await db.organisation_members.create({ data: { org_id: org.id, user_id: host, role: "owner", is_primary_contact: true } })
+    const eventId = await makeEvent(host)
+    events.push(eventId)
+    await db.events.update({ where: { id: eventId }, data: { organizer_org_id: org.id } })
+    mockGetAuth.mockResolvedValue({ user: { id: host, role: "organizer" } })
+    return eventId
+  }
+
+  const save = (eventId: string, media_items: unknown[]) =>
+    eventRoute.PATCH(
+      new Request(`http://localhost/api/events/${eventId}`, { method: "PATCH", body: JSON.stringify({ media_items }) }),
+      { params: Promise.resolve({ id: eventId }) }
+    )
+
+  const clip = { type: "video", url: "https://media.example.com/c.mp4", width: 1080, height: 1920, duration_ms: 15_200 }
+
+  it("PATCH writes the size and GET /events/:id sends it in camelCase", async () => {
+    const eventId = await ownedEvent()
+    expect((await save(eventId, [clip])).status).toBe(200)
+
+    const viewer = await makeUser("media-viewer")
+    users.push(viewer)
+    await db.profiles.create({ data: { id: viewer, onboarded: true } })
+    const { email } = await db.user.findUniqueOrThrow({ where: { id: viewer }, select: { email: true } })
+    const res = await detailRoute.GET(
+      new NextRequest(`http://localhost/api/mobile/events/${eventId}`, {
+        headers: { authorization: `Bearer ${signAccessToken(viewer, email)}` },
+      }),
+      { params: Promise.resolve({ eventId }) }
+    )
+    expect(res.status).toBe(200)
+    const { data } = await res.json()
+    expect(data.media).toEqual([
+      expect.objectContaining({ type: "video", width: 1080, height: 1920, durationMs: 15_200 }),
+    ])
+  })
+
+  it("PATCH refuses a clip past the tolerance and leaves the rows that were there", async () => {
+    const eventId = await ownedEvent()
+    expect((await save(eventId, [clip])).status).toBe(200)
+    expect((await save(eventId, [{ ...clip, duration_ms: 20_000 }])).status).toBe(400)
+    expect(await db.event_media.findMany({ where: { event_id: eventId }, select: { duration_ms: true } })).toEqual([
+      { duration_ms: 15_200 },
+    ])
+  })
 })
