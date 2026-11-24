@@ -160,8 +160,9 @@ async function pushPlan(crew: { id: string; name: string }, roomId: string, plan
       title: crew.name,
       body: `${plannerName} wants to go together. Open the crew to see the night.`,
       // ponytail: the crew_here kind — it opens the crew chat and sits in the "Your crew" category, so installed builds
-      // route it already. A kind of its own is an enum migration; add one if the client must tell the two apart.
-      data: { type: "crew_here", crewId: crew.id, chatGroupId: roomId },
+      // route it already. `kind: "crew_plan"` tells it from an arrival (SCRUM-1098): the bell titles only arrivals, and
+      // a plan's push replaces none. A kind of its own is an enum migration; add one if `data.kind` stops being enough.
+      data: { type: "crew_here", kind: "crew_plan", crewId: crew.id, chatGroupId: roomId },
     })
   } catch (error) {
     logger.warn("Push notification failed", { context: "crew plan", error: error instanceof Error ? error.message : String(error) })

@@ -50,6 +50,9 @@ describe("Going together (S4)", () => {
       expect(got[0].body).not.toContain(title)
     }
     expect(await pushes(priya.id)).toEqual([])
+    // Marked as a plan, so the bell never titles it as an arrival (SCRUM-1098).
+    const stored = await db.notifications.findFirstOrThrow({ where: { kind: "crew_here", user_id: arjun.id }, select: { data: true } })
+    expect(stored.data).toMatchObject({ type: "crew_here", kind: "crew_plan", crewId })
 
     // A second member marking the same night: the same plan, nobody told twice.
     expect((await plan(arjun, crewId, eventId)).body.data).toEqual({ planned: true, repeated: true, occurrenceId })

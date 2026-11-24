@@ -176,6 +176,10 @@ describe("a Flow 9 build: the delivery keys travel with the new channel ids", ()
     expect(deliveryFor({ type: "crew_here", crewId: "k1", chatGroupId: "g1" }, V)).toEqual({ channelId: "crew", threadId: key, collapseId: key, tag: key })
   })
 
+  it("a crew's plan is not an arrival: it replaces nothing, and nothing replaces it (SCRUM-1098)", () => {
+    expect(deliveryFor({ type: "crew_here", kind: "crew_plan", crewId: "k1", chatGroupId: "g1" }, V)).toEqual({ channelId: "crew" })
+  })
+
   it("the new channels carry no replace keys of their own", () => {
     for (const type of ["match", "friend_request", "board_request", "crew_invite", "crew_here", "blend"] as const) {
       const { channelId, ...keys } = deliveryFor(data(type), V)
