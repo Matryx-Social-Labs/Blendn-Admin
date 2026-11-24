@@ -106,11 +106,11 @@ test("a picked clip and photo keep their measured size; a clip over 15 s is refu
 
   // A clip fills every card, so it always gets the picker. The pointer sets a point; Home clears it.
   const subject = card(1).getByRole("slider", { name: "Subject position" })
-  await expect(subject).toHaveAttribute("aria-valuetext", "Not set: the centre, a little high")
+  await expect(subject).toHaveAttribute("aria-valuetext", "Not set: the center, a little high")
   await subject.click({ position: { x: 10, y: 10 } })
   await expect(subject).toHaveAttribute("aria-valuetext", /^x \d+%, y \d+%$/)
   await subject.press("Home")
-  await expect(subject).toHaveAttribute("aria-valuetext", "Not set: the centre, a little high")
+  await expect(subject).toHaveAttribute("aria-valuetext", "Not set: the center, a little high")
   // From the default (50%, 40%): two steps right, one fine step down.
   await subject.press("ArrowRight")
   await subject.press("ArrowRight")

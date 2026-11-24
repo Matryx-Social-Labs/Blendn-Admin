@@ -164,7 +164,7 @@ function Picker({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={percent(at.x)}
-        aria-valuetext={focal ? `x ${percent(at.x)}%, y ${percent(at.y)}%` : "Not set: the centre, a little high"}
+        aria-valuetext={focal ? `x ${percent(at.x)}%, y ${percent(at.y)}%` : "Not set: the center, a little high"}
         className="relative cursor-crosshair touch-none overflow-hidden rounded-md border outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onKeyDown={onKeyDown}
         onPointerDown={(e) => {
