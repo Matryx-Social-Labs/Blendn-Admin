@@ -10,6 +10,8 @@ import { MIN_ATTENDEES } from "@/lib/connection-metrics"
 import { MIN_CELL } from "@/lib/disclosure"
 import { discloseInsights, type StoredInsightCounts } from "@/lib/event-insights"
 
+const AT = "2026-11-24T17:10:00.000Z"
+
 /** A night of 40 guests with every figure comfortably over the floors. */
 function night(over: { [K in keyof StoredInsightCounts]?: Partial<StoredInsightCounts[K]> } = {}): StoredInsightCounts {
   return {
@@ -17,7 +19,7 @@ function night(over: { [K in keyof StoredInsightCounts]?: Partial<StoredInsightC
     lobby: { offer: 6, seeking: 5, chat: 7, asks: 12, accepted: 6, ...over.lobby },
     tonight: { answered: 24, workIntent: { hire: 0, find_work: 0, build: 0, learn: 0 }, ...over.tonight },
     conversations: 12,
-    crews: { came: 3, people: 9, ...over.crews },
+    crews: { came: 3, people: 9, peak: { crews: 3, people: 9, at: AT }, back: { crews: 1, people: 2 }, mixes: 6, ...over.crews },
     ...(over.conversations !== undefined && { conversations: over.conversations as number }),
   }
 }
@@ -151,9 +153,9 @@ describe("Tonight's question and crews", () => {
   })
 
   it("holds crews with their people while the people are a few, since two crews already say four people", () => {
-    expect(discloseInsights(night({ crews: { came: 2, people: 4 } }), true).crews).toEqual({ came: "few", people: "few" })
-    expect(discloseInsights(night({ crews: { came: 0, people: 0 } }), true).crews).toEqual({ came: 0, people: 0 })
-    expect(discloseInsights(night({ crews: { came: 2, people: 5 } }), true).crews).toEqual({ came: 2, people: 5 })
+    expect(discloseInsights(night({ crews: { came: 2, people: 4 } }), true).crews).toMatchObject({ came: "few", people: "few", pct: null })
+    expect(discloseInsights(night({ crews: { came: 0, people: 0 } }), true).crews).toMatchObject({ came: 0, people: 0 })
+    expect(discloseInsights(night({ crews: { came: 2, people: 5 } }), true).crews).toMatchObject({ came: 2, people: 5, pct: 13 })
   })
 
   it("never lets crews give their people back (brute force: 0 to 4 crews, 0 to 12 people)", () => {
@@ -162,6 +164,36 @@ describe("Tonight's question and crews", () => {
       ([came, people]) => discloseInsights(night({ crews: { came, people } }), true).crews,
       (c: { people: unknown }) => (c.people === "few" ? [1] : [])
     )
+  })
+})
+
+describe("a night's crews (S8)", () => {
+  const crewsOf = (crews: Partial<StoredInsightCounts["crews"]>) => discloseInsights(night({ crews }), true).crews
+
+  it("says the share who came as a crew, the peak and its time, the crews back again and the Mixes", () => {
+    expect(crewsOf({ came: 4, people: 12, peak: { crews: 3, people: 9, at: AT }, back: { crews: 2, people: 6 }, mixes: 5 })).toEqual({
+      came: 4, people: 12, pct: 30, peak: { crews: 3, at: AT }, back: 2, mixes: 5,
+    })
+  })
+
+  it("holds the share when those who came alone are a few", () => {
+    expect(crewsOf({ came: 9, people: 37 })).toMatchObject({ people: "nearly_all", pct: null })
+    expect(crewsOf({ came: 9, people: 35 })).toMatchObject({ people: 35, pct: 88 })
+  })
+
+  it("holds the peak's time with its crews, Mixes under five, and the crews back from both sides", () => {
+    expect(crewsOf({ peak: { crews: 2, people: 4, at: AT }, mixes: 3 })).toMatchObject({ peak: { crews: "few", at: null }, mixes: "few" })
+    expect(crewsOf({ came: 6, people: 20, back: { crews: 2, people: 4 } })).toMatchObject({ back: "few" })
+    // Two people did not come back: "5 of 6 crews" would name theirs.
+    expect(crewsOf({ came: 6, people: 20, back: { crews: 5, people: 18 } })).toMatchObject({ back: "nearly_all" })
+    expect(crewsOf({ came: 6, people: 20, back: { crews: 6, people: 20 } })).toMatchObject({ back: 6 })
+    expect(crewsOf({ back: { crews: 0, people: 0 }, peak: null, mixes: 0 })).toMatchObject({ back: 0, peak: null, mixes: 0 })
+  })
+
+  it("says not recorded, never 0, for a tally frozen before S8, and nothing to compare for a host with no other nights", () => {
+    const old = discloseInsights({ ...night(), crews: { came: 3, people: 9 } }, true).crews
+    expect(old).toMatchObject({ came: 3, people: 9, peak: "not_recorded", back: "not_recorded", mixes: "not_recorded" })
+    expect(crewsOf({ back: null })).toMatchObject({ back: null })
   })
 })
 
@@ -180,6 +212,8 @@ describe("what leaves the server", () => {
   it("is counts, shares and words for held figures: never an id", () => {
     const leaves = (v: unknown): unknown[] => (v !== null && typeof v === "object" ? Object.values(v).flatMap(leaves) : [v])
     for (const leaf of leaves(discloseInsights(night({ crews: { came: 1, people: 2 } }), true))) {
+      // The one other string: when the crews peaked, to ten minutes.
+      if (leaf === AT) continue
       if (typeof leaf === "string") expect(["few", "nearly_all", "not_recorded"]).toContain(leaf)
       else expect(leaf === null || typeof leaf === "number" || typeof leaf === "boolean").toBe(true)
     }

@@ -282,12 +282,12 @@ async function freezeFeedbackTallies(messageIds: string[]): Promise<void> {
   })
   for (const { event_id } of reached) {
     const [rows, population] = await Promise.all([
-      db.event_feedback.findMany({ where: { event_id }, select: { sentiment: true, category: true, message: { select: { user_id: true } } } }),
+      db.event_feedback.findMany({ where: { event_id }, select: { sentiment: true, category: true, topic: true, message: { select: { user_id: true } } } }),
       db.chat_group_members.count({ where: { chat_group: { event_id } } }),
     ])
-    const { contributors } = tallyFeedback(rows.map((r) => ({ sentiment: r.sentiment, category: r.category, userId: r.message?.user_id ?? null })))
+    const { contributors, topics } = tallyFeedback(rows.map((r) => ({ sentiment: r.sentiment, category: r.category, topic: r.topic, userId: r.message?.user_id ?? null })))
     await db.event_feedback_tallies.createMany({
-      data: [{ event_id, population, contributors: Object.fromEntries(contributors) }],
+      data: [{ event_id, population, contributors: Object.fromEntries(contributors), topics: Object.fromEntries(topics) }],
       skipDuplicates: true,
     })
   }

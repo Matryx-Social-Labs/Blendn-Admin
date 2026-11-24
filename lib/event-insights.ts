@@ -1,7 +1,7 @@
 // Relative imports, like the rest of lib/.
 import { MIN_ATTENDEES, type ConnectionCounts } from "./connection-metrics"
 import { db } from "./db"
-import { discloseAnswered, discloseCrews, discloseFigure, discloseGroup, fewCount, heldPart, type FewCount, type HeldTotal } from "./disclosure"
+import { discloseAnswered, discloseCrews, discloseFigure, discloseGroup, disclosePeak, fewCount, heldPart, type FewCount, type HeldTotal } from "./disclosure"
 import { insightCountsOf, type InsightCounts } from "./insight-tallies"
 import { lensForEvent } from "./tonight"
 
@@ -25,7 +25,7 @@ export type NotRecorded = "not_recorded"
 export type StoredInsightCounts = Omit<InsightCounts, "connections" | "conversations" | "crews"> & {
   connections: Omit<ConnectionCounts, "byWay" | "keptTalking"> & Partial<Pick<ConnectionCounts, "byWay" | "keptTalking">>
   conversations?: number
-  crews?: InsightCounts["crews"]
+  crews?: Pick<InsightCounts["crews"], "came" | "people"> & Partial<InsightCounts["crews"]>
 }
 
 /** A funnel stage: how many, and the share of who came. */
@@ -64,7 +64,21 @@ export interface EventInsights {
     /** "Here to" on a work-lens night; null when nobody said. */
     workIntent: { total: number | HeldTotal; parts: { hire: FewCount; find_work: FewCount; build: FewCount; learn: FewCount } } | null
   } | null
-  crews: { came: FewCount; people: FewCount } | NotRecorded
+  /** Counts only, never a crew (S8). */
+  crews:
+    | {
+        came: FewCount
+        /** People who came as a crew, once each; `"nearly_all"` when those who did not are a few. */
+        people: FewCount | "nearly_all"
+        /** Share of who came, when `people` is a number. */
+        pct: number | null
+        /** The most crews here at once, and when; null when there was none. */
+        peak: { crews: FewCount; at: string | null } | null | NotRecorded
+        /** Crews that had come to an earlier night of this host; `"nearly_all"` when the people in the others are a few; null when there is no host to compare with. */
+        back: FewCount | "nearly_all" | null | NotRecorded
+        mixes: FewCount | NotRecorded
+      }
+    | NotRecorded
 }
 
 const pct = (part: number, whole: number) => Math.round((part / whole) * 100)
@@ -79,7 +93,6 @@ export function discloseInsights(c: StoredInsightCounts, asked: boolean): EventI
   const { hire, find_work, build, learn } = c.tonight.workIntent
   const intents = hire + find_work + build + learn > 0 ? discloseGroup([hire, find_work, build, learn]) : null
   const answered = discloseAnswered(c.tonight.answered, attendees)
-  const crews = c.crews ? discloseCrews(c.crews.came, c.crews.people) : null
   // The pairs floor, through the one suppression rule. Every attendee is a possible member of a pair, so only its
   // minimum cell can fire (contributors = population would trip the dominance rule on every night).
   const pairsHeld = discloseFigure({ count: attendees, contributors: attendees, population: attendees, floor: MIN_ATTENDEES }).reason === "min_cell"
@@ -120,8 +133,26 @@ export function discloseInsights(c: StoredInsightCounts, asked: boolean): EventI
             },
           }
         : null,
-    crews: crews ? { came: crews.crews, people: crews.people } : "not_recorded",
+    crews: c.crews ? discloseNightCrews(c.crews, attendees) : "not_recorded",
   }
+}
+
+function discloseNightCrews(c: NonNullable<StoredInsightCounts["crews"]>, attendees: number): Exclude<EventInsights["crews"], NotRecorded> {
+  const people = discloseAnswered(c.people, attendees)
+  return {
+    came: discloseCrews(c.came, c.people).crews,
+    people,
+    pct: typeof people === "number" && attendees > 0 ? pct(people, attendees) : null,
+    peak: c.peak === undefined ? "not_recorded" : disclosePeak(c.peak),
+    back: c.back === undefined ? "not_recorded" : discloseBack(c.back, c.people),
+    mixes: c.mixes === undefined ? "not_recorded" : fewCount(c.mixes),
+  }
+}
+
+/** The crews that came back, held from both sides: the people in them, and in the crews that did not. */
+function discloseBack(back: { crews: number; people: number } | null, people: number): FewCount | "nearly_all" | null {
+  if (!back) return null
+  return discloseAnswered(back.people, people) === "nearly_all" ? "nearly_all" : discloseCrews(back.crews, back.people).crews
 }
 
 /**
