@@ -70,17 +70,16 @@ export async function loopClosure(): Promise<LoopStage[]> {
         AND c.kind = 'attendee'
     ),
     /*
-     * A match is a mutual pair of likes at one event. There is no matches
-     * table -- the mutual check is done on every like and never stored -- so it
-     * is a self-join, and the pair is unordered.
+     * A match is the conversation it opened: cameFromMatch in SQL (a
+     * pseudonym snapshotted, no Lobby ask behind it). Never the waves or likes
+     * themselves, which are purged 30 days after the event
+     * (purgeEventGestures) and would take the stage down with them.
      */
     matched AS (
-      SELECT DISTINCT l.liker_id AS user_id
-      FROM event_likes l
-      JOIN event_likes back
-        ON back.event_id = l.event_id
-       AND back.liker_id = l.liked_id
-       AND back.liked_id = l.liker_id
+      SELECT u.user_id FROM private_conversations c
+      CROSS JOIN LATERAL (VALUES (c.user1_id), (c.user2_id)) AS u(user_id)
+      WHERE (c.user1_pseudonym IS NOT NULL OR c.user2_pseudonym IS NOT NULL)
+        AND c.origin_board_request_id IS NULL
     ),
     /*
      * Conversed is a message SENT, not a conversation existing. A match that

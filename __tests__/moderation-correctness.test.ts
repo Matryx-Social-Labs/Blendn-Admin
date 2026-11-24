@@ -141,7 +141,7 @@ describe("G8 — admin Keep actually keeps", () => {
 describe("G13 — the burst limit is one bucket, not one per replica", () => {
   it("counts bursts in the shared store", () => {
     const src = code("lib/moderation/spam-detector.ts")
-    expect(src).toMatch(/await hit\(`spam:burst:\$\{key\}`, SPAM_BURST_WINDOW_MS\)/)
+    expect(src).toMatch(/await hitRolling\(`spam:rolling:\$\{key\}`, SPAM_BURST_WINDOW_MS, SPAM_BURST_LIMIT\)/)
   })
 
   it("resets both halves of the state together", () => {
@@ -152,7 +152,7 @@ describe("G13 — the burst limit is one bucket, not one per replica", () => {
      */
     const src = code("lib/moderation/spam-detector.ts")
     expect(src).toMatch(/export async function resetSpamHistory/)
-    expect(src).toMatch(/await forget\(`spam:burst:\$\{key\}`\)/)
+    expect(src).toMatch(/await forget\(`spam:rolling:\$\{key\}`\)/)
     expect(src).toMatch(/export async function clearAllSpamHistory/)
   })
 })

@@ -5,9 +5,9 @@ import { db } from "./db"
 import { logger } from "./logger"
 import { CHAT_WINDOW_HOURS } from "./chat-window"
 import { closeRoomSockets } from "./room-close"
-import { purgeLapsedCrewLikes, repairCrews } from "./crews/sweep"
+import { purgeLapsedCrewLikes, purgeLapsedCrewLinks, repairCrews } from "./crews/sweep"
 import { recheckPendingPhotos } from "./lobby-photo"
-import { purgeClosedLobbies, purgeTonightAnswers } from "./lobby-retention"
+import { purgeClosedLobbies, purgeEventGestures, purgeTonightAnswers } from "./lobby-retention"
 
 /** Bounded so one pass cannot hold locks for an unbounded period. */
 const SWEEP_BATCH = 500
@@ -151,8 +151,9 @@ async function runSweep(): Promise<void> {
   /*
    * Crews left below two active members or without an active owner — by an
    * erasure whose settle failed after its commit, or by a suspension, which
-   * writes no crew row — are settled here, and crew likes that never made a
-   * Blend go 12 hours after their night (lib/crews/sweep.ts). Its own catch,
+   * writes no crew row — are settled here, crew likes that never made a
+   * Blend go 12 hours after their night, and invite links once their week is
+   * over (lib/crews/sweep.ts). Its own catch,
    * so one arm failing never stops the other.
    */
   try {
@@ -160,6 +161,8 @@ async function runSweep(): Promise<void> {
     if (crews.repaired > 0) logger.info("Repaired crews", { ...crews })
     const purged = await purgeLapsedCrewLikes()
     if (purged > 0) logger.info("Purged crew likes that never made a Blend", { purged })
+    const links = await purgeLapsedCrewLinks()
+    if (links > 0) logger.info("Purged crew invite links past their week", { links })
   } catch (error) {
     logger.error("Crew repair sweep failed", { error: error instanceof Error ? error.message : String(error) })
   }
@@ -184,6 +187,13 @@ async function runSweep(): Promise<void> {
     if (answers.answers > 0) logger.info("Purged Tonight's question answers", { ...answers })
   } catch (error) {
     logger.error("Tonight answer purge failed", { error: error instanceof Error ? error.message : String(error) })
+  }
+  /* Person waves and old likes, 30 days after the event, once its counts are frozen (lib/lobby-retention.ts). Its own catch. */
+  try {
+    const gestures = await purgeEventGestures()
+    if (gestures.waves + gestures.likes > 0) logger.info("Purged waves and likes", { ...gestures })
+  } catch (error) {
+    logger.error("Wave and like purge failed", { error: error instanceof Error ? error.message : String(error) })
   }
 }
 

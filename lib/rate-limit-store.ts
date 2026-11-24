@@ -1,6 +1,8 @@
 // Relative, not `@/`: `lib/push-notifications.ts` throttles bursts with `hit`,
 // and it is reachable from `server.ts`, which `build:server` compiles with
 // plain tsc. `__tests__/server-import-boundary.test.ts` enforces it.
+import { randomUUID } from "crypto"
+
 import { logger } from "./logger"
 import { RATE_LIMIT_MAX_ENTRIES } from "./constants"
 
@@ -17,7 +19,8 @@ import { RATE_LIMIT_MAX_ENTRIES } from "./constants"
  * window would be more precise at the boundary — a caller can burst twice the
  * limit across a window edge — but it needs a sorted set per key and a trim on
  * every request. For "stop one account hammering an endpoint", the fixed window
- * is the right amount of machinery.
+ * is the right amount of machinery; the chat and DM burst, whose limit is five,
+ * uses `hitRolling`.
  */
 
 export interface HitResult {
@@ -174,6 +177,70 @@ export async function hit(key: string, windowMs: number, opts: StoreOptions = {}
   }
 }
 
+export interface RollingResult {
+  allowed: boolean
+  /** When the next one would be allowed (epoch ms). Set only on a refusal. */
+  retryAt?: number
+}
+
+const rolling = new Map<string, number[]>()
+
+function hitRollingMemory(key: string, windowMs: number, limit: number, now: number): RollingResult {
+  const inWindow = (rolling.get(key) ?? []).filter((t) => t > now - windowMs)
+  if (inWindow.length >= limit) return { allowed: false, retryAt: inWindow[0] + windowMs }
+  // Re-inserted, so the map's first key is the one hit longest ago, and it is the one evicted.
+  rolling.delete(key)
+  if (rolling.size >= RATE_LIMIT_MAX_ENTRIES) {
+    const oldest = rolling.keys().next().value
+    if (oldest !== undefined) rolling.delete(oldest)
+  }
+  rolling.set(key, [...inWindow, now])
+  return { allowed: true }
+}
+
+/*
+ * Trim, count, add: one script, so two sends at once cannot both be the fifth.
+ * Redis's own clock, so replicas agree. Answers 0 when allowed, else the epoch
+ * ms of the oldest one still in the window.
+ */
+const ROLLING_SCRIPT = `
+local t = redis.call('TIME')
+local now = t[1] * 1000 + math.floor(t[2] / 1000)
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now - ARGV[1])
+if redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[2]) then
+  return redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')[2]
+end
+redis.call('ZADD', KEYS[1], now, ARGV[3])
+redis.call('PEXPIRE', KEYS[1], ARGV[1])
+return '0'`
+
+/**
+ * At most `limit` in ANY `windowMs`, where `hit`'s fixed window lets twice the
+ * limit pass across its edge. Only what is allowed is remembered, so retrying
+ * while refused never pushes `retryAt` out. For a small limit on a hot key (the
+ * chat and DM burst): it keeps up to `limit` entries per key. Falls back to this
+ * process's memory when Redis cannot answer, as `hit` does.
+ */
+export async function hitRolling(key: string, windowMs: number, limit: number): Promise<RollingResult> {
+  const now = Date.now()
+  const redis = await getRedis()
+  if (!redis) return hitRollingMemory(key, windowMs, limit, now)
+  try {
+    const oldest = Number(
+      await (redis as unknown as { eval(script: string, opts: { keys: string[]; arguments: string[] }): Promise<unknown> }).eval(ROLLING_SCRIPT, {
+        keys: [key],
+        arguments: [String(windowMs), String(limit), randomUUID()],
+      })
+    )
+    return oldest === 0 ? { allowed: true } : { allowed: false, retryAt: oldest + windowMs }
+  } catch (error) {
+    logger.warn("Rate limit Redis rolling hit failed, falling back to memory", {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return hitRollingMemory(key, windowMs, limit, now)
+  }
+}
+
 /**
  * The count a key holds now, without adding to it; zero when it has none or
  * its window has passed. Same rules as `hit`, `failClosed` included.
@@ -225,6 +292,7 @@ export async function release(key: string): Promise<void> {
 
 export function resetMemoryStore(): void {
   memory.clear()
+  rolling.clear()
 }
 
 /**
@@ -240,6 +308,7 @@ export function resetMemoryStore(): void {
  */
 export async function forget(key: string): Promise<void> {
   memory.delete(key)
+  rolling.delete(key)
   const redis = await getRedis()
   if (!redis) return
   try {

@@ -2516,7 +2516,7 @@ If OpenAI times out (>1s), message is broadcast and moderation falls back to asy
 **Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `CHAT_LOCKED` (403), `NOT_CHECKED_IN` (403), `LEFT_ROOM` (403), `NOT_LIVE` (403, a venue's room after your Go Live ended), `SPAM_BLOCKED` (429), `MODERATION_UNAVAILABLE` (503, busy event rooms only, above)
 
 **`SPAM_BLOCKED` says when to try again** (SV13): a send refused for a burst (5 in
-10 seconds) carries `retryAfter`, whole seconds until that window ends, in the
+10 seconds) carries `retryAfter`, whole seconds until the oldest of the five is 10 seconds old (a rolling window: never more than five in any 10 seconds, and a refused try is not counted), in the
 body and in `Retry-After`, as a `RATE_LIMITED` 429 does. A message refused for
 too many links has none: sending it again would not pass. The same on the event
 chat and DM sends (`docs/API.md`, *Direct messages*). `errorCode` is unchanged;
@@ -3241,13 +3241,16 @@ then on — a reveal already made can't be unseen (D-10).
 **The name and bio** — 2–32 characters (not unique) and ≤ 140 — are shown to
 strangers on the crew card. They are **folded** first (`lib/moderation/fold.ts`):
 compatibility forms to ordinary ones (fullwidth `９８４５`, ligatures, `․` to
-`.`), any script's digits to 0–9 (`९८४५`), Cyrillic and Greek look-alikes to
-Latin — and the folded form is what is stored. A name with an invisible
+`.`), any script's digits to 0–9 (`९८४५`), and Cyrillic and Greek look-alikes to
+Latin inside a word that mixes them with Latin (`Lоt` with a Cyrillic `о` is
+stored `Lot`). A word in one alphabet is stored as typed (`Москва` stays
+`Москва`), but every check reads it with its look-alikes folded too, so a word
+spelled wholly in look-alike letters is still refused. A name with an invisible
 character (zero-width space, bidi override; an emoji's own joiner aside) is
 400; a bio has them stripped. Then the moderation pipeline and a **strict**
 contact-detail check (`findProfileContactInfo`): phone numbers, any @handle,
-emails and web addresses, written out or spelled ("nine eight four…", "at
-gmail dot com", "dot in"). A refusal is 400 with a sentence naming what was
+emails and web addresses, written out or spelled ("nine eight four…",
+"ninefour fivezero…", "at gmail dot com", "dot in"). A refusal is 400 with a sentence naming what was
 found, and nothing is stored. Intent is the person intent enum.
 
 **Tags are the crew's own hashtags** (owner 2026-11-14; until then ten curated

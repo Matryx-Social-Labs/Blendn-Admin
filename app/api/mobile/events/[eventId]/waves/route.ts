@@ -18,7 +18,6 @@ import { inRoomWhere } from "@/lib/event-kind"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { hit } from "@/lib/rate-limit-store"
 import { emitRoomWave } from "@/lib/socket-server"
 import { roomMemberFromRef } from "@/lib/room-handle"
 import { knownToEachOther, LISTED_IN_ROSTER } from "@/lib/room-people"
@@ -44,9 +43,6 @@ const waveSchema = z.object({
   /** Wave on your crew's behalf (crews 5-A, S5): a crew → person wave, lib/crews/like.ts decides. */
   asCrewId: z.string().uuid().optional(),
 })
-
-/** The live ping across rooms (W2): one per pair per this long, whichever room. A wave back is never held by it. */
-const WAVE_WINDOW_MS = 10 * 60 * 1000
 
 /** The roster's visibility rule for the person waved at: listed, not suspended, a guest and not staff (SCRUM-891). */
 const waveable = { kind: "attendee" as const, user: { suspended_at: null, ...LISTED_IN_ROSTER } }
@@ -190,25 +186,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (await hasWaved(eventId, fromUserId, toUserId)) return successResponse({ sent: true, mutual: false })
 
     /*
-     * The live ping's pair window (W2), counted only now, after every refusal,
-     * so a wave that could not have been delivered does not start the clock.
-     * Keyed on the people, not the room. Not for a wave back: an answer is
-     * never held because you waved at them in another room a minute ago.
+     * Stored under the sender's lock, which also counts the live ping's pair
+     * window (W2) — only now, after every refusal, so a wave that could not
+     * have been delivered does not start the clock, and never for a wave back.
      */
-    if (!answering) {
-      const { count, resetAt } = await hit(`rl:wave:${fromUserId}:${toUserId}`, WAVE_WINDOW_MS)
-      if (count > 1) {
-        const retryAfter = Math.max(1, Math.ceil((resetAt - Date.now()) / 1000))
-        return NextResponse.json(
-          { success: false, error: "You waved at them a moment ago", errorCode: ErrorCode.WAVE_TOO_SOON, retryAfter },
-          { status: 429, headers: { "Retry-After": retryAfter.toString() } }
-        )
-      }
-    }
-
-    const stored = await recordWave(eventId, fromUserId, toUserId)
+    const stored = await recordWave(eventId, fromUserId, toUserId, { answering })
     if (!stored.recorded) {
-      // Two taps at once: the other one stored it. Capped only in that same race.
+      // Two taps at once: the other one stored it. Capped in that same race, or by the pair window.
       return stored.capped ? capResponse(stored.capped) : successResponse({ sent: true, mutual: false })
     }
 
@@ -280,6 +264,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
 /** A sender cap (W3-W6): about the sender only, never the person they waved at. */
 function capResponse(cap: WaveCap): NextResponse {
+  if (cap.cap === "pair") {
+    return NextResponse.json(
+      { success: false, error: "You waved at them a moment ago", errorCode: ErrorCode.WAVE_TOO_SOON, retryAfter: cap.retryAfter },
+      { status: 429, headers: { "Retry-After": cap.retryAfter.toString() } }
+    )
+  }
   const error = cap.cap === "day" ? "You’ve waved a lot today. Try again later." : "You’ve waved a lot in this room. Try again in a bit."
   return NextResponse.json(
     { success: false, error, errorCode: ErrorCode.RATE_LIMITED, retryAfter: cap.retryAfter },

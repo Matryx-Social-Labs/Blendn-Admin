@@ -12,6 +12,7 @@ import { NextRequest } from "next/server"
 
 import { CREW } from "@/lib/constants"
 import { conversationPair } from "@/lib/conversations"
+import { purgeLapsedCrewLinks } from "@/lib/crews/sweep"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
 import { GET as preview } from "@/app/api/mobile/crews/links/[token]/preview/route"
 
@@ -151,6 +152,20 @@ describe("A crew invite link", () => {
 
     await db.crew_invite_tokens.update({ where: { token }, data: { created_at: new Date(Date.now() - CREW.LINK_TTL_MS - 1000) } })
     expect((await api.openLink(holder, token)).status).toBe(404)
+  })
+
+  it("goes from the database once its week is over, used, revoked or lapsed alike; a link inside its week stays", async () => {
+    const c = await crew("lkp")
+    const make = async () => (await api.makeLink(c.owner, c.crewId)).body.data.token as string
+    const [lapsed, used, revoked, fresh] = [await make(), await make(), await make(), await make()]
+    const weekAgo = new Date(Date.now() - CREW.LINK_TTL_MS - 1000)
+    await db.crew_invite_tokens.update({ where: { token: lapsed }, data: { created_at: weekAgo } })
+    await db.crew_invite_tokens.update({ where: { token: used }, data: { created_at: weekAgo, used_at: weekAgo, used_by: c.mate.id } })
+    await db.crew_invite_tokens.update({ where: { token: revoked }, data: { created_at: weekAgo, revoked_at: weekAgo } })
+
+    expect(await purgeLapsedCrewLinks()).toBeGreaterThanOrEqual(3)
+    const left = await db.crew_invite_tokens.findMany({ where: { token: { in: [lapsed, used, revoked, fresh] } }, select: { token: true } })
+    expect(left).toEqual([{ token: fresh }])
   })
 
   it("is for members only, and at most LINKS_PER_WINDOW a day", async () => {

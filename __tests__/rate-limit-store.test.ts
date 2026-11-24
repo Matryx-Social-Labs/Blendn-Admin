@@ -1,4 +1,4 @@
-import { hit, release, resetMemoryStore } from "@/lib/rate-limit-store"
+import { forget, hit, hitRolling, release, resetMemoryStore } from "@/lib/rate-limit-store"
 
 /**
  * The counter behind every limit.
@@ -76,5 +76,47 @@ describe("hit", () => {
     // replica case, not a failure.
     delete process.env.REDIS_URL
     await expect(hit("test:noredis", 60_000)).resolves.toBeDefined()
+  })
+})
+
+describe("hitRolling: at most N in any window, not N per fixed window", () => {
+  const T = 1_900_000_000_000
+  const at = (ms: number) => jest.spyOn(Date, "now").mockReturnValue(T + ms)
+  afterEach(() => jest.restoreAllMocks())
+
+  it("holds across a fixed window's edge, where twice the limit used to pass", async () => {
+    // Five late in one ten-second window, then five early in the next.
+    for (let i = 0; i < 5; i++) {
+      at(9_000 + i * 100)
+      expect((await hitRolling("roll:edge", 10_000, 5)).allowed).toBe(true)
+    }
+    at(11_000)
+    expect(await hitRolling("roll:edge", 10_000, 5)).toEqual({ allowed: false, retryAt: T + 19_000 })
+    // The first of the five leaves the window at 19 s: one more, and only one.
+    at(19_001)
+    expect((await hitRolling("roll:edge", 10_000, 5)).allowed).toBe(true)
+    at(19_001)
+    expect((await hitRolling("roll:edge", 10_000, 5)).allowed).toBe(false)
+  })
+
+  it("a refused try is not counted, so retrying never pushes the wait out", async () => {
+    for (let i = 0; i < 5; i++) {
+      at(i)
+      await hitRolling("roll:retry", 10_000, 5)
+    }
+    for (let i = 0; i < 20; i++) {
+      at(5_000 + i)
+      expect(await hitRolling("roll:retry", 10_000, 5)).toEqual({ allowed: false, retryAt: T + 10_000 })
+    }
+    at(10_001)
+    expect((await hitRolling("roll:retry", 10_000, 5)).allowed).toBe(true)
+  })
+
+  it("admits exactly the limit of many at once, keeps keys apart, and is forgotten", async () => {
+    const all = await Promise.all(Array.from({ length: 12 }, () => hitRolling("roll:many", 10_000, 5)))
+    expect(all.filter((r) => r.allowed)).toHaveLength(5)
+    expect((await hitRolling("roll:other", 10_000, 5)).allowed).toBe(true)
+    await forget("roll:many")
+    expect((await hitRolling("roll:many", 10_000, 5)).allowed).toBe(true)
   })
 })

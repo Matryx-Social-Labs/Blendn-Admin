@@ -1,3 +1,6 @@
+import { randomUUID } from "crypto"
+
+import { conversationPair } from "@/lib/conversations"
 import { loopClosure } from "@/lib/loop-closure"
 
 import {
@@ -60,6 +63,19 @@ async function baseline() {
 
 const delta = (after: number[], before: number[]) => after.map((v, i) => v - before[i])
 
+/**
+ * A match as `openIfMutual` leaves it: the pair's conversation with both
+ * pseudonyms snapshotted. The waves or likes behind it are purged at 30 days
+ * (`purgeEventGestures`), so the funnel never reads them.
+ */
+async function match(eventId: string, a: string, b: string) {
+  const [user1_id, user2_id] = conversationPair(a, b)
+  return db.private_conversations.create({
+    data: { user1_id, user2_id, origin_event_id: eventId, user1_pseudonym: "Quiet Otter", user2_pseudonym: "Loud Heron" },
+    select: { id: true },
+  })
+}
+
 async function onboardedUser(label: string) {
   const id = await makeUser(testId(label))
   users.push(id)
@@ -110,12 +126,7 @@ describe("the loop, stage by stage", () => {
       await db.event_rsvps.create({ data: { event_id: eventId, user_id: u, status: "going" } })
       await putInRoom({ eventId, occurrenceId, userId: u })
     }
-    await db.event_likes.createMany({
-      data: [
-        { event_id: eventId, liker_id: matchedA, liked_id: matchedB },
-        { event_id: eventId, liker_id: matchedB, liked_id: matchedA },
-      ],
-    })
+    await match(eventId, matchedA, matchedB)
 
     const after = await baseline()
     const [signedUp, onboarded, rsvpd, checkedInCount, returned, matched, conversed] = delta(
@@ -137,10 +148,9 @@ describe("the loop, stage by stage", () => {
 
   it("does not count a one-sided like as a match", async () => {
     /*
-     * There is no `matches` table — the mutual check runs on every like and is
-     * never stored — so this stage is a self-join. Counting a single like would
-     * report an approach as a connection, which is the one thing this product
-     * measures itself on.
+     * A match is the conversation it opens. Counting a single like or wave
+     * would report an approach as a connection, which is the one thing this
+     * product measures itself on.
      */
     const before = await baseline()
 
@@ -185,17 +195,7 @@ describe("the loop, stage by stage", () => {
       await db.event_rsvps.create({ data: { event_id: eventId, user_id: u, status: "going" } })
       await putInRoom({ eventId, occurrenceId, userId: u })
     }
-    await db.event_likes.createMany({
-      data: [
-        { event_id: eventId, liker_id: speaker, liked_id: listener },
-        { event_id: eventId, liker_id: listener, liked_id: speaker },
-      ],
-    })
-    const [user1_id, user2_id] = [speaker, listener].sort()
-    const conversation = await db.private_conversations.create({
-      data: { user1_id, user2_id },
-      select: { id: true },
-    })
+    const conversation = await match(eventId, speaker, listener)
     await db.private_messages.create({
       data: { conversation_id: conversation.id, sender_id: speaker, message_text: "hello" },
     })
@@ -233,17 +233,7 @@ describe("the loop, stage by stage", () => {
     const conference = await onboardedUser("lc3-conf")
     for (const u of [loyal, conference]) {
       await db.event_rsvps.create({ data: { event_id: first, user_id: u, status: "going" } })
-      await db.event_likes.createMany({
-        data: [
-          { event_id: first, liker_id: u, liked_id: host },
-          { event_id: first, liker_id: host, liked_id: u },
-        ],
-      })
-      const [user1_id, user2_id] = [u, host].sort()
-      const conversation = await db.private_conversations.create({
-        data: { user1_id, user2_id },
-        select: { id: true },
-      })
+      const conversation = await match(first, u, host)
       await db.private_messages.create({
         data: { conversation_id: conversation.id, sender_id: u, message_text: "hi" },
       })
@@ -295,6 +285,34 @@ describe("the loop, stage by stage", () => {
     expect(matched).toBe(2)
     expect(conversed).toBe(2)
     expect(returned).toBe(1)
+  })
+
+  it("a match survives the purge of the waves behind it; a chat that is not a match never counts", async () => {
+    const before = await baseline()
+    const host = await makeUser(testId("lc5-host"), "organizer")
+    users.push(host)
+    const eventId = await makeEvent(host)
+    events.push(eventId)
+    const occurrenceId = await occurrenceOf(eventId)
+    const [waverA, waverB, asker, asked, writer, reader] = await Promise.all(
+      ["wa", "wb", "ask", "asked", "wr", "rd"].map((l) => onboardedUser(`lc5-${l}`))
+    )
+    for (const u of [waverA, waverB, asker, asked, writer, reader]) {
+      await db.event_rsvps.create({ data: { event_id: eventId, user_id: u, status: "going" } })
+      await putInRoom({ eventId, occurrenceId, userId: u })
+    }
+    // No wave or like row at all: they have been purged. The match is its conversation.
+    await match(eventId, waverA, waverB)
+    // A Lobby ask's chat is pseudonymous too, and is not a match (`cameFromMatch`).
+    const lobby = await match(eventId, asker, asked)
+    await db.private_conversations.update({ where: { id: lobby.id }, data: { origin_board_request_id: randomUUID() } })
+    // Nor is an accepted message request: real names, no pseudonym.
+    const [user1_id, user2_id] = conversationPair(writer, reader)
+    await db.private_conversations.create({ data: { user1_id, user2_id } })
+
+    const [, , , checkedIn, , matched] = delta(await baseline(), before)
+    expect(checkedIn).toBe(6)
+    expect(matched).toBe(2)
   })
 
   it("counts somebody who came to two events as back, whether or not they matched (SCRUM-313)", async () => {
