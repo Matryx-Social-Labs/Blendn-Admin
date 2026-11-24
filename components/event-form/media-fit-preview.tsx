@@ -60,7 +60,8 @@ export function MediaFitPreview({ src, type, poster, size, focal, onFocalChange 
   }
 
   return (
-    <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+    // Sized by its own width: a gallery item sits in a narrow form column, where the cards go under the picker.
+    <div className="@container space-y-3 rounded-lg border bg-muted/30 p-4">
       {!known && (
         <>
           <p className="text-xs text-muted-foreground">Preview appears once the picture loads.</p>
@@ -74,7 +75,7 @@ export function MediaFitPreview({ src, type, poster, size, focal, onFocalChange 
         </>
       )}
       {known && (
-        <div className={showPicker ? "grid gap-5 md:grid-cols-[minmax(0,340px)_1fr]" : undefined}>
+        <div className={showPicker ? "grid gap-5 @3xl:grid-cols-[minmax(0,340px)_1fr]" : undefined}>
           {showPicker && (
             <Picker
               picture={picture}
@@ -155,7 +156,7 @@ function Picker({
   const percent = (v: number) => Math.round(v * 100)
 
   return (
-    <div className="space-y-2">
+    <div className="max-w-[340px] space-y-2">
       <p className="text-sm font-medium">Subject</p>
       <div
         role="slider"
