@@ -25,7 +25,8 @@ import { eventReadiness } from "@/lib/event-readiness"
 import { AdvancedSection } from "@/components/event-form/advanced-section"
 import { uploadFile } from "@/components/event-form/upload"
 import { captureVideoPoster } from "@/lib/video-poster"
-import { DEFAULT_CHECK_IN_RADIUS_M } from "@/lib/constants"
+import { clipTooLong, readMediaSize } from "@/lib/media-size"
+import { DEFAULT_CHECK_IN_RADIUS_M, MEDIA } from "@/lib/constants"
 import { Refusal } from "@/lib/refusal"
 
 export type { EventFormValues } from "@/components/event-form/schema"
@@ -118,14 +119,26 @@ export function EventForm({
 
   // ── Upload helpers ──────────────────────────────────────────────────────────
 
-  const handleMediaUpload = async (file: File, index: number) => {
+  const handleMediaUpload = async (file: File, index: number): Promise<string | null> => {
     try {
       setMediaUploadProgress((p) => ({ ...p, [index]: 0 }))
+      const type = form.getValues(`media_items.${index}.type`)
+      /*
+       * Measured before the upload (SCRUM-1066): the app chooses a card's fit
+       * from the size before the bytes land, and a clip over the limit is
+       * refused here rather than after twelve megabytes went up.
+       */
+      const size = type === "image" || type === "video" ? await readMediaSize(file, type) : null
+      if (type === "video" && size?.duration_ms && clipTooLong(size.duration_ms)) {
+        return `This clip is ${(size.duration_ms / 1000).toFixed(1)} seconds. Clips play up to ${MEDIA.MAX_CLIP_MS / 1000} seconds: trim it and upload again.`
+      }
       const url = await uploadFile(file, (percent) =>
         setMediaUploadProgress((p) => ({ ...p, [index]: percent }))
       )
       form.setValue(`media_items.${index}.url`, url, { shouldValidate: true })
-      const type = form.getValues(`media_items.${index}.type`)
+      form.setValue(`media_items.${index}.width`, size?.width)
+      form.setValue(`media_items.${index}.height`, size?.height)
+      form.setValue(`media_items.${index}.duration_ms`, size?.duration_ms)
       if (type === "image" && !form.getValues(`media_items.${index}.thumbnail_url`)) {
         form.setValue(`media_items.${index}.thumbnail_url`, url)
       }
@@ -172,6 +185,7 @@ export function EventForm({
         return next
       })
     }
+    return null
   }
 
   // ── Location handler ────────────────────────────────────────────────────────

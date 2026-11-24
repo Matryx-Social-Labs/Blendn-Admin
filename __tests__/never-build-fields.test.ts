@@ -39,6 +39,15 @@ const NOT_ABOUT_PEOPLE: Record<string, string[]> = {
   "lib/email-html.ts": ["height"],
   "app/global-error.tsx": ["minHeight", "lineHeight"],
   "lib/venue-types.ts": ["college"],
+  // A picture's pixel height (event_media.height, SCRUM-1066), never a person's.
+  "lib/event-media.ts": ["height"],
+  "lib/media-size.ts": ["height"],
+  "lib/openapi/paths/dashboard.ts": ["height"],
+  "lib/openapi/schemas/event.ts": ["height"],
+  "lib/services/events.service.ts": ["height"],
+  "lib/validations/event.ts": ["height"],
+  "app/api/mobile/events/[eventId]/route.ts": ["height"],
+  "app/dashboard/events/[id]/edit/page.tsx": ["height"],
   // The list itself.
   "lib/never-build.ts": [...NEVER_BUILD],
 }
@@ -60,6 +69,9 @@ function sourceFiles(dir: string, acc: string[] = []): string[] {
 const strip = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").replace(/\s\/\/.*$/gm, "")
 
 /** Field names and enum values in schema.prisma. */
+/** Columns of things, not people, by `model.column`, so the word on a people table still fails. */
+const COLUMNS_NOT_ABOUT_PEOPLE = new Set(["event_media.height"])
+
 function schemaIdentifiers(schema: string): string[] {
   const ids: string[] = []
   for (const block of schema.matchAll(/^(model|enum)\s+(\w+)\s*\{([\s\S]*?)^\}/gm)) {
@@ -67,7 +79,8 @@ function schemaIdentifiers(schema: string): string[] {
     for (const line of block[3].split("\n")) {
       const t = line.trim()
       if (!t || t.startsWith("//") || t.startsWith("@@")) continue
-      ids.push(t.split(/\s+/)[0])
+      const id = t.split(/\s+/)[0]
+      if (!COLUMNS_NOT_ABOUT_PEOPLE.has(`${block[2]}.${id}`)) ids.push(id)
     }
   }
   return ids
@@ -85,6 +98,8 @@ function sourceIdentifiers(src: string): { keys: string[]; literals: string[] } 
 describe("never build: caste, kundli, veg and their kin (MV-G01)", () => {
   it("the guard sees what it guards (control)", () => {
     expect(offending(schemaIdentifiers("model profiles {\n  id String\n  diet String?\n}\n"), NEVER_AS_FIELD)).toEqual(["diet"])
+    // A picture's height is exempt on its own table only.
+    expect(offending(schemaIdentifiers("model profiles {\n  height Int?\n}\nmodel event_media {\n  height Int?\n}\n"), NEVER_AS_FIELD)).toEqual(["height"])
     expect(offending(sourceIdentifiers('z.object({ nonVeg: z.boolean() })').keys, NEVER_AS_FIELD)).toEqual(["nonVeg"])
     expect(offending(sourceIdentifiers('z.enum(["veg", "non_veg"])').literals, NEVER)).toEqual(["veg", "non_veg"])
     // Prose in a comment is not a field.

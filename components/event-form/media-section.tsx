@@ -1,5 +1,6 @@
 "use client"
 
+import { useId, useState } from "react"
 import Image from "next/image"
 import type { UseFieldArrayReturn, UseFormReturn } from "react-hook-form"
 import {
@@ -70,7 +71,8 @@ function SortableMediaItem({
   form: UseFormReturn<EventFormValues>
   onRemove: () => void
   uploadProgress: number | undefined
-  onUpload: (file: File, index: number) => Promise<void>
+  /** Resolves to why the file was refused, shown beside the input, or null. */
+  onUpload: (file: File, index: number) => Promise<string | null>
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: fieldItem.id })
@@ -80,6 +82,15 @@ function SortableMediaItem({
     transition,
     opacity: isDragging ? 0.5 : 1,
   }
+
+  /*
+   * Inline, not a toast: the organizer has to go and trim the clip, so the
+   * reason stays beside the input until the next pick or a change of type
+   * (decided per advisor, SCRUM-1066). Local to the item, so it follows a
+   * reorder and goes with a removal.
+   */
+  const [refusal, setRefusal] = useState<string | null>(null)
+  const refusalId = useId()
 
   const isUploading = uploadProgress !== undefined
   const previewUrl = form.watch(`media_items.${index}.url`)
@@ -119,7 +130,13 @@ function SortableMediaItem({
         render={({ field }) => (
           <FormItem>
             <FormLabel>Type</FormLabel>
-            <Select onValueChange={field.onChange} value={field.value}>
+            <Select
+              onValueChange={(value) => {
+                setRefusal(null)
+                field.onChange(value)
+              }}
+              value={field.value}
+            >
               <FormControl>
                 <SelectTrigger>
                   <SelectValue placeholder="Select type" />
@@ -144,18 +161,39 @@ function SortableMediaItem({
             <FormLabel>URL</FormLabel>
             <div className="flex flex-col gap-2">
               <FormControl>
-                <Input placeholder="https://…" {...field} />
+                <Input
+                  placeholder="https://…"
+                  {...field}
+                  onChange={(e) => {
+                    field.onChange(e)
+                    // A typed URL is another file: the measured size was the upload's (SCRUM-1066).
+                    form.setValue(`media_items.${index}.width`, undefined)
+                    form.setValue(`media_items.${index}.height`, undefined)
+                    form.setValue(`media_items.${index}.duration_ms`, undefined)
+                  }}
+                />
               </FormControl>
               <Input
                 type="file"
                 disabled={isUploading}
+                aria-invalid={refusal ? true : undefined}
+                aria-describedby={refusal ? refusalId : undefined}
                 accept={mediaType ? ACCEPT[mediaType] : undefined}
                 onChange={async (e) => {
-                  const file = e.target.files?.[0]
-                  if (file) await onUpload(file, index)
-                  e.target.value = ""
+                  const input = e.target
+                  const file = input.files?.[0]
+                  if (!file) return
+                  setRefusal(null)
+                  const reason = await onUpload(file, index)
+                  input.value = ""
+                  setRefusal(reason)
                 }}
               />
+              {refusal && (
+                <p id={refusalId} role="alert" className="text-sm text-destructive">
+                  {refusal}
+                </p>
+              )}
               {/*
                 The spec for the type actually chosen, next to the control that
                 needs it. It used to sit at the top of the section — both specs,
@@ -301,7 +339,8 @@ export function MediaSection({
   form: UseFormReturn<EventFormValues>
   mediaFieldArray: UseFieldArrayReturn<EventFormValues, "media_items">
   mediaUploadProgress: Record<number, number>
-  onUpload: (file: File, index: number) => Promise<void>
+  /** Resolves to why the file was refused, shown beside the input, or null. */
+  onUpload: (file: File, index: number) => Promise<string | null>
 }) {
   const sensors = useSensors(useSensor(PointerSensor))
 

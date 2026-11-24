@@ -117,6 +117,10 @@ export const eventListSelect = {
       thumbnail_url: true,
       type: true,
       order: true,
+      // Measured on upload, null for a pasted URL (SCRUM-1066): the card's fit before load, the lap's length.
+      width: true,
+      height: true,
+      duration_ms: true,
     },
     orderBy: { order: "asc" },
     take: 5,

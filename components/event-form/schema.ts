@@ -91,6 +91,10 @@ export const eventFormSchema = z.object({
         thumbnail_url: httpsUrl().optional().or(z.literal("")),
         title: z.string().max(200).optional(),
         description: z.string().max(2000).optional(),
+        /** Measured from the picked file (`readMediaSize`); cleared when the URL is typed over. */
+        width: z.number().int().positive().optional(),
+        height: z.number().int().positive().optional(),
+        duration_ms: z.number().int().positive().optional(),
       })
     )
     .optional(),
