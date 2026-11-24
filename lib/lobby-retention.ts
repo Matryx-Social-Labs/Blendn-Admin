@@ -333,11 +333,12 @@ export async function purgeTonightAnswers(now: Date = new Date()): Promise<{ ans
  * the event's last night (SCRUM-1094 c), answered or not. Nothing in the app
  * reads them once the room closes, a day after the end: an unanswered one is
  * somebody's private interest, and a returned one already opened the
- * conversation that lives on without it. The host's connection counts are read
- * from them, so the event's insight counts are frozen first and the delete
- * waits for them, as the Tonight answers' does. Not behind `LOBBY_PURGE`: no
- * report copies a wave. Crew likes have their own, shorter rule
- * (`purgeLapsedCrewLikes`).
+ * conversation that lives on without it. Two dashboard readers count from
+ * them: the host's connections, whose event is frozen first
+ * (`event_insight_tallies`; the delete waits for it, as the Tonight answers'
+ * does), and the admin funnel's "matched", which reads the conversations
+ * instead (lib/loop-closure.ts). Not behind `LOBBY_PURGE`: no report copies a
+ * wave. Crew likes have their own, shorter rule (`purgeLapsedCrewLikes`).
  */
 export const GESTURE_DAYS = 30
 const GESTURE_BATCH = 5_000

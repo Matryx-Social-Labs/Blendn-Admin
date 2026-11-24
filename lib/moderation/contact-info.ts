@@ -113,12 +113,12 @@ const GLUED_WORD = new RegExp(GLUED_WORDS.join("|"), "g")
 /**
  * A token made wholly of two or more digit names, as its digits:
  * `ninefourfive` → `945`. In the same four forms as `digitWordFor`, so
- * `niiinefour` and `f1vezero` read too.
+ * `niiinefour` and `f1vezero` read too. "ohoh" is an exclamation, not a number.
  */
 function gluedDigitsFor(token: string): string | undefined {
   const collapse = (t: string) => t.replace(/(.)\1+/g, "$1")
   for (const form of [token, collapse(token), unleet(token), collapse(unleet(token))]) {
-    if (GLUED.test(form)) return form.replace(GLUED_WORD, (w) => DIGIT_WORDS[w])
+    if (GLUED.test(form) && !/^(?:oh)+$/.test(form)) return form.replace(GLUED_WORD, (w) => DIGIT_WORDS[w])
   }
   return undefined
 }

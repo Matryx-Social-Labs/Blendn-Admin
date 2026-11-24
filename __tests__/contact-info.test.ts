@@ -71,7 +71,7 @@ describe("digit words glued into one word (follow-up from #981)", () => {
 
   it("never splits an ordinary word, and never uses the homophones glued", () => {
     // to/too/for/won/ate/tree/o stay spaced-only: glued, they are ordinary words.
-    for (const text of ["often tooth forte tonight", "toto fortoo wonate", "someone ninety tenfold", "fiver sevens eighteen nineteen"]) {
+    for (const text of ["often tooth forte tonight", "toto fortoo wonate", "someone ninety tenfold", "fiver sevens eighteen nineteen", "ohoh ohohoh ohoh"]) {
       expect(findContactInfo(text)).toEqual([])
     }
   })

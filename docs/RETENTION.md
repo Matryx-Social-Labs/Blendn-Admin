@@ -173,7 +173,8 @@ days after the event's last night (`purgeEventGestures`, same sweeper). Nothing
 reads them once the room closes; a returned wave already opened its
 conversation, which stays. The host's connection counts come from them, so the
 event's insight counts are frozen first (`event_insight_tallies`) and the delete
-waits for them. Not behind `LOBBY_PURGE`: no report copies a wave. Crew likes
+waits for them; the admin funnel's "matched" counts the conversations matches
+opened, never these rows. Not behind `LOBBY_PURGE`: no report copies a wave. Crew likes
 that made no Blend go 12 hours after their night (`purgeLapsedCrewLikes`), and
 crew invite links once their 7-day week is over, used, revoked or lapsed
 (`purgeLapsedCrewLinks`).
