@@ -94,6 +94,7 @@ export async function crewsBack(eventId: string): Promise<{ crews: number; peopl
   const sameHost = day
     ? Prisma.sql`e.kind = 'venue_day' AND e.venue_id = ${event.venue_id}::uuid AND e.start_time >= ${claimedAt}`
     : Prisma.sql`e.kind = 'event' AND e.organizer_org_id = ${event.organizer_org_id}::uuid`
+  // any-kind: `sameHost` names the kind, an event's earlier events or a venue day's earlier days.
   const [row] = await db.$queryRaw<{ crews: bigint; people: bigint }[]>`
     WITH tonight AS MATERIALIZED (
       SELECT m.crew_id, m.user_id, m.joined_at
