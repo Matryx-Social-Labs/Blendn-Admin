@@ -4,7 +4,7 @@ import type { MediaSize } from "@/lib/media-size"
 import { clipTooLong } from "@/lib/media-size"
 
 type MediaItem = NonNullable<EventFormValues["media_items"]>[number]
-type MediaPatch = Pick<MediaItem, "url" | "thumbnail_url" | "width" | "height" | "duration_ms">
+type MediaPatch = Pick<MediaItem, "url" | "thumbnail_url" | "width" | "height" | "duration_ms" | "focal_x" | "focal_y">
 
 export interface UploadMediaDeps {
   /** The gallery as it is now: read again after the upload, because it can be reordered or cut meanwhile. */
@@ -33,6 +33,9 @@ export type UploadMediaResult =
  * kept the old image. A clip whose frame cannot be read gets no poster rather
  * than the old one: the cover backs it, and the caller says so.
  *
+ * A new file forgets the old one's focal point (SCRUM-1106): its subject is
+ * somewhere else. The point is picked again on the new picture.
+ *
  * Measured before the upload (SCRUM-1066): the app chooses a card's fit from the
  * size before the bytes land, and a clip over the limit is refused here rather
  * than after twelve megabytes went up.
@@ -59,6 +62,8 @@ export async function uploadMediaItem(file: File, itemId: string, deps: UploadMe
     width: size?.width,
     height: size?.height,
     duration_ms: size?.duration_ms,
+    focal_x: undefined,
+    focal_y: undefined,
     ...(poster === undefined ? {} : { thumbnail_url: poster ?? "" }),
   })
   return { kind: "done", posterMissing: type === "video" && poster === null }

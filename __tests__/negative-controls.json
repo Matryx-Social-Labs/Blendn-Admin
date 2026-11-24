@@ -35,6 +35,12 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "media-fit.test.ts": {
+      "guards": "SCRUM-1106: the dashboard's per-card preview draws the app's five cards at their sizes, agrees with docs/MEDIA.md, and fits by rule B exactly as the app's fitFor (exactly 15% off still crops).",
+      "mutation": "lib/media-fit.ts: (1) Venue hero width 393 -> 374; (2) fitFor's `<=` -> `<`.",
+      "observed": "(1) 2 of 17 failing (the card list and the MEDIA.md table); (2) 1 of 17 failing (the 15% edge). Restored; 17/17.",
+      "date": "2026-11-25"
+    },
     "profile-options-country.test.ts": {
       "guards": "SCRUM-711 / SCRUM-1082: GET /profile-options with no ?country= is byte for byte the India response installed builds read (fixture __tests__/fixtures/profile-options-india.json), while ?country= serves a country's own lists or the neutral view.",
       "mutation": "app/api/mobile/profile-options/route.ts: legacy() put maxLanguages before languages (same values, a different key order).",
@@ -2669,7 +2675,6 @@
     "container-queries.test.ts",
     "conversation-identity.test.ts",
     "conversation-provenance.test.ts",
-    "device-preview.test.ts",
     "leave-and-report.test.ts",
     "match-notifications.test.ts",
     "media-guidance.test.ts",

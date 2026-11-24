@@ -42,6 +42,7 @@ const NOT_ABOUT_PEOPLE: Record<string, string[]> = {
   // A picture's pixel height (event_media.height, SCRUM-1066), never a person's.
   "lib/event-media.ts": ["height"],
   "lib/media-size.ts": ["height"],
+  "lib/media-fit.ts": ["height"],
   "lib/openapi/paths/dashboard.ts": ["height"],
   "lib/openapi/schemas/event.ts": ["height"],
   "lib/services/events.service.ts": ["height"],

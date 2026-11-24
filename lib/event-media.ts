@@ -11,6 +11,8 @@ export interface EventMediaInput {
   width?: number | null
   height?: number | null
   duration_ms?: number | null
+  focal_x?: number | null
+  focal_y?: number | null
 }
 
 /**
@@ -33,6 +35,7 @@ export function eventMediaRows(
     ...(item.description && { description: item.description }),
     ...(item.width != null && item.height != null && { width: item.width, height: item.height }),
     ...(item.type === "video" && item.duration_ms != null && { duration_ms: item.duration_ms }),
+    ...(item.focal_x != null && item.focal_y != null && { focal_x: item.focal_x, focal_y: item.focal_y }),
     order: item.order ?? index,
   }))
 }

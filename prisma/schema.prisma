@@ -856,6 +856,10 @@ model event_media {
   height        Int?
   /// A clip's length, only on a video (`event_media_duration_on_video`).
   duration_ms   Int?
+  /// Where the subject is, 0–1 from the left and top, picked in the dashboard (SCRUM-1106).
+  /// Both or neither, each 0–1 (`event_media_focal_both`); null = the app's default focus.
+  focal_x       Float?
+  focal_y       Float?
   created_at    DateTime   @default(now()) @db.Timestamptz(6)
   updated_at    DateTime   @default(now()) @db.Timestamptz(6)
 
