@@ -5,6 +5,7 @@ import { NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { getAuth } from "@/lib/auth"
 import { eventWriteSchema, parseJsonField } from "@/lib/validations/event"
+import { eventMediaRows } from "@/lib/event-media"
 import { phoneCheckInRadius } from "@/lib/geofence"
 import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { uniqueEventSlug } from "@/lib/event-slug"
@@ -503,25 +504,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
           ? {
               media: {
                 deleteMany: {},
-                create: media_items.map((item: Record<string, unknown>, index: number) => ({
-                  type: item.type as "image" | "video" | "document",
-                  url: item.url as string,
-                  /*
-                   * `|| undefined` here, not `!= null`: these arrive as
-                   * unvalidated strings off the request body, and an empty one
-                   * should leave the column at its default rather than write
-                   * "". That is a different question from the fields above,
-                   * where `""` was a value worth writing.
-                   */
-                  ...((item.thumbnail_url as string) && {
-                    thumbnail_url: item.thumbnail_url as string,
-                  }),
-                  ...((item.title as string) && { title: item.title as string }),
-                  ...((item.description as string) && {
-                    description: item.description as string,
-                  }),
-                  order: typeof item.order === "number" ? item.order : index,
-                })),
+                create: eventMediaRows(media_items),
               },
             }
           : {}),

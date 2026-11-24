@@ -255,3 +255,16 @@ export const CREW = {
   /** Links one member may make in `CREATE_WINDOW_MS`, every crew: each is a way in for a stranger. */
   LINKS_PER_WINDOW: 10,
 } as const
+
+/**
+ * Event media (docs/MEDIA.md). The dashboard measures each upload in the
+ * browser and the write route checks it against these (SCRUM-1066).
+ */
+export const MEDIA = {
+  /** A clip plays at most this long; the Featured lap is timed to it. */
+  MAX_CLIP_MS: 15_000,
+  /** A "15 second" export often measures 15.02 to 15.2 s (audio padding), so refuse only past this much over (decided per advisor). */
+  CLIP_TOLERANCE_MS: 500,
+  /** Larger than any real upload, so a side past it is a bug, not a photo. */
+  MAX_SIDE_PX: 20_000,
+} as const

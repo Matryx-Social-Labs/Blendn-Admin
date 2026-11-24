@@ -207,6 +207,8 @@ and therefore in every deployed environment:
 | `events_ticketing_external_needs_url` | an event linking out to tickets has the link |
 | `events_external_ticket_url_https` | that link is https with a host and no user name, and at most 2048 characters — the floor under `httpsUrl()` |
 | `events_ticketing_native_needs_schedule` | an event selling tickets here has its fee snapshot (`IS NOT NULL` spelled out: `jsonb_typeof(NULL)` would pass) |
+| `event_media_size_both` | a media row's pixel `width` and `height` are both positive or both NULL (COALESCE spelled out: `100 > 0 AND NULL > 0` would pass) |
+| `event_media_duration_on_video` | a media row's `duration_ms` is positive and only on a `video`; the 15 s ceiling is the app's (`lib/media-size.ts`, `lib/validations/event.ts`) |
 | `events_venue_day_not_ticketed` | a venue day is never ticketed |
 | `events_ticketing_native_needs_enablement` | a native event was turned on by `enableTicketing` (`lib/ticketing-enable.ts`): it has `ticketing_enabled_at` |
 | `events_ticket_fee_rule_with_enabled_at` | `ticket_fee_rule` and `ticketing_enabled_at` are set together: the price rule is decided once, in the database, never by a request |

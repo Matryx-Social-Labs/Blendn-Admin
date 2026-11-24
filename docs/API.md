@@ -1538,6 +1538,22 @@ cancelled, so the event is over.` (`EVENT_ENDED`), in the event's timezone. A
 day still to come that is cancelled is skipped when finding the next one.
 Single-day events keep "Event has not started yet" / "Event has already ended".
 
+**Every media row carries its size (SCRUM-1066).** On `GET /events` (each
+`media[]` row, snake_case): `width`, `height`, `duration_ms`. On
+`GET /events/:eventId` (`media[]`, camelCase): `width`, `height`, `durationMs`.
+`width`/`height` are pixels as displayed (orientation applied), both or neither;
+`duration_ms` is a clip's length, only ever on a `video` row. All three are
+`null` for media added by pasted URL and for rows from before 2026-11-21: fit by
+the loaded size then, as before. The dashboard measures them from the file the
+organizer picked, and a clip over 15 s is refused (`400`) with 500 ms
+of tolerance (a "15 second" export often measures 15.02 to 15.2 s). The measured
+value is stored as it is, so a set `duration_ms` is at most 15500: do not assume 15000.
+
+```json
+{ "id": "…", "type": "video", "url": "https://…/clip.mp4", "thumbnail_url": "https://…/clip-poster.jpg",
+  "order": 0, "width": 1080, "height": 1920, "duration_ms": 12400 }
+```
+
 **Each category on an event now carries its `parent`** (or `null` at top level).
 Events are tagged to **leaves** — an event is "Classical and Carnatic", never
 "Music" — so a client wanting a whole family groups on the parent rather than

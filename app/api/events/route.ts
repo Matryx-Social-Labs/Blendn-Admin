@@ -3,6 +3,7 @@ import { errorResponse } from "@/lib/api-response"
 import { NextResponse, type NextRequest } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { eventWriteSchema, parseJsonField } from "@/lib/validations/event"
+import { eventMediaRows } from "@/lib/event-media"
 import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { resolveEventCity } from "@/lib/location"
 import { eventCityToStore } from "@/lib/cities"
@@ -372,21 +373,7 @@ export async function POST(req: Request) {
         ...(Array.isArray(media_items) && media_items.length > 0
           ? {
               media: {
-                create: media_items.map((item: Record<string, unknown>, index: number) => ({
-                  type: item.type as "image" | "video" | "document",
-                  url: item.url as string,
-                  // `||`, not `!= null`: these are unvalidated strings off the
-                  // body, and an empty one should leave the column at its
-                  // default rather than write "".
-                  ...((item.thumbnail_url as string) && {
-                    thumbnail_url: item.thumbnail_url as string,
-                  }),
-                  ...((item.title as string) && { title: item.title as string }),
-                  ...((item.description as string) && {
-                    description: item.description as string,
-                  }),
-                  order: typeof item.order === "number" ? item.order : index,
-                })),
+                create: eventMediaRows(media_items),
               },
             }
           : {}),
