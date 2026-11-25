@@ -1,6 +1,7 @@
 // Relative imports throughout — see lib/conversations.ts.
 import { CREW } from "../constants"
 import { db } from "../db"
+import { publicSiteOrigin } from "../env"
 import { befriendIn, firstName, INVITE_TOKEN, lockPair, newInviteToken, personCard, personSelect } from "../friends"
 import { logger } from "../logger"
 import { notifyFriendshipChanged } from "../room-friends"
@@ -36,8 +37,10 @@ export const NO_LINK: CrewRefusal = { refusal: "This invite link doesn’t work 
 const NO_LINK_CREW: CrewRefusal = { refusal: "Crew not found", status: 404 }
 const LINKS_ENOUGH: CrewRefusal = { refusal: "That’s enough invite links for today. Try again tomorrow.", status: 429 }
 
-/** Where crew links point. `/c/`, not `/f/`: an installed build reads every `/f/` link as a friend's. */
-export const CREW_LINK_BASE = "https://www.blendn.app/c/"
+/** Where a crew link points. `/c/`, not `/f/`: an installed build reads every `/f/` link as a friend's. */
+export function crewLinkUrl(token: string): string {
+  return `${publicSiteOrigin()}/c/${token}`
+}
 
 /** A refusal raised inside the join's transaction so its writes roll back (the friendship came out false). */
 class LinkRefused extends Error {}
@@ -117,7 +120,7 @@ export async function createCrewLink(userId: string, crewId: string): Promise<{ 
     })
   })
   if (isRefusal(made)) return made
-  return { token: made.token, url: `${CREW_LINK_BASE}${made.token}`, expiresAt: expiresAt(made.created_at) }
+  return { token: made.token, url: crewLinkUrl(made.token), expiresAt: expiresAt(made.created_at) }
 }
 
 /** Revoke an unused link: its sharer, or the crew's owner. False when there is none such. */
