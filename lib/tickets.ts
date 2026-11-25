@@ -142,8 +142,10 @@ async function ticketFor(eventId: string, credential: RedeemCredential): Promise
  * its organisation, the venue it is held at, an admin) may.
  *
  * The write is one conditional UPDATE — not redeemed yet, and its order still
- * paid — and its row count is the answer, so two scanners at two doors cannot
- * both let one ticket in.
+ * paid with no refund claimed — and its row count is the answer, so two
+ * scanners at two doors cannot both let one ticket in. `FOR SHARE` waits for a
+ * refund's claim of the order in flight (lib/ticket-refunds.ts), so a ticket is
+ * never both let in and refunded by its buyer.
  *
  * The door ("Check tickets", `admitAtDoor` in lib/ticket-door.ts, SCRUM-1014)
  * rate limits this per operator and per event before calling it; six
@@ -165,7 +167,7 @@ export async function redeemTicket(input: {
   const [admitted] = await db.$queryRaw<{ redeemed_at: Date }[]>`
     UPDATE tickets AS t SET redeemed_at = now(), redeemed_by = ${input.user.id}
      WHERE t.id = ${ticketId}::uuid AND t.redeemed_at IS NULL
-       AND EXISTS (SELECT 1 FROM ticket_orders o WHERE o.id = t.order_id AND o.status = 'paid')
+       AND EXISTS (SELECT 1 FROM ticket_orders o WHERE o.id = t.order_id AND o.status = 'paid' AND o.refund_requested_at IS NULL FOR SHARE)
     RETURNING t.redeemed_at`
   if (admitted) return { ok: true, ticketId, redeemedAt: admitted.redeemed_at }
 

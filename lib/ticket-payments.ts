@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client"
 // Relative imports: lib/ticket-reconcile.ts reaches this from server.ts (`build:server`, plain tsc).
 import { payoutsConnected } from "./payout-status"
 import { lateSeatRefusal } from "./ticket-holds"
+import { organizerShare } from "./ticket-refund-policy"
 import { issueTickets } from "./tickets"
 
 /**
@@ -71,9 +72,6 @@ export const PAYOUT_HOLD_AFTER_EVENT_MS = 3 * 24 * 60 * 60 * 1000
 export const holdFloor = (event: { start_time: Date; end_time: Date }): Date =>
   new Date(Math.max(event.start_time.getTime(), event.end_time.getTime()) + PAYOUT_HOLD_AFTER_EVENT_MS)
 
-/** An organizer refund is refused once its payout is being released or released (`refundOrder`, the Sales panel). The status is the only source. */
-export const PAYOUT_GONE: ReadonlySet<string> = new Set(["releasing", "released"])
-
 interface LockedOrder {
   id: string
   event_id: string
@@ -88,10 +86,6 @@ interface LockedOrder {
 }
 
 type Line = { ticket_type_id: string; quantity: number }
-
-/** The organizer's share: what the buyer paid, less our fee, its tax and processing (ticket-fees `organizerPayoutMinor`). */
-export const organizerShare = (o: Pick<LockedOrder, "total_minor" | "service_fee_minor" | "service_fee_tax_minor" | "processing_fee_minor">) =>
-  o.total_minor - o.service_fee_minor - o.service_fee_tax_minor - o.processing_fee_minor
 
 export async function lockOrderByRef(tx: Prisma.TransactionClient, orderRef: string): Promise<LockedOrder | null> {
   const [order] = await tx.$queryRaw<LockedOrder[]>`

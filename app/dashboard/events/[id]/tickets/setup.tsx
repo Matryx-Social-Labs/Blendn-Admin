@@ -264,7 +264,10 @@ export function TurnOnForm(p: TurnOnProps) {
                 </label>
               ))}
             </div>
-            <p className="text-[0.8125rem] text-faint-foreground">Buyers see it before they pay. If you cancel the event, every buyer gets everything back, booking fee included.</p>
+            <p className="text-[0.8125rem] text-faint-foreground" aria-live="polite">
+              Buyers see it before they pay. {policy === "none" ? "They can’t refund their own order; you still can." : "Until then, a buyer can refund their own order without asking you."} If you
+              cancel the event, every buyer gets everything back, booking fee included.
+            </p>
           </div>
         </div>
 

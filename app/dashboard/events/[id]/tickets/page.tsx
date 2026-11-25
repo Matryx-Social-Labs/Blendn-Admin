@@ -133,7 +133,7 @@ export default async function TicketsPage({
         paidTicketsBefore={paidTicketsBefore}
         startEditing={types.length === 0}
       />
-      <SalesPanel eventId={id} sales={sales} query={query} types={types} feesAbsorbed={row.fees_absorbed} format={(d) => clock.format(d, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })} />
+      <SalesPanel eventId={id} sales={sales} query={query} types={types} format={(d) => clock.format(d, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })} />
       <div className="grid grid-cols-1 items-start gap-5 @4xl/main:grid-cols-2">
         <Panel title="Payout" hint="One per event, released 3 days after it ends">
           <table className="w-full text-sm">
@@ -183,7 +183,7 @@ export default async function TicketsPage({
               </table>
             </div>
           )}
-          <p className="text-[0.8125rem] text-faint-foreground">Razorpay returns the money to the buyer in 5–7 days.</p>
+          <p className="text-[0.8125rem] text-faint-foreground">Razorpay returns the money to the buyer in 5–7 business days.</p>
         </Panel>
       </div>
       <p className="text-[0.8125rem] text-muted-foreground">
@@ -287,14 +287,12 @@ function SalesPanel({
   sales,
   query,
   types,
-  feesAbsorbed,
   format,
 }: {
   eventId: string
   sales: NonNullable<Awaited<ReturnType<typeof salesPage>>>
   query: { q?: string; typeId?: string; status: SalesStatusFilter }
   types: Array<{ id: string; name: string }>
-  feesAbsorbed: boolean
   format: (d: Date) => string
 }) {
   const base = `/dashboard/events/${eventId}/tickets`
@@ -387,7 +385,7 @@ function SalesPanel({
                         types={r.types}
                         refundMinor={r.refundMinor}
                         bookingFeeMinor={r.bookingFeeMinor}
-                        feesAbsorbed={feesAbsorbed}
+                        chargedFeesMinor={r.chargedFeesMinor}
                         currency={sales.currency}
                       />
                     ) : null}

@@ -5,7 +5,8 @@ import { db } from "./db"
 import { attendeeLabel } from "./pseudonym"
 import { eventPermissionSelect, eventPermissions, type PermissionActor } from "./rbac"
 import { labelScopeFor } from "./reports"
-import { holdFloor, organizerShare, PAYOUT_GONE } from "./ticket-payments"
+import { holdFloor } from "./ticket-payments"
+import { BUYER_REFUND, EVENT_CANCELLED_REFUND, PAYOUT_GONE, policyRefundDebit, policyRefundMinor } from "./ticket-refund-policy"
 
 /**
  * What the Tickets tab reads about money and orders (SCRUM-1014): the Sales
@@ -38,8 +39,10 @@ export interface SaleRow {
   ticketPriceMinor: number
   /** What the buyer paid, the booking fee included unless it was absorbed. */
   totalMinor: number
-  /** What a refund from here returns: the organizer's share (the booking fee is kept). */
+  /** What a refund from here returns: the full ticket price (the booking fee is kept). */
   refundMinor: number
+  /** What it charges the organization: the fees it absorbed on this order. */
+  chargedFeesMinor: number
   bookingFeeMinor: number
   status: SaleStatus
   refundedAt: Date | null
@@ -141,7 +144,8 @@ export async function salesPage(actor: PermissionActor, eventId: string, query: 
       quantity: lines.reduce((n, l) => n + l.quantity, 0),
       ticketPriceMinor: o.subtotal_minor,
       totalMinor: o.total_minor,
-      refundMinor: organizerShare(o),
+      refundMinor: policyRefundMinor(o),
+      chargedFeesMinor: policyRefundDebit(o),
       bookingFeeMinor: o.fees_absorbed ? 0 : o.total_minor - o.subtotal_minor,
       status,
       refundedAt: o.refunded_at,
@@ -159,7 +163,7 @@ export interface RefundRow {
   amountMinor: number
   /** Null while Razorpay has not confirmed it. */
   refundedAt: Date | null
-  /** The member who refunded it, or why it went back (a cancelled event, a late payment). */
+  /** The member who refunded it, "Buyer", or why it went back (a cancelled event, a late payment). */
   by: string
 }
 
@@ -180,7 +184,9 @@ export interface TicketsSummary {
 }
 
 const REASON_BY: Record<string, string> = {
-  event_cancelled: "Event canceled",
+  [EVENT_CANCELLED_REFUND]: "Event canceled",
+  // Never the person: hosts do not learn who a buyer is (SCRUM-1113).
+  [BUYER_REFUND]: "Buyer",
   late_payment: "Paid after the hold ran out",
   buyer_deleted: "Account deleted",
 }
@@ -238,7 +244,7 @@ async function refundsOf(eventId: string): Promise<RefundRow[]> {
     select: { id: true, refund_requested_minor: true, refunded_minor: true, refunded_at: true, refund_reason: true, status: true },
   })
   if (orders.length === 0) return []
-  // Who: the member the organizer's refund audit row names. A colleague, never a buyer.
+  // Who: the member the organizer's refund audit row names. A colleague, never a buyer (a buyer's own row is another action and names nobody).
   const audits = await db.audit_logs.findMany({
     where: { action: "ticket_order.refund", resource_id: { in: orders.map((o) => o.id) } },
     select: { resource_id: true, user_id: true },

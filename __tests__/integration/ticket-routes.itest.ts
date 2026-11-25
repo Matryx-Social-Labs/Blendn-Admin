@@ -379,6 +379,8 @@ describe("GET /me/tickets", () => {
       ticketId: expect.any(String),
       orderId,
       eventId: ev.eventId,
+      refund: null,
+      refundOffer: null,
       typeName: "Tier 0",
       doorCode: expect.stringMatching(/^[23456789ABCDEFGHJKMNPQRSTVWXYZ]{6}$/),
       qrPayload: expect.any(String),

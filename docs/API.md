@@ -1795,7 +1795,7 @@ gives: 404 for a draft or a stranger's private event, 403 `AGE_RESTRICTED`
 403 `FORBIDDEN` + `PROFILE_INCOMPLETE` for an account not set up: whoever may
 not say "going" may not buy their way in. Then refusals are 409 with the code in
 `errorCode`: `sold_out`, `not_on_sale`, `over_order_limit`, `over_buyer_limit`
-(10 seats a buyer an event, held and paid together), `unknown_ticket_type`,
+(10 seats a buyer an event, held, paid and refunded by themselves together), `unknown_ticket_type`,
 `private` (someone the door lets in, such as its organizer), `age` (backstop);
 orders also `too_many_holds` and `busy` (`retryAfter: 1`, retry at most twice). 503: Razorpay cannot take the payment (the
 hold is given back). Limits: quote 60/min a user and 240/min a network; order
@@ -1804,17 +1804,41 @@ hold is given back). Limits: quote 60/min a user and 240/min a network; order
 ### GET /ticket-orders/:orderId · DELETE /ticket-orders/:orderId
 
 Buyer only; anyone else's is the same 404.
-`{ orderId, eventId, status, holdExpiresAt, totalMinor, currency, paymentFailed, tickets }` —
+`{ orderId, eventId, status, holdExpiresAt, totalMinor, currency, paymentFailed, refund, refundOffer, tickets }` —
 `tickets` empty unless `paid`; `paymentFailed` is the latest checkout
 attempt's failure (Razorpay `payment.failed`), cleared when the pay page starts
 another. DELETE lets a pending hold go (204, `cancelled`); 409 `not_pending`
 otherwise.
 
+`refund` (SCRUM-1113) is `null`, or
+`{ state: "started" | "refunded", amountMinor, currency, requestedAt, refundedAt }`
+whoever asked for it. `refundOffer` is `null`, or
+`{ amountMinor, bookingFeeMinor, currency, until }`: what the buyer gets back if
+they ask now, the booking fee that is kept (0 when the organizer absorbed the
+fees), and the last moment to ask. Show these amounts; never compute them.
+
+### POST /ticket-orders/:orderId/refund-request
+
+The buyer refunds their own order, automatically, inside the event's
+`refundPolicy` window (`until_7d` / `until_24h` before its start as it is now).
+No body. The whole order, the full ticket price. 200 with the order (as GET,
+its `refund` set) plus `message` to show as it is. `refund.state` is `started`
+while Razorpay has not confirmed it (the server retries a failure) and
+`refunded` after; asking again is the same 200. While it is `started` the
+tickets stay on `GET /me/tickets` but neither the door nor check-in takes them;
+once `refunded` they, and the RSVP, are gone.
+
+409 with the code in `errorCode`: `refund_policy_none`, `refund_window_closed`,
+`ticket_used` (a ticket of it was let in; the host can still refund),
+`payout_released`, `event_canceled` (that refund is the full one), `not_paid`.
+404 for anyone but the buyer. 503 while payments are not set up. 10/min a user.
+
 ### GET /me/tickets?eventId=
 
 Tickets of my paid orders, newest event first, not paginated:
-`{ ticketId, orderId, eventId, typeName, doorCode, qrPayload, redeemedAt, event: { id, title, startsAt, endsAt, timezone, venueName, coverUrl } }`.
-`qrPayload` is `<ticketId>.<mac>`, derived on the server, never stored.
+`{ ticketId, orderId, eventId, typeName, doorCode, qrPayload, redeemedAt, event: { id, title, startsAt, endsAt, timezone, venueName, coverUrl }, refund, refundOffer }`.
+`refund` and `refundOffer` are the ticket's order's (above), the whole order's
+amounts on each of its tickets. `qrPayload` is `<ticketId>.<mac>`, derived on the server, never stored.
 
 ### RSVP on a ticketed event
 
