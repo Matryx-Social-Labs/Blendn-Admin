@@ -137,6 +137,6 @@ DATABASE_URL=postgresql://postgres:test@localhost:55432/t npm run test:integrati
 
 ## Deployment
 
-Railway via Docker. Health check at `GET /api/health`. Branches: `dev` →
+Railway (Railpack; settings in `.railway/railway.ts`). Health check at `GET /api/health`. Branches: `dev` →
 `stage` (internal testing) → `prod`. CI runs lint, typecheck, tests, and build
 on all three.

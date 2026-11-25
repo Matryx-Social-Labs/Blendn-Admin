@@ -165,7 +165,7 @@ describe("the reminder is sent once, and by something", () => {
   /*
    * `sendEventReminders` was correct about its audience, had a cron route in
    * front of it, and **nothing called that route** — no cron block in
-   * railway.json, no scheduled workflow. The one notification the product tells
+   * Railway, no scheduled workflow. The one notification the product tells
    * people it sends was never sent by anything.
    *
    * It was also not idempotent, and the two defects were hiding each other: the
