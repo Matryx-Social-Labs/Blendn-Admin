@@ -37,7 +37,7 @@ async function job({ url, uploads }, signal) {
       put(uploads.small, small.path, "video/mp4", signal),
     ])
     const copyFacts = ({ width, height, bytes }) => ({ width, height, bytes })
-    return { ok: true, ...facts, stillSeconds: taken.map((s) => s.at), main: copyFacts(main), small: copyFacts(small) }
+    return { ok: true, width: facts.width, height: facts.height, durationMs: facts.durationMs, stillSeconds: taken.map((s) => s.at), main: copyFacts(main), small: copyFacts(small) }
   } catch (error) {
     if (error instanceof FetchRefusal) return { ok: false, reason: error.reason, bytes: error.bytes }
     if (error instanceof NotVideo) return { ok: false, reason: "not_video" }

@@ -1,5 +1,5 @@
 import { EventEmitter } from "events"
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from "fs"
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 import { join } from "path"
 import { Readable, Writable } from "stream"
@@ -69,7 +69,7 @@ describe("the clip", () => {
   const probe = (stream: object, duration = "12.0") => JSON.stringify({ streams: [stream], format: { duration } })
 
   it("is measured as displayed", () => {
-    expect(factsFrom(probe({ width: 1920, height: 1080 }))).toEqual({ width: 1920, height: 1080, durationMs: 12_000 })
+    expect(factsFrom(probe({ width: 1920, height: 1080 }))).toEqual({ width: 1920, height: 1080, durationMs: 12_000, hdr: false })
     expect(factsFrom(probe({ width: 1920, height: 1080, side_data_list: [{ rotation: -90 }] }))).toMatchObject({ width: 1080, height: 1920 })
     expect(factsFrom(probe({ width: 1920, height: 1080, tags: { rotate: "270" } }))).toMatchObject({ width: 1080, height: 1920 })
     expect(factsFrom(probe({ width: 1920, height: 1080, side_data_list: [{ rotation: 180 }] }))).toMatchObject({ width: 1920, height: 1080 })
@@ -95,6 +95,49 @@ describe("the clip", () => {
 
   it("never scales up", () => expect(scaleFilter(540)).toContain("min(540,iw)"))
 
+  it.each([
+    ["HLG, as an iPhone records", { color_transfer: "arib-std-b67" }, true],
+    ["PQ (HDR10)", { color_transfer: "smpte2084" }, true],
+    ["SDR", { color_transfer: "bt709" }, false],
+    ["10-bit BT.2020 with an SDR curve", { color_transfer: "bt2020-10", color_primaries: "bt2020", pix_fmt: "yuv420p10le" }, false],
+    ["no tag", {}, false],
+  ])("is HDR by its transfer curve alone: %s", (_why, tags, hdr) =>
+    expect(factsFrom(probe({ width: 1920, height: 1080, ...tags }))?.hdr).toBe(hdr)
+  )
+
+  it("is probed for its transfer curve", async () => {
+    const asked: string[] = []
+    await probeClip("/tmp/in", new AbortController().signal, async (_tool, args) => {
+      asked.push(...args)
+      return probe({ width: 10, height: 10 })
+    })
+    expect(asked.join(" ")).toMatch(/stream=[^ ]*color_transfer/)
+  })
+
+  // Decided per advisor 2026-11-25 (task 32): an HDR clip is brought to SDR in the pixels, so the poster and the playing copy are one picture on every device.
+  it.each([[true], [false]])("brings an HDR clip to SDR BT.709 in every still and both copies, and leaves SDR alone (HDR: %s)", async (hdr) => {
+    const dir = mkdtempSync(join(tmpdir(), "clip-hdr-"))
+    const ffmpegRuns: string[][] = []
+    const exec = async (tool: "ffmpeg" | "ffprobe", args: string[]) => {
+      if (tool === "ffprobe") return probe({ width: 1080, height: 1920 })
+      ffmpegRuns.push(args)
+      writeFileSync(args[args.length - 1], "x")
+      return ""
+    }
+    await makeFiles("/tmp/in", dir, { width: 1080, height: 1920, durationMs: 12_000, hdr }, new AbortController().signal, exec)
+    expect(ffmpegRuns).toHaveLength(STILLS + 2)
+    for (const args of ffmpegRuns) {
+      const filter = args[args.indexOf("-vf") + 1]
+      expect(filter.includes("tonemap=mobius")).toBe(hdr)
+      // Scaled first: the tone map runs on the smaller frame, in floating point.
+      if (hdr) expect(filter.indexOf("scale=")).toBeLessThan(filter.indexOf("zscale"))
+    }
+    for (const args of ffmpegRuns.slice(STILLS)) {
+      for (const flag of ["-color_primaries", "-color_trc", "-colorspace"]) expect(args.includes(flag)).toBe(hdr)
+      if (hdr) expect(args[args.indexOf("-color_trc") + 1]).toBe("bt709")
+    }
+  })
+
   it("never lets ffmpeg open anything but the file, as MP4", async () => {
     const runs: string[][] = []
     const exec = async (tool: "ffmpeg" | "ffprobe", args: string[]) => {
@@ -104,7 +147,7 @@ describe("the clip", () => {
     const signal = new AbortController().signal
     await probeClip("/tmp/in", signal, exec)
     // No still is written by this fake, so it stops at the first: a clip with no poster is not a video.
-    await expect(makeFiles("/tmp/in", "/tmp/no-such-dir", { width: 1280, height: 720, durationMs: 12_000 }, signal, exec)).rejects.toBeInstanceOf(NotVideo)
+    await expect(makeFiles("/tmp/in", "/tmp/no-such-dir", { width: 1280, height: 720, durationMs: 12_000, hdr: false }, signal, exec)).rejects.toBeInstanceOf(NotVideo)
     for (const args of runs) {
       expect(args.join(" ")).toContain("-protocol_whitelist file -f mov -max_pixels 9437184 -threads 2")
       expect(args.indexOf("mov")).toBeLessThan(args.indexOf("/tmp/in"))
@@ -113,7 +156,7 @@ describe("the clip", () => {
   })
 
   it("ends the job when a still runs out of time or nobody is waiting, rather than trying the next", async () => {
-    const facts = { width: 1280, height: 720, durationMs: 12_000 }
+    const facts = { width: 1280, height: 720, durationMs: 12_000, hdr: false }
     const killed = jest.fn(() => Promise.reject(Object.assign(new Error("timed out"), { killed: true })))
     await expect(makeFiles("/tmp/in", "/tmp/no-such-dir", facts, new AbortController().signal, killed)).rejects.toThrow("timed out")
     expect(killed).toHaveBeenCalledTimes(1)
