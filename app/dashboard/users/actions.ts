@@ -258,9 +258,9 @@ export async function updateUser(
      * An email change followed by a password reset is a takeover of the
      * account (SCRUM-1235). An admin's address is never changed here, and no
      * address is moved onto the company domain, which is what makes an account
-     * eligible for admin (`updateUserRole`).
+     * eligible for admin (`updateUserRole`). Compared with the stored address
+     * normalised too, so a legacy row with a capital is re-saved lowercase, not refused.
      */
-    // Against the stored one normalised too: a legacy row with a capital is re-saved lowercase, not refused.
     if (email !== undefined && email !== before.email.trim().toLowerCase()) {
       if (before.role === "app_admin") {
         throw new Refusal("An admin's email can't be changed from the dashboard. Create a new account for the new address.")
