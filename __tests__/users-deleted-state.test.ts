@@ -25,7 +25,7 @@ const mockDb = {
   event_favorites: { groupBy: jest.fn().mockResolvedValue([]) },
   audit_logs: { create: jest.fn() },
   // The edit and its audit row are one transaction (SCRUM-1235); the mock runs it on itself.
-  $transaction: jest.fn(async (fn: (tx: unknown) => unknown) => fn(mockDb)),
+  $transaction: jest.fn(async (fn: (tx: unknown) => unknown): Promise<unknown> => fn(mockDb)),
 }
 const mockAuth = jest.fn()
 jest.mock("@/lib/db", () => ({ db: mockDb }))
