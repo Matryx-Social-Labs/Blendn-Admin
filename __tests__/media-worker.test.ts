@@ -6,7 +6,7 @@ import { Readable, Writable } from "stream"
 import { pipeline } from "stream/promises"
 
 import { MEDIA } from "@/lib/constants"
-import { MAX_DURATION_MS, STILLS, factsFrom, makeFiles, probeClip, run, scaleFilter, smallKbps, stillTimes, NotVideo } from "@/services/media-worker/clip"
+import { MAX_DURATION_MS, STILLS, factsFrom, makeFiles, probeClip, refusal, run, scaleFilter, smallKbps, stillTimes, NotVideo } from "@/services/media-worker/clip"
 import { capBytes, isPublicAddress, openableUrl, publicLookup } from "@/services/media-worker/fetch-clip"
 import { JOB_MS, MAX_LINE, authorised, createHandler, parseRequest, type ClipResult } from "@/services/media-worker/handler"
 
@@ -69,7 +69,7 @@ describe("the clip", () => {
   const probe = (stream: object, duration = "12.0") => JSON.stringify({ streams: [stream], format: { duration } })
 
   it("is measured as displayed", () => {
-    expect(factsFrom(probe({ width: 1920, height: 1080 }))).toEqual({ width: 1920, height: 1080, durationMs: 12_000, hdr: false })
+    expect(factsFrom(probe({ width: 1920, height: 1080 }))).toEqual({ width: 1920, height: 1080, durationMs: 12_000, hdr: false, noBaseLayer: false })
     expect(factsFrom(probe({ width: 1920, height: 1080, side_data_list: [{ rotation: -90 }] }))).toMatchObject({ width: 1080, height: 1920 })
     expect(factsFrom(probe({ width: 1920, height: 1080, tags: { rotate: "270" } }))).toMatchObject({ width: 1080, height: 1920 })
     expect(factsFrom(probe({ width: 1920, height: 1080, side_data_list: [{ rotation: 180 }] }))).toMatchObject({ width: 1920, height: 1080 })
@@ -105,6 +105,35 @@ describe("the clip", () => {
     expect(factsFrom(probe({ width: 1920, height: 1080, ...tags }))?.hdr).toBe(hdr)
   )
 
+  // As ffprobe printed them for real encodes (x265 + dovi_tool, re-muxed by libx265 -dolbyvision): the record, and the
+  // empty entries the other side data leave under -show_entries.
+  it.each([
+    ["profile 5: no compatible base layer", [{ dv_profile: 5, dv_bl_signal_compatibility_id: 0 }], true],
+    ["AV1 profile 10.0: the same", [{ dv_profile: 10, dv_bl_signal_compatibility_id: 0 }], true],
+    ["profile 8.1: an HDR10 base", [{ dv_profile: 8, dv_bl_signal_compatibility_id: 1 }, {}, {}], false],
+    ["profile 8.4: an HLG base, as an iPhone records", [{ dv_profile: 8, dv_bl_signal_compatibility_id: 4 }], false],
+    ["profile 7: a Blu-ray base", [{ dv_profile: 7, dv_bl_signal_compatibility_id: 6 }], false],
+    ["no Dolby Vision record", [{ rotation: -90 }, {}], false],
+  ])("has no base layer to decode only on a Dolby Vision record that says so: %s", (_why, side_data_list, noBase) =>
+    expect(factsFrom(probe({ width: 1920, height: 1080, color_transfer: "smpte2084", side_data_list }))?.noBaseLayer).toBe(noBase)
+  )
+
+  it("refuses a clip with no base layer before its length, so nobody trims a clip to be refused again", () => {
+    const facts = { width: 1920, height: 1080, durationMs: 12_000, hdr: true, noBaseLayer: false }
+    expect(refusal({ ...facts, noBaseLayer: true, durationMs: 40_000 })).toEqual({ ok: false, reason: "unsupported_hdr" })
+    expect(refusal({ ...facts, durationMs: 40_000 })).toEqual({ ok: false, reason: "too_long", durationMs: 40_000 })
+    expect(refusal({ ...facts, durationMs: MAX_DURATION_MS })).toBeNull()
+  })
+
+  it("is probed for its Dolby Vision record", async () => {
+    const asked: string[] = []
+    await probeClip("/tmp/in", new AbortController().signal, async (_tool, args) => {
+      asked.push(...args)
+      return probe({ width: 10, height: 10 })
+    })
+    expect(asked.join(" ")).toMatch(/stream_side_data=[^ ]*dv_bl_signal_compatibility_id/)
+  })
+
   it("is probed for its transfer curve", async () => {
     const asked: string[] = []
     await probeClip("/tmp/in", new AbortController().signal, async (_tool, args) => {
@@ -124,7 +153,7 @@ describe("the clip", () => {
       writeFileSync(args[args.length - 1], "x")
       return ""
     }
-    await makeFiles("/tmp/in", dir, { width: 1080, height: 1920, durationMs: 12_000, hdr }, new AbortController().signal, exec)
+    await makeFiles("/tmp/in", dir, { width: 1080, height: 1920, durationMs: 12_000, hdr, noBaseLayer: false }, new AbortController().signal, exec)
     expect(ffmpegRuns).toHaveLength(STILLS + 2)
     for (const args of ffmpegRuns) {
       const filter = args[args.indexOf("-vf") + 1]
@@ -147,7 +176,7 @@ describe("the clip", () => {
     const signal = new AbortController().signal
     await probeClip("/tmp/in", signal, exec)
     // No still is written by this fake, so it stops at the first: a clip with no poster is not a video.
-    await expect(makeFiles("/tmp/in", "/tmp/no-such-dir", { width: 1280, height: 720, durationMs: 12_000, hdr: false }, signal, exec)).rejects.toBeInstanceOf(NotVideo)
+    await expect(makeFiles("/tmp/in", "/tmp/no-such-dir", { width: 1280, height: 720, durationMs: 12_000, hdr: false, noBaseLayer: false }, signal, exec)).rejects.toBeInstanceOf(NotVideo)
     for (const args of runs) {
       expect(args.join(" ")).toContain("-protocol_whitelist file -f mov -max_pixels 9437184 -threads 2")
       expect(args.indexOf("mov")).toBeLessThan(args.indexOf("/tmp/in"))
@@ -156,7 +185,7 @@ describe("the clip", () => {
   })
 
   it("ends the job when a still runs out of time or nobody is waiting, rather than trying the next", async () => {
-    const facts = { width: 1280, height: 720, durationMs: 12_000, hdr: false }
+    const facts = { width: 1280, height: 720, durationMs: 12_000, hdr: false, noBaseLayer: false }
     const killed = jest.fn(() => Promise.reject(Object.assign(new Error("timed out"), { killed: true })))
     await expect(makeFiles("/tmp/in", "/tmp/no-such-dir", facts, new AbortController().signal, killed)).rejects.toThrow("timed out")
     expect(killed).toHaveBeenCalledTimes(1)

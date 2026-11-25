@@ -71,7 +71,7 @@ const answerSchema = z.discriminatedUnion("ok", [
   }),
   z.object({
     ok: z.literal(false),
-    reason: z.enum(["unreachable", "not_video", "too_big", "too_long"]),
+    reason: z.enum(["unreachable", "not_video", "too_big", "too_long", "unsupported_hdr"]),
     bytes: z.number().optional(),
     durationMs: z.number().optional(),
   }),
@@ -91,6 +91,8 @@ export function refusalWords(answer: Extract<Answer, { ok: false }>): string {
       return "This link isn’t a video file. Paste a direct link to an MP4."
     case "unreachable":
       return "We couldn’t open this link. Check that it’s public, then paste it again."
+    case "unsupported_hdr":
+      return "This clip is in a Dolby Vision format we can’t convert, so its colors would play wrong: export it as HDR10 or standard (SDR) video and add it again."
   }
 }
 

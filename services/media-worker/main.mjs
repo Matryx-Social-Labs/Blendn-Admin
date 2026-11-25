@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { FetchRefusal, fetchClip } from "./fetch-clip.ts"
-import { MAX_DURATION_MS, NotVideo, makeFiles, probeClip } from "./clip.ts"
+import { NotVideo, makeFiles, probeClip, refusal } from "./clip.ts"
 import { createHandler } from "./handler.ts"
 
 const secret = process.env.MEDIA_WORKER_SECRET ?? ""
@@ -28,7 +28,8 @@ async function job({ url, uploads }, signal) {
     const input = join(dir, "input")
     await fetchClip(url, input, signal)
     const facts = await probeClip(input, signal)
-    if (facts.durationMs > MAX_DURATION_MS) return { ok: false, reason: "too_long", durationMs: facts.durationMs }
+    const refused = refusal(facts)
+    if (refused) return refused
     const { stills, main, small } = await makeFiles(input, dir, facts, signal)
     const taken = stills.slice(0, uploads.stills.length)
     await Promise.all([

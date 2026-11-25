@@ -105,4 +105,12 @@ describe("checkClip (SCRUM-1106)", () => {
     expect(refusalWords({ ok: false, reason: "not_video" })).toBe("This link isn’t a video file. Paste a direct link to an MP4.")
     expect(refusalWords({ ok: false, reason: "unreachable" })).toBe("We couldn’t open this link. Check that it’s public, then paste it again.")
   })
+
+  it("refuses a Dolby Vision clip it cannot convert in the advisor's words (SCRUM-1120)", async () => {
+    fetchMock.mockResolvedValue(answer(200, { ok: false, reason: "unsupported_hdr" }))
+    expect(await checkClip("https://a.test/c.mp4", "u1", pause)).toEqual({
+      kind: "refused",
+      message: "This clip is in a Dolby Vision format we can’t convert, so its colors would play wrong: export it as HDR10 or standard (SDR) video and add it again.",
+    })
+  })
 })

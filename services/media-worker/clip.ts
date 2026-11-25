@@ -9,6 +9,8 @@ import { execFile } from "node:child_process"
 import { stat } from "node:fs/promises"
 import { join } from "node:path"
 
+import type { ClipResult } from "./handler.ts"
+
 /** The web service's `MEDIA.MAX_CLIP_MS + CLIP_TOLERANCE_MS` (a test holds the two together). */
 export const MAX_DURATION_MS = 15_500
 /** A little over DCI 4K. Read from the container here and enforced on every decoded frame (`-max_pixels`): the two can differ. */
@@ -34,6 +36,11 @@ export interface ClipFacts {
   durationMs: number
   /** An HLG or PQ curve: its stills and copies are brought to SDR (`TO_SDR`). */
   hdr: boolean
+  /**
+   * Dolby Vision with no compatible base layer (profile 5, AV1 10.0): the picture is IPTPQc2, which ffmpeg decodes to
+   * wrong colors, so it is refused (decided per advisor 2026-11-25, SCRUM-1120). 8.x, 7 and 10.1+ have a usable base.
+   */
+  noBaseLayer: boolean
 }
 
 /** HLG (iPhones record it by default) and PQ (HDR10, Dolby Vision 8.1). Not BT.2020 primaries or 10 bits alone: those can be SDR. */
@@ -58,7 +65,7 @@ export const run: Run = (tool, args, timeoutMs, signal) =>
   })
 
 interface Probe {
-  streams?: { width?: number; height?: number; duration?: string; color_transfer?: string; tags?: { rotate?: string }; side_data_list?: { rotation?: number }[] }[]
+  streams?: { width?: number; height?: number; duration?: string; color_transfer?: string; tags?: { rotate?: string }; side_data_list?: { rotation?: number; dv_bl_signal_compatibility_id?: number }[] }[]
   format?: { duration?: string }
 }
 
@@ -81,6 +88,9 @@ export function factsFrom(json: string): ClipFacts | null {
     height: turned ? stream.width : stream.height,
     durationMs: Math.round(seconds * 1000),
     hdr: HDR_CURVES.has(stream.color_transfer ?? ""),
+    // Only a Dolby Vision configuration record carries the id; 0 is "no compatible base layer".
+    // ponytail: the record (dvcC) only; a profile 5 stream muxed without one passes. Read the first frame's RPU if one turns up.
+    noBaseLayer: stream.side_data_list?.some((d) => d.dv_bl_signal_compatibility_id === 0) ?? false,
   }
 }
 
@@ -88,7 +98,7 @@ export async function probeClip(path: string, signal: AbortSignal, exec: Run = r
   const json = await exec(
     "ffprobe",
     [...READ, "-select_streams", "v:0", "-show_entries",
-      "stream=width,height,duration,color_transfer:stream_tags=rotate:stream_side_data=rotation:format=duration", "-of", "json", path],
+      "stream=width,height,duration,color_transfer:stream_tags=rotate:stream_side_data=rotation,dv_bl_signal_compatibility_id:format=duration", "-of", "json", path],
     PROBE_MS,
     signal
   ).catch(() => "")
@@ -96,6 +106,13 @@ export async function probeClip(path: string, signal: AbortSignal, exec: Run = r
   const facts = factsFrom(json)
   if (!facts) throw new NotVideo("not a playable video")
   return facts
+}
+
+/** A verdict from the probe alone, before any still or copy: the colors first, so nobody trims a clip to be refused again. */
+export function refusal(facts: ClipFacts): Extract<ClipResult, { ok: false }> | null {
+  if (facts.noBaseLayer) return { ok: false, reason: "unsupported_hdr" }
+  if (facts.durationMs > MAX_DURATION_MS) return { ok: false, reason: "too_long", durationMs: facts.durationMs }
+  return null
 }
 
 /** When the stills are taken: the first frame (0.1 s, as the browser's poster), then five across the clip. */
