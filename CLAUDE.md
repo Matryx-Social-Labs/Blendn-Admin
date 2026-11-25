@@ -273,7 +273,7 @@ three constraints were missing.
 
 ## Environment Variables
 
-Required: `DATABASE_URL`, `NEXTAUTH_URL`, `NEXTAUTH_SECRET` (32+ chars), `MOBILE_JWT_SECRET` (32+ chars).
+Required: `DATABASE_URL`, `NEXTAUTH_URL`, `NEXTAUTH_SECRET` (32+ chars), `MOBILE_JWT_SECRET` (32+ chars). On Railway `production` also `OPENAI_API_KEY` (boot refuses without it; elsewhere it warns).
 
 Staging only: `SEED_PASSWORD` — the password of the dashboard test accounts
 (`admin@`, `organizer@`, `venue.owner@`, `sponsor@blendn.app`), which the
@@ -281,7 +281,7 @@ pre-deploy step (`scripts/test-accounts.ts`) re-asserts on every deploy.
 `seed:qa --apply` refuses to run without it, and refuses any database that is
 not Railway `staging` or `localhost`.
 
-Optional: Tigris object storage (`TIGRIS_ENDPOINT`, `TIGRIS_ACCESS_KEY`, `TIGRIS_SECRET_KEY`, `TIGRIS_BUCKET`, `TIGRIS_PRIVATE_BUCKET`, `TIGRIS_REGION`), Google OAuth client IDs (`GOOGLE_WEB_CLIENT_ID`, `GOOGLE_IOS_CLIENT_ID`, `GOOGLE_ANDROID_CLIENT_ID`), `OPENAI_API_KEY`, `REDIS_URL`, `NEXT_PUBLIC_SENTRY_DSN`.
+Optional: Tigris object storage (`TIGRIS_ENDPOINT`, `TIGRIS_ACCESS_KEY`, `TIGRIS_SECRET_KEY`, `TIGRIS_BUCKET`, `TIGRIS_PRIVATE_BUCKET`, `TIGRIS_REGION`), Google OAuth client IDs (`GOOGLE_WEB_CLIENT_ID`, `GOOGLE_IOS_CLIENT_ID`, `GOOGLE_ANDROID_CLIENT_ID`), `OPENAI_API_KEY` (outside production), `REDIS_URL`, `NEXT_PUBLIC_SENTRY_DSN`.
 
 **The storage vars are `TIGRIS_*`, not `AWS_*`.** This file said `AWS_ACCESS_KEY_ID` / `AWS_S3_BUCKET`, and `lib/tigris.ts` has only ever read `TIGRIS_*` — so a deployment configured from these instructions got uploads silently switched off, with no error anywhere. `DEPLOYMENT.md` and `lib/env.ts` were corrected; this file was not, and it is the one an agent reads first.
 
