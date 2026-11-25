@@ -395,8 +395,10 @@ registry.registerPath({
     "Called every few minutes while checked in, so the live count reflects who is " +
     "actually in the room. Judged with the same accuracy allowance as check-in, so " +
     "GPS drift indoors does not read as leaving. A first reading outside starts a " +
-    "grace period; once it expires the response asks the attendee to confirm; if " +
-    "nothing comes back they are checked out. Silence alone never checks anyone out " +
+    "20-minute clock; a second outside reading at least 10 minutes later lets it run " +
+    "on silence, and they are checked out at 20 minutes. One outside reading alone, or " +
+    "a fix worse than the door's 150 m reading outside (status `unknown`), never checks " +
+    "anyone out. Silence alone never checks anyone out " +
     "— a basement with no signal is not an empty room. Staff are never checked out " +
     "automatically.",
   security: bearerAuth,
@@ -423,7 +425,7 @@ registry.registerPath({
         "application/json": {
           schema: wrap(
             z.object({
-              status: z.enum(["inside", "outside", "prompt", "checked_out", "not_checked_in"]),
+              status: z.enum(["inside", "outside", "unknown", "checked_out", "not_checked_in"]),
               reason: z.string().optional(),
               shortfallMetres: z.number().nullable().optional(),
               graceEndsAt: z.string().nullable().optional(),

@@ -10,10 +10,10 @@ import {
   resolveFence,
   type Geofence,
   type LatLng,
+  MAX_GPS_ACCURACY_METERS,
 } from "@/lib/geofence"
 import { CHECK_IN_LEAD_MINUTES, pickOccurrence } from "@/lib/occurrences"
 import { canJoinEvent } from "@/lib/socket-auth"
-import { MAX_GPS_ACCURACY_METERS } from "@/lib/validations/event"
 import { goLiveArea, venuesTakenOver } from "@/lib/venue-visibility"
 
 /**
