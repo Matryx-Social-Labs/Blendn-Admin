@@ -47,7 +47,7 @@ are taken out of all three rooms; a rejoin is refused. The end is scheduled at
 the window's second (`lib/live-timers.ts`, with a 30 s backstop), and every
 emit to those rooms goes only to members still live, so a socket the eviction
 has not reached yet hears nothing either. Across replicas the eviction needs
-the Redis adapter (`REDIS_URL`).
+the Redis adapter (`SOCKET_REDIS_ADAPTER=1`; `REDIS_URL` alone no longer attaches it).
 
 On refusal the server emits `error` and the socket is **not** added to the room:
 

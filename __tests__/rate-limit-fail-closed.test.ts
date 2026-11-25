@@ -14,6 +14,8 @@ const fake = {
   /** Requests sent to Redis: a MULTI's exec is one. */
   roundTrips: 0,
   on: jest.fn(),
+  /** node-redis: true while connected; the store uses no client that is not. */
+  isReady: true,
   connect: jest.fn(async () => undefined),
   live(key: string) {
     const at = fake.expiresAt.get(key)
