@@ -159,6 +159,8 @@ export const api = {
   read: (as: Person, g: string) => call(routes.messages.GET, `/api/mobile/chat/groups/${g}/messages`, as, { params: { chatGroupId: g } }),
   send: (as: Person, g: string, content = `hi ${testId("m")}`) =>
     call(routes.messages.POST, `/api/mobile/chat/groups/${g}/messages`, as, { method: "POST", body: { content }, params: { chatGroupId: g } }),
+  reply: (as: Person, g: string, parentId: string, content: string) =>
+    call(routes.messages.POST, `/api/mobile/chat/groups/${g}/messages`, as, { method: "POST", body: { content, parentId }, params: { chatGroupId: g } }),
   roster: (as: Person, g: string) =>
     call(routes.participants.GET, `/api/mobile/chat/groups/${g}/participants`, as, { params: { chatGroupId: g } }),
   leave: (as: Person, g: string) =>
@@ -216,7 +218,7 @@ export function socketHarness() {
     const socket = connect(`http://localhost:${port}`, { auth: { token: p.token }, transports: ["websocket"], reconnection: false })
     clients.push(socket)
     const heard = {
-      message: [] as { message: { content: string; userName: string; userId: string; userImage?: string } }[],
+      message: [] as { message: { content: string; userName: string; userId: string; userImage?: string; metadata?: unknown } }[],
       typing: [] as { userName: string }[],
       refused: [] as unknown[],
     }

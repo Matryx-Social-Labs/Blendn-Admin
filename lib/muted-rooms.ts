@@ -11,6 +11,7 @@ import {
 } from "./chat-group-rows"
 import { ownedRooms } from "./chat-list"
 import { blockCounterparties } from "./conversations"
+import { hiddenWaveLineIds } from "./crews/wave-lines"
 import { db } from "./db"
 import { mutedNowSql } from "./room-mute"
 
@@ -152,8 +153,9 @@ export async function mutedRoomPage(userId: string, limit: number, after: Candid
 
   const ids = { chat_group_id: { in: page.map((c) => c.id) } }
   const where = { user_id: userId, status: { in: [...LISTED_MEMBER_STATUSES] }, ...ids }
-  const [blockedIds, eventRows, others] = await Promise.all([
+  const [blockedIds, hiddenLineIds, eventRows, others] = await Promise.all([
     blockCounterparties(userId),
+    hiddenWaveLineIds(userId),
     db.chat_group_members.findMany({ where: { ...where, chat_group: EVENT_ROOM_WHERE, ...liveRoomsOnly(now) }, ...eventMemberArgs }),
     ownedRooms(userId, ids, now),
   ])
@@ -164,6 +166,7 @@ export async function mutedRoomPage(userId: string, limit: number, after: Candid
     others,
     notUnread,
     blockedIds,
+    hiddenLineIds,
     now,
   })
   const byId = new Map<string, (typeof built.groups)[number] | (typeof built.rooms)[number]>(

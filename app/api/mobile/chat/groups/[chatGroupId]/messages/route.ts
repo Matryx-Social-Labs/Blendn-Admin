@@ -5,6 +5,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { keptApartIn } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { tallyReactions } from "@/lib/reactions"
+import { answeredWaves, hiddenWaveLineIds } from "@/lib/crews/wave-lines"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { idForViewer } from "@/lib/room-handle"
 import { crewMemberImages, namesInRoom } from "@/lib/identity"
@@ -120,11 +121,17 @@ export async function GET(
      * push notification.
      */
     // …and in a board post's room, a closed conversation's too (`keptApartIn`).
-    const blockedIds = await keptApartIn(user.userId, chatGroup.kind)
+    // In a crew's, a hidden crew's wave (`hiddenWaveLineIds`).
+    const [blockedIds, hiddenLineIds] = await Promise.all([
+      keptApartIn(user.userId, chatGroup.kind),
+      chatGroup.kind === "crew" ? hiddenWaveLineIds(user.userId, chatGroupId) : [],
+    ])
+    const hiddenLines = new Set(hiddenLineIds)
 
     const whereClause: Record<string, unknown> = {
       chat_group_id: chatGroupId,
       ...(blockedIds.length ? { user_id: { notIn: blockedIds } } : {}),
+      ...(hiddenLineIds.length ? { id: { notIn: hiddenLineIds } } : {}),
       OR: [
         { deleted_at: null },
         { moderation_status: "hidden", user_id: user.userId },
@@ -232,13 +239,15 @@ export async function GET(
      * numbers, from the `parent_id` index, beside the read marker and the names,
      * which wait on nothing here.
      */
-    const [, anonMap, repliesByParent, crewImages] = await Promise.all([
+    const [, anonMap, repliesByParent, crewImages, waveAnswers] = await Promise.all([
       markRead,
       // The room's own naming rule: pseudonyms, or first names in a crew's (`namesInRoom`).
       namesInRoom(chatGroup, [...pseudonymFor]),
       replyCounts(messagesToReturn.map((m) => m.id)),
       // A crew's room shows its members' photos; every other kind, none (SCRUM-812).
       crewMemberImages(chatGroup, [...pseudonymFor]),
+      // Whether this crew answered each wave on the page.
+      answeredWaves(chatGroup.crew_id, user.userId, messagesToReturn),
     ])
 
     /*
@@ -278,6 +287,8 @@ export async function GET(
           ...m,
           // The poll a `poll` message carries; absent on every other type.
           ...(m.type === "poll" ? { pollId: isHidden ? null : (poll?.id ?? null) } : {}),
+          // A `crew_waved` line only: this crew has waved or liked back.
+          ...(waveAnswers.has(m.id) ? { answered: waveAnswers.get(m.id) } : {}),
           _count: { replies: repliesByParent.get(m.id) ?? 0 },
           user_id: idFor(m.user_id),
           deleted_by: m.deleted_by && idFor(m.deleted_by),
@@ -306,7 +317,8 @@ export async function GET(
                  * hide landed kept serving both, image signed, to the whole
                  * room (SCRUM-444).
                  */
-                const removed = deleted_at !== null || moderation_status === "hidden"
+                // Nor a quote of a wave this reader's hide keeps from them.
+                const removed = deleted_at !== null || moderation_status === "hidden" || hiddenLines.has(parent.id)
                 return {
                   ...parent,
                   content: removed ? null : parent.content,

@@ -13,10 +13,15 @@ import { resetMemoryStore } from "@/lib/rate-limit-store"
 import { roomHandle } from "@/lib/room-handle"
 
 import { db } from "./helpers"
-import { api, arrive, cleanupCrewWorld, crewOf, liveEvent, person, type Person } from "./crew-world"
+import { api, arrive, cleanupCrewWorld, crewOf, liveEvent, person, socketHarness, until, type Person } from "./crew-world"
 
+const sockets = socketHarness()
 beforeEach(() => resetMemoryStore())
-afterAll(() => cleanupCrewWorld())
+beforeAll(() => sockets.start())
+afterAll(async () => {
+  await sockets.stop()
+  await cleanupCrewWorld()
+})
 
 async function world(label: string) {
   const host = await person(`${label}-host`)
@@ -35,6 +40,13 @@ async function world(label: string) {
 
 const lines = (roomId: string) =>
   db.chat_messages.findMany({ where: { chat_group_id: roomId }, orderBy: { created_at: "asc" }, select: { user_id: true, content: true, metadata: true } })
+/** The crew_waved lines of a room as its history gives them to one person. */
+const wavedLines = async (as: Person, roomId: string) =>
+  ((await api.read(as, roomId)).body.data.messages as { id: string; content: string; metadata: Record<string, unknown> | null; answered?: boolean }[]).filter(
+    (m) => m.metadata?.kind === "crew_waved"
+  )
+const roomRow = async (as: Person, roomId: string) =>
+  ((await api.chatGroups(as)).body.data.rooms as { id: string; unreadCount: number; lastMessage: { content: string } | null }[]).find((r) => r.id === roomId)
 const cardsFor = async (as: Person, eventId: string) => (await api.atEvent(as, eventId)).body.data.crews as Record<string, unknown>[]
 const notesOf = (people: Person[]) => db.notifications.count({ where: { user_id: { in: people.map((p) => p.id) } } })
 
@@ -54,7 +66,7 @@ describe("Wave for {crew}", () => {
     expect(await lines(w.orbit.roomId)).toContainEqual({
       user_id: SYSTEM_USER_ID,
       content: "Nebula waved at your crew",
-      metadata: { kind: "crew_waved", eventId: w.eventId, fromCrewId: w.nebula.crewId },
+      metadata: { kind: "crew_waved", eventId: w.eventId, occurrenceId: w.occurrenceId, fromCrewId: w.nebula.crewId },
     })
     // Our chat: who tapped, as a crew like says it.
     expect(await lines(w.nebula.roomId)).toContainEqual(
@@ -125,7 +137,7 @@ describe("Wave for {crew}", () => {
     expect(res.body.data).toEqual({ liked: true, waved: true, blend: null })
     const handle = roomHandle(w.eventId, solo.id)
     const line = (await lines(w.orbit.roomId)).find((l) => l.metadata && (l.metadata as Record<string, unknown>).fromUserId)
-    expect(line).toEqual({ user_id: SYSTEM_USER_ID, content: "Lunar Fox waved at the crew", metadata: { kind: "crew_waved", eventId: w.eventId, fromUserId: handle } })
+    expect(line).toEqual({ user_id: SYSTEM_USER_ID, content: "Lunar Fox waved at the crew", metadata: { kind: "crew_waved", eventId: w.eventId, occurrenceId: w.occurrenceId, fromUserId: handle } })
     expect(JSON.stringify(line)).not.toContain("Meera")
     expect(JSON.stringify(line)).not.toContain(solo.id)
 
@@ -191,5 +203,132 @@ describe("Block on a crew: hide it from you for good", () => {
     expect((await api.hide(w.nebula.people[1], w.nebula.crewId)).status).toBe(404)
     expect((await api.hide(w.nebula.people[1], "00000000-0000-4000-8000-000000000000")).status).toBe(404)
     expect(await db.crew_hides.count({ where: { user_id: w.nebula.people[1].id } })).toBe(0)
+  })
+})
+
+describe("a crew_waved line, per reader (SCRUM-1110)", () => {
+  it("reaches the room's sockets with the metadata its history has", async () => {
+    const w = await world("sock")
+    const a = await sockets.online(w.orbit.people[0])
+    expect(await sockets.joins(a, w.orbit.roomId)).toBe(true)
+    await api.waveCrew(w.nebula.people[0], w.eventId, w.orbit.crewId, w.nebula.crewId)
+    expect(await until(() => a.heard.message.length > 0)).toBe(true)
+    const [line] = await wavedLines(w.orbit.people[0], w.orbit.roomId)
+    expect(a.heard.message[0].message).toMatchObject({ content: "Nebula waved at your crew", metadata: line.metadata })
+    expect(line.metadata).toEqual({ kind: "crew_waved", eventId: w.eventId, occurrenceId: w.occurrenceId, fromCrewId: w.nebula.crewId })
+    // A person's words carry none.
+    await api.send(w.orbit.people[1], w.orbit.roomId, "hello all")
+    expect(await until(() => a.heard.message.length > 1)).toBe(true)
+    expect(a.heard.message[1].message).not.toHaveProperty("metadata")
+  })
+
+  it("says `answered` once this crew waved or liked back, and only on the waves it answered", async () => {
+    const w = await world("answered")
+    // By id, so the answering crew is side B of one Mix and side A of the other.
+    const [lo, mid, hi] = [w.nebula, w.orbit, w.comet].sort((a, b) => (a.crewId < b.crewId ? -1 : 1))
+    const reader = mid.people[1]
+    await api.waveCrew(lo.people[0], w.eventId, mid.crewId, lo.crewId)
+    await api.waveCrew(hi.people[0], w.eventId, mid.crewId, hi.crewId)
+    expect((await wavedLines(reader, mid.roomId)).map((l) => l.answered)).toEqual([false, false])
+
+    await api.waveCrew(mid.people[0], w.eventId, lo.crewId, mid.crewId)
+    const of = async (crewId: string) => (await wavedLines(reader, mid.roomId)).find((l) => l.metadata?.fromCrewId === crewId)?.answered
+    expect(await of(lo.crewId)).toBe(true)
+    expect(await of(hi.crewId)).toBe(false)
+    // An installed build's like answers it too.
+    await api.likeCrew(mid.people[0], w.eventId, hi.crewId, mid.crewId)
+    expect(await of(hi.crewId)).toBe(true)
+    // Still answered once the Mix is over, and a line from before `occurrenceId` was written is read by its event.
+    await db.blends.updateMany({ where: { occurrence_id: w.occurrenceId }, data: { closed_at: new Date() } })
+    await db.$executeRaw`UPDATE chat_messages SET metadata = metadata - 'occurrenceId' WHERE chat_group_id = ${mid.roomId}::uuid AND metadata ->> 'kind' = 'crew_waved'`
+    expect(await of(lo.crewId)).toBe(true)
+    // No other line carries the field.
+    const all = (await api.read(reader, mid.roomId)).body.data.messages as Record<string, unknown>[]
+    expect(all.filter((m) => "answered" in m)).toHaveLength(2)
+  })
+
+  it("a wave from another night stays unanswered by this night's Mix", async () => {
+    const w = await world("night")
+    await api.waveCrew(w.nebula.people[0], w.eventId, w.orbit.crewId, w.nebula.crewId)
+    await db.$executeRaw`UPDATE chat_messages SET metadata = jsonb_set(metadata, '{occurrenceId}', '"00000000-0000-4000-8000-000000000000"') WHERE chat_group_id = ${w.orbit.roomId}::uuid AND metadata ->> 'kind' = 'crew_waved'`
+    await api.waveCrew(w.orbit.people[0], w.eventId, w.nebula.crewId, w.orbit.crewId)
+    expect((await wavedLines(w.orbit.people[1], w.orbit.roomId)).map((l) => l.answered)).toEqual([false])
+  })
+
+  it("a person's wave is answered by the crew's like of that person, not of another", async () => {
+    const w = await world("solo-answered")
+    await db.crews.update({ where: { id: w.orbit.crewId }, data: { open_to_solo: true, intent: ["friendship"] } })
+    const [meera, kabir] = [await person("ans-meera", "Meera Iyer"), await person("ans-kabir", "Kabir Das")]
+    for (const p of [meera, kabir]) {
+      await arrive(w.eventId, w.occurrenceId, p)
+      await api.prefs(p, w.eventId, { openToCrews: true })
+      await api.waveCrew(p, w.eventId, w.orbit.crewId)
+    }
+    const handle = roomHandle(w.eventId, meera.id)
+    expect((await api.likePerson(w.orbit.people[0], w.eventId, handle, w.orbit.crewId)).body.data.blend).not.toBeNull()
+    const read = await wavedLines(w.orbit.people[1], w.orbit.roomId)
+    expect(read.map((l) => [l.metadata?.fromUserId, l.answered])).toEqual([
+      [handle, true],
+      [roomHandle(w.eventId, kabir.id), false],
+    ])
+  })
+
+  it("a crew you hid is out of your history, quotes, chat list and socket; your crewmates and every other line keep it", async () => {
+    const w = await world("hidden")
+    const [hider, mate] = w.orbit.people
+    const [a, b] = [await sockets.online(hider), await sockets.online(mate)]
+    expect(await sockets.joins(a, w.orbit.roomId)).toBe(true)
+    expect(await sockets.joins(b, w.orbit.roomId)).toBe(true)
+    await api.send(mate, w.orbit.roomId, "before the waves")
+    await api.read(hider, w.orbit.roomId)
+    await db.crews.update({ where: { id: w.orbit.crewId }, data: { open_to_solo: true, intent: ["friendship"] } })
+    const solo = await person("hidden-solo", "Meera Iyer")
+    await arrive(w.eventId, w.occurrenceId, solo)
+    await api.prefs(solo, w.eventId, { openToCrews: true })
+
+    // A person's wave (no fromCrewId) is not a hidden crew's.
+    await api.waveCrew(solo, w.eventId, w.orbit.crewId)
+    await api.hide(hider, w.nebula.crewId)
+    // Hiding one crew hides no other: the mate, who hid Comet, hears Nebula.
+    await api.hide(mate, w.comet.crewId)
+    await api.waveCrew(w.nebula.people[0], w.eventId, w.orbit.crewId, w.nebula.crewId)
+    expect(await until(() => b.heard.message.some((m) => m.message.content === "Nebula waved at your crew"))).toBe(true)
+    // A marker after it: when the hider has heard this, the wave was not merely late.
+    await api.send(mate, w.orbit.roomId, "marker line")
+    expect(await until(() => a.heard.message.some((m) => m.message.content === "marker line"))).toBe(true)
+    expect(a.heard.message.map((m) => m.message.content)).not.toContain("Nebula waved at your crew")
+
+    const nebulaLine = (await wavedLines(mate, w.orbit.roomId)).find((l) => l.metadata?.fromCrewId === w.nebula.crewId)!
+    expect(nebulaLine.content).toBe("Nebula waved at your crew")
+    expect((await roomRow(hider, w.orbit.roomId))?.unreadCount).toBe(2) // the person's wave and the marker
+    const mine = await wavedLines(hider, w.orbit.roomId)
+    expect(mine.map((l) => Object.keys(l.metadata!).includes("fromUserId"))).toEqual([true])
+
+    // Quoted by a crewmate: the hider reads the reply, not the line.
+    await api.reply(mate, w.orbit.roomId, nebulaLine.id, "shall we wave back")
+    const quoted = ((await api.read(hider, w.orbit.roomId)).body.data.messages as { content: string; parent_message: Record<string, unknown> | null }[]).find(
+      (m) => m.content === "shall we wave back"
+    )
+    expect(quoted?.parent_message).toMatchObject({ content: null, metadata: null, moderation_hidden: true })
+
+    // The newest line from a hidden crew is never the row's preview; with nothing read, it is not counted.
+    await db.chat_messages.update({ where: { id: nebulaLine.id }, data: { created_at: new Date(Date.now() + 60_000) } })
+    expect((await roomRow(hider, w.orbit.roomId))?.lastMessage?.content).toBe("shall we wave back")
+    expect((await roomRow(mate, w.orbit.roomId))?.lastMessage?.content).toBe("Nebula waved at your crew")
+    await db.chat_group_members.updateMany({ where: { chat_group_id: w.orbit.roomId }, data: { last_read_message_id: null } })
+    const unreadBefore = (await roomRow(hider, w.orbit.roomId))!.unreadCount
+    await api.hide(hider, w.nebula.crewId, "DELETE")
+    expect((await roomRow(hider, w.orbit.roomId))!.unreadCount).toBe(unreadBefore + 1)
+    expect((await wavedLines(hider, w.orbit.roomId)).some((l) => l.metadata?.fromCrewId === w.nebula.crewId)).toBe(true)
+  })
+
+  it("refuses a wave from outside the room in wave words", async () => {
+    const w = await world("words")
+    const outside = await person("words-out")
+    expect((await api.waveCrew(outside, w.eventId, w.orbit.crewId)).body.error).toBe("Check in before you wave here.")
+    expect((await api.likePerson(outside, w.eventId, roomHandle(w.eventId, w.orbit.people[0].id))).body.error).toBe("Check in before you wave here.")
+    const solo = await person("words-solo")
+    await arrive(w.eventId, w.occurrenceId, solo)
+    expect((await api.waveCrew(solo, w.eventId, w.orbit.crewId)).body.error).toBe('Turn on "Open to joining a crew tonight" to wave at a crew.')
   })
 })

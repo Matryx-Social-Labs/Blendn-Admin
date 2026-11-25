@@ -139,7 +139,7 @@ already know each other's ids.
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `chat:message` | `{ id, chatGroupId, userId, userName, userImage, content, type, parentId, createdAt }` | New message in chat |
+| `chat:message` | `{ id, chatGroupId, userId, userName, userImage, content, type, parentId, createdAt, metadata? }` | New message in chat. `metadata` on a crew chat's `type: "system"` line only, as the history has it (`crew_waved`, `crew_here`, `crew_plan`, `crew_like`, `crew_wave`; SCRUM-1110). A `crew_waved` from a crew is not sent to a member who hid that crew. |
 | `chat:typing` | `{ chatGroupId, userId, userName, isTyping }` | Typing state changed. `userName` is the sender's anonymous name, never their real identity. |
 | `chat:reaction` | `{ chatGroupId, messageId, tally: [{ emoji, count }] }` | Reactions changed on a message. **Counts only — never who reacted**, which the room must not disclose. The whole tally rather than a delta, so two reactions in the same tick cannot race and a dropped packet self-corrects. `mine` is per-viewer and absent by design: a client knows its own reaction from its own request. |
 | `chat:messageDeleted` | `{ chatGroupId, messageId, moderation?, userId? }` | Message deleted. When `moderation: true`, it was auto-hidden by moderation — `userId` identifies the sender (their real id to them, a handle to everyone else) so the sender's client can show a placeholder instead of removing. |
