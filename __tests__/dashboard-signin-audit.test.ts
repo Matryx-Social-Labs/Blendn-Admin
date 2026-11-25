@@ -6,6 +6,10 @@
  * The write is the real `auditLog`, down to the row it hands Prisma; only the
  * database is mocked. It is fire-and-forget, so a slow or failing write can
  * neither hold up nor refuse a sign-in.
+ *
+ * Last, the admin's 12 hours (lib/session-revocation.ts) through the jwt
+ * callback every page reads: a refresh must carry the sign-in's time, never
+ * restart it, or an admin's session would never end.
  */
 import type { NextAuthOptions } from "next-auth"
 
@@ -24,6 +28,7 @@ jest.mock("bcryptjs", () => ({ compare: async (given: string, stored: string) =>
 import { authOptions } from "@/lib/auth"
 import { logger } from "@/lib/logger"
 import { APP_ONLY_SIGNIN } from "@/lib/rbac"
+import { SessionEnded } from "@/lib/session-revocation"
 
 type Authorize = (c: Record<string, string>, req?: { headers: Record<string, string> }) => Promise<unknown>
 const rawAuthorize = (
@@ -105,4 +110,25 @@ it("a write that fails or never answers neither refuses nor holds up the sign-in
 
   mockAuditCreate.mockReturnValueOnce(new Promise(() => undefined))
   await expect(signIn("organizer")).resolves.toMatchObject({ id: "u-organizer" })
+})
+
+describe("the jwt callback ends an admin's session at 12 hours and nobody else's", () => {
+  const HOUR = 3_600_000
+  const jwt = (authOptions.callbacks as unknown as { jwt: (a: { token: Record<string, unknown> }) => Promise<Record<string, unknown>> }).jwt
+  const row = (role: string) => ({ email: `${role}@x.test`, role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null })
+
+  it("ends an admin signed in 12 h and a minute ago", async () => {
+    mockFindUnique.mockResolvedValue(row("app_admin"))
+    await expect(jwt({ token: { sub: "u-a", role: "app_admin", signedInAt: Date.now() - 12 * HOUR - 60_000 } })).rejects.toThrow(SessionEnded)
+  })
+
+  it.each([
+    ["app_admin", 11 * HOUR],
+    ["organizer", 29 * 24 * HOUR],
+    ["venue_owner", 13 * HOUR],
+  ])("keeps a %s signed in %d ms ago, and the refresh carries the sign-in's time", async (role, age) => {
+    mockFindUnique.mockResolvedValue(row(role))
+    const signedInAt = Date.now() - age
+    await expect(jwt({ token: { sub: "u-a", role, signedInAt } })).resolves.toMatchObject({ role, signedInAt })
+  })
 })

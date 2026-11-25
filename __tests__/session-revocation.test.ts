@@ -4,7 +4,7 @@
  * integration suite drives it through NextAuth; these are the boundaries a
  * real clock rarely lands on.
  */
-import { isRevoked, provenAt } from "@/lib/session-revocation"
+import { ADMIN_SESSION_MS, isRevoked, provenAt } from "@/lib/session-revocation"
 
 const CHANGED = Date.parse("2026-10-11T09:30:00.000Z")
 const live = { role: "organizer" as const, deletedAt: null, suspended_at: null, password_changed_at: null, sessions_revoked_at: null }
@@ -59,6 +59,15 @@ describe("an admin's session ends 12 hours after it proved the password; nobody 
     expect(isRevoked(ago(11 * HOUR), admin)).toBe(false)
     // A session from before signedInAt existed is judged by its first iat, the same way.
     expect(isRevoked({ sub: "u1", iat: Math.floor((Date.now() - 13 * HOUR) / 1000) }, admin)).toBe(true)
+  })
+
+  it("keeps an admin at exactly 12 hours and ends it a millisecond later", () => {
+    const now = Date.parse("2026-11-26T12:00:00.000Z")
+    const clock = jest.spyOn(Date, "now").mockReturnValue(now)
+    expect(isRevoked({ sub: "u1", signedInAt: now - ADMIN_SESSION_MS }, admin)).toBe(false)
+    expect(isRevoked({ sub: "u1", signedInAt: now - ADMIN_SESSION_MS - 1 }, admin)).toBe(true)
+    expect(ADMIN_SESSION_MS).toBe(12 * HOUR)
+    clock.mockRestore()
   })
 
   it.each(["organizer", "venue_owner", "sponsor", "attendee"] as const)("never ends a %s's session for its age", (role) => {
