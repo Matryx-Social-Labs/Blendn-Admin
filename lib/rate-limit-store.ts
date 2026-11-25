@@ -71,6 +71,9 @@ type RedisLike = {
   multi(): RedisMulti
 }
 
+/** How long the first callers wait for a healthy Redis to connect. */
+const CONNECT_GRACE_MS = 250
+
 let client: (RedisLike & { isReady: boolean }) | null = null
 let starting: Promise<void> | null = null
 
@@ -105,9 +108,18 @@ async function startRedis(url: string): Promise<void> {
         error: error instanceof Error ? error.message : String(error),
       })
     })
-    created.on("ready", () => logger.info("Rate limiting backed by Redis"))
+    const ready = new Promise<void>((resolve) =>
+      created.on("ready", () => {
+        logger.info("Rate limiting backed by Redis")
+        resolve()
+      })
+    )
     created.connect().catch(unavailable)
     client = created as unknown as RedisLike & { isReady: boolean }
+    // The first callers give a healthy Redis a moment to connect, so a
+    // fail-closed key is not refused in the few ms after every boot. Bounded:
+    // a Redis down at boot costs this once per process, never a hang.
+    await Promise.race([ready, new Promise((resolve) => setTimeout(resolve, CONNECT_GRACE_MS).unref())])
   } catch (error) {
     unavailable(error)
   }

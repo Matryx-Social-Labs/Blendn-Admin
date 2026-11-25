@@ -2453,9 +2453,9 @@
       "date": "2026-11-26"
     },
     "redis-not-ready.test.ts": {
-      "guards": "SCRUM-1217: with REDIS_URL set and Redis not ready (connect() never settles, isReady false), hit/hitRolling count from memory, a fail-closed key throws StoreUnavailable, and exposure counts come from memory, all within 2 s; a client that drops mid-run (isReady false, MULTI queues for ever) is not used, and counting returns to Redis once ready.",
-      "mutation": "M1 rate-limit-store getRedis awaits connect() again (dev 354ded45). M2 the isReady check removed (`return client`). M3 exposure.ts getRedis awaits connect() again.",
-      "observed": "2026-11-26: on dev 354ded45 4 of 4 failing (each times out at 2 s). M2: 2 of 4 failing (a not-ready client is used: the fail-closed key at boot is counted instead of refused, and the mid-run drop times out). M3: 1 of 4 failing (exposure). Each reverted; 4 of 4.",
+      "guards": "SCRUM-1217: with REDIS_URL set and Redis not ready (connect() never settles, isReady false), hit/hitRolling/peek/release/forget use memory and never reach Redis, a fail-closed key throws StoreUnavailable, and exposure counts come from memory, all within 2 s; a connect() that rejects is caught (no unhandled rejection); a healthy Redis at boot is waited for briefly (250 ms grace) so the first fail-closed key is counted, not refused; a client that drops mid-run is not used, and counting returns to Redis once ready.",
+      "mutation": "M1 rate-limit-store awaits connect() again (dev 354ded45). M2 the isReady check removed (`return client`). M3 exposure.ts awaits connect() again. M4 connect()'s .catch removed. M5 the boot grace removed.",
+      "observed": "2026-11-26: on dev 354ded45 (first version of the file) 4 of 4 failing, each timing out at 2 s. M1: 3 of 6 failing. M2: 3 of 6 failing (a not-ready client is used: memory paths reach Redis, the fail-closed key is counted, the mid-run drop times out). M3: 1 of 6 failing (exposure). M4: 1 of 6 failing (unhandled rejection). M5: 1 of 6 failing (the cold-start fail-closed key refused). Each reverted; 6 of 6.",
       "date": "2026-11-26"
     },
     "event-counts-not-whole-table.itest.ts": {
