@@ -107,8 +107,8 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
      * The point of the `unchecked` state. Previously the pipeline wrote
      * `moderation_status: "clean"` whether or not the model had been reached,
      * so a moderator could not distinguish a quiet room from a pipeline that
-     * had been down for a week -- and `OPENAI_API_KEY` is optional, so "down"
-     * is the ordinary configuration.
+     * had been down for a week -- and outside production `OPENAI_API_KEY` is
+     * optional, so "down" is an ordinary configuration there.
      *
      * An hour rather than all time: this is a health signal, and a total would
      * accumulate a number nobody could act on.

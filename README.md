@@ -94,7 +94,7 @@ misconfiguration surfaces as a failed deploy rather than a broken runtime.
 
 Two that fail quietly and are worth checking in a new environment:
 
-- **`OPENAI_API_KEY`** unset — moderation silently degrades to keyword matching.
+- **`OPENAI_API_KEY`** unset — moderation degrades to keyword matching, with a boot warning (Railway `production` refuses to boot without it).
 - **`TIGRIS_*`** unset — uploads return 503.
 
 ## Testing

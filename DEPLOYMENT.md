@@ -426,7 +426,7 @@ so it is never related to session or login state.
 | `TIGRIS_REGION` | No | Bucket region (default: auto) |
 | `MEDIA_WORKER_URL` | No | The media worker's private address (`services/media-worker/README.md`). Clips are not checked unless this and its secret are both set |
 | `MEDIA_WORKER_SECRET` | No | Shared with the media worker (min 32 chars) |
-| `OPENAI_API_KEY` | No | AI moderation. Without it, moderation falls back to keyword matching only |
+| `OPENAI_API_KEY` | Required in production | AI moderation. Railway `production` refuses to boot without it (`openaiKeyProblem`, `lib/env.ts`); elsewhere the server boots with a warning and moderation is keyword matching only |
 | `RESEND_API_KEY` | No | Transactional email. Without it onboarding and invites still work, but nothing is sent — the dashboard shows the link/password to pass on by hand |
 | `EMAIL_FROM` | No | Sender, `"Blend'n" <hello@blendn.app>`. Quote the display name — the apostrophe is legal unquoted per RFC 5322 but quoting is free. Required alongside `RESEND_API_KEY`; email is off unless both are set |
 | `EMAIL_ALLOWLIST` | No | Outside production (`RAILWAY_ENVIRONMENT_NAME` other than `production`, staging and local included) mail goes only to `blendn.app`, `matrixsociallabs.com` and `resend.dev`, plus the exact addresses listed here, comma-separated. Anything else is not sent and reads as not configured (SCRUM-452) |

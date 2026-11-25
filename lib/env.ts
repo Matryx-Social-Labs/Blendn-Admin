@@ -33,7 +33,8 @@ const envSchema = z.object({
   MEDIA_WORKER_URL: z.string().url().optional(),
   MEDIA_WORKER_SECRET: z.string().min(32, "MEDIA_WORKER_SECRET must be at least 32 characters").optional(),
 
-  // OpenAI (optional — moderation degrades to keyword-only if absent)
+  // OpenAI: the moderation model. Required on Railway production (`openaiKeyProblem`);
+  // elsewhere optional, and without it moderation is the keyword list alone.
   OPENAI_API_KEY: z.string().optional(),
 
   // Landing-page lead ingest. Optional because an environment that does not
@@ -240,6 +241,23 @@ export function razorpayKeyModeProblem(
   return null
 }
 
+/**
+ * Why this environment may not run without OPENAI_API_KEY, or null.
+ *
+ * Without the key every model check is skipped: big rooms proceed, crew text
+ * skips its fail-closed, the Lobby and both re-check sweepers stop, and
+ * moderation is the keyword list alone, with nothing failing. Gated on the
+ * Railway name, not NODE_ENV: CI's e2e lane boots NODE_ENV=production with no
+ * key and must keep booting.
+ */
+export function openaiKeyProblem(
+  key: string | undefined,
+  environmentName: string | undefined
+): string | null {
+  if (environmentName !== "production" || key?.trim()) return null
+  return "OPENAI_API_KEY is required in production: without it moderation is the keyword list alone"
+}
+
 const DEFAULT_SITE_ORIGIN = "https://www.blendn.app"
 
 /**
@@ -280,6 +298,8 @@ export function publicSiteOrigin(): string {
 }
 
 const refinedEnvSchema = envSchema.superRefine((env, ctx) => {
+  const openai = openaiKeyProblem(env.OPENAI_API_KEY, env.RAILWAY_ENVIRONMENT_NAME)
+  if (openai) ctx.addIssue({ code: "custom", path: ["OPENAI_API_KEY"], message: openai })
   const site = publicSiteOriginProblem(env.PUBLIC_SITE_ORIGIN?.trim() || undefined, env.RAILWAY_ENVIRONMENT_NAME)
   if (site) ctx.addIssue({ code: "custom", path: ["PUBLIC_SITE_ORIGIN"], message: site })
   // Selling with no QR key issues tickets that cannot be checked at the door.

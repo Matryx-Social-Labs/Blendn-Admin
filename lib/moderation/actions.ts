@@ -164,8 +164,8 @@ export async function checkAndAutoMute(
  *
  * `markClean` wrote `"clean"` for every message that reached the end of the
  * pipeline, including every message the model never saw -- no API key, an API
- * error, or a timeout in the inline path's race. `OPENAI_API_KEY` is optional in
- * `lib/env.ts` and listed as not required in `DEPLOYMENT.md`, so the ordinary
+ * error, or a timeout in the inline path's race. `OPENAI_API_KEY` was optional
+ * everywhere (production requires it at boot since SCRUM-1159), so the ordinary
  * deployment recorded every message as moderated by a moderator that was never
  * called.
  *
