@@ -211,6 +211,9 @@ const envSchema = z.object({
    */
   SHARE_PROXY_SECRET: z.string().min(32, "SHARE_PROXY_SECRET must be at least 32 characters").optional(),
 
+  /** The public site links are built on (door QR, friend and crew links, mail). Unset = www. `publicSiteOrigin()` below. */
+  PUBLIC_SITE_ORIGIN: z.string().optional(),
+
   // Application
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   PORT: z.string().default("3000"),
@@ -237,7 +240,48 @@ export function razorpayKeyModeProblem(
   return null
 }
 
+const DEFAULT_SITE_ORIGIN = "https://www.blendn.app"
+
+/**
+ * Why this `PUBLIC_SITE_ORIGIN` must not be used here, or null. Pure, so the
+ * helper refuses at the moment of a call what boot refuses (as Razorpay does).
+ *
+ * An https origin exactly as `URL` writes it: no path, no slash, no query, no
+ * credentials. Production holds www only: a QR printed from production must
+ * never point at staging.
+ */
+export function publicSiteOriginProblem(value: string | undefined, environmentName: string | undefined): string | null {
+  if (!value) return null
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return "PUBLIC_SITE_ORIGIN is not a URL"
+  }
+  if (url.protocol !== "https:" || url.origin !== value) {
+    return "PUBLIC_SITE_ORIGIN must be a bare https origin, like https://staging.blendn.app (no path, no trailing slash)"
+  }
+  if (environmentName === "production" && value !== DEFAULT_SITE_ORIGIN) {
+    return `PUBLIC_SITE_ORIGIN in production must be ${DEFAULT_SITE_ORIGIN} or unset`
+  }
+  return null
+}
+
+/**
+ * The origin of every link the server mints to the public site, no trailing
+ * slash. Server config only, never a request header: these links are printed
+ * on door QR codes and sent in mails. Throws on a value boot would refuse.
+ */
+export function publicSiteOrigin(): string {
+  const value = process.env.PUBLIC_SITE_ORIGIN?.trim() || undefined
+  const problem = publicSiteOriginProblem(value, process.env.RAILWAY_ENVIRONMENT_NAME)
+  if (problem) throw new Error(problem)
+  return value ?? DEFAULT_SITE_ORIGIN
+}
+
 const refinedEnvSchema = envSchema.superRefine((env, ctx) => {
+  const site = publicSiteOriginProblem(env.PUBLIC_SITE_ORIGIN?.trim() || undefined, env.RAILWAY_ENVIRONMENT_NAME)
+  if (site) ctx.addIssue({ code: "custom", path: ["PUBLIC_SITE_ORIGIN"], message: site })
   // Selling with no QR key issues tickets that cannot be checked at the door.
   if (env.TICKETING === "true" && !env.TICKET_QR_KEY) {
     ctx.addIssue({ code: "custom", path: ["TICKET_QR_KEY"], message: "TICKET_QR_KEY is required once TICKETING is on" })

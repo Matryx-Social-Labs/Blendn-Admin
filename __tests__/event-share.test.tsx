@@ -2,7 +2,7 @@ import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
 import { DoorSlide, EventShare, fileName } from "@/components/dashboard/event-share"
-import { EVENT_LINK_BASE, eventShareUrl } from "@/lib/event-share"
+import { eventShareUrl } from "@/lib/event-share"
 
 import { decode } from "./support/qr-decode"
 
@@ -22,9 +22,8 @@ const WHEN = "4 Oct 2026, 15:31 · The Humming Tree"
 describe("eventShareUrl", () => {
   it("is the event's permanent address on www: the app's own route, keyed by id", () => {
     expect(eventShareUrl(ID)).toBe(`https://www.blendn.app/event/${ID}`)
-    // `www`: the apex 307s to it, and Apple and Google refuse an association
-    // file behind a redirect.
-    expect(EVENT_LINK_BASE.startsWith("https://www.blendn.app/")).toBe(true)
+    // `www` (PUBLIC_SITE_ORIGIN unset): the apex 307s to it, and Apple and
+    // Google refuse an association file behind a redirect.
   })
 
   it("carries the id and nothing else: no query, no fragment, no token", () => {
