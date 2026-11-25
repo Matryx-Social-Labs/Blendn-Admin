@@ -22,9 +22,12 @@ jest.mock("@/lib/audit-log", () => {
 
 import { auditInTx } from "@/lib/audit-log"
 import { updateUser, updateUserRole } from "@/app/dashboard/users/actions"
+import { db as appDb } from "@/lib/db"
 import { db, closeDb, testId } from "./helpers"
 
 const users: string[] = []
+
+beforeEach(() => jest.mocked(auditInTx).mockClear())
 
 afterAll(async () => {
   if (users.length) {
@@ -86,7 +89,28 @@ describe("making someone an admin", () => {
     const id = await person("y@matrixsociallabs.com")
     jest.mocked(auditInTx).mockRejectedValueOnce(new Error("audit write failed"))
 
-    await expect(updateUserRole(id, "app_admin")).rejects.toThrow()
+    await expect(updateUserRole(id, "app_admin")).rejects.toThrow("audit write failed")
+
+    expect(auditInTx).toHaveBeenCalled()
+    expect(await roleOf(id)).toBe("attendee")
+    expect(await auditRows(id)).toEqual([])
+  })
+
+  it("fails closed when the address changed after it was checked", async () => {
+    await signedInAdmin()
+    const id = await person("race@matrixsociallabs.com")
+    // The pre-read sees the company address; another admin re-addresses the row before the write.
+    const read = appDb.user.findUnique.bind(appDb.user)
+    const spy = jest.spyOn(appDb.user, "findUnique").mockImplementation((async (args: { where: { id?: string } }) => {
+      const row = await read(args as never)
+      if (args.where.id === id) await db.user.update({ where: { id }, data: { email: `race${id.slice(-8)}@gmail.com` } })
+      return row
+    }) as never)
+    try {
+      await expect(updateUserRole(id, "app_admin")).rejects.toThrow()
+    } finally {
+      spy.mockRestore()
+    }
 
     expect(await roleOf(id)).toBe("attendee")
     expect(await auditRows(id)).toEqual([])
@@ -103,6 +127,9 @@ describe("the last admin", () => {
     })
     const otherIds = others.map((u) => u.id)
     await db.user.updateMany({ where: { id: { in: otherIds } }, data: { suspended_at: new Date() } })
+    // An erased admin row is not another admin.
+    const erased = await person("erased@matrixsociallabs.com", "app_admin")
+    await db.user.update({ where: { id: erased }, data: { deletedAt: new Date() } })
     try {
       await expect(updateUserRole(adminId, "organizer")).rejects.toThrow("This is the last admin")
       expect(await roleOf(adminId)).toBe("app_admin")
@@ -182,8 +209,10 @@ describe("editing an email", () => {
     const before = (await db.user.findUniqueOrThrow({ where: { id } })).email
     jest.mocked(auditInTx).mockRejectedValueOnce(new Error("audit write failed"))
 
-    await expect(updateUser(id, { email: `new${id.slice(-8)}@example.com` })).rejects.toThrow()
+    await expect(updateUser(id, { name: "Not saved", email: `new${id.slice(-8)}@example.com` })).rejects.toThrow()
 
-    expect((await db.user.findUniqueOrThrow({ where: { id } })).email).toBe(before)
+    expect(auditInTx).toHaveBeenCalled()
+    expect(await db.user.findUniqueOrThrow({ where: { id } })).toMatchObject({ email: before, name: "Lock test" })
+    expect(await auditRows(id)).toEqual([])
   })
 })
