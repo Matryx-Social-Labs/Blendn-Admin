@@ -36,12 +36,20 @@ export interface ClipFacts {
 
 export type Run = (tool: "ffmpeg" | "ffprobe", args: string[], timeoutMs: number, signal: AbortSignal) => Promise<string>
 
-/** Killed at its own limit, and when the job's signal says so. */
+/**
+ * Killed at its own limit, and when the job's signal says so; settles only once the process has gone, so the next job
+ * never runs beside it. Not execFile's own `signal`: that sends SIGTERM whatever `killSignal` says, and settles at once.
+ */
 export const run: Run = (tool, args, timeoutMs, signal) =>
   new Promise((resolve, reject) => {
-    execFile(tool, args, { timeout: timeoutMs, signal, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 }, (error, stdout) =>
-      error ? reject(error) : resolve(stdout)
-    )
+    if (signal.aborted) return reject(signal.reason)
+    const stop = () => child.kill("SIGKILL")
+    const child = execFile(tool, args, { timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 }, (error, stdout) => {
+      signal.removeEventListener("abort", stop)
+      if (error) reject(error)
+      else resolve(stdout)
+    })
+    signal.addEventListener("abort", stop, { once: true })
   })
 
 interface Probe {

@@ -1,5 +1,6 @@
 import { EventEmitter } from "events"
-import { readdirSync, readFileSync } from "fs"
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from "fs"
+import { tmpdir } from "os"
 import { join } from "path"
 import { Readable, Writable } from "stream"
 import { pipeline } from "stream/promises"
@@ -121,12 +122,26 @@ describe("the clip", () => {
     await expect(probeClip("/tmp/in", gone.signal, () => Promise.reject(new Error("x")))).rejects.not.toBeInstanceOf(NotVideo)
   })
 
-  it("gives every run the job's signal, and a real process dies by it", async () => {
-    const stop = new AbortController()
-    setTimeout(() => stop.abort(), 50)
-    const started = Date.now()
-    await expect(run(process.execPath as never, ["-e", "setTimeout(() => {}, 20000)"], 20_000, stop.signal)).rejects.toThrow()
-    expect(Date.now() - started).toBeLessThan(5_000)
+  it.each([["the job's signal", 20_000, true], ["its own limit", 1_500, false]])(
+    "has no process left when it settles, even one that ignores SIGTERM: %s",
+    async (_why, limit, abort) => {
+      const pidFile = join(mkdtempSync(join(tmpdir(), "clip-run-")), "pid")
+      const script = `process.on("SIGTERM", () => {}); require("fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`
+      const stop = new AbortController()
+      const turn = run(process.execPath as never, ["-e", script], limit, stop.signal)
+      const settled = expect(turn).rejects.toThrow()
+      if (abort) {
+        while (!existsSync(pidFile) || !readFileSync(pidFile, "utf8")) await new Promise((resolve) => setTimeout(resolve, 20))
+        stop.abort()
+      }
+      await settled
+      expect(() => process.kill(Number(readFileSync(pidFile, "utf8")), 0)).toThrow(/ESRCH/)
+    },
+    15_000
+  )
+
+  it("starts nothing for a job that is already over", async () => {
+    await expect(run("ffmpeg", ["-version"], 1_000, AbortSignal.abort(new Error("gone")))).rejects.toThrow("gone")
   })
 })
 
