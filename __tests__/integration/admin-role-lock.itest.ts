@@ -156,6 +156,16 @@ describe("editing an email", () => {
     expect((await db.user.findUniqueOrThrow({ where: { id } })).name).toBe("Renamed")
   })
 
+  it("re-saves a legacy admin address stored with a capital, lowercased, rather than refusing the edit", async () => {
+    await signedInAdmin()
+    const id = await person("Legacy@matrixsociallabs.com", "app_admin")
+    const stored = (await db.user.findUniqueOrThrow({ where: { id } })).email
+
+    await updateUser(id, { name: "Renamed", email: stored })
+
+    expect(await db.user.findUniqueOrThrow({ where: { id } })).toMatchObject({ name: "Renamed", email: stored.toLowerCase() })
+  })
+
   it("refuses moving an account onto the company domain, which would let it be made an admin", async () => {
     await signedInAdmin()
     const id = await person("someone@gmail.com")

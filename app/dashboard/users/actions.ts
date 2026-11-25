@@ -260,7 +260,8 @@ export async function updateUser(
      * address is moved onto the company domain, which is what makes an account
      * eligible for admin (`updateUserRole`).
      */
-    if (email !== undefined && email !== before.email) {
+    // Against the stored one normalised too: a legacy row with a capital is re-saved lowercase, not refused.
+    if (email !== undefined && email !== before.email.trim().toLowerCase()) {
       if (before.role === "app_admin") {
         throw new Refusal("An admin's email can't be changed from the dashboard. Create a new account for the new address.")
       }
@@ -391,7 +392,7 @@ export async function updateUserRole(id: string, role: user_role) {
   }
   await db.$transaction(async (tx) => {
     if (before.role === "app_admin" && role !== "app_admin") {
-      // Locks every live admin row, so two admins demoting each other at once
+      // Locks every live, unsuspended admin row, so two admins demoting each other at once
       // queue here and the second one sees who is left.
       const admins = await tx.$queryRaw<{ id: string }[]>`
         SELECT id FROM "User" WHERE role = 'app_admin' AND "deletedAt" IS NULL AND suspended_at IS NULL ORDER BY id FOR UPDATE`
