@@ -461,6 +461,12 @@ export async function releaseTransfer(transferId: string): Promise<void> {
 
 const reversalSchema = z.object({ id: z.string().min(1), transfer_id: z.string(), amount: z.number().int() })
 
+/** How much of a transfer Razorpay has already taken back: asked before reversing, so a retry never reverses twice. */
+export async function reversedOf(transferId: string): Promise<number> {
+  const transfer = await call(z.object({ id: z.string(), amount_reversed: z.number().int().nullish() }), "GET", `/transfers/${encodeURIComponent(transferId)}`)
+  return transfer.amount_reversed ?? 0
+}
+
 /** Take back part or all of a transfer: a refund's share, out of the organizer's held payout. */
 export async function reverseTransfer(transferId: string, amountMinor: number): Promise<z.infer<typeof reversalSchema>> {
   return call(reversalSchema, "POST", `/transfers/${encodeURIComponent(transferId)}/reversals`, { amount: amountMinor })

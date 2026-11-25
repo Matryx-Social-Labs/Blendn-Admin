@@ -40,7 +40,7 @@ import { FeesExceedPriceError, parseFeeSchedule, ticketFees, type FeeBreakdown }
  * | `reserveTickets`             | the event's types (id order), then expired orders `SKIP LOCKED`, then inserts its own |
  * | `releaseExpiredHolds`        | expired orders `SKIP LOCKED`, then their types (id order)               |
  * | the payment webhook (lib/ticket-payments.ts) | its order, then the order's types (id order)           |
- * | a refund (`finishRefund`)    | its order, then the order's types (id order)                           |
+ * | a refund (`finishRefund`)    | its payout, its order, then the order's types (id order)               |
  * | `cancelBuyerHolds` / `cancelHold` / `cancelEventHolds` | pending orders (id order, waiting), then their types (id order) |
  *
  * Reserving never waits on an order lock (`SKIP LOCKED`), and everyone takes

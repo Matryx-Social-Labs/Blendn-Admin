@@ -66,6 +66,27 @@ export const TicketOrderCreatedSchema = z
   })
   .openapi("TicketOrderCreated")
 
+export const TicketRefundSchema = z
+  .object({
+    state: z.enum(["started", "refunded"]).describe("`started` until Razorpay confirms it; asking again changes nothing"),
+    amountMinor: z.number().int().describe("Exactly what goes back to the buyer"),
+    currency: z.string(),
+    requestedAt: z.string(),
+    refundedAt: z.string().nullable(),
+  })
+  .nullable()
+  .openapi("TicketRefund", { description: "The order's refund, whoever asked for it; null while there is none" })
+
+export const TicketRefundOfferSchema = z
+  .object({
+    amountMinor: z.number().int().describe("What the buyer gets back: the full ticket price of the whole order"),
+    bookingFeeMinor: z.number().int().describe("The booking fee that is kept; 0 when the organizer absorbed the fees"),
+    currency: z.string(),
+    until: z.string().describe("The last moment to ask, from the event's start as it is now"),
+  })
+  .nullable()
+  .openapi("TicketRefundOffer", { description: "What POST …/refund-request would return now; null when the buyer cannot ask" })
+
 export const TicketSchema = z
   .object({
     ticketId: z.string().uuid(),
@@ -84,6 +105,8 @@ export const TicketSchema = z
       venueName: z.string().nullable(),
       coverUrl: z.string().nullable(),
     }),
+    refund: TicketRefundSchema.optional().describe("On GET /me/tickets only; on an order it is the order's"),
+    refundOffer: TicketRefundOfferSchema.optional().describe("On GET /me/tickets only; the whole order's, not this ticket's"),
   })
   .openapi("Ticket")
 
@@ -96,9 +119,13 @@ export const TicketOrderSchema = z
     totalMinor: z.number().int(),
     currency: z.string(),
     paymentFailed: z.boolean().describe("The latest checkout attempt failed (Razorpay `payment.failed`); cleared when the pay page starts another. Only ever true while pending"),
+    refund: TicketRefundSchema,
+    refundOffer: TicketRefundOfferSchema,
     tickets: z.array(TicketSchema).describe("Empty unless paid"),
   })
   .openapi("TicketOrder")
+
+export const TicketRefundStartedSchema = TicketOrderSchema.extend({ message: z.string().describe("Shown as it is") }).openapi("TicketRefundStarted")
 
 export const TICKET_REFUSALS =
   "First the RSVP's door, with the RSVP's own answers: 404 for a draft or a stranger's private event, 403 `AGE_RESTRICTED` (`reasonCode` " +

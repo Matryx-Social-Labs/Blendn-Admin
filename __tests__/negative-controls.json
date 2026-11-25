@@ -59,6 +59,12 @@
       "observed": "4 of 4 failing before; 4/4 after.",
       "date": "2026-11-06"
     },
+    "ticket-refund-policy.test.tsx": {
+      "guards": "SCRUM-1113 (owner 2026-11-25): a policy refund is the full ticket price and charges the organization exactly the fees it absorbed; a buyer's window is the policy's, in hours back from the start; every refusal; the Refund dialog's ledger says both amounts. With __tests__/integration/ticket-buyer-refund.itest.ts: books balance, one claim, lock order, the door, and hosts never learning who asked.",
+      "mutation": "R0 policyRefundMinor returns organizerShare (the code as it was). R1 the deadline compare removed. R2 'none' reads as open. R3 a used ticket allowed. R4 a cancelled event allowed. R5 a released payout allowed. Integration: R6 no buyer check. R7 a second ask refused. R8 a second claim allowed. R9 the buyer's id on the audit row. R10 the payout lock dropped from the claim. R11 orgDebit 0. R12 no debit on a share never transferred. R13 reversePayout not asking Razorpay first. R14 the reversal retry removed. R15 the door admits a claimed refund. R16 the door's FOR SHARE dropped. R17 Buyer label removed. R18 the panel's amount. R19 the started state hidden. R20 check-in admits a claimed refund. R21 the audit log's Buyer actor. R22 the webhook locking the order first. R23 finishRefund not locking the payout first.",
+      "observed": "All 24 failing (R0-R5 and R18 in both suites where both cover them). R20 survived the first run and got its own assertion; R22 and R23 fail the two deadlock tests. Restored; green.",
+      "date": "2026-11-25"
+    },
     "tickets-long-text.test.tsx": {
       "guards": "Long-text audit (owner 2026-11-05): the Tickets tab's Sales selects are held to the form's width (min-w-0 max-w-full), and every overflow-x-auto table wrapper on the tab is `relative`, so sr-only labels inside a wide table are placed in it, not against the page.",
       "mutation": "MLT1 page.tsx `select` class without min-w-0 max-w-full (the code as it was). MLT2 the three table wrappers as plain `overflow-x-auto` (as they were).",
