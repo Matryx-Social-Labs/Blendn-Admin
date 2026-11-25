@@ -109,7 +109,8 @@ Blendn is a **social event discovery and anonymous networking app**. Users can:
   - Includes device information for identification
   - Can be individually revoked (e.g., logout from specific device)
   - Bulk revocation on password change or security events
-- **Web dashboard sessions:** NextAuth.js JWT-based sessions
+- **Web dashboard sessions:** NextAuth.js JWT-based sessions, 30 days renewed on use; a platform admin's ends 12 hours after it signed in
+  - Every dashboard sign-in is recorded in `audit_logs` (`auth.dashboard_signin`): the account and the IP address it came from
 
 ### Account Deletion
 - Users can request account deletion (implementation pending — this should be documented in privacy policy as a user right)

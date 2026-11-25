@@ -4,7 +4,8 @@ import CredentialsProvider from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { db } from "./db"
 import { cookies } from "next/headers"
-import { DUMMY_HASH, MAX_EMAIL_LENGTH, refuseOverSigninLimits, settleSigninSuccess, signinKeys } from "./dashboard-signin-limits"
+import { auditLog } from "./audit-log"
+import { DUMMY_HASH, MAX_EMAIL_LENGTH, refuseOverSigninLimits, settleSigninSuccess, signinIp, signinKeys } from "./dashboard-signin-limits"
 import { KNOWN_DEVICE_MAX_AGE_SECONDS, isKnownDevice, knownDeviceCookie } from "./known-device"
 import { logger } from "./logger"
 import { APP_ONLY_SIGNIN, canAccessDashboard } from "./rbac"
@@ -113,6 +114,15 @@ export const authOptions: NextAuthOptions = {
         if (!canAccessDashboard(user.role) && !(await hasLiveInvite(user.email))) {
           throw new Error(APP_ONLY_SIGNIN)
         }
+
+        /*
+         * Who was in, and from where (SCRUM-1238; security audit 2026-11-25
+         * finding 8). Not awaited: `auditLog` catches its own failures, so a
+         * slow or failing write neither holds up nor refuses a sign-in.
+         */
+        const ipAddress = signinIp(req?.headers)
+        auditLog({ action: "auth.dashboard_signin", resource: "user", resourceId: user.id, userId: user.id, ipAddress, details: { provider: "credentials" } })
+        if (user.role === "app_admin") logger.warn("Admin dashboard sign-in", { userId: user.id, ipAddress })
 
         return { id: user.id, email: user.email, name: user.name, role: user.role }
       },
