@@ -8,26 +8,32 @@ import { logger } from "./logger"
 import { actorFor } from "./org-membership"
 import { eventPermissionSelect, eventPermissions } from "./rbac"
 import { cancelEventHolds } from "./ticket-holds"
-import { organizerShare, PAYOUT_GONE } from "./ticket-payments"
+import { BUYER_REFUND, BUYER_REFUND_ACTION, buyerRefundRefusal, EVENT_CANCELLED_REFUND, PAYOUT_GONE, policyRefundDebit, policyRefundMinor, type BuyerRefundRefusal } from "./ticket-refund-policy"
 import { executeRefund } from "./ticket-settle"
 
 /**
- * Organizer refunds (SCRUM-1011; the dashboard's button is Phase 4).
+ * Ticket refunds (SCRUM-1011; the buyer's own, SCRUM-1113).
  *
- * Both entry points only *claim* refunds, under the order's row lock, and
- * then make them through `executeRefund`: Razorpay is never called inside a
+ * Every entry point only *claims* refunds, under the order's row lock, and
+ * then makes them through `executeRefund`: Razorpay is never called inside a
  * transaction, and a call that fails leaves the claim for the reconcile job.
- * Authorization is the event's organisation (`eventPermissions(...).canEdit`
- * on `actorFor`, so role and memberships are the database's); anyone else
- * reads the order as not found.
  *
- * What comes back, per the organizer agreement (ticketing-business-model.md):
+ * Two doors to one claim (`claimPolicyRefund`), the same amount from both:
  *
- * - `refundOrder`, a buyer's request granted: the ticket price. The booking
- *   fee is kept, so the refund is the organizer's share and the share's
- *   transfer is reversed whole: we and they each end where they started.
+ * - `refundOrder`, the organizer: `eventPermissions(...).canEdit` on
+ *   `actorFor`, so role and memberships are the database's; any time.
+ * - `buyerRefund`, the order's buyer: automatic, inside the event's refund
+ *   window, re-checked under the locks (`buyerRefundRefusal`).
+ *
+ * Anyone else reads the order as not found. What comes back, per the organizer
+ * agreement (5.4) and the owner's ruling of 2026-11-25:
+ *
+ * - The full ticket price, always. A booking fee the buyer paid is kept, so
+ *   the refund is the organizer's share and its transfer is reversed whole.
+ *   Fees the organizer absorbed are charged to them (`org_debit_minor`,
+ *   lib/ticket-settle.ts): the share taken back is short by them.
  *   Only while the share is held: once its payout is `releasing` or
- *   `released` (lib/payout-release.ts) it is refused, whoever calls it. The
+ *   `released` (lib/payout-release.ts) it is refused, whoever asks. The
  *   payout row is locked, so a refund and a release never both win.
  * - `cancelEventRefundAll`, the organizer cancelled: everything the buyer
  *   paid, booking fee included. We refund our fee; Razorpay keeps its
@@ -50,8 +56,60 @@ async function canEditEvent(tx: Prisma.TransactionClient, eventId: string, user:
 }
 
 class Refused extends Error {
-  constructor(readonly reason: RefundRefusal) {
+  constructor(readonly reason: RefundRefusal | BuyerRefundRefusal) {
     super(reason)
+  }
+}
+
+type LockedOrder = {
+  event_id: string
+  buyer_id: string
+  status: string
+  refund_requested_at: Date | null
+  subtotal_minor: number
+  total_minor: number
+  service_fee_minor: number
+  service_fee_tax_minor: number
+  processing_fee_minor: number
+}
+
+/** Who is asking, decided on the locked order. Throws `Refused`; what it returns is written as the claim's reason and audit row. */
+type Door = (tx: Prisma.TransactionClient, order: LockedOrder | undefined, payoutStatus: string | null) => Promise<{ order: LockedOrder; orgId: string | null; userId?: string; action: string; reason: string }>
+
+async function claimPolicyRefund(orderId: string, door: Door): Promise<void> {
+  await db.$transaction(async (tx) => {
+    // One lock order everywhere (security review 6): the payout row, then its order, as the release job's claim.
+    // The payout's status is the only release source: locked, so the release job claims it before us or after.
+    const [payout] = await tx.$queryRaw<{ status: string }[]>`SELECT status::text AS status FROM ticket_payouts WHERE order_id = ${orderId}::uuid FOR UPDATE`
+    const [locked] = await tx.$queryRaw<LockedOrder[]>`
+      SELECT event_id::text, buyer_id, status::text AS status, refund_requested_at, subtotal_minor, total_minor, service_fee_minor, service_fee_tax_minor, processing_fee_minor
+        FROM ticket_orders WHERE id = ${orderId}::uuid FOR UPDATE`
+    const { order, orgId, userId, action, reason } = await door(tx, locked, payout?.status ?? null)
+    if (order.status !== "paid") throw new Refused("not_paid")
+    if (payout && PAYOUT_GONE.has(payout.status)) throw new Refused("payout_released")
+    const amount = policyRefundMinor(order)
+    await tx.ticket_orders.update({ where: { id: orderId }, data: { refund_requested_at: new Date(), refund_requested_minor: amount, refund_reason: reason } })
+    if (orgId) {
+      await auditInTx(tx, {
+        ...(userId ? { userId } : {}),
+        action,
+        resource: "ticket_order",
+        resourceId: orderId,
+        orgId,
+        details: { amountMinor: amount, chargedFeesMinor: policyRefundDebit(order), reason },
+      })
+    }
+  }, TX)
+}
+
+/** Make a claimed refund now. False: Razorpay failed, and the reconcile job retries the claim. */
+async function makeNow(orderId: string): Promise<boolean> {
+  try {
+    await executeRefund(orderId)
+    return true
+  } catch (error) {
+    logger.error("Ticket refund failed at Razorpay; the reconcile job retries it", { orderId, error: error instanceof Error ? error.message : String(error) })
+    return false
   }
 }
 
@@ -63,44 +121,56 @@ export async function refundOrder(orderId: string, user: Actor, reason: string):
   const why = (typeof reason === "string" ? reason.trim() : "").slice(0, REASON_MAX) || "organizer"
 
   try {
-    await db.$transaction(async (tx) => {
-      // One lock order everywhere (security review 6): the payout row, then its order, as the release job's claim.
-      // The payout's status is the only release source: locked, so the release job claims it before us or after.
-      const [payout] = await tx.$queryRaw<{ status: string }[]>`SELECT status::text AS status FROM ticket_payouts WHERE order_id = ${orderId}::uuid FOR UPDATE`
-      const [order] = await tx.$queryRaw<
-        { event_id: string; status: string; refund_requested_at: Date | null; total_minor: number; service_fee_minor: number; service_fee_tax_minor: number; processing_fee_minor: number }[]
-      >`SELECT event_id::text, status::text AS status, refund_requested_at, total_minor, service_fee_minor, service_fee_tax_minor, processing_fee_minor
-          FROM ticket_orders WHERE id = ${orderId}::uuid FOR UPDATE`
+    await claimPolicyRefund(orderId, async (tx, order) => {
       const event = order ? await canEditEvent(tx, order.event_id, user) : null
       if (!order || !event) throw new Refused("not_found")
       if (order.refund_requested_at) throw new Refused("already_refunding")
-      if (order.status !== "paid") throw new Refused("not_paid")
-      if (payout && PAYOUT_GONE.has(payout.status)) throw new Refused("payout_released")
-      const amount = organizerShare(order)
-      await tx.ticket_orders.update({ where: { id: orderId }, data: { refund_requested_at: new Date(), refund_requested_minor: amount, refund_reason: why } })
-      if (event.organizer_org_id) {
-        await auditInTx(tx, {
-          userId: user.id,
-          action: "ticket_order.refund",
-          resource: "ticket_order",
-          resourceId: orderId,
-          orgId: event.organizer_org_id,
-          details: { amountMinor: amount, reason: why },
-        })
-      }
-    }, TX)
+      return { order, orgId: event.organizer_org_id, userId: user.id, action: "ticket_order.refund", reason: why }
+    })
   } catch (error) {
-    if (error instanceof Refused) return { ok: false, reason: error.reason }
+    if (error instanceof Refused) return { ok: false, reason: error.reason as RefundRefusal }
     throw error
   }
+  return (await makeNow(orderId)) ? { ok: true } : { ok: false, reason: "retrying" }
+}
+
+export type BuyerRefundAnswer = { ok: true } | { ok: false; reason: BuyerRefundRefusal | "ticketing_off" | "payments_off" | "not_found" }
+
+/**
+ * A buyer's own refund, automatic inside the event's refund window (owner
+ * 2026-11-25): no host step. The buyer only; anyone else reads not found.
+ * Asking again is the same yes and claims nothing. A Razorpay failure is still
+ * a yes: the claim stands and the reconcile job makes it.
+ *
+ * The audit row names nobody (no `userId`, which the platform's own rows also
+ * lack): it is the organization's to read, and hosts never learn who a buyer
+ * is. Who asked is the order's `buyer_id`.
+ */
+export async function buyerRefund(orderId: string, buyerId: string, now: Date = new Date()): Promise<BuyerRefundAnswer> {
+  if (!ticketingOn()) return { ok: false, reason: "ticketing_off" }
+  if (!isUuid(orderId)) return { ok: false, reason: "not_found" }
+  if (!razorpayKeys()) return { ok: false, reason: "payments_off" }
 
   try {
-    await executeRefund(orderId)
-    return { ok: true }
+    await claimPolicyRefund(orderId, async (tx, order, payoutStatus) => {
+      if (!order || order.buyer_id !== buyerId) throw new Refused("not_found")
+      if (order.refund_requested_at) throw new Refused("already_refunding")
+      const event = await tx.events.findUniqueOrThrow({
+        where: { id: order.event_id },
+        select: { status: true, deleted_at: true, refund_policy: true, start_time: true, organizer_org_id: true },
+      })
+      // Read under the order's lock, which a door scan shares (`redeemTicket`).
+      const ticketUsed = (await tx.tickets.count({ where: { order_id: orderId, redeemed_at: { not: null } } })) > 0
+      const refused = buyerRefundRefusal({ status: order.status, payoutStatus, ticketUsed, event }, now)
+      if (refused) throw new Refused(refused)
+      return { order, orgId: event.organizer_org_id, action: BUYER_REFUND_ACTION, reason: BUYER_REFUND }
+    })
   } catch (error) {
-    logger.error("Ticket refund failed at Razorpay; the reconcile job retries it", { orderId, error: error instanceof Error ? error.message : String(error) })
-    return { ok: false, reason: "retrying" }
+    if (!(error instanceof Refused)) throw error
+    return error.reason === "already_refunding" ? { ok: true } : { ok: false, reason: error.reason as BuyerRefundRefusal | "not_found" }
   }
+  await makeNow(orderId)
+  return { ok: true }
 }
 
 export type CancelRefusal = "ticketing_off" | "payments_off" | "not_found" | "event_not_cancelled"
@@ -133,7 +203,7 @@ export async function cancelEventRefundAll(
     const gone = payouts.filter((p) => PAYOUT_GONE.has(p.status)).map((p) => p.order_id)
     const rows = await tx.$queryRaw<{ id: string }[]>`
       UPDATE ticket_orders
-         SET refund_requested_at = now(), refund_requested_minor = total_minor, refund_reason = 'event_cancelled', updated_at = now()
+         SET refund_requested_at = now(), refund_requested_minor = total_minor, refund_reason = ${EVENT_CANCELLED_REFUND}, updated_at = now()
        WHERE event_id = ${eventId}::uuid AND status = 'paid' AND refund_requested_at IS NULL AND NOT (id::text = ANY(${gone}::text[]))
       RETURNING id::text`
     if (event.organizer_org_id) {

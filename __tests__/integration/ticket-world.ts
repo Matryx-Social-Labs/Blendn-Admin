@@ -84,6 +84,7 @@ export function fakeRazorpay(): FakeRazorpay {
       return payment
     },
   }
+  const reversedOf = (id: string) => fake.reversals.filter((r) => r.transfer_id === id).reduce((sum, r) => sum + r.amount, 0)
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
 
   jest.spyOn(global, "fetch").mockImplementation(async (input, init) => {
@@ -124,7 +125,7 @@ export function fakeRazorpay(): FakeRazorpay {
     }
     if (method === "GET" && (m = path.match(/^\/transfers\/([^/]+)$/))) {
       const t = fake.transfer(m[1])
-      return t ? json({ ...t, entity: "transfer", on_hold: Boolean(t.on_hold) }) : json({ error: { description: "The id provided does not exist" } }, 400)
+      return t ? json({ ...t, entity: "transfer", on_hold: Boolean(t.on_hold), amount_reversed: reversedOf(t.id) }) : json({ error: { description: "The id provided does not exist" } }, 400)
     }
     if (method === "PATCH" && (m = path.match(/^\/transfers\/([^/]+)$/))) {
       // Modify settlement hold (Route): PATCH /v1/transfers/:id { on_hold }. A transfer already released answers an error.
@@ -135,6 +136,8 @@ export function fakeRazorpay(): FakeRazorpay {
       return json({ ...t, entity: "transfer", on_hold: Boolean(t.on_hold), settlement_status: t.on_hold ? "on_hold" : "pending" })
     }
     if ((m = path.match(/^\/transfers\/([^/]+)\/reversals$/))) {
+      const t = fake.transfer(m[1])
+      if (t && reversedOf(t.id) + body.amount > t.amount) return json({ error: { description: "The reversal amount exceeds the amount of the transfer" } }, 400)
       fake.reversals.push({ transfer_id: m[1], amount: body.amount })
       return json({ id: `rvrsl_${randomUUID().slice(0, 14)}`, transfer_id: m[1], amount: body.amount })
     }

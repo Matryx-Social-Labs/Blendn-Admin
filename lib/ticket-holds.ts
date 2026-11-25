@@ -9,6 +9,7 @@ import { ticketingOn } from "./env"
 import { attendeeEventAccess } from "./event-door"
 import { violatedConstraint } from "./prisma-errors"
 import { FeesExceedPriceError, parseFeeSchedule, ticketFees, type FeeBreakdown } from "./ticket-fees"
+import { BUYER_REFUND } from "./ticket-refund-policy"
 
 /**
  * Ticket holds (SCRUM-1008, hardened in SCRUM-1010): an order reserves its
@@ -40,7 +41,7 @@ import { FeesExceedPriceError, parseFeeSchedule, ticketFees, type FeeBreakdown }
  * | `reserveTickets`             | the event's types (id order), then expired orders `SKIP LOCKED`, then inserts its own |
  * | `releaseExpiredHolds`        | expired orders `SKIP LOCKED`, then their types (id order)               |
  * | the payment webhook (lib/ticket-payments.ts) | its order, then the order's types (id order)           |
- * | a refund (`finishRefund`)    | its order, then the order's types (id order)                           |
+ * | a refund (`finishRefund`)    | its payout, its order, then the order's types (id order)               |
  * | `cancelBuyerHolds` / `cancelHold` / `cancelEventHolds` | pending orders (id order, waiting), then their types (id order) |
  *
  * Reserving never waits on an order lock (`SKIP LOCKED`), and everyone takes
@@ -273,7 +274,12 @@ function checkLine(type: LockedType | undefined, quantity: number, now: Date): L
   return type
 }
 
-/** The buyer's seats for the event that count against the cap, and their open holds. */
+/**
+ * The buyer's seats for the event that count against the cap, and their open
+ * holds. Seats they refunded themselves still count (SCRUM-1113): such a refund
+ * is automatic and may charge the organizer the fees it absorbed, so buying and
+ * refunding in a loop would otherwise cost the organizer without end.
+ */
 async function buyerStake(tx: Prisma.TransactionClient, eventId: string, buyerId: string, now: Date) {
   const [row] = await tx.$queryRaw<{ seats: number; pending: number }[]>`
     SELECT coalesce(sum(l.quantity), 0)::int AS seats,
@@ -281,7 +287,8 @@ async function buyerStake(tx: Prisma.TransactionClient, eventId: string, buyerId
       FROM ticket_orders o
       JOIN ticket_order_lines l ON l.order_id = o.id
      WHERE o.event_id = ${eventId}::uuid AND o.buyer_id = ${buyerId}
-       AND (o.status = 'paid' OR (o.status = 'pending' AND o.hold_expires_at > ${now}))`
+       AND (o.status = 'paid' OR (o.status = 'pending' AND o.hold_expires_at > ${now})
+            OR (o.status = 'refunded' AND o.refund_reason = ${BUYER_REFUND}))`
   return row
 }
 

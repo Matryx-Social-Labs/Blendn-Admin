@@ -981,10 +981,11 @@ async function applyTicketRefund(tx: Tx, d: Delivery): Promise<Outcome | null> {
   const paymentId = str(refund?.payment_id)
   const refundId = str(refund?.id)
   if (!paymentId) return null
+  // Read, not locked: `finishRefund` locks the payout row and then the order, and a claim's amount is set once,
+  // committed before Razorpay is asked. Locking the order here first would be the other way round.
   const [order] = await tx.$queryRaw<{ id: string; refund_requested_minor: number | null }[]>`
     SELECT id::text, refund_requested_minor FROM ticket_orders
-     WHERE provider = ${PROVIDER} AND provider_payment_ref = ${paymentId}
-       FOR UPDATE`
+     WHERE provider = ${PROVIDER} AND provider_payment_ref = ${paymentId}`
   if (!order) return null
   if (!refundId || str(refund?.status) !== "processed") return refuse("malformed")
   if (order.refund_requested_minor === null) return refuse("unrequested_refund")

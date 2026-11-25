@@ -5,8 +5,9 @@ import { db } from "./db"
 import { sendEmail, ticketOrderEmail } from "./email"
 import { logger } from "./logger"
 import { sendPushNotification } from "./push-notifications"
-import { createTransfer, paymentRefunds, paymentTransfers, refundPayment, reverseTransfer } from "./razorpay"
+import { createTransfer, paymentRefunds, paymentTransfers, refundPayment, reversedOf, reverseTransfer } from "./razorpay"
 import { lockLines, moveSeats, type SettleOutcome } from "./ticket-payments"
+import { EVENT_CANCELLED_REFUND } from "./ticket-refund-policy"
 
 /**
  * What a ticket payment or refund does after its transaction commits
@@ -62,22 +63,32 @@ export async function createPayoutTransfer(orderId: string): Promise<string | nu
   return transfer.id
 }
 
-/** Take back a refunded order's transfer, from the organizer's held payout. */
+/**
+ * What the organization owes after its share of a refunded order is taken back
+ * (`ticket_payouts.org_debit_minor`, the only ledger of it):
+ *
+ * - It cancelled the event: Razorpay keeps its processing, charged to it (5.2).
+ * - A policy refund (the buyer's or its own): what the buyer got beyond the
+ *   share, which is the fees it absorbed. Zero when the buyer paid them.
+ */
+export const orgDebit = (share: number, order: { refund_reason: string | null; refund_requested_minor: number | null; processing_fee_minor: number }): number =>
+  order.refund_reason === EVENT_CANCELLED_REFUND ? order.processing_fee_minor : Math.max(0, (order.refund_requested_minor ?? 0) - share)
+
+/** Take back a refunded order's transfer, from the organizer's held payout. The reconcile job repeats it (lib/ticket-reconcile.ts). */
 export async function reversePayout(orderId: string): Promise<void> {
   const payout = await db.ticket_payouts.findUnique({
     where: { order_id: orderId },
-    select: { status: true, provider_transfer_ref: true, amount_minor: true, reversed_minor: true, order: { select: { refund_reason: true, processing_fee_minor: true } } },
+    select: { status: true, provider_transfer_ref: true, amount_minor: true, reversed_minor: true, order: { select: { refund_reason: true, refund_requested_minor: true, processing_fee_minor: true } } },
   })
   if (!payout || payout.status !== "on_hold" || !payout.provider_transfer_ref) return
-  const amount = payout.amount_minor - payout.reversed_minor
+  const amount = payout.amount_minor - (await reversedOf(payout.provider_transfer_ref))
   if (amount > 0) await reverseTransfer(payout.provider_transfer_ref, amount)
   await db.ticket_payouts.updateMany({
     where: { order_id: orderId, status: "on_hold" },
     data: {
       status: "reversed",
       reversed_minor: payout.amount_minor,
-      // The organizer cancelled: Razorpay keeps its processing, and the agreement charges it to them.
-      org_debit_minor: payout.order.refund_reason === "event_cancelled" ? payout.order.processing_fee_minor : 0,
+      org_debit_minor: orgDebit(payout.amount_minor, payout.order),
     },
   })
 }
@@ -99,8 +110,10 @@ export interface ConfirmedRefund {
  * reversed after the commit (`reversePayout`).
  */
 export async function finishRefund(tx: Prisma.TransactionClient, orderId: string, refund: ConfirmedRefund, now: Date = new Date()): Promise<boolean> {
-  const [order] = await tx.$queryRaw<{ status: string; event_id: string; buyer_id: string }[]>`
-    SELECT status::text AS status, event_id::text, buyer_id FROM ticket_orders WHERE id = ${orderId}::uuid FOR UPDATE`
+  // One lock order everywhere (security review 6): the payout row, then its order. A buyer asking again holds the payout and waits for the order.
+  const [payout] = await tx.$queryRaw<{ amount_minor: number }[]>`SELECT amount_minor FROM ticket_payouts WHERE order_id = ${orderId}::uuid FOR UPDATE`
+  const [order] = await tx.$queryRaw<{ status: string; event_id: string; buyer_id: string; refund_reason: string | null; refund_requested_minor: number | null; processing_fee_minor: number }[]>`
+    SELECT status::text AS status, event_id::text, buyer_id, refund_reason, refund_requested_minor, processing_fee_minor FROM ticket_orders WHERE id = ${orderId}::uuid FOR UPDATE`
   if (!order || order.status === "refunded") return false
 
   if (order.status === "paid") {
@@ -115,8 +128,11 @@ export async function finishRefund(tx: Prisma.TransactionClient, orderId: string
     where: { id: orderId },
     data: { status: "refunded", refunded_minor: refund.amountMinor, provider_refund_ref: refund.refundRef, refunded_at: now },
   })
-  // Never transferred: nothing to take back, and the retry must not make it now.
-  await tx.ticket_payouts.updateMany({ where: { order_id: orderId, status: { in: ["pending", "no_account"] } }, data: { status: "reversed" } })
+  // Never transferred: nothing to take back, and the retry must not make it now. The fees it absorbed are owed all the same.
+  if (payout) {
+    const debit = order.refund_reason === EVENT_CANCELLED_REFUND ? 0 : orgDebit(payout.amount_minor, order)
+    await tx.ticket_payouts.updateMany({ where: { order_id: orderId, status: { in: ["pending", "no_account"] } }, data: { status: "reversed", org_debit_minor: debit } })
+  }
   return true
 }
 

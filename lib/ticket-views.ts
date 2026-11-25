@@ -9,6 +9,7 @@ import { activeMembership } from "./org-membership"
 import { ticketingOn } from "./env"
 import { parseFeeSchedule, type FeeBreakdown } from "./ticket-fees"
 import type { ReserveRefusal } from "./ticket-holds"
+import { buyerRefundRefusal, policyRefundMinor, refundUntil, type BuyerRefundRefusal } from "./ticket-refund-policy"
 import { ticketQrPayload } from "./tickets"
 
 /**
@@ -179,12 +180,72 @@ export async function missingTicketAtCheckIn(
   const staffOrgs = [event.organizer_org_id, event.venue?.owner_org_id ?? null].filter((o): o is string => o !== null)
   const [staff, ticket] = await Promise.all([
     staffOrgs.length ? db.organisation_members.findFirst({ where: { user_id: userId, org_id: { in: staffOrgs }, ...activeMembership }, select: { id: true } }) : null,
-    db.tickets.findFirst({ where: { event_id: event.id, holder_id: userId, order: { status: "paid" } }, select: { id: true } }),
+    db.tickets.findFirst({ where: { event_id: event.id, holder_id: userId, order: { status: "paid", refund_requested_at: null } }, select: { id: true } }),
   ])
   return !staff && !ticket
 }
 
 export const NO_TICKET_SENTENCE = "This event needs a ticket. Get one on the event page, then check in."
+
+/* ------------------------------------------------------------------------ */
+/* Refunds                                                                   */
+/* ------------------------------------------------------------------------ */
+
+/** The owner's wording (2026-11-25). TODO(legal): the lawyer confirms it before ticketing goes live on prod. */
+export const REFUND_STARTED_SENTENCE = "Refund started. It can take 5–7 business days to reach you."
+
+/** Each buyer refund refusal's answer (SCRUM-1113): 409 with the code in `errorCode`. */
+const REFUND_REFUSALS: Record<BuyerRefundRefusal, string> = {
+  not_paid: "Only a paid order can be refunded",
+  event_canceled: "This event was canceled",
+  payout_released: "This order can no longer be refunded here",
+  refund_policy_none: "This host doesn’t refund tickets",
+  refund_window_closed: "The refund window has closed",
+  ticket_used: "A ticket in this order has already been used. Ask the host for a refund.",
+}
+
+export function refundRefusalResponse(reason: BuyerRefundRefusal): NextResponse {
+  return errorResponse(REFUND_REFUSALS[reason], 409, reason)
+}
+
+/** What an order's refund state and offer are read from. */
+const refundSelect = {
+  status: true,
+  currency: true,
+  subtotal_minor: true,
+  total_minor: true,
+  refund_requested_at: true,
+  refund_requested_minor: true,
+  refunded_minor: true,
+  refunded_at: true,
+  payout: { select: { status: true } },
+  tickets: { where: { redeemed_at: { not: null } }, select: { id: true }, take: 1 },
+  event: { select: { status: true, deleted_at: true, refund_policy: true, start_time: true } },
+} satisfies Prisma.ticket_ordersSelect
+
+type RefundRow = Prisma.ticket_ordersGetPayload<{ select: typeof refundSelect }>
+
+/** The refund under way or made, with its exact amount; and, while its buyer may ask, what asking returns. The client computes neither. */
+function refundView(o: RefundRow, now: Date) {
+  if (o.refund_requested_at) {
+    const refunded = o.status === "refunded"
+    return {
+      refund: {
+        state: refunded ? ("refunded" as const) : ("started" as const),
+        amountMinor: refunded ? o.refunded_minor : (o.refund_requested_minor ?? 0),
+        currency: o.currency,
+        requestedAt: o.refund_requested_at.toISOString(),
+        refundedAt: o.refunded_at?.toISOString() ?? null,
+      },
+      refundOffer: null,
+    }
+  }
+  const until = refundUntil(o.event)
+  const refused = buyerRefundRefusal({ status: o.status, payoutStatus: o.payout?.status ?? null, ticketUsed: o.tickets.length > 0, event: o.event }, now)
+  if (refused || !until) return { refund: null, refundOffer: null }
+  const amountMinor = policyRefundMinor(o)
+  return { refund: null, refundOffer: { amountMinor, bookingFeeMinor: o.total_minor - amountMinor, currency: o.currency, until: until.toISOString() } }
+}
 
 /* ------------------------------------------------------------------------ */
 /* Orders and tickets                                                        */
@@ -230,17 +291,15 @@ const ticketView = ({ ticket_type: { event, ...type }, ...t }: TicketRow) => ({
 })
 
 /** The buyer's order, or null for anyone else: a stranger cannot tell it exists (§5). */
-export async function orderView(orderId: string, buyerId: string) {
+export async function orderView(orderId: string, buyerId: string, now: Date = new Date()) {
   if (!isUuid(orderId)) return null
   const order = await db.ticket_orders.findFirst({
     where: { id: orderId, buyer_id: buyerId },
     select: {
+      ...refundSelect,
       id: true,
       event_id: true,
-      status: true,
       hold_expires_at: true,
-      total_minor: true,
-      currency: true,
       payment_failed_at: true,
       tickets: { select: ticketSelect, orderBy: [{ created_at: "asc" }, { id: "asc" }] },
     },
@@ -254,18 +313,20 @@ export async function orderView(orderId: string, buyerId: string) {
     totalMinor: order.total_minor,
     currency: order.currency,
     paymentFailed: order.status === "pending" && order.payment_failed_at !== null,
+    ...refundView({ ...order, tickets: order.tickets.filter((t) => t.redeemed_at) }, now),
     // A refunded order's tickets stay as rows and the door refuses them; the buyer is shown none.
     tickets: order.status === "paid" ? order.tickets.map(ticketView) : [],
   }
 }
 
-/** My tickets: of paid orders only, newest event first. */
-export async function myTicketsView(holderId: string, eventId: string | null) {
+/** My tickets: of paid orders only, newest event first, each with its order's refund (an order is refunded whole). */
+export async function myTicketsView(holderId: string, eventId: string | null, now: Date = new Date()) {
   const tickets = await db.tickets.findMany({
     where: { holder_id: holderId, order: { status: "paid" }, ...(eventId ? { event_id: eventId } : {}) },
-    select: ticketSelect,
+    select: { ...ticketSelect, order: { select: { ...refundSelect, buyer_id: true } } },
     orderBy: [{ ticket_type: { event: { start_time: "desc" } } }, { created_at: "asc" }, { id: "asc" }],
     take: MY_TICKETS_MAX,
   })
-  return tickets.map(ticketView)
+  // The buyer's alone, as POST …/refund-request is: should a ticket ever be held by somebody else, nothing.
+  return tickets.map(({ order, ...t }) => ({ ...ticketView(t), ...(order.buyer_id === holderId ? refundView(order, now) : { refund: null, refundOffer: null }) }))
 }

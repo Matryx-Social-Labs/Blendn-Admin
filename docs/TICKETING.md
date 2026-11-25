@@ -30,7 +30,7 @@ that authorizes for itself, and answers in a sentence.
 | `reviewPayoutAccountFor` | `reviewPayoutAccount` | app_admin only. `active` only when Razorpay's `GET /v2/accounts/:id` says `activated` (`linkedAccountStatus`, `lib/razorpay.ts`); without Razorpay keys the row records `razorpay: "not_checked"`. Or `rejected`. Audit `payouts.account_reviewed`. |
 | `turnOnTicketSelling` | `turnOnTicketing` (`lib/ticket-setup.ts`) | canEdit. The page's terms hash must equal the server's hash of the file it serves now (`terms_changed` otherwise). Payouts connected and a native market are checked before anything is recorded. If the organization has not accepted the version in force, `recordLegalAcceptance` with the **server's** `document_sha256` (owners and admins only); then the refund policy and who pays are written, then `enableTicketing`. |
 | `saveTicketTypeForm` | `saveTicketType` (`lib/ticket-types.ts`) | canEdit, event selling natively. At most 20 types an event, hidden ones counted, under a `FOR NO KEY UPDATE` lock on the event. Price > 0 (free is RSVP plus capacity). Quantity ≥ sold + held. Most per order 1–10. Window in the event's timezone. Off sale = `hidden`. A price change applies to new orders only (orders keep `unit_price_minor` and `total_minor`) and writes `ticket_type.price_changed` with what was sold. |
-| `refundSale` | `refundOrder` (`lib/ticket-refunds.ts`) | canEdit on the order's event. Refunds the organizer's share (the booking fee is kept, terms 5.4), behind a confirmation dialog whose default is Keep. Refused (`payout_released`) once the order's payout is `releasing` or `released`, read under the payout row's lock inside `refundOrder`, so every caller gets it; never from event times. The Sales panel's Refund action reads the same status. |
+| `refundSale` | `refundOrder` (`lib/ticket-refunds.ts`) | canEdit on the order's event. Refunds the full ticket price (a booking fee the buyer paid is kept, terms 5.4; fees the organization absorbed are charged to it, see "Refunds" below), behind a confirmation dialog whose default is Keep. Refused (`payout_released`) once the order's payout is `releasing` or `released`, read under the payout row's lock inside `refundOrder`, so every caller gets it; never from event times. The Sales panel's Refund action reads the same status. |
 | `saveTicketLink` | `saveExternalTicketLink` | canEdit, the city's market is `external`. https only (`httpsUrl`); the app's "Tickets on <site>" is derived from the link's host. Nothing fetches the link. Empty turns the event back to free. |
 | `admitTicket` | `admitAtDoor` (`lib/ticket-door.ts`) | canOperate, checked before any attempt counts. 30 attempts a minute per operator at the event, 300 a minute for the event, then `redeemTicket` (one conditional UPDATE). Answers a code, the type and a time: never a person. |
 
@@ -39,6 +39,58 @@ that already exist (the dashboard and mobile event PATCH routes, the admin
 status move): `refundAllOnCancel` calls `cancelEventRefundAll` after the cancel
 commits and never throws; a refund Razorpay cannot make now is claimed and the
 reconcile job retries it.
+
+## Refunds: who gets what (SCRUM-1113, owner 2026-11-25)
+
+A **policy refund** returns the full ticket price (`subtotal_minor`), always,
+through two doors to one claim (`claimPolicyRefund`, `lib/ticket-refunds.ts`;
+the payout row is locked, then its order):
+
+- **The organizer's** Refund button (`refundOrder`, canEdit): any time, under any policy.
+- **The buyer's** own (`buyerRefund`, `POST /ticket-orders/:id/refund-request`):
+  automatic, no host step, the order's buyer only. `buyerRefundRefusal`
+  (`lib/ticket-refund-policy.ts`) decides it under the locks and shapes the
+  app's `refundOffer`: the policy's window, counted in hours back from the
+  event's start **as it is now** (a ticketed event only moves later, so the
+  window only moves later); the payout not `releasing`/`released`; the event not
+  canceled (its refund is the full one); no ticket of it let in. Asking twice is
+  one refund. Its wording is the owner's, `TODO(legal)` in `lib/ticket-views.ts`.
+
+Neither refunds an order once its payout is released. Seats a buyer refunded
+themselves still count toward their ten an event (`buyerStake`), so buying and
+refunding in a loop cannot run up the fees an organization absorbed.
+
+| | Buyer paid the fees | Organization absorbed them |
+|---|---|---|
+| Buyer paid | price + fees | price |
+| Share transferred (held) | price | price − fees |
+| Refund to the buyer | price | price (all they paid) |
+| Reversed from the held transfer | price | price − fees |
+| `org_debit_minor` | 0 | fees |
+| In the end: buyer + organization + Blend'n + Razorpay | price + 0 + (fee + tax) + processing | price − fees + (fee + tax) + processing |
+
+Each column adds up to what was paid. **Where the difference comes from when the
+fees were absorbed:** the refund is larger than the share we hold by exactly the
+fees, so it is paid from our Razorpay balance (the fees we kept from the sale,
+less Razorpay's processing, which Razorpay keeps: until the debit is collected we
+are out the processing). The organization owes the fees:
+`ticket_payouts.org_debit_minor`, the column a cancellation already charges
+processing to, and the only ledger. It is set by `orgDebit`
+(`lib/ticket-settle.ts`) from the amounts, so a refund claimed before this rule
+(for the share) charges nothing. A share never transferred (`pending`,
+`no_account`) is closed with the same debit.
+
+**Nothing collects `org_debit_minor` yet**: terms 4.4 allow setting it off
+against payouts, and that job is not built (ROADMAP). A cancellation whose share
+was never transferred still records no debit, as before.
+
+A claim also stops the tickets: the door and check-in refuse an order with a
+refund claimed, before Razorpay has made it. The audit row of a buyer's refund
+(`ticket_order.buyer_refund`) has no actor, and the Refunds panel and the
+organization's audit log say "Buyer": hosts never learn who a buyer is.
+
+The reconcile job makes what failed: a claimed refund, and the reversal of a
+refunded order's share (`reversePayout` reads what Razorpay has reversed first).
 
 ## Payouts: held until we release them
 
@@ -92,7 +144,8 @@ reference or attendee label, filter by type and status) and `ticketsSummary`
 (sold, refunded, the organizer's share, release date = event end + 3 days).
 Buyers are their attendee label (`attendeeLabel` with `labelScopeFor`, as in
 Attendees and the exports); no name, email or buyer id reaches a row. The
-Refunds panel names the member who refunded, from the refund's audit row.
+Refunds panel names the member who refunded, from the refund's audit row; a
+buyer's own refund says "Buyer".
 
 ## Not built (v1)
 

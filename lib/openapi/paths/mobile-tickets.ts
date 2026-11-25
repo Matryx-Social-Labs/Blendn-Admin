@@ -2,7 +2,7 @@ import { z } from "zod"
 
 import { registry } from "@/lib/openapi/registry"
 import { bearerAuth, standardErrors, wrap } from "@/lib/openapi/schemas/common"
-import { TICKET_REFUSALS, TicketLinesSchema, TicketOrderCreatedSchema, TicketOrderSchema, TicketQuoteSchema, TicketSchema } from "@/lib/openapi/schemas/tickets"
+import { TICKET_REFUSALS, TicketLinesSchema, TicketOrderCreatedSchema, TicketOrderSchema, TicketQuoteSchema, TicketRefundStartedSchema, TicketSchema } from "@/lib/openapi/schemas/tickets"
 
 /*
  * Ticketing (SCRUM-1011; .context/plans/ticketing-api-contract.md). Every
@@ -74,11 +74,32 @@ registry.registerPath({
 })
 
 registry.registerPath({
+  method: "post",
+  path: "/api/mobile/ticket-orders/{orderId}/refund-request",
+  tags,
+  summary: "Refund my order, inside the event's refund window",
+  description:
+    "Buyer only; no body. Automatic: the whole order, the full ticket price (a booking fee the buyer paid is kept), with no host step. " +
+    "Answers the order with its `refund` and the `message` to show. Idempotent: an order already being refunded, or refunded, is the same 200. " +
+    "A Razorpay failure is still a 200 (`refund.state: started`): the server retries. " +
+    "Refusals are 409 with the code in `errorCode`: `not_paid`, `event_canceled` (its refund is the full one), `payout_released`, `refund_policy_none`, " +
+    "`refund_window_closed`, `ticket_used` (a ticket of it was let in; the host can still refund). Limited per user (10/min).",
+  security: bearerAuth,
+  request: { params: orderParams },
+  responses: {
+    200: { description: "Refund started, or already under way or made", ...json(wrap(TicketRefundStartedSchema)) },
+    ...conflict("Refused: see the codes above"),
+    503: { description: "Payments are not set up on this server" },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
   method: "get",
   path: "/api/mobile/me/tickets",
   tags,
   summary: "My tickets",
-  description: "Tickets of my paid orders, newest event first, each with its event so the pass renders offline. Not paginated in v1.",
+  description: "Tickets of my paid orders, newest event first, each with its event so the pass renders offline, and its order's `refund` and `refundOffer`. Not paginated in v1.",
   security: bearerAuth,
   request: { query: z.object({ eventId: z.string().uuid().optional() }) },
   responses: { 200: { description: "Tickets", ...json(wrap(z.array(TicketSchema))) }, ...standardErrors },

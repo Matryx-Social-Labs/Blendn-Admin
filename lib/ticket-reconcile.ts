@@ -4,7 +4,7 @@ import { razorpayKeys, ticketingOn } from "./env"
 import { logger } from "./logger"
 import { orderPayments } from "./razorpay"
 import { settleTicketPayment } from "./ticket-payments"
-import { afterSettle, createPayoutTransfer, executeRefund } from "./ticket-settle"
+import { afterSettle, createPayoutTransfer, executeRefund, reversePayout } from "./ticket-settle"
 
 /**
  * The ticket money nobody confirmed (SCRUM-1011), every five minutes while
@@ -16,7 +16,10 @@ import { afterSettle, createPayoutTransfer, executeRefund } from "./ticket-settl
  *    late-payment rules included.
  * 2. **A refund asked for and not confirmed** (Razorpay failed, or we crashed
  *    after asking): made again; `executeRefund` reads Razorpay's refunds first.
- * 3. **A payout owed and not transferred**: made again; `createPayoutTransfer`
+ * 3. **A refunded order's share not taken back** (the reversal failed after the
+ *    refund was recorded): made again; `reversePayout` reads what Razorpay has
+ *    reversed first.
+ * 4. **A payout owed and not transferred**: made again; `createPayoutTransfer`
  *    adopts a transfer Razorpay already made.
  *
  * Each item fails alone, logged; the next pass tries again.
@@ -87,6 +90,25 @@ async function unconfirmedRefunds(now: Date): Promise<number> {
   return refunded
 }
 
+async function unreversedPayouts(now: Date): Promise<number> {
+  const payouts = await db.ticket_payouts.findMany({
+    where: { status: "on_hold", order: { status: "refunded", refunded_at: { lte: new Date(now.getTime() - SETTLE_AFTER_MS) } } },
+    select: { order_id: true },
+    orderBy: { created_at: "asc" },
+    take: BATCH,
+  })
+  let reversed = 0
+  for (const payout of payouts) {
+    try {
+      await reversePayout(payout.order_id)
+      reversed++
+    } catch (error) {
+      logger.error("Ticket payout reversal retry failed", { orderId: payout.order_id, error: message(error) })
+    }
+  }
+  return reversed
+}
+
 async function untransferredPayouts(now: Date): Promise<number> {
   const payouts = await db.ticket_payouts.findMany({
     where: { status: "pending", created_at: { lte: new Date(now.getTime() - SETTLE_AFTER_MS) } },
@@ -105,12 +127,13 @@ async function untransferredPayouts(now: Date): Promise<number> {
   return transferred
 }
 
-export async function reconcileTicketPayments(now: Date = new Date()): Promise<{ paid: number; refunded: number; transferred: number }> {
-  if (!razorpayKeys()) return { paid: 0, refunded: 0, transferred: 0 }
+export async function reconcileTicketPayments(now: Date = new Date()): Promise<{ paid: number; refunded: number; reversed: number; transferred: number }> {
+  if (!razorpayKeys()) return { paid: 0, refunded: 0, reversed: 0, transferred: 0 }
   const paid = await lostPayments(now)
   const refunded = await unconfirmedRefunds(now)
+  const reversed = await unreversedPayouts(now)
   const transferred = await untransferredPayouts(now)
-  return { paid, refunded, transferred }
+  return { paid, refunded, reversed, transferred }
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -119,7 +142,7 @@ let stopped = false
 async function run(): Promise<void> {
   try {
     const done = await reconcileTicketPayments()
-    if (done.paid || done.refunded || done.transferred) logger.info("Ticket payments reconciled", done)
+    if (done.paid || done.refunded || done.reversed || done.transferred) logger.info("Ticket payments reconciled", done)
   } catch (error) {
     logger.error("Ticket reconcile pass failed", { error: message(error) })
   }

@@ -3,6 +3,7 @@
 import { Refusal } from "./refusal"
 import { db } from "@/lib/db"
 import { currentUser } from "@/lib/current-user"
+import { BUYER_REFUND_ACTION } from "@/lib/ticket-refund-policy"
 import type { Prisma } from "@prisma/client"
 import { activeMembership } from "@/lib/org-membership"
 import { isUuid } from "@/lib/api-input"
@@ -173,7 +174,8 @@ export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage
       resource: r.resource,
       resourceId: isAdmin ? r.resource_id : hostResourceId(user.id, r),
       createdAt: r.created_at,
-      actor: r.user_id ? (actorMap.get(r.user_id) ?? null) : null,
+      // A buyer's own refund is written with no actor: the organization never learns who (SCRUM-1113).
+      actor: r.action === BUYER_REFUND_ACTION ? { id: "buyer", name: "Buyer", email: "" } : r.user_id ? (actorMap.get(r.user_id) ?? null) : null,
       details: r.details,
       // IP is admin-only. An org admin seeing a colleague's home IP address is
       // more than "who changed what", and it is not theirs to have.

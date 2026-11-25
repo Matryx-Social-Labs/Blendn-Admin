@@ -108,7 +108,7 @@ export async function refundSale(eventId: string, orderId: string): Promise<Acti
   if (await overUserLimit("write", "ticket-refund", user.id)) return TOO_FAST
   const res = await refundOrder(orderId, user, "organizer")
   tab(eventId)
-  if (res.ok) return { ok: true, message: "Refunded. Razorpay returns the money in 5–7 days." }
+  if (res.ok) return { ok: true, message: "Refunded. Razorpay returns the money in 5–7 business days." }
   const sentence: Record<string, string> = {
     retrying: "Razorpay didn’t answer. The refund is claimed and will be retried automatically.",
     already_refunding: "This order is already being refunded.",
