@@ -2668,6 +2668,12 @@
       "observed": "C1: 2 of 4 failing (blr's 'never writes the cover', and its control, which then finds no null); C2: 1 of 4 failing (qa 'never writes the cover'). Both seeds at origin/dev: 4 of 4. Restored; 4/4.",
       "date": "2026-11-17"
     },
+    "public-site-origin.test.ts": {
+      "guards": "SCRUM-1366: no www.blendn.app URL in lib/, app/ or components/ code outside the fixed list (links go through publicSiteOrigin()), and production refuses any PUBLIC_SITE_ORIGIN but www.",
+      "mutation": "(C1) a template-literal `https://www.blendn.app/f/${...}` appended to lib/friends.ts; (C2) the production check in publicSiteOriginProblem replaced by `if (false)`. Before the fix (eaae4ddb) the guard listed the 7 literals then in lib/.",
+      "observed": "C1: the guard test failing, naming lib/friends.ts. C2: 3 of 26 failing (both production refusals and validateEnv). Restored; 26 of 26.",
+      "date": "2026-11-26"
+    },
     "media-worker.test.ts": {
       "guards": "SCRUM-1106: the clip worker holds one secret and no dependency, starts itself from its own Dockerfile with every source in the image, ffmpeg opens only the downloaded file as MP4, and a pasted link reaches public https addresses only.",
       "mutation": "(C1) main.mjs reads process.env.DATABASE_URL; (C2) CMD back to npm run start; (C3) handler.ts dropped from COPY; (C4) -f mov to -f hls; (C5) lookup refuses only when every address is private; (C6) literal IPs not checked; (C7) 169.254/16 and 2002::/16 dropped; (C8) the byte cap off; (C9) jobs not queued; (C10) the secret not checked; (C11) URLs logged.",
