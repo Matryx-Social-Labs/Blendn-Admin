@@ -119,6 +119,34 @@ value cannot be used in the transaction that added it. Migrations before
 transaction"; that comment is wrong, and the files are left as they are,
 because editing an applied migration changes its checksum (the renamed migrations, below).
 
+#### A migration is additive for one release
+
+The pre-deploy step migrates while the old container still serves, and a
+rollback is "redeploy the previous build", which runs it on the new schema. So
+a migration only adds: add the column or table, backfill, switch the code, and
+drop or rename the old shape in a later deploy, once no running build reads it.
+Rollback is therefore the previous build plus a forward-fix migration, never a
+hand-reverted schema. Take a manual dump before any promotion that carries a
+migration (the backups section, ops task 04).
+
+`__tests__/migration-tx.test.ts` holds every migration after its
+`LAST_UNCHECKED` to this, and to locks that last as long as the table is big:
+
+- `DROP TABLE`, `DROP COLUMN` (or a bare `ALTER TABLE … DROP x`), `DROP TYPE`,
+  and any `RENAME` (a column, a table, a constraint or index the code catches by
+  name, an enum value) fail unless the file says `-- contract: <why> #<PR>`,
+  naming the PR after which nothing reads the old shape. `DROP CONSTRAINT`,
+  `DROP INDEX`, `DROP DEFAULT`, `DROP NOT NULL` and `DROP TRIGGER` are fine.
+- On a table the file does not create: a plain `CREATE INDEX` (use
+  `CONCURRENTLY`, alone in its file), `ADD CONSTRAINT … CHECK | FOREIGN KEY`
+  without `NOT VALID` (validate in a later migration), `ADD CONSTRAINT … UNIQUE
+  | PRIMARY KEY` without `USING INDEX`, `SET NOT NULL` and `ALTER COLUMN … TYPE`
+  fail unless the file says `-- lock-ok: <why>` (a table of 40 rows, say).
+  `lock_timeout` bounds the wait for the lock, not how long it is held.
+- A wrapped migration with DDL has `SET LOCAL lock_timeout` as its second
+  statement: an `ALTER` queued behind a long transaction blocks every read of
+  the table while it waits.
+
 #### The test accounts are written by the same step
 
 Staging's pre-deploy command is `npm run railway:predeploy`
