@@ -14,7 +14,7 @@ import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 
 /*
  * The accounts people sign in as to look at the dashboard, written on every
- * staging deploy by `railway.json`'s pre-deploy step.
+ * staging deploy by its pre-deploy step.
  *
  * Every case runs against its own namespaced world rather than the real
  * addresses: jest shares one database here, and locally that is the same

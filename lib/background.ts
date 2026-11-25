@@ -67,7 +67,7 @@ export function startBackgroundWork(): void {
   /*
    * The reminder the product tells people it sends. `sendEventReminders` was
    * correct and had a cron route in front of it, and nothing called that route
-   * — no cron block in railway.json, no scheduled workflow. It also prunes
+   * — no Railway cron, no scheduled workflow. It also prunes
    * expired refresh tokens, which `cleanupExpiredTokens` has been ready to do
    * since it was written and never been asked to.
    */

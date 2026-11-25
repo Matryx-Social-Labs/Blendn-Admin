@@ -79,6 +79,24 @@ railway run npx prisma migrate deploy
 
 Railway also runs this automatically on deploy, so you rarely need it by hand.
 
+#### The deploy settings are on the Railway service
+
+The pre-deploy command (the migrations), the start command, the `/api/health`
+healthcheck and the restart policy are stored on the service itself, per
+environment, and described in `.railway/railway.ts`. There is no `railway.json`:
+Railway stops reading it on 2026-12-01, and until then it would override the
+service. Railway does not read `.railway/` during a deploy. To change a setting,
+edit the file, then, once per environment:
+
+```bash
+railway config plan --environment staging    # read it: only what you changed
+railway config apply --environment staging   # redeploys the service
+```
+
+Production is the owner's. **A service without the pre-deploy command deploys
+without migrations and says nothing**, so after any change here read the deploy
+log for `prisma migrate deploy`. A settled environment plans no changes.
+
 #### A migration is a transaction only if it says so
 
 `prisma migrate deploy` sends a migration file **statement by statement,
@@ -103,7 +121,8 @@ because editing an applied migration changes its checksum (the renamed migration
 
 #### The test accounts are written by the same step
 
-`railway.json`'s pre-deploy command is `npm run railway:predeploy`: the
+Staging's pre-deploy command is `npm run railway:predeploy`
+(`.railway/railway.ts`; production's is `npm run db:migrate`, the migrations only): the
 migrations, then `scripts/test-accounts.ts`. That creates or repairs one
 dashboard account per role — `admin@`, `organizer@`, `venue.owner@` and
 `sponsor@blendn.app` — with their organisations and memberships, and sets their

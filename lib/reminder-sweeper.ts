@@ -9,8 +9,8 @@ import { sendEventReminders, sendRatingRequests } from "./services/event-notific
  * The reminder people were promised, and the tokens nobody pruned.
  *
  * `sendEventReminders` existed, was correct about its audience, and had a cron
- * route in front of it — and **nothing called that route**. There is no cron
- * block in `railway.json` and no scheduled workflow, so the one notification
+ * route in front of it — and **nothing called that route**. There is no
+ * Railway cron and no scheduled workflow, so the one notification
  * the product tells people it sends was never sent by anything.
  *
  * In-process rather than an external cron, matching the five loops already in

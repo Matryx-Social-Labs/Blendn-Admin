@@ -13,7 +13,7 @@ import { realEventsWhere } from "../lib/event-kind"
  *
  * ## Written on every staging deploy
  *
- * `railway.json`'s pre-deploy step runs this after the migrations. It runs
+ * staging's pre-deploy step (`.railway/railway.ts`) runs this after the migrations. It runs
  * inside Railway's network, so it never meets the internal hostname that
  * `railway run` hands a laptop, and changing the variable is the whole of a
  * password rotation — Railway redeploys and this re-asserts it.
