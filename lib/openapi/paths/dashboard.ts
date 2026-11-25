@@ -248,6 +248,7 @@ registry.registerPath({
               duration_ms: z.number().int().max(15500).optional().openapi({ description: "A clip's measured length: nominally 15 s, over 15500 is 400. Dropped on a non-video" }),
               focal_x: z.number().min(0).max(1).optional().openapi({ description: "Where the subject is, 0–1 from the left; with `focal_y`, or neither (400)" }),
               focal_y: z.number().min(0).max(1).optional(),
+              renditions: z.array(z.object({ url: z.string(), width: z.number().int(), height: z.number().int(), bytes: z.number().int() })).max(4).optional().openapi({ description: "A clip's copies, as `POST /api/media/clip` returned them. Dropped on a non-video" }),
             })).optional(),
           }),
         },
@@ -593,6 +594,43 @@ registry.registerPath({
   },
   responses: {
     204: { description: "Deleted" },
+    ...standardErrors,
+  },
+})
+
+// POST /api/media/clip
+registry.registerPath({
+  method: "post",
+  path: "/api/media/clip",
+  tags: ["Dashboard Uploads"],
+  summary: "Check a clip (dashboard)",
+  description:
+    "Downloads a clip by link in the media worker, measures it, takes six stills and makes two copies. Requires admin/organizer/venue_owner. " +
+    "Can take a minute. 422 (`CLIP_REFUSED`) is a verdict in words: over 15.5 s, over 50 MB, not an MP4/MOV, or a link that cannot be opened. " +
+    "503: the worker is off, busy or down, which says nothing about the clip.",
+  security: sessionAuth,
+  request: { body: { content: { "application/json": { schema: z.object({ url: z.string().describe("https") }) } } } },
+  responses: {
+    200: {
+      description: "The checked clip",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              width: z.number().int(),
+              height: z.number().int(),
+              duration_ms: z.number().int(),
+              stills: z.array(z.object({ url: z.string(), at: z.number().describe("Seconds") })).describe("First = the opening frame"),
+              renditions: z
+                .array(z.object({ url: z.string(), width: z.number().int(), height: z.number().int(), bytes: z.number().int() }))
+                .describe("Smallest first"),
+            })
+          ),
+        },
+      },
+    },
+    422: { description: "The clip cannot be used as it is", content: { "application/json": { schema: z.unknown() } } },
+    503: { description: "Could not be checked now", content: { "application/json": { schema: z.unknown() } } },
     ...standardErrors,
   },
 })

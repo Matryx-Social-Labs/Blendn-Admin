@@ -2,6 +2,7 @@ import { redirect } from "next/navigation"
 import { EventEditor } from "@/components/event-editor"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
+import { clipCheckOn } from "@/lib/media-clip"
 import { canCreateEvents } from "@/lib/rbac"
 import { mayCreateEvents } from "@/lib/event-ownership"
 
@@ -71,6 +72,7 @@ export default async function NewEventPage() {
       categories={categories}
       amenities={amenities}
       canFeature={session.user.role === "app_admin"}
+      clipCheck={clipCheckOn()}
     />
   )
 }

@@ -101,6 +101,8 @@ export interface PublishRailProps {
   card: CardPreviewProps
   isEditing: boolean
   isSubmitting: boolean
+  /** A clip is being checked: what it finds goes into the save. */
+  isWaiting?: boolean
   /** The event's stored status when editing; "draft" on create. */
   status: "draft" | "published" | "cancelled" | "completed"
   onSaveDraft: () => void
@@ -157,6 +159,7 @@ function Actions({
   readiness,
   isEditing,
   isSubmitting,
+  isWaiting = false,
   status,
   onSaveDraft,
   onPublish,
@@ -175,14 +178,17 @@ function Actions({
   const live = isEditing && (status === "published" || ended)
   const cancelled = isEditing && status === "cancelled"
   const left = readiness.blockers.length
-  const why = blocked
-    ? `${left} thing${left === 1 ? "" : "s"} left before it can publish`
-    : null
+  // The wait first: it holds back Save too, and it passes by itself.
+  const why = isWaiting
+    ? "Waiting for a clip to be checked"
+    : blocked
+      ? `${left} thing${left === 1 ? "" : "s"} left before it can publish`
+      : null
 
   return (
     <div className={compact ? "flex items-center gap-2" : "flex flex-col gap-2"}>
       {live ? (
-        <Button type="button" onClick={onSaveChanges} disabled={isSubmitting || blocked} className={compact ? "" : "w-full"}>
+        <Button type="button" onClick={onSaveChanges} disabled={isSubmitting || isWaiting || blocked} aria-describedby={why ? "publish-why" : undefined} className={compact ? "" : "w-full"}>
           {isSubmitting ? "Saving…" : "Save changes"}
         </Button>
       ) : (
@@ -192,7 +198,7 @@ function Actions({
           // and the orange is meant to be earned.
           variant={blocked || cancelled ? "secondary" : "default"}
           onClick={onPublish}
-          disabled={isSubmitting || blocked || cancelled}
+          disabled={isSubmitting || isWaiting || blocked || cancelled}
           aria-describedby={why ? "publish-why" : undefined}
           className={compact ? "" : "w-full"}
         >
@@ -205,7 +211,7 @@ function Actions({
         </p>
       ) : null}
       {!live ? (
-        <Button type="button" variant="outline" onClick={onSaveDraft} disabled={isSubmitting || cancelled} className={compact ? "" : "w-full"}>
+        <Button type="button" variant="outline" onClick={onSaveDraft} disabled={isSubmitting || isWaiting || cancelled} className={compact ? "" : "w-full"}>
           {isEditing ? "Save as draft" : "Save draft"}
         </Button>
       ) : null}

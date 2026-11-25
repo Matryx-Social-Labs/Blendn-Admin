@@ -860,6 +860,9 @@ model event_media {
   /// Both or neither, each 0–1 (`event_media_focal_both`); null = the app's default focus.
   focal_x       Float?
   focal_y       Float?
+  /// A clip's copies, smallest first: [{url, width, height, bytes}] (SCRUM-1106). Only on a video
+  /// (`event_media_renditions_on_video`); null = never checked by the media worker.
+  renditions    Json?
   created_at    DateTime   @default(now()) @db.Timestamptz(6)
   updated_at    DateTime   @default(now()) @db.Timestamptz(6)
 

@@ -92,7 +92,7 @@ describe("event notifications are reachable", () => {
     expect(isUncancellingEvent("draft", "published")).toBe(false)
     // The rail stops offering the draft button on a cancelled event, so the
     // refusal is a backstop rather than the thing an organiser meets.
-    expect(read("components/event-form/publish-rail.tsx")).toMatch(/onClick=\{onSaveDraft\} disabled=\{isSubmitting \|\| cancelled\}/)
+    expect(read("components/event-form/publish-rail.tsx")).toMatch(/onClick=\{onSaveDraft\} disabled=\{isSubmitting \|\| isWaiting \|\| cancelled\}/)
   })
 })
 

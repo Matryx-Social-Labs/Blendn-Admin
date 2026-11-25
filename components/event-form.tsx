@@ -26,6 +26,7 @@ import { AdvancedSection } from "@/components/event-form/advanced-section"
 import { uploadFile } from "@/components/event-form/upload"
 import { captureVideoPoster } from "@/lib/video-poster"
 import { readMediaSize } from "@/lib/media-size"
+import { askClipCheck, checkMediaClip, type ClipCheckState, type ClipPatch } from "@/components/event-form/check-clip"
 import { uploadMediaItem } from "@/components/event-form/upload-media-item"
 import { DEFAULT_CHECK_IN_RADIUS_M } from "@/lib/constants"
 import { Refusal } from "@/lib/refusal"
@@ -42,6 +43,8 @@ interface EventFormProps {
   isEditing?: boolean
   /** app_admin only: the Featured switch, and the API's acceptance of it. */
   canFeature?: boolean
+  /** Clips are checked by the media worker here (`clipCheckOn`); none of it is drawn otherwise. */
+  clipCheck?: boolean
   categories?: CategoryOption[]
   /** The seeded amenity vocabulary. Empty is a valid state: no picker drawn. */
   amenities?: AmenityOption[]
@@ -67,6 +70,7 @@ export function EventForm({
   isSubmitting = false,
   isEditing = false,
   canFeature = false,
+  clipCheck = false,
   categories = [],
   amenities = [],
 }: EventFormProps) {
@@ -118,6 +122,50 @@ export function EventForm({
   const [coverUploadProgress, setCoverUploadProgress] = useState(0)
   const [mediaUploadProgress, setMediaUploadProgress] = useState<Record<string, number>>({})
 
+  // ── Clip checks ─────────────────────────────────────────────────────────────
+
+  const [clipChecks, setClipChecks] = useState<Record<string, ClipCheckState>>({})
+  /** The newest run per item: an older answer, about a link since retyped, must not write over it. */
+  const clipRuns = useRef<Record<string, number>>({})
+  /** One at a time: the server checks one clip per person. */
+  const clipLine = useRef<Promise<unknown>>(Promise.resolve())
+
+  const setClipState = (itemId: string, state: ClipCheckState | null) =>
+    setClipChecks(({ [itemId]: _old, ...rest }) => (state ? { ...rest, [itemId]: state } : rest))
+
+  /** A retyped link or another file: whatever was said about the old clip is gone, and an answer on its way is dropped. */
+  const forgetClipCheck = (itemId: string) => {
+    clipRuns.current = { ...clipRuns.current, [itemId]: (clipRuns.current[itemId] ?? 0) + 1 }
+    setClipState(itemId, null)
+  }
+
+  const handleClipCheck = async (itemId: string, newClip: boolean) => {
+    if (!clipCheck) return
+    const run = (clipRuns.current[itemId] ?? 0) + 1
+    clipRuns.current = { ...clipRuns.current, [itemId]: run }
+    const current = () => clipRuns.current[itemId] === run
+    setClipState(itemId, { kind: "checking" })
+    const state = await checkMediaClip(
+      itemId,
+      {
+        items: () => (current() ? form.getValues("media_items") ?? [] : []),
+        write: (index, patch) => {
+          for (const key of Object.keys(patch) as (keyof ClipPatch)[]) {
+            form.setValue(`media_items.${index}.${key}`, patch[key], { shouldDirty: true })
+          }
+          void form.trigger(`media_items.${index}.url`)
+        },
+        ask: (url) => {
+          const turn = clipLine.current.then(() => askClipCheck(url))
+          clipLine.current = turn
+          return turn
+        },
+      },
+      newClip
+    )
+    if (current()) setClipState(itemId, state)
+  }
+
   // ── Upload helpers ──────────────────────────────────────────────────────────
 
   /** Keyed by the item's id, so the bar follows its item through a drag. */
@@ -128,12 +176,15 @@ export function EventForm({
       const result = await uploadMediaItem(file, itemId, {
         items: () => form.getValues("media_items") ?? [],
         write: (index, patch) => {
+          // Before the URL, which validates: the old clip's refusal must be gone by then.
+          form.setValue(`media_items.${index}.clip_refusal`, patch.clip_refusal)
           form.setValue(`media_items.${index}.url`, patch.url, { shouldValidate: true })
           form.setValue(`media_items.${index}.width`, patch.width)
           form.setValue(`media_items.${index}.height`, patch.height)
           form.setValue(`media_items.${index}.duration_ms`, patch.duration_ms)
           form.setValue(`media_items.${index}.focal_x`, patch.focal_x)
           form.setValue(`media_items.${index}.focal_y`, patch.focal_y)
+          form.setValue(`media_items.${index}.renditions`, patch.renditions)
           if (patch.thumbnail_url !== undefined) form.setValue(`media_items.${index}.thumbnail_url`, patch.thumbnail_url)
         },
         upload: uploadFile,
@@ -151,6 +202,8 @@ export function EventForm({
       if (result.kind === "done") {
         if (result.posterMissing) toast.info("Add a poster image for this clip so it does not flash when it loads.")
         toast.success("Media uploaded")
+        // Not awaited: the upload is done, and the line under the clip says how the check goes.
+        if (form.getValues("media_items")?.some((m) => m.id === itemId && m.type === "video")) void handleClipCheck(itemId, true)
       }
     } catch (err) {
       toast.error(err instanceof Refusal ? err.message : "Failed to upload media")
@@ -219,6 +272,10 @@ export function EventForm({
     void submitAsStatus(form, status, submit)
   }
   const [listingVenue, setListingVenue] = useState(false)
+  // A save now would leave without what the check is about to say (or let through what it refuses).
+  const clipsChecking = mediaFieldArray.fields.some(
+    (_field, i) => clipChecks[form.getValues(`media_items.${i}.id`) ?? ""]?.kind === "checking"
+  )
   // The rail disables on the state above one render late; this refuses a
   // second click in between, which would list the place twice (React review).
   const submitting = useRef(false)
@@ -257,6 +314,7 @@ export function EventForm({
     readiness,
     isEditing,
     isSubmitting: isSubmitting || listingVenue,
+    isWaiting: clipsChecking,
     status: (storedStatus ?? "draft") as EventFormValues["status"],
     onSaveDraft: () => submitAs("draft"),
     onPublish: () => submitAs("published"),
@@ -303,6 +361,7 @@ export function EventForm({
               mediaFieldArray={mediaFieldArray}
               mediaUploadProgress={mediaUploadProgress}
               onUpload={handleMediaUpload}
+              clips={clipCheck ? { checks: clipChecks, onCheck: handleClipCheck, onForget: forgetClipCheck } : null}
             />
             <AmenitiesSection form={form} amenities={amenities} />
             <AdvancedSection

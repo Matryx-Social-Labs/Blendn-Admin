@@ -218,6 +218,8 @@ const USER_POLICIES = {
   broadcast: { windowMs: 60 * 1000, maxRequests: 3 },
   /** Issues a signed upload URL; unbounded means unbounded storage. */
   upload: { windowMs: 60 * 1000, maxRequests: 20 },
+  /** Downloads and transcodes a clip in the media worker, one at a time: minutes of its CPU, and eight stored files. */
+  clipCheck: { windowMs: 60 * 1000, maxRequests: 6 },
   /** Safety actions. Loose on purpose — see above. */
   safety: { windowMs: 60 * 1000, maxRequests: 20 },
   /**

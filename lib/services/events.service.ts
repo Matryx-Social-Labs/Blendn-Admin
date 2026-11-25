@@ -124,6 +124,8 @@ export const eventListSelect = {
       // Where the subject is (SCRUM-1106): the card crops around it. Both or neither; null = default focus.
       focal_x: true,
       focal_y: true,
+      // A clip's copies, smallest first; null = only `url` (SCRUM-1106).
+      renditions: true,
     },
     orderBy: { order: "asc" },
     take: 5,

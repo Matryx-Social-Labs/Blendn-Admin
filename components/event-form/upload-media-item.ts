@@ -4,7 +4,7 @@ import type { MediaSize } from "@/lib/media-size"
 import { clipTooLong } from "@/lib/media-size"
 
 type MediaItem = NonNullable<EventFormValues["media_items"]>[number]
-type MediaPatch = Pick<MediaItem, "url" | "thumbnail_url" | "width" | "height" | "duration_ms" | "focal_x" | "focal_y">
+type MediaPatch = Pick<MediaItem, "url" | "thumbnail_url" | "width" | "height" | "duration_ms" | "focal_x" | "focal_y" | "renditions" | "clip_refusal">
 
 export interface UploadMediaDeps {
   /** The gallery as it is now: read again after the upload, because it can be reordered or cut meanwhile. */
@@ -64,6 +64,9 @@ export async function uploadMediaItem(file: File, itemId: string, deps: UploadMe
     duration_ms: size?.duration_ms,
     focal_x: undefined,
     focal_y: undefined,
+    // The old clip's copies, and the old clip's refusal.
+    renditions: undefined,
+    clip_refusal: undefined,
     ...(poster === undefined ? {} : { thumbnail_url: poster ?? "" }),
   })
   return { kind: "done", posterMissing: type === "video" && poster === null }
