@@ -125,9 +125,6 @@ export const checkinSchema = z.object({
   withCrewId: z.string().uuid().optional(),
 })
 
-// Maximum acceptable GPS accuracy (metres). Submissions worse than this are rejected.
-export const MAX_GPS_ACCURACY_METERS = 150
-
 export const ratingSchema = z.object({
   rating: z.number().int().min(1).max(5),
 })

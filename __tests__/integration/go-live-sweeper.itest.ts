@@ -108,7 +108,8 @@ async function crowd(n: number, opts: { expiresInMin: number; leftAreaMinAgo?: n
       created_at: created,
       expires_at: expires,
       last_seen_at: arrived,
-      ...(i < (opts.leftCount ?? 0) && opts.leftAreaMinAgo !== undefined && { left_area_at: new Date(Date.now() - opts.leftAreaMinAgo * 60_000) }),
+      // Out, and seen out again since (SCRUM-1326: one outside reading alone never checks anybody out).
+      ...(i < (opts.leftCount ?? 0) && opts.leftAreaMinAgo !== undefined && { left_area_at: new Date(Date.now() - opts.leftAreaMinAgo * 60_000), last_seen_at: new Date(Date.now() - 5 * 60_000) }),
     })),
   })
   await db.presence_sessions.createMany({
@@ -171,6 +172,8 @@ describe("bounds (F5)", () => {
         created_at: new Date(now - 5 * 3_600_000),
         expires_at: new Date(now + 3_600_000),
         left_area_at: new Date(now - 30 * 60_000),
+        // A second outside reading since (SCRUM-1326).
+        last_seen_at: new Date(now - 5 * 60_000),
       })),
     })
     const open = () => db.event_check_ins.count({ where: { user_id: { in: runners }, status: "checked_in" } })

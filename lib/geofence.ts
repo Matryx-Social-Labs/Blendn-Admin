@@ -1,6 +1,14 @@
 import { haversineDistanceMeters } from "./geo"
 
 /**
+ * Maximum acceptable GPS accuracy (metres). The door refuses a fix worse than
+ * this, and a presence ping worse than this that reads outside is silence
+ * (`lib/presence.ts`, SCRUM-1326). Here, not in `validations/event`, because
+ * the custom server reaches presence and must not reach an `@/` alias.
+ */
+export const MAX_GPS_ACCURACY_METERS = 150
+
+/**
  * Geofencing for GPS check-in.
  *
  * The product's whole premise is that everyone in an event's chatroom is

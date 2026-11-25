@@ -986,6 +986,7 @@ and `/event/<id>` and their link-preview cards. No auth, no CORS; `lib/share-pub
 | POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`). On a native ticketed event (`TICKETING` on), 403 `tickets_required` unless the caller holds a ticket whose order is paid or is the event's staff (SCRUM-1014). `left` names the rooms it took you out of (see "One room at a time, and the switch"). Optional `withCrewId` tells that crew you're in ("With {crew}", answered by `crewTold`) |
 | GET | `/events/:eventId/people` | People from a night you attended, for the Recap — see below |
 | POST | `/events/:eventId/checkout` | Check out of event |
+| POST | `/events/:eventId/presence` | "Am I still counted as here?", every few minutes while checked in. `status` is `inside`, `outside`, `unknown` (a fix worse than the door's 150 m that reads outside: it neither starts nor advances the departure clock, SCRUM-1326), `checked_out` or `not_checked_in`. Checked out after 20 minutes outside, and on silence only after two outside readings at least 10 minutes apart; see `docs/CHECKIN.md` |
 | POST | `/events/:eventId/favorite` | Toggle favorite/interest |
 | DELETE | `/events/:eventId/favorite` | Remove favorite |
 | GET | `/events/:eventId/interested-users` | `{ interestedCount, users: [], pagination }` — a count. `users` is always empty: who favourited an event is not disclosed |

@@ -209,9 +209,9 @@ async function sweepRooms(
         lastSeenAt: row.last_seen_at,
       }
       // The sweeper never has a ping — it runs between them. Its job is the
-      // passage of time: grace expiring, a prompt going unanswered, a day
-      // ending. `evaluatePresence` treats a null ping as silence, which never
-      // causes a mid-event checkout.
+      // passage of time: the allowance running out after two outside readings,
+      // a day ending. Silence alone, or after one outside reading, never causes
+      // a mid-event checkout (`evaluatePresence`, SCRUM-1326).
       return {
         row,
         decision: fence

@@ -1,4 +1,4 @@
-import { evaluateCheckIn, type Geofence, type LatLng } from "./geofence"
+import { evaluateCheckIn, MAX_GPS_ACCURACY_METERS, type Geofence, type LatLng } from "./geofence"
 
 /**
  * Is this person still here?
@@ -20,8 +20,10 @@ import { evaluateCheckIn, type Geofence, type LatLng } from "./geofence"
  *   ping inside, was out ─────────────────────────▶  clear_departure
  *   ping outside, first  ─────────────────────────▶  record_departure
  *   ping outside, > departure allowance ──────────▶  auto_checkout
+ *   weak fix (> the door's limit) reading outside ▶  as no ping (SCRUM-1326)
  *   no ping, never left  ─────────────────────────▶  stay   (silence is ambiguous)
- *   no ping, was outside ─────────────────────────▶  the departure clock keeps running
+ *   no ping, one outside reading only ────────────▶  stay   (pocketed on the way back in)
+ *   no ping, a second outside reading ≥ grace later ▶  the departure clock keeps running
  *   occurrence ended     ─────────────────────────▶  auto_checkout
  *   staff                ─────────────────────────▶  stay   (never auto)
  */
@@ -131,27 +133,6 @@ export function evaluatePresence(
   }
 
   /*
-   * Silence, with no evidence they ever left.
-   *
-   * No ping can mean: the app is backgrounded, iOS suspended it, the venue is a
-   * basement with no signal, the battery died, the permission was revoked,
-   * someone turned on airplane mode. None of those mean the person left, and a
-   * venue whose signal dies must never read as an evacuation.
-   *
-   * So silence on its own never does anything. It is resolved by the
-   * occurrence-ended branch above and nowhere else.
-   *
-   * Silence *after* a confirmed out-of-fence reading is a different thing, and
-   * falls through to the departure clock below: there we have positive evidence
-   * they stepped out, we asked them, and they did not answer. That is what the
-   * prompt is for, and only the sweeper — which never carries a ping — can ever
-   * observe the timeout expiring.
-   */
-  if (ping === null && state.leftAreaAt === null) {
-    return { action: "stay", reason: "no_signal" }
-  }
-
-  /*
    * Judged with the same allowance as check-in itself.
    *
    * A 100m fix inside a 30m fence is evidence of being indoors, not of having
@@ -167,7 +148,35 @@ export function evaluatePresence(
       : { action: "clear_departure", reason: "returned" }
   }
 
-  const shortfall = verdict?.ok === false ? verdict.shortfall : undefined
+  /*
+   * Silence, and anything that is not a reading outside.
+   *
+   * No ping can mean: the app is backgrounded, iOS suspended it, the venue is a
+   * basement with no signal, the battery died, the permission was revoked,
+   * someone turned on airplane mode. None of those mean the person left, and a
+   * venue whose signal dies must never read as an evacuation.
+   *
+   * A fix the door would refuse (`MAX_GPS_ACCURACY_METERS`: Balanced indoors,
+   * iOS approximate, Android coarse) is the same silence when it reads outside:
+   * it cannot place anybody, so it neither starts nor advances the clock (P-8).
+   *
+   * Silence after an outside reading runs the clock on only when there were
+   * two, a grace period apart: a phone opened once at the gate and pocketed on
+   * the way back in is one reading, and must not check anybody out (P-7). The
+   * second is `last_seen_at`, which moves while `left_area_at` is set only on a
+   * persisted outside reading (an inside one clears it; the ping route never
+   * writes it for a weak fix). Otherwise the day ending closes them.
+   */
+  const weak = ping?.accuracy != null && ping.accuracy > MAX_GPS_ACCURACY_METERS
+  if (verdict === null || weak) {
+    const outTwice =
+      state.leftAreaAt !== null &&
+      state.lastSeenAt !== null &&
+      state.lastSeenAt.getTime() - state.leftAreaAt.getTime() >= minutes(DEPARTURE_GRACE_MINUTES)
+    if (!outTwice) return { action: "stay", reason: "no_signal" }
+  }
+
+  const shortfall = verdict?.ok === false && !weak ? verdict.shortfall : undefined
 
   if (state.leftAreaAt === null) {
     // First reading outside. Start the clock; do not act on one sample.
