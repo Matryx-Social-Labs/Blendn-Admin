@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { CREW } from "@/lib/constants"
 import { registry } from "@/lib/openapi/registry"
+import { ShareHeaders } from "@/lib/openapi/paths/system"
 import { BadgeSchema, ErrorResponseSchema, ListPaginationSchema, ListQuerySchema, OverlapSchema, standardErrors, UserRefParamSchema, wrap, ROOM_BAN_GATE, bearerAuth } from "@/lib/openapi/schemas/common"
 
 /*
@@ -738,9 +739,9 @@ registry.registerPath({
   tags,
   summary: "A crew invite link, before sign-in",
   description:
-    "No account needed (20 a minute per IP). The crew's name, emblem and size and the sharer's first name and photo: no members, line or tags. " +
+    "No account needed (20 a minute per visitor, key `crew-link-preview:<network>`: the landing's forwarded `x-share-client` when it sends the `x-share-proxy` secret, otherwise the caller's own network). The crew's name, emblem and size and the sharer's first name and photo: no members, line or tags. " +
     "A signed-in caller kept apart from anybody in the crew gets the 404 too. " +
     LINK_404,
-  request: { params: LinkToken },
+  request: { params: LinkToken, headers: ShareHeaders },
   responses: { 200: { description: "The preview", ...json(wrap(LinkPreview)) }, ...standardErrors },
 })
