@@ -19,7 +19,7 @@ export interface ClipRequest {
 }
 export type ClipResult =
   | { ok: true; width: number; height: number; durationMs: number; stillSeconds: number[]; main: CopyFacts; small: CopyFacts }
-  | { ok: false; reason: "unreachable" | "not_video" | "too_big" | "too_long"; bytes?: number; durationMs?: number }
+  | { ok: false; reason: "unreachable" | "not_video" | "too_big" | "too_long" | "unsupported_hdr"; bytes?: number; durationMs?: number }
 export interface CopyFacts {
   width: number
   height: number
