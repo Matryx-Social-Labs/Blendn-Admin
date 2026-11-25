@@ -71,7 +71,7 @@ registry.registerPath({
  * What the landing site's public pages and link-preview cards are drawn from.
  * Server to server; no auth, no CORS. Not for the app.
  */
-const ShareHeaders = z.object({
+export const ShareHeaders = z.object({
   "x-share-proxy": z.string().optional().openapi({
     description:
       "The landing's shared secret (`SHARE_PROXY_SECRET`). Only a caller that sends it is believed about `x-share-client`; without it the caller is limited by its own address.",
