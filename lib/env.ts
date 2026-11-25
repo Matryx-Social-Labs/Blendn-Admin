@@ -95,6 +95,20 @@ const envSchema = z.object({
   MAINTENANCE_MODE: z.string().optional(),
   /** The `Retry-After` of that 503, in seconds (default 300, at most 3600). */
   MAINTENANCE_RETRY_AFTER_SECONDS: z.string().optional(),
+  /**
+   * Redis for the rate limiter and the match deck's exposure counts. Unset:
+   * both count in this process's memory, correct at one replica. Set but down:
+   * the same, at once; neither waits on Redis (SCRUM-1217).
+   */
+  REDIS_URL: z.string().optional(),
+  /**
+   * `1`: attach the Socket.io Redis adapter (lib/socket-server.ts), which a
+   * second replica needs. Anything else: the in-memory adapter, which one
+   * replica wants, because with the Redis one a Redis restart froze every room
+   * emit. Never set on its own: see the comment there for the other two
+   * preconditions of a second replica.
+   */
+  SOCKET_REDIS_ADAPTER: z.string().optional(),
   DASHBOARD_HOST: z.string().optional(),
   API_HOST: z.string().optional(),
   /**

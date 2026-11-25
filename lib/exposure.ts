@@ -40,35 +40,42 @@ type RedisLike = {
   mGet(keys: string[]): Promise<(string | null)[]>
 }
 
-let clientPromise: Promise<RedisLike | null> | null = null
+let client: (RedisLike & { isReady: boolean }) | null = null
+let starting: Promise<void> | null = null
 
+/**
+ * The client when it can answer now, else null, and never a wait on Redis:
+ * `connect()` is started once and not awaited, because in node-redis 6 it
+ * retries for ever while Redis is down (as `rate-limit-store.ts`).
+ */
 async function getRedis(): Promise<RedisLike | null> {
   const url = process.env.REDIS_URL
   if (!url) return null
+  starting ??= startRedis(url)
+  await starting
+  return client?.isReady ? client : null
+}
 
-  if (!clientPromise) {
-    clientPromise = (async () => {
-      try {
-        const { createClient } = await import("redis")
-        const client = createClient({ url })
-        // An unhandled 'error' event takes the process down, and a ranking
-        // heuristic must never do that.
-        client.on("error", (error: unknown) => {
-          logger.warn("Exposure Redis error", {
-            error: error instanceof Error ? error.message : String(error),
-          })
-        })
-        await client.connect()
-        return client as unknown as RedisLike
-      } catch (error) {
-        logger.warn("Exposure counters falling back to memory", {
-          error: error instanceof Error ? error.message : String(error),
-        })
-        return null
-      }
-    })()
+async function startRedis(url: string): Promise<void> {
+  const unavailable = (error: unknown) =>
+    logger.warn("Exposure counters falling back to memory", {
+      error: error instanceof Error ? error.message : String(error),
+    })
+  try {
+    const { createClient } = await import("redis")
+    const created = createClient({ url })
+    // An unhandled 'error' event takes the process down, and a ranking
+    // heuristic must never do that.
+    created.on("error", (error: unknown) => {
+      logger.warn("Exposure Redis error", {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
+    created.connect().catch(unavailable)
+    client = created as unknown as RedisLike & { isReady: boolean }
+  } catch (error) {
+    unavailable(error)
   }
-  return clientPromise
 }
 
 /* -------------------------------------------------------------------------- */
