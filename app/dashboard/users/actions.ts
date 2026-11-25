@@ -6,7 +6,8 @@ import { db } from "@/lib/db"
 import { normalizeLocationToCity } from "@/lib/location"
 import { revalidatePath } from "next/cache"
 import { requireAdmin } from "@/lib/current-user"
-import { auditLog } from "@/lib/audit-log"
+import { auditInTx } from "@/lib/audit-log"
+import { COMPANY, isStaffEmail } from "@/lib/company"
 import { ageFrom } from "@/lib/age"
 import type { user_role } from "@prisma/client"
 import { SYSTEM_USER_ID } from "@/lib/event-kind"
@@ -244,11 +245,29 @@ export async function updateUser(
       select: {
         name: true,
         email: true,
+        role: true,
         profile: { select: { phone: true, age: true, date_of_birth: true, location: true, onboarded: true } },
       },
     })
     // Its address is the one thing that keeps anybody from signing in as it.
     if (!before || id === SYSTEM_USER_ID) throw new Refusal("User not found")
+
+    // Stored the way sign-in looks it up (lib/auth.ts): a capital letter typed here locked the person out.
+    const email = data.email?.trim().toLowerCase()
+    /*
+     * An email change followed by a password reset is a takeover of the
+     * account (SCRUM-1235). An admin's address is never changed here, and no
+     * address is moved onto the company domain, which is what makes an account
+     * eligible for admin (`updateUserRole`).
+     */
+    if (email !== undefined && email !== before.email) {
+      if (before.role === "app_admin") {
+        throw new Refusal("An admin's email can't be changed from the dashboard. Create a new account for the new address.")
+      }
+      if (isStaffEmail(email)) {
+        throw new Refusal(`A @${COMPANY.staffEmailDomain} address can't be set from the dashboard. Create the company account instead.`)
+      }
+    }
 
     /*
      * Age is typed at sign-up and superseded by the birth date the moment one
@@ -266,7 +285,7 @@ export async function updateUser(
 
     const updateData: Record<string, unknown> = {}
     if (data.name !== undefined) updateData.name = data.name
-    if (data.email !== undefined) updateData.email = data.email
+    if (email !== undefined) updateData.email = email
 
     if (data.profile) {
       updateData.profile = {
@@ -312,38 +331,41 @@ export async function updateUser(
       }
     }
 
-    // `deletedAt: null` in the where: an erased account cannot be edited back
-    // into existence. The row menu is hidden for those rows, but a server
-    // action is callable without a menu. P2025 surfaces as the generic error.
-    await db.user.update({
-      where: { id, deletedAt: null },
-      data: updateData,
-      // Nothing is read back: the row carries the password hash and the birth date.
-      select: { id: true },
-    })
-
     const changed: Record<string, { from: unknown; to: unknown }> = {}
     const note = (field: string, from: unknown, to: unknown) => {
       if (to !== undefined && from !== to) changed[field] = { from: from ?? null, to: to ?? null }
     }
     note("name", before.name, data.name)
-    note("email", before.email, data.email)
+    note("email", before.email, email)
     note("phone", before.profile?.phone, data.profile?.phone)
     note("age", before.profile?.age, data.profile?.age)
     note("location", before.profile?.location, normalizedLocation)
     note("onboarded", before.profile?.onboarded, data.profile?.onboarded)
-    // Nothing changed, no row: the dialog sends every field it shows and then the
-    // role, so a role-only save used to leave "user.updated {}" beside the real
-    // `user.role_changed` (SCRUM-614).
-    if (Object.keys(changed).length > 0) {
-      auditLog({
-        userId: admin.id,
-        action: "user.updated",
-        resource: "user",
-        resourceId: id,
-        details: { changed } as never,
+
+    // The edit and its audit row commit together or not at all (SCRUM-1235).
+    await db.$transaction(async (tx) => {
+      // `deletedAt: null` in the where: an erased account cannot be edited back
+      // into existence. The row menu is hidden for those rows, but a server
+      // action is callable without a menu. P2025 surfaces as the generic error.
+      await tx.user.update({
+        where: { id, deletedAt: null },
+        data: updateData,
+        // Nothing is read back: the row carries the password hash and the birth date.
+        select: { id: true },
       })
-    }
+      // Nothing changed, no row: the dialog sends every field it shows and then the
+      // role, so a role-only save used to leave "user.updated {}" beside the real
+      // `user.role_changed` (SCRUM-614).
+      if (Object.keys(changed).length > 0) {
+        await auditInTx(tx, {
+          userId: admin.id,
+          action: "user.updated",
+          resource: "user",
+          resourceId: id,
+          details: { changed } as never,
+        })
+      }
+    })
 
     revalidatePath("/dashboard/users")
     return { success: true }
@@ -356,17 +378,32 @@ export async function updateUser(
 
 export async function updateUserRole(id: string, role: user_role) {
   const admin = await requireAdmin()
-  const before = id === SYSTEM_USER_ID ? null : await db.user.findUnique({ where: { id, deletedAt: null }, select: { role: true } })
+  const before = id === SYSTEM_USER_ID ? null : await db.user.findUnique({ where: { id, deletedAt: null }, select: { role: true, email: true } })
   if (!before) throw new Refusal("User not found")
-  await db.user.update({ where: { id, deletedAt: null }, data: { role } })
-  // A role change is the canonical audited admin action (CLAUDE.md), and it
-  // had no row: an attendee made an admin left nothing behind (SCRUM-131).
-  auditLog({
-    userId: admin.id,
-    action: "user.role_changed",
-    resource: "user",
-    resourceId: id,
-    details: { from: before.role, to: role },
+  // Admins are company staff only (launch gate 10, SCRUM-1235).
+  if (role === "app_admin" && !isStaffEmail(before.email)) {
+    throw new Refusal(
+      `Only @${COMPANY.staffEmailDomain} accounts can be admins. Set up the person's company account and make that one an admin.`
+    )
+  }
+  await db.$transaction(async (tx) => {
+    if (before.role === "app_admin" && role !== "app_admin") {
+      // Locks every live admin row, so two admins demoting each other at once
+      // queue here and the second one sees who is left.
+      const admins = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "User" WHERE role = 'app_admin' AND "deletedAt" IS NULL AND suspended_at IS NULL FOR UPDATE`
+      if (!admins.some((a) => a.id !== id)) throw new Refusal("This is the last admin. Make someone else an admin first.")
+    }
+    await tx.user.update({ where: { id, deletedAt: null }, data: { role }, select: { id: true } })
+    // A role change is the canonical audited admin action (CLAUDE.md): its row
+    // commits with it, so a failed audit write changes nothing (SCRUM-131, SCRUM-1235).
+    await auditInTx(tx, {
+      userId: admin.id,
+      action: "user.role_changed",
+      resource: "user",
+      resourceId: id,
+      details: { from: before.role, to: role },
+    })
   })
   revalidatePath("/dashboard/users")
   return { success: true }

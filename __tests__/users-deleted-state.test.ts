@@ -24,6 +24,8 @@ const mockDb = {
   event_check_ins: { groupBy: jest.fn().mockResolvedValue([]) },
   event_favorites: { groupBy: jest.fn().mockResolvedValue([]) },
   audit_logs: { create: jest.fn() },
+  // The edit and its audit row are one transaction (SCRUM-1235); the mock runs it on itself.
+  $transaction: jest.fn(async (fn: (tx: unknown) => unknown) => fn(mockDb)),
 }
 const mockAuth = jest.fn()
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -54,7 +56,7 @@ beforeEach(() => {
       ? { role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null }
       : { name: "Old", email: "old@x", role: "attendee", profile: null }
   )
-  mockDb.audit_logs.create.mockReturnValue({ catch: () => undefined, then: () => undefined })
+  mockDb.audit_logs.create.mockResolvedValue({})
 })
 
 const whereOf = (call: jest.Mock) => call.mock.calls[0][0].where as { AND: Record<string, unknown>[] }

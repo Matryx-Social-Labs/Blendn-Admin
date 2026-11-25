@@ -19,7 +19,14 @@ export const COMPANY = {
   grievance: { name: "Likhith Gowda", title: "Chief Operating Officer", email: "grievance@blendn.app" },
   /** The current privacy policy, the one the app links to (the landing site's). */
   privacyUrl: "https://www.blendn.app/privacy",
+  /** The only domain an `app_admin` may sign in with (launch gate 10, SCRUM-1235). */
+  staffEmailDomain: "matrixsociallabs.com",
 } as const
+
+/** Whether an address is on the company domain, the only one an admin may have. */
+export function isStaffEmail(email: string): boolean {
+  return email.trim().toLowerCase().endsWith(`@${COMPANY.staffEmailDomain}`)
+}
 
 /** The public policy pages, in the order every page and the sign-in page list them. */
 export const POLICY_LINKS = [
