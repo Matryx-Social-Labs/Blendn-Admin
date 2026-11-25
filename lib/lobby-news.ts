@@ -12,6 +12,9 @@ type NewsEvent = { id: string; start_time: Date; end_time: Date; ticketing_mode:
  * none). Never the caller's own, never a hidden author's (`hiddenAuthorsFor`), never a spare ticket where the Lobby
  * hides tickets (`livePostsWhere`'s rules). One grouped query for the page: no N+1.
  *
+ * The marker is the newest post's `createdAt` as JSON carried it, to the millisecond, while `created_at` is `now()`'s
+ * microseconds: the comparison truncates the post's time to match, or the newest post counts as new forever (SCRUM-1118).
+ *
  * Only events in the map get a `lobby` object; read-only (doors open) and closed Lobbies are not news.
  */
 export async function lobbyNewCounts(viewerId: string, events: readonly NewsEvent[], now: Date = new Date()): Promise<Map<string, number>> {
@@ -27,7 +30,7 @@ export async function lobbyNewCounts(viewerId: string, events: readonly NewsEven
        AND p.deleted_at IS NULL
        AND p.author_id <> ${viewerId}
        ${hidden.length ? Prisma.sql`AND NOT (p.author_id = ANY(${hidden}::text[]))` : Prisma.empty}
-       AND (s.seen_at IS NULL OR p.created_at > s.seen_at)
+       AND (s.seen_at IS NULL OR date_trunc('milliseconds', p.created_at) > s.seen_at)
        AND NOT (p.event_id = ANY(${noTickets}::uuid[]) AND p.sub_kind IS NOT DISTINCT FROM 'ticket')
      GROUP BY p.event_id`
   const counts = new Map(open.map((e) => [e.id, 0]))

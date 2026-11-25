@@ -241,6 +241,25 @@ describe("lobby.newCount on GET /me/rsvps", () => {
     expect(rows.find((e) => e.id === open)?.lobby).toEqual({ newCount: 0 })
   })
 
+  it("clears a post stored to the microsecond once the marker is its createdAt as JSON gives it, to the millisecond (SCRUM-1118)", async () => {
+    const eventId = await eventStarting(48 * HOUR)
+    const me = await person("gl-us-me")
+    const other = await person("gl-us-other")
+    await going(eventId, me.id)
+    // now() stores microseconds; Prisma and JSON carry milliseconds, so the client's `at` is the post's time truncated.
+    const { id } = await db.board_posts.create({ data: { event_id: eventId, author_id: other.id, kind: "chat", body: "hi" } })
+    await db.$executeRaw`UPDATE board_posts SET created_at = date_trunc('milliseconds', now()) - interval '1 minute' + interval '849 microseconds' WHERE id = ${id}::uuid`
+    const shown = await db.board_posts.findUniqueOrThrow({ where: { id }, select: { created_at: true } })
+
+    expect((await call(seen.POST, "board/seen", eventId, me.token, "POST", { at: shown.created_at.toISOString() })).status).toBe(200)
+
+    const rows = await myGoing(me.token)
+    expect(rows.find((e) => e.id === eventId)?.lobby).toEqual({ newCount: 0 })
+    // A post a millisecond later is still news: truncation only forgives the part JSON cannot carry.
+    await db.board_posts.create({ data: { event_id: eventId, author_id: other.id, kind: "chat", body: "again", created_at: new Date(shown.created_at.getTime() + 1) } })
+    expect((await myGoing(me.token)).find((e) => e.id === eventId)?.lobby).toEqual({ newCount: 1 })
+  })
+
   it("leaves out spare tickets where the Lobby hides them, and only there", async () => {
     const native = await eventStarting(48 * HOUR)
     const plain = await eventStarting(48 * HOUR)
