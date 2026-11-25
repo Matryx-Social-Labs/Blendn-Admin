@@ -8,13 +8,14 @@ const FIRST_WRAPPED = "20261009120000"
  * Alone in its file and unwrapped: `ALTER TYPE … ADD VALUE` cannot share a transaction with its use, and
  * Postgres refuses `CONCURRENTLY` inside one. A single statement is atomic enough.
  */
-const UNWRAPPABLE = /^(ALTER TYPE .* ADD VALUE|CREATE (UNIQUE )?INDEX CONCURRENTLY)/i
+const UNWRAPPABLE = /^(ALTER TYPE .* ADD VALUE|(CREATE|DROP) (UNIQUE )?INDEX CONCURRENTLY)/i
+const statementsOf = (sql: string) => sql.replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)
 
 describe("migrations are transactions", () => {
   const files = readdirSync(DIR).filter((d) => d >= FIRST_WRAPPED && /^\d{14}_/.test(d))
   it.each(files)("%s begins and commits", (dir) => {
     const sql = readFileSync(join(DIR, dir, "migration.sql"), "utf8")
-    const statements = sql.replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)
+    const statements = statementsOf(sql)
     if (statements.length === 1 && UNWRAPPABLE.test(statements[0])) return
     expect(statements[0].toUpperCase()).toBe("BEGIN")
     expect(statements.at(-1)!.toUpperCase()).toBe("COMMIT")
@@ -34,7 +35,7 @@ describe("a CONCURRENTLY migration is exactly one statement", () => {
   // The allowance above must not become a way to run several statements outside a transaction.
   it("the unread-message index is a single CREATE INDEX CONCURRENTLY", () => {
     const sql = readFileSync(join(DIR, "20261022100200_private_messages_unread_idx", "migration.sql"), "utf8")
-    const statements = sql.replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)
+    const statements = statementsOf(sql)
     expect(statements).toHaveLength(1)
     expect(statements[0]).toMatch(/^CREATE INDEX CONCURRENTLY IF NOT EXISTS "private_messages_unread_idx" ON "private_messages" \("conversation_id"\) WHERE "is_read" = false$/)
   })
@@ -43,7 +44,7 @@ describe("a CONCURRENTLY migration is exactly one statement", () => {
 describe("the inbox preview index", () => {
   it("is a single CREATE INDEX CONCURRENTLY", () => {
     const sql = readFileSync(join(DIR, "20261022150300_private_messages_preview_idx", "migration.sql"), "utf8")
-    const statements = sql.replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)
+    const statements = statementsOf(sql)
     expect(statements).toHaveLength(1)
     expect(statements[0]).toMatch(/^CREATE INDEX CONCURRENTLY IF NOT EXISTS "private_messages_conversation_created_idx" ON "private_messages" \("conversation_id", "created_at" DESC, "id" DESC\)$/)
   })
@@ -56,8 +57,40 @@ describe("the inbox preview index", () => {
  */
 const LAST_UNCHECKED = "20261125120000"
 
+/**
+ * Drops and renames the previous build may still read. A constraint, index, default, NOT NULL or trigger
+ * changes no shape it reads, and a temp table's `ON COMMIT DROP` outlives nothing.
+ */
+const CONTRACTS = /(?<!\bCOMMIT\s+)\bDROP\s+(?!(CONSTRAINT|INDEX|DEFAULT|NOT\s+NULL|TRIGGER)\b)|\bRENAME\b/i
+/** Locks held for as long as the table takes to scan, rewrite or index. */
+const LOCKS = [
+  /\bCREATE\s+(UNIQUE\s+)?INDEX\s+(?!CONCURRENTLY\b)/i,
+  /\bADD\s+CONSTRAINT\s+\S+\s+(CHECK|FOREIGN\s+KEY)\b(?![\s\S]*\bNOT\s+VALID\b)/i,
+  /\bADD\s+CONSTRAINT\s+\S+\s+(UNIQUE|PRIMARY\s+KEY|EXCLUDE)\b(?!\s+USING\s+INDEX\b)/i,
+  /\bSET\s+NOT\s+NULL\b/i,
+  /\bALTER\s+(COLUMN\s+)?\S+\s+(SET\s+DATA\s+)?TYPE\b/i,
+]
+const NAME = String.raw`(?:"?\w+"?\.)?"?(\w+)"?`
+const CREATED = new RegExp(String.raw`^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + NAME, "i")
+const TARGET = new RegExp(String.raw`^(?:ALTER\s+TABLE(?:\s+IF\s+EXISTS)?(?:\s+ONLY)?|CREATE\s+(?:UNIQUE\s+)?INDEX\b[\s\S]*?\bON(?:\s+ONLY)?)\s+` + NAME, "i")
+
 function migrationViolations(sql: string): string[] {
-  return []
+  const statements = statementsOf(sql)
+  const created = new Set(statements.map((s) => CREATED.exec(s)?.[1]).filter(Boolean))
+  const contractOk = /^\s*--\s*contract:.*#\d+/m.test(sql)
+  const lockOk = /^\s*--\s*lock-ok:\s*\S/m.test(sql)
+  const out: string[] = []
+  for (const s of statements) {
+    const shown = s.replace(/\s+/g, " ")
+    if (!contractOk && CONTRACTS.test(s)) out.push(`contract: ${shown}`)
+    const target = TARGET.exec(s)?.[1]
+    if (!lockOk && !(target && created.has(target)) && LOCKS.some((re) => re.test(s))) out.push(`lock: ${shown}`)
+  }
+  const ddl = statements.some((s) => /^(ALTER|CREATE|DROP)\b/i.test(s))
+  if (statements[0]?.toUpperCase() === "BEGIN" && ddl && !/^SET\s+LOCAL\s+lock_timeout\b/i.test(statements[1] ?? "")) {
+    out.push("lock_timeout: not the second statement")
+  }
+  return out
 }
 
 describe("migrationViolations", () => {
@@ -93,6 +126,7 @@ describe("migrationViolations", () => {
     `ALTER TABLE "x" ALTER COLUMN "y" DROP NOT NULL;`,
     `ALTER TABLE "x" ADD COLUMN "y" TEXT;`,
     `UPDATE "x" SET "y" = 'dropped' WHERE "y" IS NULL;`,
+    `CREATE TEMP TABLE "t" ON COMMIT DROP AS SELECT "id" FROM "x";`,
   ])("allows %s", (stmt) => {
     expect(migrationViolations(wrap(stmt))).toEqual([])
   })
