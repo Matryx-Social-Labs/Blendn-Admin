@@ -25,7 +25,7 @@ jest.mock("expo-server-sdk", () => {
 })
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 let session: { user: { id: string; role: DashboardRole } } | null = null
-jest.mock("@/lib/auth", () => ({ getAuth: async () => (session?.user ? { ...session, user: { signedInAt: 0, ...session.user } } : session) }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => (session?.user ? { ...session, user: { signedInAt: Date.now(), ...session.user } } : session) }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 const mockCheck = jest.fn()
 jest.mock("@/lib/moderation/openai-moderation", () => ({

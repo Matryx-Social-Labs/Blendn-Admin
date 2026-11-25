@@ -10,7 +10,7 @@ import type { DashboardRole } from "@/lib/dashboard-types"
  * impersonation; so is an organisation's. Real actions, real rows.
  */
 let session: { user: { id: string; role: DashboardRole } } | null = null
-jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await session; return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await session; return s?.user ? { ...s, user: { signedInAt: Date.now(), ...s.user } } : s } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 jest.mock("@/lib/email", () => {
   const actual = jest.requireActual("@/lib/email")

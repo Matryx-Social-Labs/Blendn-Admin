@@ -34,7 +34,7 @@ const mockDb = {
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 
 const mockAuth = jest.fn()
-jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth(); return s?.user ? { ...s, user: { signedInAt: Date.now(), ...s.user } } : s } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 const mockAuditLog = jest.fn()

@@ -39,7 +39,7 @@ jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 const mockAuth = jest.fn()
-jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth(); return s?.user ? { ...s, user: { signedInAt: Date.now(), ...s.user } } : s } }))
 
 import { setAmenityActive, updateAmenity, createAmenity } from "@/lib/amenity-actions"
 
