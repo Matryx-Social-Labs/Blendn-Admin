@@ -5,8 +5,8 @@ import { db } from "./db"
 import { attendeeLabel } from "./pseudonym"
 import { eventPermissionSelect, eventPermissions, type PermissionActor } from "./rbac"
 import { labelScopeFor } from "./reports"
-import { holdFloor, PAYOUT_GONE } from "./ticket-payments"
-import { BUYER_REFUND, EVENT_CANCELLED_REFUND, policyRefundDebit, policyRefundMinor } from "./ticket-refund-policy"
+import { holdFloor } from "./ticket-payments"
+import { BUYER_REFUND, EVENT_CANCELLED_REFUND, PAYOUT_GONE, policyRefundDebit, policyRefundMinor } from "./ticket-refund-policy"
 
 /**
  * What the Tickets tab reads about money and orders (SCRUM-1014): the Sales

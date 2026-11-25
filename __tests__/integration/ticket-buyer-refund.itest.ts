@@ -4,6 +4,7 @@ import { NextRequest } from "next/server"
 import { getAuditLog } from "@/lib/audit-actions"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { actorFor } from "@/lib/org-membership"
+import { reserveTickets } from "@/lib/ticket-holds"
 import { reconcileTicketPayments } from "@/lib/ticket-reconcile"
 import { refundOrder } from "@/lib/ticket-refunds"
 import { salesPage, ticketsSummary } from "@/lib/ticket-sales"
@@ -213,6 +214,18 @@ describe("a buyer's refund inside the window", () => {
     expect(c.body.data).toMatchObject({ status: "refunded", refund: { state: "refunded", amountMinor: 2 * PRICE } })
     expect(rzp.refunds.get(o.paymentId)).toHaveLength(1)
     expect(await db.audit_logs.count({ where: { action: "ticket_order.buyer_refund", resource_id: o.orderId } })).toBe(1)
+  })
+
+  it("counts what a buyer refunded themselves toward their ten seats, so a loop cannot run up the host's fees", async () => {
+    const o = await paid({ absorbed: true, quantity: 6 })
+    expect((await ask(o.orderId, o.buyerId)).status).toBe(200)
+    const again = (quantity: number, buyerId: string) => reserveTickets({ eventId: o.eventId, buyerId, lines: [{ ticketTypeId: o.typeIds[0], quantity }] })
+    expect(await again(5, o.buyerId)).toEqual({ ok: false, reason: "too_many_seats" })
+    // Controls: within the ten they may buy again, and an organizer's refund does not count.
+    expect((await again(4, o.buyerId)).ok).toBe(true)
+    const byHost = await paid({ absorbed: true, quantity: 6 })
+    await refundOrder(byHost.orderId, { id: byHost.host, role: "organizer" }, "organizer")
+    expect((await reserveTickets({ eventId: byHost.eventId, buyerId: byHost.buyerId, lines: [{ ticketTypeId: byHost.typeIds[0], quantity: 6 }] })).ok).toBe(true)
   })
 
   it("never deadlocks: asking, Razorpay's webhook and the retry at once all answer, on one refund", async () => {

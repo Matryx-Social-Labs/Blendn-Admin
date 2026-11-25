@@ -1,13 +1,11 @@
 import type { ticket_refund_policy } from "@prisma/client"
 
-// Relative and pure: lib/ticket-settle.ts reaches this from server.ts (`build:server`, plain tsc).
-import { PAYOUT_GONE, organizerShare } from "./ticket-payments"
-
 /**
  * What a refund under the event's policy is worth, and whether its buyer may
  * ask for it now (SCRUM-1113, owner 2026-11-25). One rule for the claim
  * (lib/ticket-refunds.ts, under the locks), the app's offer
- * (lib/ticket-views.ts) and the Sales panel, so none computes its own.
+ * (lib/ticket-views.ts) and the Sales panel, so none computes its own. Pure,
+ * importing nothing of ours: the holds, the payments and the settling read it.
  */
 
 /** `refund_reason` of a refund its buyer asked for. */
@@ -26,7 +24,13 @@ export function refundUntil(event: { refund_policy: ticket_refund_policy; start_
   return window === null ? null : new Date(event.start_time.getTime() - window)
 }
 
+/** A refund is refused once its payout is being released or released (both doors, the Sales panel). The status is the only source. */
+export const PAYOUT_GONE: ReadonlySet<string> = new Set(["releasing", "released"])
+
 type Amounts = { subtotal_minor: number; total_minor: number; service_fee_minor: number; service_fee_tax_minor: number; processing_fee_minor: number }
+
+/** The organizer's share: what the buyer paid, less our fee, its tax and processing (ticket-fees `organizerPayoutMinor`). */
+export const organizerShare = (o: Omit<Amounts, "subtotal_minor">): number => o.total_minor - o.service_fee_minor - o.service_fee_tax_minor - o.processing_fee_minor
 
 /** A policy refund, the buyer's or the organizer's: the full ticket price (terms 5.4). */
 export const policyRefundMinor = (o: Pick<Amounts, "subtotal_minor">): number => o.subtotal_minor

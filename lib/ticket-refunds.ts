@@ -8,8 +8,7 @@ import { logger } from "./logger"
 import { actorFor } from "./org-membership"
 import { eventPermissionSelect, eventPermissions } from "./rbac"
 import { cancelEventHolds } from "./ticket-holds"
-import { PAYOUT_GONE } from "./ticket-payments"
-import { BUYER_REFUND, BUYER_REFUND_ACTION, buyerRefundRefusal, EVENT_CANCELLED_REFUND, policyRefundDebit, policyRefundMinor, type BuyerRefundRefusal } from "./ticket-refund-policy"
+import { BUYER_REFUND, BUYER_REFUND_ACTION, buyerRefundRefusal, EVENT_CANCELLED_REFUND, PAYOUT_GONE, policyRefundDebit, policyRefundMinor, type BuyerRefundRefusal } from "./ticket-refund-policy"
 import { executeRefund } from "./ticket-settle"
 
 /**

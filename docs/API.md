@@ -1795,7 +1795,7 @@ gives: 404 for a draft or a stranger's private event, 403 `AGE_RESTRICTED`
 403 `FORBIDDEN` + `PROFILE_INCOMPLETE` for an account not set up: whoever may
 not say "going" may not buy their way in. Then refusals are 409 with the code in
 `errorCode`: `sold_out`, `not_on_sale`, `over_order_limit`, `over_buyer_limit`
-(10 seats a buyer an event, held and paid together), `unknown_ticket_type`,
+(10 seats a buyer an event, held, paid and refunded by themselves together), `unknown_ticket_type`,
 `private` (someone the door lets in, such as its organizer), `age` (backstop);
 orders also `too_many_holds` and `busy` (`retryAfter: 1`, retry at most twice). 503: Razorpay cannot take the payment (the
 hold is given back). Limits: quote 60/min a user and 240/min a network; order

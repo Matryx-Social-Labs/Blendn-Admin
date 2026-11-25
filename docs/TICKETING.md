@@ -56,7 +56,9 @@ the payout row is locked, then its order):
   canceled (its refund is the full one); no ticket of it let in. Asking twice is
   one refund. Its wording is the owner's, `TODO(legal)` in `lib/ticket-views.ts`.
 
-Neither refunds an order once its payout is released.
+Neither refunds an order once its payout is released. Seats a buyer refunded
+themselves still count toward their ten an event (`buyerStake`), so buying and
+refunding in a loop cannot run up the fees an organization absorbed.
 
 | | Buyer paid the fees | Organization absorbed them |
 |---|---|---|
