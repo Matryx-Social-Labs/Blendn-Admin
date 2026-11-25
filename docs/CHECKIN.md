@@ -374,7 +374,7 @@ at `expires_at` it is checked out `expired`, which evicts the person's sockets
 from the venue's rooms (`live:ended` to their `user:` room). The timers live in
 the process; the expiry pass every 30 s is the backstop for any a restart lost.
 With more than one replica, the eviction reaches sockets held by the others
-only through the Socket.io Redis adapter — `REDIS_URL` must be set wherever
+only through the Socket.io Redis adapter — `SOCKET_REDIS_ADAPTER=1` (with `REDIS_URL`) must be set wherever
 more than one replica runs. The per-emit filter above holds either way.
 
 Two people count as having met at a venue's day (message requests,
