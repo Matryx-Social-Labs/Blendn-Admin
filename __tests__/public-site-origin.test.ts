@@ -124,6 +124,13 @@ describe("validateEnv", () => {
     expect(() => validateEnv()).toThrow("Invalid environment variables")
   })
 
+  it("reads a padded value as itself and a blank one as unset", () => {
+    withOrigin(` ${STAGING} `, "staging")
+    expect(inviteUrl(TOKEN)).toBe(`${STAGING}/f/${TOKEN}`)
+    withOrigin("  ", "production")
+    expect(inviteUrl(TOKEN)).toBe(`${WWW}/f/${TOKEN}`)
+  })
+
   it("and the helper refuses a value boot would have refused, rather than mint a bad link", () => {
     withOrigin(`${STAGING}/x`, "staging")
     expect(() => publicSiteOrigin()).toThrow(/PUBLIC_SITE_ORIGIN/)
@@ -142,7 +149,7 @@ const FIXED: Record<string, string> = {
   "lib/email-html.ts": "BRAND_ASSETS: the mail logos are images on the production site, not links",
   "app/about/page.tsx": "names the public product site in prose",
 }
-const LITERAL = /["'`]https:\/\/www\.blendn\.app[^"'`]*["'`]/g
+const LITERAL = /https?:\/\/www\.blendn\.app\S*/g
 
 /** Comments out, URLs kept: `stripComments` cuts a line at the `//` of `https://`. */
 const code = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
