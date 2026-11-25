@@ -119,6 +119,41 @@ value cannot be used in the transaction that added it. Migrations before
 transaction"; that comment is wrong, and the files are left as they are,
 because editing an applied migration changes its checksum (the renamed migrations, below).
 
+#### A migration is additive for one release
+
+The pre-deploy step migrates while the old container still serves, and a
+rollback is "redeploy the previous build", which runs it on the new schema. So
+a migration only adds: add the column or table, backfill, switch the code, and
+drop or rename the old shape in a later deploy, once no running build reads it.
+Rollback is therefore the previous build plus a forward-fix migration, never a
+hand-reverted schema. Take a manual dump before any promotion that carries a
+migration (the backups section, ops task 04).
+
+`__tests__/migration-tx.test.ts` holds every migration after its
+`LAST_UNCHECKED` to this, and to locks that last as long as the table is big:
+
+- `DROP TABLE`, `DROP COLUMN` (or a bare `ALTER TABLE … DROP x`), `DROP TYPE`,
+  any other `DROP` but the ones below, any `RENAME` (a column, a table, a
+  constraint or index the code catches by name, an enum value), and `ADD COLUMN
+  … NOT NULL` with no `DEFAULT` (the previous build's inserts leave it out) fail
+  unless the file says `-- contract: <why> #<PR>`, naming the PR after which
+  nothing reads the old shape. `DROP CONSTRAINT`, `DROP INDEX`, `DROP DEFAULT`,
+  `DROP NOT NULL` and `DROP TRIGGER` are fine.
+- On a table the file has not created yet: a plain `CREATE INDEX` (use
+  `CONCURRENTLY`, alone in its file), a `CHECK` or `FOREIGN KEY` without `NOT
+  VALID` (and `VALIDATE CONSTRAINT` goes in a later migration: in the same
+  transaction it scans under the `ADD`'s lock), `UNIQUE` or `PRIMARY KEY`
+  without `USING INDEX`, `ADD COLUMN … REFERENCES | CHECK | GENERATED` or with a
+  volatile default (`gen_random_uuid()`), `SET NOT NULL` and `ALTER COLUMN …
+  TYPE` fail unless the file says `-- lock-ok: <why>` (a table of 40 rows, say).
+  `lock_timeout` bounds the wait for the lock, not how long it is held.
+- A wrapped migration has a non-zero `SET LOCAL lock_timeout` as its second
+  statement: an `ALTER` queued behind a long transaction blocks every read of
+  the table while it waits, and an `UPDATE` waits on row locks the same way.
+
+A marker covers the whole file, so a migration that needs one is best kept to
+the statements it excuses.
+
 #### The test accounts are written by the same step
 
 Staging's pre-deploy command is `npm run railway:predeploy`
