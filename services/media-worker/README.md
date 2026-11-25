@@ -1,7 +1,7 @@
 # media-worker
 
 Checks the clips organizers add to an event (SCRUM-1106): downloads one by link, measures it, takes six stills and makes two
-H.264 faststart copies (≤ 1080 px with sound, ≤ 540 px silent and about 2 MB). It is a service of its own because it opens links
+H.264 faststart copies (≤ 1080 px with sound, ≤ 540 px silent and about 2 MB). An HDR clip (HLG or PQ, as iPhones record) is brought to SDR BT.709 in every still and copy (`TO_SDR` in `clip.ts`), so the poster and the playing copy are one picture. It is a service of its own because it opens links
 people paste, and the web service holds the database and sign-in secrets.
 
 - **Holds:** `MEDIA_WORKER_SECRET` and nothing else. No storage keys: the web service (`lib/media-clip.ts`) sends a presigned PUT

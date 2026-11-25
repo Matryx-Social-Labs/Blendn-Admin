@@ -32,7 +32,12 @@ export interface ClipFacts {
   width: number
   height: number
   durationMs: number
+  /** An HLG or PQ curve: its stills and copies are brought to SDR (`TO_SDR`). */
+  hdr: boolean
 }
+
+/** HLG (iPhones record it by default) and PQ (HDR10, Dolby Vision 8.1). Not BT.2020 primaries or 10 bits alone: those can be SDR. */
+const HDR_CURVES = new Set(["arib-std-b67", "smpte2084"])
 
 export type Run = (tool: "ffmpeg" | "ffprobe", args: string[], timeoutMs: number, signal: AbortSignal) => Promise<string>
 
@@ -53,7 +58,7 @@ export const run: Run = (tool, args, timeoutMs, signal) =>
   })
 
 interface Probe {
-  streams?: { width?: number; height?: number; duration?: string; tags?: { rotate?: string }; side_data_list?: { rotation?: number }[] }[]
+  streams?: { width?: number; height?: number; duration?: string; color_transfer?: string; tags?: { rotate?: string }; side_data_list?: { rotation?: number }[] }[]
   format?: { duration?: string }
 }
 
@@ -75,6 +80,7 @@ export function factsFrom(json: string): ClipFacts | null {
     width: turned ? stream.height : stream.width,
     height: turned ? stream.width : stream.height,
     durationMs: Math.round(seconds * 1000),
+    hdr: HDR_CURVES.has(stream.color_transfer ?? ""),
   }
 }
 
@@ -82,7 +88,7 @@ export async function probeClip(path: string, signal: AbortSignal, exec: Run = r
   const json = await exec(
     "ffprobe",
     [...READ, "-select_streams", "v:0", "-show_entries",
-      "stream=width,height,duration:stream_tags=rotate:stream_side_data=rotation:format=duration", "-of", "json", path],
+      "stream=width,height,duration,color_transfer:stream_tags=rotate:stream_side_data=rotation:format=duration", "-of", "json", path],
     PROBE_MS,
     signal
   ).catch(() => "")
@@ -103,6 +109,20 @@ export function stillTimes(durationMs: number): number[] {
 /** Scales the short side down to `side` (never up) with even sides, as H.264 needs. */
 export function scaleFilter(side: number): string {
   return `scale='if(gt(iw,ih),-2,trunc(min(${side},iw)/2)*2)':'if(gt(iw,ih),trunc(min(${side},ih)/2)*2,-2)'`
+}
+
+/**
+ * HDR to SDR BT.709, in the pixels: the poster (a still) and the playing copy are then one picture on every device, where
+ * a copy left tagged HLG is tone-mapped by each player and its still is not (decided per advisor 2026-11-25, task 32).
+ * zscale reads the source's curve from the frame. Mobius rolls highlights off rather than clipping them. After the scale,
+ * so the float frame is the small one.
+ */
+const TO_SDR = "zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=mobius:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p"
+const SDR_TAGS = ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"]
+
+/** What every still and copy is drawn through: the scale, and the HDR clip's way to SDR. */
+function picture(side: number, hdr: boolean): string {
+  return hdr ? `${scaleFilter(side)},${TO_SDR}` : scaleFilter(side)
 }
 
 /** The small copy's bitrate: under the byte cap for its length, and never more than 540p can use. */
@@ -139,15 +159,15 @@ async function copy(path: string, signal: AbortSignal, exec: Run): Promise<Copy>
   return { path, bytes: size, width, height }
 }
 
-// ponytail: no tone mapping, so an HDR clip's copies look flatter; add zscale+tonemap if organizers upload HDR.
 export async function makeFiles(input: string, dir: string, facts: ClipFacts, signal: AbortSignal, exec: Run = run): Promise<ClipFiles> {
   const ffmpeg = (args: string[], timeoutMs = STEP_MS) => exec("ffmpeg", ["-y", ...INPUT, ...args], timeoutMs, signal)
   const limit = ["-t", String(MAX_DURATION_MS / 1000)]
+  const tags = facts.hdr ? SDR_TAGS : []
 
   const stills: Still[] = []
   for (const [i, at] of stillTimes(facts.durationMs).entries()) {
     const path = join(dir, `still-${i}.jpg`)
-    await ffmpeg(["-ss", String(at), "-i", input, "-frames:v", "1", "-vf", scaleFilter(MAIN_SIDE), "-q:v", "3", "-update", "1", path], STILL_MS).catch((error: { killed?: boolean }) => {
+    await ffmpeg(["-ss", String(at), "-i", input, "-frames:v", "1", "-vf", picture(MAIN_SIDE, facts.hdr), "-q:v", "3", "-update", "1", path], STILL_MS).catch((error: { killed?: boolean }) => {
       // A frame that cannot be read is left out; one that ran out of time ends the job.
       if (error.killed || signal.aborted) throw error
     })
@@ -158,11 +178,11 @@ export async function makeFiles(input: string, dir: string, facts: ClipFacts, si
   }
 
   const mainPath = join(dir, "main.mp4")
-  await ffmpeg(["-i", input, ...limit, ...H264, "-map", "0:a:0?", "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-crf", "22", "-maxrate", "6M", "-bufsize", "12M", "-vf", scaleFilter(MAIN_SIDE), mainPath])
+  await ffmpeg(["-i", input, ...limit, ...H264, "-map", "0:a:0?", "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-crf", "22", "-maxrate", "6M", "-bufsize", "12M", "-vf", picture(MAIN_SIDE, facts.hdr), ...tags, mainPath])
 
   const smallPath = join(dir, "small.mp4")
   const small = (kbps: number) =>
-    ffmpeg(["-i", input, ...limit, ...H264, "-an", "-b:v", `${kbps}k`, "-maxrate", `${kbps}k`, "-bufsize", `${kbps}k`, "-vf", scaleFilter(SMALL_SIDE), smallPath])
+    ffmpeg(["-i", input, ...limit, ...H264, "-an", "-b:v", `${kbps}k`, "-maxrate", `${kbps}k`, "-bufsize", `${kbps}k`, "-vf", picture(SMALL_SIDE, facts.hdr), ...tags, smallPath])
   const kbps = smallKbps(facts.durationMs)
   await small(kbps)
   if ((await stat(smallPath)).size > SMALL_MAX_BYTES) await small(Math.floor(kbps * 0.7))
