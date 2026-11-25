@@ -152,10 +152,11 @@ judgment belongs somewhere cheap to test.
 ping inside                        ─▶  stay
 ping inside, was out               ─▶  clear_departure
 ping outside, first                ─▶  record_departure
-outside, past grace, not asked     ─▶  prompt
-outside, past prompt timeout       ─▶  auto_checkout
+ping outside, past 20 min          ─▶  auto_checkout
+weak fix (> 150 m) reading outside ─▶  as no ping    (SCRUM-1326)
 no ping, never left                ─▶  stay          (silence is ambiguous)
-no ping, was outside               ─▶  clock keeps running
+no ping, one outside reading only  ─▶  stay          (SCRUM-1326)
+no ping, out twice ≥ 10 min apart  ─▶  clock keeps running
 occurrence ended                   ─▶  auto_checkout
 staff, mid-event                   ─▶  stay
 ```
@@ -164,7 +165,7 @@ staff, mid-event                   ─▶  stay
 |---|---|
 | `PING_INTERVAL_MINUTES` | 5 |
 | `DEPARTURE_GRACE_MINUTES` | 10 |
-| `PROMPT_TIMEOUT_MINUTES` | 10 |
+| `DEPARTURE_ALLOWANCE_MINUTES` | 20 |
 | `OCCURRENCE_GRACE_MINUTES` | 60 |
 
 Out-of-fence is judged by **calling `evaluateCheckIn`** — the same function that
@@ -178,9 +179,13 @@ battery, a revoked permission, airplane mode. **None of those mean the person
 left.**
 
 The distinction that makes the sweeper work: silence with *no evidence* they
-left does nothing; silence *after* a confirmed out-of-fence reading lets the
-clock run, because there we have positive evidence, we asked, and they did not
-answer.
+left does nothing; silence after **two** out-of-fence readings at least
+`DEPARTURE_GRACE_MINUTES` apart lets the clock run. One reading is not enough
+(SCRUM-1326): a phone opened once at the gate and pocketed on the way back in
+would otherwise be checked out 20 minutes later. A fix worse than the door's
+`MAX_GPS_ACCURACY_METERS` (150 m: Balanced indoors, iOS approximate, Android
+coarse) that reads outside is silence too: the ping answers `status: "unknown"`,
+moves the presence session's heartbeat, and writes nothing on the check-in.
 
 An earlier version got this wrong — it short-circuited on any missing ping, and
 the sweeper never carries one, so the grace and prompt clocks were unreachable

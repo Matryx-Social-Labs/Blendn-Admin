@@ -4,7 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg"
 
 import { DEFAULT_ACCURACY_POLICY, evaluateCheckIn } from "../lib/geofence"
 import { signAccessToken } from "../lib/mobile-auth"
-import { MAX_GPS_ACCURACY_METERS } from "../lib/validations/event"
+import { MAX_GPS_ACCURACY_METERS } from "../lib/geofence"
 
 /**
  * E9 — check-in, driven with mocked coordinates.

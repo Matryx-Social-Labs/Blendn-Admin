@@ -8,6 +8,7 @@ import {
   type PresenceState,
 } from "@/lib/presence"
 import type { Geofence } from "@/lib/geofence"
+import { MAX_GPS_ACCURACY_METERS } from "@/lib/geofence"
 
 /**
  * Is this person still here?
@@ -91,10 +92,91 @@ describe("GPS drift is not departure", () => {
     expect(d.action).toBe("record_departure")
   })
 
-  it("caps a wildly pessimistic accuracy claim", () => {
+  it("caps a wildly pessimistic accuracy claim: 5 km of error is not inside", () => {
     // A device claiming 5km of error must not thereby be "inside" everywhere.
+    // Nor is it outside (P-8, below): the door would refuse it, so it says nothing.
     const d = evaluatePresence(state(), ping(OUTSIDE, 5000), FENCE, ENDS, NOW)
+    expect(d.action).toBe("stay")
+    expect(d.reason).toBe("no_signal")
+  })
+})
+
+/*
+ * SCRUM-1326 (serving/07c). A false check-out is worse than a stale count, and
+ * two paths broke that rule: a fix the door would refuse read as "outside"
+ * (P-8: Balanced indoors, iOS approximate, Android coarse), and one outside
+ * reading followed by a pocketed phone checked the guest out 20 minutes later
+ * (P-7) -- the sweeper ran the clock on silence.
+ */
+describe("a weak fix is not a reading (P-8)", () => {
+  const WEAK = MAX_GPS_ACCURACY_METERS + 250 // 400 m: Balanced, indoors
+
+  it("never starts the outside clock", () => {
+    const d = evaluatePresence(state(), ping(OUTSIDE, WEAK), FENCE, ENDS, NOW)
+    expect(d.action).toBe("stay")
+    expect(d.reason).toBe("no_signal")
+  })
+
+  it("never advances it either: a running clock with only weak fixes since is silence", () => {
+    const d = evaluatePresence(
+      state({ leftAreaAt: ago(DEPARTURE_ALLOWANCE_MINUTES + 5), lastSeenAt: ago(DEPARTURE_ALLOWANCE_MINUTES + 5) }),
+      ping(OUTSIDE, WEAK),
+      FENCE,
+      ENDS,
+      NOW
+    )
+    expect(d.action).toBe("stay")
+    expect(d.reason).toBe("no_signal")
+  })
+
+  it("is judged by the door's own limit: exactly the limit still counts", () => {
+    const d = evaluatePresence(state(), ping(OUTSIDE, MAX_GPS_ACCURACY_METERS), FENCE, ENDS, NOW)
     expect(d.action).toBe("record_departure")
+  })
+
+  it("still clears a departure when even a weak fix puts them inside", () => {
+    // Erring towards "still here" is the safe side; the door's allowance judged it.
+    const d = evaluatePresence(state({ leftAreaAt: ago(5) }), ping(INSIDE, WEAK), FENCE, ENDS, NOW)
+    expect(d.action).toBe("clear_departure")
+  })
+})
+
+describe("one outside reading alone never checks anyone out (P-7)", () => {
+  it("stays when the only outside reading is the one that started the clock", () => {
+    // Opened the app at the gate, pocketed it, walked back in. 25 minutes of silence.
+    const t0 = ago(25)
+    const d = evaluatePresence(state({ leftAreaAt: t0, lastSeenAt: t0 }), null, FENCE, ENDS, NOW)
+    expect(d.action).toBe("stay")
+    expect(d.reason).toBe("no_signal")
+  })
+
+  it("checks out once a second outside reading came a grace period later", () => {
+    const t0 = ago(25)
+    const second = new Date(t0.getTime() + (DEPARTURE_GRACE_MINUTES + 2) * 60_000)
+    const d = evaluatePresence(state({ leftAreaAt: t0, lastSeenAt: second }), null, FENCE, ENDS, NOW)
+    expect(d.action).toBe("auto_checkout")
+    expect(d.reason).toBe("left_area")
+  })
+
+  it("counts a second reading exactly a grace period after the first", () => {
+    const t0 = ago(25)
+    const second = new Date(t0.getTime() + DEPARTURE_GRACE_MINUTES * 60_000)
+    const d = evaluatePresence(state({ leftAreaAt: t0, lastSeenAt: second }), null, FENCE, ENDS, NOW)
+    expect(d.action).toBe("auto_checkout")
+  })
+
+  it("lets a weak fix close somebody already seen out twice, as the sweeper would", () => {
+    const t0 = ago(25)
+    const second = new Date(t0.getTime() + (DEPARTURE_GRACE_MINUTES + 2) * 60_000)
+    const d = evaluatePresence(state({ leftAreaAt: t0, lastSeenAt: second }), ping(OUTSIDE, 400), FENCE, ENDS, NOW)
+    expect(d.action).toBe("auto_checkout")
+  })
+
+  it("does not count a second reading that came too soon after the first", () => {
+    const t0 = ago(25)
+    const soon = new Date(t0.getTime() + (DEPARTURE_GRACE_MINUTES - 1) * 60_000)
+    const d = evaluatePresence(state({ leftAreaAt: t0, lastSeenAt: soon }), null, FENCE, ENDS, NOW)
+    expect(d.action).toBe("stay")
   })
 })
 

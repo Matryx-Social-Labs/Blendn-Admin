@@ -166,16 +166,24 @@ export async function POST(
       lng: longitude,
       accuracy: body.accuracy ?? null,
     })
-    await db.event_check_ins.update({
-      where: { id: checkIn.id },
-      data: {
-        last_seen_at: now,
-        ...(decision.action === "record_departure" ? { left_area_at: now } : {}),
-        ...(decision.action === "clear_departure"
-          ? { left_area_at: null, departure_prompted_at: null }
-          : {}),
-      },
-    })
+    /*
+     * A weak fix (`no_signal`, SCRUM-1326) is no reading: its check-in
+     * `last_seen_at` would pass for the second outside reading that lets the
+     * departure clock run on silence (`evaluatePresence`). The session's
+     * heartbeat above still shows the phone is alive.
+     */
+    if (decision.reason !== "no_signal") {
+      await db.event_check_ins.update({
+        where: { id: checkIn.id },
+        data: {
+          last_seen_at: now,
+          ...(decision.action === "record_departure" ? { left_area_at: now } : {}),
+          ...(decision.action === "clear_departure"
+            ? { left_area_at: null, departure_prompted_at: null }
+            : {}),
+        },
+      })
+    }
   }
 
   /*
@@ -231,7 +239,8 @@ export async function POST(
    * (undelivered) prompt would have fired rather than the moment of checkout --
    * so the client counted down to a deadline ten minutes before the real one.
    */
-  const graceEndsAt = leftAt
+  // No countdown on a reading that cannot place them (`unknown`): the clock it would show is not running.
+  const graceEndsAt = leftAt && decision.reason !== "no_signal"
     ? new Date(leftAt.getTime() + DEPARTURE_ALLOWANCE_MINUTES * 60_000).toISOString()
     : null
 
@@ -245,7 +254,10 @@ export async function POST(
     status:
       decision.reason === "inside" || decision.reason === "returned"
         ? "inside"
-        : "outside",
+        : // A fix too vague to place them: neither in nor out (SCRUM-1326).
+          decision.reason === "no_signal"
+          ? "unknown"
+          : "outside",
     reason: decision.reason,
     shortfallMetres: decision.shortfall ? Math.round(decision.shortfall) : null,
     graceEndsAt,
