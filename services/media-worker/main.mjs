@@ -11,30 +11,30 @@ if (secret.length < 32) throw new Error("MEDIA_WORKER_SECRET must be set, 32 cha
 
 const UPLOAD_MS = 30_000
 
-async function put(url, path, type) {
+async function put(url, path, type, signal) {
   const response = await fetch(url, {
     method: "PUT",
     headers: { "content-type": type },
     body: await readFile(path),
     redirect: "error",
-    signal: AbortSignal.timeout(UPLOAD_MS),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(UPLOAD_MS)]),
   })
   if (!response.ok) throw new Error(`upload answered ${response.status}`)
 }
 
-async function job({ url, uploads }) {
+async function job({ url, uploads }, signal) {
   const dir = await mkdtemp(join(tmpdir(), "clip-"))
   try {
     const input = join(dir, "input")
-    await fetchClip(url, input)
-    const facts = await probeClip(input)
+    await fetchClip(url, input, signal)
+    const facts = await probeClip(input, signal)
     if (facts.durationMs > MAX_DURATION_MS) return { ok: false, reason: "too_long", durationMs: facts.durationMs }
-    const { stills, main, small } = await makeFiles(input, dir, facts)
+    const { stills, main, small } = await makeFiles(input, dir, facts, signal)
     const taken = stills.slice(0, uploads.stills.length)
     await Promise.all([
-      ...taken.map(({ path }, i) => put(uploads.stills[i], path, "image/jpeg")),
-      put(uploads.main, main.path, "video/mp4"),
-      put(uploads.small, small.path, "video/mp4"),
+      ...taken.map(({ path }, i) => put(uploads.stills[i], path, "image/jpeg", signal)),
+      put(uploads.main, main.path, "video/mp4", signal),
+      put(uploads.small, small.path, "video/mp4", signal),
     ])
     const copyFacts = ({ width, height, bytes }) => ({ width, height, bytes })
     return { ok: true, ...facts, stillSeconds: taken.map((s) => s.at), main: copyFacts(main), small: copyFacts(small) }

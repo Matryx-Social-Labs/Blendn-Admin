@@ -127,6 +127,8 @@ export function EventForm({
   const [clipChecks, setClipChecks] = useState<Record<string, ClipCheckState>>({})
   /** The newest run per item: an older answer, about a link since retyped, must not write over it. */
   const clipRuns = useRef<Record<string, number>>({})
+  /** One at a time: the server checks one clip per person. */
+  const clipLine = useRef<Promise<unknown>>(Promise.resolve())
 
   const setClipState = (itemId: string, state: ClipCheckState | null) =>
     setClipChecks(({ [itemId]: _old, ...rest }) => (state ? { ...rest, [itemId]: state } : rest))
@@ -153,7 +155,11 @@ export function EventForm({
           }
           void form.trigger(`media_items.${index}.url`)
         },
-        ask: askClipCheck,
+        ask: (url) => {
+          const turn = clipLine.current.then(() => askClipCheck(url))
+          clipLine.current = turn
+          return turn
+        },
       },
       newClip
     )

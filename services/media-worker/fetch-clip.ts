@@ -123,8 +123,8 @@ export function capBytes(max: number): Transform {
 }
 
 /** Downloads `link` to `path`, or throws a FetchRefusal. */
-export async function fetchClip(link: string, path: string): Promise<void> {
-  const signal = AbortSignal.timeout(DOWNLOAD_MS)
+export async function fetchClip(link: string, path: string, job: AbortSignal): Promise<void> {
+  const signal = AbortSignal.any([job, AbortSignal.timeout(DOWNLOAD_MS)])
   try {
     const response = await openFollowing(link, signal)
     const declared = Number(response.headers["content-length"])
@@ -135,6 +135,8 @@ export async function fetchClip(link: string, path: string): Promise<void> {
     await pipeline(response, capBytes(MAX_BYTES), createWriteStream(path), { signal })
   } catch (error) {
     if (error instanceof FetchRefusal) throw error
+    // The job ran out, or nobody is waiting: that says nothing about the link.
+    job.throwIfAborted()
     throw new FetchRefusal("unreachable")
   }
 }

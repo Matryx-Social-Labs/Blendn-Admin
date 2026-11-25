@@ -123,8 +123,24 @@ async function ask(body: string, pause: (ms: number) => Promise<void>): Promise<
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
+/**
+ * One check per person at a time, so nobody fills the worker's line. The editor
+ * asks one by one; a second tab is told to come back.
+ * ponytail: per process; a second web replica doubles it, which the worker's own line still bounds.
+ */
+const checking = new Set<string>()
+
 export async function checkClip(url: string, userId: string, pause: (ms: number) => Promise<void> = wait): Promise<ClipCheck> {
-  if (!clipCheckOn() || !isConfigured()) return { kind: "unavailable" }
+  if (!clipCheckOn() || !isConfigured() || checking.has(userId)) return { kind: "unavailable" }
+  checking.add(userId)
+  try {
+    return await checkNow(url, userId, pause)
+  } finally {
+    checking.delete(userId)
+  }
+}
+
+async function checkNow(url: string, userId: string, pause: (ms: number) => Promise<void>): Promise<ClipCheck> {
   // Under the person's own events prefix, so it goes with their other uploads.
   const dir = `events/${userId}/clips/${randomUUID()}`
   const [main, small, ...stills] = await Promise.all([

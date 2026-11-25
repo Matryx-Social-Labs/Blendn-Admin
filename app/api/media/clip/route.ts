@@ -20,8 +20,6 @@ const UNAVAILABLE = "We couldn’t check this clip right now. You can save it, a
  */
 export async function POST(request: NextRequest) {
   try {
-    if (!clipCheckOn()) return errorResponse(UNAVAILABLE, 503)
-
     const session = await getAuth()
     if (!session?.user) return unauthorizedResponse("Authentication required")
     // The roles that may upload an event's media (`/api/uploads/presigned-url`).
@@ -36,6 +34,8 @@ export async function POST(request: NextRequest) {
     const parsed = bodySchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
 
+    // After the request is judged on its own: a bad one is a 4xx whether or not clips are checked here.
+    if (!clipCheckOn()) return errorResponse(UNAVAILABLE, 503)
     const result = await checkClip(parsed.data.url, session.user.id)
     if (result.kind === "refused") return errorResponse(result.message, 422, "CLIP_REFUSED")
     if (result.kind === "unavailable") return errorResponse(UNAVAILABLE, 503)

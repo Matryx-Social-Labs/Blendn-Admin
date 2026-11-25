@@ -28,6 +28,8 @@ export interface CopyFacts {
 
 const MAX_BODY = 32 * 1024
 export const MAX_LINE = 3
+/** One job, start to finish: download, ffmpeg and uploads together. */
+export const JOB_MS = 150_000
 
 const digest = (value: string) => createHash("sha256").update(value).digest()
 
@@ -61,7 +63,7 @@ async function readBody(request: IncomingMessage): Promise<string | null> {
   return Buffer.concat(chunks).toString("utf8")
 }
 
-export function createHandler(secret: string, job: (request: ClipRequest) => Promise<ClipResult>) {
+export function createHandler(secret: string, job: (request: ClipRequest, signal: AbortSignal) => Promise<ClipResult>) {
   let waiting = 0
   let tail: Promise<unknown> = Promise.resolve()
 
@@ -80,7 +82,13 @@ export function createHandler(secret: string, job: (request: ClipRequest) => Pro
       if (waiting >= MAX_LINE) return send(503, { error: "busy" })
 
       waiting++
-      const turn = tail.then(() => job(parsed))
+      // Nobody waiting for the answer: a queued job is skipped and a running one stopped.
+      const gone = new AbortController()
+      response.on("close", () => gone.abort())
+      const turn = tail.then(() => {
+        gone.signal.throwIfAborted()
+        return job(parsed, AbortSignal.any([gone.signal, AbortSignal.timeout(JOB_MS)]))
+      })
       tail = turn.catch(() => undefined).finally(() => waiting--)
       send(200, await turn)
     } catch (error) {

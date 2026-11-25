@@ -44,6 +44,13 @@ it.each([{}, { url: "http://cdn.example.com/a.mp4" }, { url: "https://a:b@cdn.ex
   expect(mockCheck).not.toHaveBeenCalled()
 })
 
+it("judges the request before saying the check is off", async () => {
+  mockOn.mockReturnValue(false)
+  expect((await post({ url: 3 })).status).toBe(400)
+  mockGetAuth.mockResolvedValue(null)
+  expect((await post(good)).status).toBe(401)
+})
+
 it("says a verdict as a 422 in words, and an unanswered check as a 503", async () => {
   mockCheck.mockResolvedValueOnce({ kind: "refused", message: "This clip is 20.2 seconds." })
   const refused = await post(good)

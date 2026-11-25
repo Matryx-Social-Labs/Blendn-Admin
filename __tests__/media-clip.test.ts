@@ -66,6 +66,20 @@ describe("checkClip (SCRUM-1106)", () => {
     }
   )
 
+  it("checks one clip per person at a time, and frees the place even after a failure", async () => {
+    let release = (_: Response) => {}
+    fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => (release = resolve)))
+    const first = checkClip("https://a.test/c.mp4", "u1", pause)
+    expect(await checkClip("https://a.test/d.mp4", "u1", pause)).toEqual({ kind: "unavailable" })
+    fetchMock.mockResolvedValueOnce(answer(200, ok))
+    expect((await checkClip("https://a.test/e.mp4", "u2", pause)).kind).toBe("ok")
+    await new Promise((resolve) => setImmediate(resolve))
+    release(answer(500))
+    expect((await first).kind).toBe("unavailable")
+    fetchMock.mockResolvedValueOnce(answer(200, ok))
+    expect((await checkClip("https://a.test/c.mp4", "u1", pause)).kind).toBe("ok")
+  })
+
   it("gives up after a few refused connections", async () => {
     fetchMock.mockRejectedValue(new TypeError("fetch failed"))
     expect(await checkClip("https://a.test/c.mp4", "u1", pause)).toEqual({ kind: "unavailable" })

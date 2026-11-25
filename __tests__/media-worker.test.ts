@@ -5,9 +5,9 @@ import { Readable, Writable } from "stream"
 import { pipeline } from "stream/promises"
 
 import { MEDIA } from "@/lib/constants"
-import { MAX_DURATION_MS, STILLS, factsFrom, makeFiles, probeClip, scaleFilter, smallKbps, stillTimes, NotVideo } from "@/services/media-worker/clip"
+import { MAX_DURATION_MS, STILLS, factsFrom, makeFiles, probeClip, run, scaleFilter, smallKbps, stillTimes, NotVideo } from "@/services/media-worker/clip"
 import { capBytes, isPublicAddress, openableUrl, publicLookup } from "@/services/media-worker/fetch-clip"
-import { MAX_LINE, authorised, createHandler, parseRequest, type ClipResult } from "@/services/media-worker/handler"
+import { JOB_MS, MAX_LINE, authorised, createHandler, parseRequest, type ClipResult } from "@/services/media-worker/handler"
 
 /**
  * The clip worker (SCRUM-1106): it opens links people paste, so what it may
@@ -100,14 +100,33 @@ describe("the clip", () => {
       runs.push([tool, ...args])
       return tool === "ffprobe" ? probe({ width: 1280, height: 720 }) : ""
     }
-    await probeClip("/tmp/in", exec)
+    const signal = new AbortController().signal
+    await probeClip("/tmp/in", signal, exec)
     // No still is written by this fake, so it stops at the first: a clip with no poster is not a video.
-    await expect(makeFiles("/tmp/in", "/tmp/no-such-dir", { width: 1280, height: 720, durationMs: 12_000 }, exec)).rejects.toBeInstanceOf(NotVideo)
+    await expect(makeFiles("/tmp/in", "/tmp/no-such-dir", { width: 1280, height: 720, durationMs: 12_000 }, signal, exec)).rejects.toBeInstanceOf(NotVideo)
     for (const args of runs) {
-      expect(args.join(" ")).toContain("-protocol_whitelist file -f mov")
+      expect(args.join(" ")).toContain("-protocol_whitelist file -f mov -max_pixels 9437184 -threads 2")
       expect(args.indexOf("mov")).toBeLessThan(args.indexOf("/tmp/in"))
     }
     expect(runs.length).toBe(2)
+  })
+
+  it("ends the job when a still runs out of time or nobody is waiting, rather than trying the next", async () => {
+    const facts = { width: 1280, height: 720, durationMs: 12_000 }
+    const killed = jest.fn(() => Promise.reject(Object.assign(new Error("timed out"), { killed: true })))
+    await expect(makeFiles("/tmp/in", "/tmp/no-such-dir", facts, new AbortController().signal, killed)).rejects.toThrow("timed out")
+    expect(killed).toHaveBeenCalledTimes(1)
+    const gone = new AbortController()
+    gone.abort()
+    await expect(probeClip("/tmp/in", gone.signal, () => Promise.reject(new Error("x")))).rejects.not.toBeInstanceOf(NotVideo)
+  })
+
+  it("gives every run the job's signal, and a real process dies by it", async () => {
+    const stop = new AbortController()
+    setTimeout(() => stop.abort(), 50)
+    const started = Date.now()
+    await expect(run(process.execPath as never, ["-e", "setTimeout(() => {}, 20000)"], 20_000, stop.signal)).rejects.toThrow()
+    expect(Date.now() - started).toBeLessThan(5_000)
   })
 })
 
@@ -116,7 +135,7 @@ describe("the request", () => {
   const good = JSON.stringify({ url: "https://cdn.example.com/a.mp4", uploads: { main: "https://m", small: "https://s", stills: ["https://0"] } })
   const done: ClipResult = { ok: false, reason: "not_video" }
 
-  async function send(handler: ReturnType<typeof createHandler>, opts: { method?: string; url?: string; auth?: string; body?: string } = {}) {
+  async function send(handler: ReturnType<typeof createHandler>, opts: { method?: string; url?: string; auth?: string; body?: string; onResponse?: (response: EventEmitter) => void } = {}) {
     const request = Object.assign(Readable.from([Buffer.from(opts.body ?? good)]), {
       method: opts.method ?? "POST",
       url: opts.url ?? "/clip",
@@ -134,6 +153,7 @@ describe("the request", () => {
         this.body = body
       },
     })
+    opts.onResponse?.(response)
     await handler(request as never, response as never)
     return response.status
   }
@@ -189,6 +209,26 @@ describe("the request", () => {
     expect(await next).toBe(200)
     log.mockRestore()
   })
+
+  it("skips a queued job and stops a running one when its caller has gone", async () => {
+    const log = jest.spyOn(console, "error").mockImplementation(() => {})
+    const signals: AbortSignal[] = []
+    const handler = createHandler(SECRET, (_request, signal) => {
+      signals.push(signal)
+      return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason)))
+    })
+    const responses: EventEmitter[] = []
+    const line = [send(handler, { onResponse: (r) => responses.push(r) }), send(handler, { onResponse: (r) => responses.push(r) })]
+    while (signals.length === 0) await new Promise((resolve) => setImmediate(resolve))
+    responses[1].emit("close")
+    responses[0].emit("close")
+    await Promise.all(line)
+    expect(signals).toHaveLength(1)
+    expect(signals[0].aborted).toBe(true)
+    log.mockRestore()
+  })
+
+  it("gives one job less time than its caller waits", () => expect(JOB_MS).toBeLessThan(240_000))
 
   it("takes only what it knows", () => expect(parseRequest(good)).toEqual(JSON.parse(good)))
 })

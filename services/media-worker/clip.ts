@@ -11,16 +11,20 @@ import { join } from "node:path"
 
 /** The web service's `MEDIA.MAX_CLIP_MS + CLIP_TOLERANCE_MS` (a test holds the two together). */
 export const MAX_DURATION_MS = 15_500
-/** Larger than any phone's recording: refuse before decoding rather than fill the memory. */
-const MAX_PIXELS = 4096 * 4096
+/** A little over DCI 4K. Read from the container here and enforced on every decoded frame (`-max_pixels`): the two can differ. */
+const MAX_PIXELS = 4096 * 2304
 const SMALL_MAX_BYTES = 2_000_000
 const MAIN_SIDE = 1080
 const SMALL_SIDE = 540
 const STEP_MS = 100_000
+const STILL_MS = 15_000
+const PROBE_MS = 20_000
 export const STILLS = 6
 const FIRST_STILL_SECONDS = 0.1
 
-const INPUT = ["-nostdin", "-v", "error", "-protocol_whitelist", "file", "-f", "mov"]
+/** Before every input: what may be opened, and what decoding it may cost. */
+const READ = ["-v", "error", "-protocol_whitelist", "file", "-f", "mov", "-max_pixels", String(MAX_PIXELS), "-threads", "2"]
+const INPUT = ["-nostdin", ...READ]
 
 export class NotVideo extends Error {}
 
@@ -30,11 +34,12 @@ export interface ClipFacts {
   durationMs: number
 }
 
-export type Run = (tool: "ffmpeg" | "ffprobe", args: string[], timeoutMs: number) => Promise<string>
+export type Run = (tool: "ffmpeg" | "ffprobe", args: string[], timeoutMs: number, signal: AbortSignal) => Promise<string>
 
-export const run: Run = (tool, args, timeoutMs) =>
+/** Killed at its own limit, and when the job's signal says so. */
+export const run: Run = (tool, args, timeoutMs, signal) =>
   new Promise((resolve, reject) => {
-    execFile(tool, args, { timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 }, (error, stdout) =>
+    execFile(tool, args, { timeout: timeoutMs, signal, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 }, (error, stdout) =>
       error ? reject(error) : resolve(stdout)
     )
   })
@@ -65,13 +70,15 @@ export function factsFrom(json: string): ClipFacts | null {
   }
 }
 
-export async function probeClip(path: string, exec: Run = run): Promise<ClipFacts> {
+export async function probeClip(path: string, signal: AbortSignal, exec: Run = run): Promise<ClipFacts> {
   const json = await exec(
     "ffprobe",
-    ["-v", "error", "-protocol_whitelist", "file", "-f", "mov", "-select_streams", "v:0", "-show_entries",
+    [...READ, "-select_streams", "v:0", "-show_entries",
       "stream=width,height,duration:stream_tags=rotate:stream_side_data=rotation:format=duration", "-of", "json", path],
-    20_000
+    PROBE_MS,
+    signal
   ).catch(() => "")
+  signal.throwIfAborted()
   const facts = factsFrom(json)
   if (!facts) throw new NotVideo("not a playable video")
   return facts
@@ -118,21 +125,24 @@ export interface ClipFiles {
   small: Copy
 }
 
-async function copy(path: string, exec: Run): Promise<Copy> {
+async function copy(path: string, signal: AbortSignal, exec: Run): Promise<Copy> {
   const { size } = await stat(path)
-  const { width, height } = await probeClip(path, exec)
+  const { width, height } = await probeClip(path, signal, exec)
   return { path, bytes: size, width, height }
 }
 
 // ponytail: no tone mapping, so an HDR clip's copies look flatter; add zscale+tonemap if organizers upload HDR.
-export async function makeFiles(input: string, dir: string, facts: ClipFacts, exec: Run = run): Promise<ClipFiles> {
-  const ffmpeg = (args: string[]) => exec("ffmpeg", ["-y", ...INPUT, ...args], STEP_MS)
+export async function makeFiles(input: string, dir: string, facts: ClipFacts, signal: AbortSignal, exec: Run = run): Promise<ClipFiles> {
+  const ffmpeg = (args: string[], timeoutMs = STEP_MS) => exec("ffmpeg", ["-y", ...INPUT, ...args], timeoutMs, signal)
   const limit = ["-t", String(MAX_DURATION_MS / 1000)]
 
   const stills: Still[] = []
   for (const [i, at] of stillTimes(facts.durationMs).entries()) {
     const path = join(dir, `still-${i}.jpg`)
-    await ffmpeg(["-ss", String(at), "-i", input, "-frames:v", "1", "-vf", scaleFilter(MAIN_SIDE), "-q:v", "3", "-update", "1", path]).catch(() => "")
+    await ffmpeg(["-ss", String(at), "-i", input, "-frames:v", "1", "-vf", scaleFilter(MAIN_SIDE), "-q:v", "3", "-update", "1", path], STILL_MS).catch((error: { killed?: boolean }) => {
+      // A frame that cannot be read is left out; one that ran out of time ends the job.
+      if (error.killed || signal.aborted) throw error
+    })
     // A seek past the last frame writes nothing and still exits 0: that still is left out. The first one is the poster.
     const written = await stat(path).then((s) => s.size > 0, () => false)
     if (written) stills.push({ path, at })
@@ -149,5 +159,5 @@ export async function makeFiles(input: string, dir: string, facts: ClipFacts, ex
   await small(kbps)
   if ((await stat(smallPath)).size > SMALL_MAX_BYTES) await small(Math.floor(kbps * 0.7))
 
-  return { stills, main: await copy(mainPath, exec), small: await copy(smallPath, exec) }
+  return { stills, main: await copy(mainPath, signal, exec), small: await copy(smallPath, signal, exec) }
 }
