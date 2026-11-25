@@ -1,18 +1,23 @@
 import { NextRequest } from "next/server"
 
 import { serverErrorResponse, successResponse } from "@/lib/api-response"
-import { clientIpFrom } from "@/lib/client-ip"
 import { refusalResponse } from "@/lib/crews/crews"
 import { crewLinkPreview, NO_LINK } from "@/lib/crews/links"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit } from "@/lib/rate-limit"
+import { shareNetworkFor } from "@/lib/share-public"
 
-/** Per IP, as the friend link's preview: there is no account to key on. */
+/**
+ * Per visitor: there is no account to key on. www.blendn.app/c/<token> calls
+ * this from Vercel and forwards the visitor, so the limit counts them, not
+ * Vercel's address; a forwarded visitor without the landing's secret is
+ * ignored (`shareNetworkFor`). The app's own call is keyed on its network.
+ */
 const PREVIEW_LIMIT = {
   windowMs: 60 * 1000,
   maxRequests: 20,
-  keyGenerator: (req: NextRequest) => `crew-link-preview:${clientIpFrom(req.headers)}`,
+  keyGenerator: (req: NextRequest) => `crew-link-preview:${shareNetworkFor(req.headers)}`,
 }
 
 /**

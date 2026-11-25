@@ -3547,7 +3547,7 @@ not listed). Erased with your account. "Hide this crew tonight" is the app's.
 | DELETE | `/crews/:crewId/links/:token` | Revoke an unused link: its sharer or the owner → `{ revoked: true }` |
 | GET | `/crews/links/:token` | The invite card: `{ crewId, name, emblemSeed, size, invitedBy: { name, photoUrl }, bio, tags, expiresAt, member }` |
 | POST | `/crews/links/:token` | Join by it: `{ revealConsent: true, keepMeAnonymous? }` → `{ crewId, chatGroupId }` |
-| GET | `/crews/links/:token/preview` | No sign-in (20/min per IP): `{ name, emblemSeed, size, invitedBy: { name, photoUrl } }` |
+| GET | `/crews/links/:token/preview` | No sign-in (20/min per visitor: the landing's `x-share-client` when it sends the `x-share-proxy` secret, otherwise the caller's network): `{ name, emblemSeed, size, invitedBy: { name, photoUrl } }` |
 
 `url` is `https://www.blendn.app/c/<token>` — `/c/`, never `/f/`, which an
 installed build reads as a friend's link. A link works **once, for 7 days**, and
