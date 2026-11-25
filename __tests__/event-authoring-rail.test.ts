@@ -46,7 +46,7 @@ describe("the rail answers 'can this publish' from every scroll position", () =>
 
   it("Publish is disabled while anything blocks, and says how many things are left", () => {
     expect(rail).toMatch(/const blocked = readiness\.blockers\.length > 0/)
-    expect(rail).toMatch(/disabled=\{isSubmitting \|\| blocked \|\| cancelled\}/)
+    expect(rail).toMatch(/disabled=\{isSubmitting \|\| isWaiting \|\| blocked \|\| cancelled\}/)
     expect(rail).toMatch(/thing\$\{left === 1 \? "" : "s"\} left before it can publish/)
   })
 

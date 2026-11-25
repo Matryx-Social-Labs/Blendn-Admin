@@ -154,6 +154,14 @@ const mediaSide = z.number().int().min(1).max(MEDIA.MAX_SIDE_PX).nullish()
 /** 0–1 of the picture from its left or top edge (SCRUM-1106). */
 const focalAxis = z.number().min(0).max(1).nullish()
 
+/** One copy of a clip (`lib/media-clip.ts`). */
+const renditionSchema = z.object({
+  url: httpsUrl(),
+  width: z.number().int().min(1).max(MEDIA.MAX_SIDE_PX),
+  height: z.number().int().min(1).max(MEDIA.MAX_SIDE_PX),
+  bytes: z.number().int().min(1).max(2_147_483_647),
+})
+
 /*
  * `width`, `height` and `duration_ms` are measured by the dashboard from the
  * file the organizer picked (SCRUM-1066), so the app can choose a card's fit
@@ -179,6 +187,8 @@ const mediaItemSchema = z
     // Where the subject is, picked in the dashboard (SCRUM-1106): the app crops around it. Both or neither.
     focal_x: focalAxis,
     focal_y: focalAxis,
+    // A clip's copies, from its check (SCRUM-1106): round-tripped by the editor, because a save recreates the rows.
+    renditions: z.array(renditionSchema).max(4).nullish(),
   })
   .refine((item) => (item.width == null) === (item.height == null), {
     message: "A media size needs both a width and a height",

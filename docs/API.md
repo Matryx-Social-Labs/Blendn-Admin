@@ -1564,9 +1564,18 @@ still is cropped around it only when fit rule B crops at all (its ratio within
 ±15% of the card's), and is otherwise shown whole. Keep the point as near the
 card's centre as the picture allows (`focusPosition` in `lib/media-fit.ts`).
 
+**A checked clip has copies (SCRUM-1106).** `renditions` on both routes:
+`[{ url, width, height, bytes }]`, smallest first, or `null` (a still, or a clip
+nobody checked: play `url`). Both are H.264 MP4, faststart, `Content-Type:
+video/mp4`. The first is at most 540 px on its short side, silent and about 2 MB:
+play it on mobile data. The last is at most 1080 px, with sound. Choose by
+`bytes` and `height`, never by position alone: there may be more later.
+
 ```json
 { "id": "…", "type": "video", "url": "https://…/clip.mp4", "thumbnail_url": "https://…/clip-poster.jpg",
-  "order": 0, "width": 1080, "height": 1920, "duration_ms": 12400, "focal_x": 0.62, "focal_y": 0.25 }
+  "order": 0, "width": 1080, "height": 1920, "duration_ms": 12400, "focal_x": 0.62, "focal_y": 0.25,
+  "renditions": [ { "url": "https://…/small.mp4", "width": 540, "height": 960, "bytes": 1532060 },
+                  { "url": "https://…/main.mp4", "width": 1080, "height": 1920, "bytes": 4295293 } ] }
 ```
 
 **Each category on an event now carries its `parent`** (or `null` at top level).

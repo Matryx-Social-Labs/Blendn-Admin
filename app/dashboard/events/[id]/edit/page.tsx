@@ -4,6 +4,7 @@ import { EventEditor } from "@/components/event-editor"
 import { eventTitleFor } from "@/lib/dashboard-record-titles"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
+import { clipCheckOn, type Rendition } from "@/lib/media-clip"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 
@@ -120,6 +121,7 @@ export default async function EditEventPage({ params }: EventPageProps) {
       categories={categories}
       amenities={amenities}
       canFeature={session.user.role === "app_admin"}
+      clipCheck={clipCheckOn()}
       initialEvent={{
         id: event.id,
         title: event.title,
@@ -168,6 +170,8 @@ export default async function EditEventPage({ params }: EventPageProps) {
           duration_ms: item.duration_ms,
           focal_x: item.focal_x,
           focal_y: item.focal_y,
+          // Written only through `eventMediaRows`, from the schema's shape.
+          renditions: item.renditions as Rendition[] | null,
         })),
       }}
       />

@@ -52,7 +52,7 @@ it("writes the measured size and length, and the list sends them", async () => {
           { type: "video", url: "https://media.example.com/c.mp4", width: 1080, height: 1920, duration_ms: 12_400 },
           { type: "image", url: "https://media.example.com/a.jpg", width: 2048, height: 1536, duration_ms: 99 },
           { type: "image", url: "https://media.example.com/pasted.jpg" },
-          { type: "video", url: "https://media.example.com/f.mp4", focal_x: 0.62, focal_y: 0.25 },
+          { type: "video", url: "https://media.example.com/f.mp4", focal_x: 0.62, focal_y: 0.25, renditions: [{ url: "https://media.example.com/s.mp4", width: 540, height: 960, bytes: 9 }] },
         ]),
       },
     },
@@ -63,7 +63,7 @@ it("writes the measured size and length, and the list sends them", async () => {
     expect.objectContaining({ type: "video", width: 1080, height: 1920, duration_ms: 12_400, order: 0 }),
     expect.objectContaining({ type: "image", width: 2048, height: 1536, duration_ms: null, order: 1 }),
     expect.objectContaining({ type: "image", width: null, height: null, duration_ms: null, focal_x: null, focal_y: null, order: 2 }),
-    expect.objectContaining({ type: "video", focal_x: 0.62, focal_y: 0.25, order: 3 }),
+    expect.objectContaining({ type: "video", focal_x: 0.62, focal_y: 0.25, renditions: [{ url: "https://media.example.com/s.mp4", width: 540, height: 960, bytes: 9 }], order: 3 }),
   ])
 })
 
@@ -75,11 +75,12 @@ describe("the database refuses a size the app must never write", () => {
     duration_ms?: number
     focal_x?: number
     focal_y?: number
+    renditions?: object
   }) => {
     const eventId = await anEvent()
     await expect(
       db.event_media.create({ data: { event_id: eventId, url: "https://media.example.com/x", ...data } })
-    ).rejects.toThrow(/event_media_(size_both|duration_on_video|focal_both)/)
+    ).rejects.toThrow(/event_media_(size_both|duration_on_video|focal_both|renditions_on_video)/)
   }
 
   it("a width without a height", () => refused({ type: "image", width: 100 }))
@@ -88,6 +89,8 @@ describe("the database refuses a size the app must never write", () => {
   it("a zero length", () => refused({ type: "video", duration_ms: 0 }))
   it("half a focal point", () => refused({ type: "video", focal_x: 0.5 }))
   it("a focal point past the edge", () => refused({ type: "video", focal_x: 1.2, focal_y: 0.5 }))
+  it("copies on a still", () => refused({ type: "image", renditions: [] }))
+  it("copies that are not a list", () => refused({ type: "video", renditions: { url: "x" } }))
   it("a focal point before the edge", () => refused({ type: "image", focal_x: 0.5, focal_y: -0.1 }))
 })
 
@@ -119,6 +122,7 @@ describe("from the dashboard's save to the app's detail", () => {
     duration_ms: 15_200,
     focal_x: 0.62,
     focal_y: 0.25,
+    renditions: [{ url: "https://media.example.com/small.mp4", width: 540, height: 960, bytes: 1_500_000 }],
   }
 
   it("PATCH writes the size and GET /events/:id sends it in camelCase", async () => {
@@ -138,7 +142,7 @@ describe("from the dashboard's save to the app's detail", () => {
     expect(res.status).toBe(200)
     const { data } = await res.json()
     expect(data.media).toEqual([
-      expect.objectContaining({ type: "video", width: 1080, height: 1920, durationMs: 15_200, focalX: 0.62, focalY: 0.25 }),
+      expect.objectContaining({ type: "video", width: 1080, height: 1920, durationMs: 15_200, focalX: 0.62, focalY: 0.25, renditions: clip.renditions }),
     ])
   })
 
@@ -187,7 +191,7 @@ describe("from the dashboard's save to the app's detail", () => {
     const created = await db.events.findFirstOrThrow({ where: { title }, select: { id: true, media: true } })
     events.push(created.id)
     expect(created.media).toEqual([
-      expect.objectContaining({ width: 1080, height: 1920, duration_ms: 15_200, focal_x: 0.62, focal_y: 0.25 }),
+      expect.objectContaining({ width: 1080, height: 1920, duration_ms: 15_200, focal_x: 0.62, focal_y: 0.25, renditions: clip.renditions }),
     ])
   })
 })

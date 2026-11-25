@@ -36,7 +36,8 @@ async function rows() {
 
 async function openGallery(page: Page) {
   await page.goto(`/dashboard/events/${eventId}/edit`)
-  await page.locator('button[aria-expanded="false"]', { hasText: "More" }).click()
+  // By role, not a bare locator: the streamed page can hold a second, hidden copy for a moment.
+  await page.getByRole("button", { name: /More gallery/, expanded: false }).click()
   await expect(page.getByRole("button", { name: "Add Image" })).toBeVisible()
 }
 
@@ -66,7 +67,7 @@ test("a picked clip and photo keep their measured size; a clip over 15 s is refu
   const url = (n: number) => page.locator(`input[name="media_items.${n - 1}.url"]`)
 
   await page.goto("/dashboard/events/new")
-  await page.locator(`input[name="title"]`).fill("e2e media size (SCRUM-1066)")
+  await page.locator(`input[name="title"]:visible`).fill("e2e media size (SCRUM-1066)")
   await page.getByLabel("Description").fill("Saved by e2e/event-media-size.spec.ts.")
   await page.getByLabel("Starts").fill("2030-11-10T19:00")
   await page.getByLabel("Ends").fill("2030-11-10T22:00")
@@ -126,13 +127,15 @@ test("a picked clip and photo keep their measured size; a clip over 15 s is refu
 
   // An edit that touches something else recreates the rows: the sizes survive.
   await openGallery(page)
-  await page.locator(`input[name="title"]`).fill("e2e media size, edited (SCRUM-1066)")
+  await page.locator(`input[name="title"]:visible`).fill("e2e media size, edited (SCRUM-1066)")
   await save(page)
   expect(await rows()).toEqual(picked)
 
   // A typed URL is another file, so its size is not the upload's.
   await openGallery(page)
   await url(1).fill("https://media.example.com/other.mp4")
+  // Leaving the field starts the clip check, where it is on; Save waits for it (e2e/clip-check.spec.ts).
+  await url(1).blur()
   await save(page)
   expect(await rows()).toEqual([
     { type: "video", width: null, height: null, duration_ms: null, focal_x: null, focal_y: null },

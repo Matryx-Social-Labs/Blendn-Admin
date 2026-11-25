@@ -3,6 +3,7 @@
 import type { CategoryOption } from "@/components/event-form/basic-info-section"
 
 import { logger } from "@/lib/logger"
+import type { Rendition } from "@/lib/media-clip"
 import { refusalText } from "@/lib/refusal"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -62,6 +63,7 @@ interface EventEditorData {
     duration_ms?: number | null
     focal_x?: number | null
     focal_y?: number | null
+    renditions?: Rendition[] | null
   }>
 }
 
@@ -71,6 +73,8 @@ interface EventEditorProps {
   initialEvent?: EventEditorData
   /** app_admin only: the Featured switch. The API refuses it from anyone else. */
   canFeature?: boolean
+  /** Clips are checked by the media worker here (`clipCheckOn`). */
+  clipCheck?: boolean
 }
 
 const formatDateTimeInput = (value?: string, timezone = "Asia/Kolkata") => {
@@ -115,7 +119,7 @@ const parseToFaqArray = (value: unknown): Array<{ question: string; answer: stri
   return []
 }
 
-export function EventEditor({ categories, amenities = [], initialEvent, canFeature = false }: EventEditorProps) {
+export function EventEditor({ categories, amenities = [], initialEvent, canFeature = false, clipCheck = false }: EventEditorProps) {
   const router = useRouter()
   const [isSaving, setIsSaving] = useState(false)
   const isEditing = Boolean(initialEvent?.id)
@@ -174,6 +178,7 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
           duration_ms: item.duration_ms ?? undefined,
           focal_x: item.focal_x ?? undefined,
           focal_y: item.focal_y ?? undefined,
+          renditions: item.renditions ?? undefined,
         })) ?? [],
     }
   }, [initialEvent])
@@ -220,6 +225,7 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
           duration_ms: item.duration_ms,
           focal_x: item.focal_x,
           focal_y: item.focal_y,
+          renditions: item.renditions,
           order: index,
         })),
         // Explicit null, not undefined: `undefined` disappears in JSON and the
@@ -303,6 +309,7 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
         onSubmit={handleSubmit}
         defaultValues={defaultValues}
         canFeature={canFeature}
+        clipCheck={clipCheck}
         isSubmitting={isSaving}
         isEditing={isEditing}
         categories={categories}

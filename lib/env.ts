@@ -29,6 +29,10 @@ const envSchema = z.object({
   TIGRIS_PRIVATE_BUCKET: z.string().optional(),
   TIGRIS_REGION: z.string().default("auto"),
 
+  // The media worker (services/media-worker): checks and copies event clips. Both or neither; unset = off.
+  MEDIA_WORKER_URL: z.string().url().optional(),
+  MEDIA_WORKER_SECRET: z.string().min(32, "MEDIA_WORKER_SECRET must be at least 32 characters").optional(),
+
   // OpenAI (optional — moderation degrades to keyword-only if absent)
   OPENAI_API_KEY: z.string().optional(),
 
