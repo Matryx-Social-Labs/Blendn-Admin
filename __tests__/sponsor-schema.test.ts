@@ -35,7 +35,7 @@ const MIGRATIONS = () => {
 describe("enum values ship alone, before anything references them", () => {
   it("adds user_role.sponsor and message_type.poll with IF NOT EXISTS", () => {
     // ALTER TYPE ... ADD VALUE cannot be used in the same transaction that adds
-    // it, and railway.json runs `prisma migrate deploy` as a preDeployCommand —
+    // it, and Railway runs `prisma migrate deploy` as a pre-deploy command —
     // so a half-applied enum migration does not just fail, it stops the service
     // coming back. IF NOT EXISTS makes the statement safe to re-run.
     const sql = MIGRATIONS()

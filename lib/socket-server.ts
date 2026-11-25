@@ -902,7 +902,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
    * Without an adapter every replica keeps its own room membership, so a
    * message emitted on replica A never reaches a client connected to replica
    * B — chat silently half-works rather than failing loudly. That has not
-   * bitten because railway.json sets no replica count and the app runs as one
+   * bitten because `.railway/railway.ts` sets one replica and the app runs as one
    * instance; dashboard sockets are long-lived and bring that ceiling closer.
    *
    * Opt-in on REDIS_URL. With no Redis provisioned this is a no-op and the

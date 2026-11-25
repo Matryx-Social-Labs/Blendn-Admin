@@ -289,7 +289,7 @@ Optional: Tigris object storage (`TIGRIS_ENDPOINT`, `TIGRIS_ACCESS_KEY`, `TIGRIS
 
 ## Deployment
 
-Deployed to Railway via Docker (see `DEPLOYMENT.md` and `railway.json`). Health check at `GET /api/health`. Production startup fails fast if required env vars are missing (checked in `server.ts` before the HTTP server binds).
+Deployed to Railway with Railpack (see `DEPLOYMENT.md`; the pre-deploy migrations, start command and healthcheck are on the service, described in `.railway/railway.ts` and applied by hand with `railway config apply`; there is no `railway.json`). Health check at `GET /api/health`. Production startup fails fast if required env vars are missing (checked in `server.ts` before the HTTP server binds).
 
 <!-- BEGIN:nextjs-agent-rules -->
 

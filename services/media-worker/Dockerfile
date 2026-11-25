@@ -1,5 +1,5 @@
 # The clip worker (README.md). Its own root on Railway (services/media-worker), so the web service's
-# railway.json, migrations and secrets never reach it. No npm dependencies: node runs the .ts directly.
+# deploy settings, migrations and secrets never reach it. No npm dependencies: node runs the .ts directly.
 FROM node:24-alpine
 RUN apk add --no-cache ffmpeg
 WORKDIR /app
