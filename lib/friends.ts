@@ -2,6 +2,7 @@ import { randomBytes } from "crypto"
 import { Prisma } from "@prisma/client"
 import { logger } from "@/lib/logger"
 import { db } from "@/lib/db"
+import { publicSiteOrigin } from "@/lib/env"
 import { conversationPair } from "@/lib/conversations"
 import { sendPushNotification } from "@/lib/push-notifications"
 import { UNNAMED, cameFromMatch, holdingPair, matchSelect } from "@/lib/conversation-identity"
@@ -31,15 +32,6 @@ export { holdingPair, matchSelect }
  * surfaces — the list, a friend's profile — show real names because both people
  * agreed; a room is somewhere else, with other people in it.
  */
-
-/**
- * Where invite links point.
- *
- * `www`, not the apex: `blendn.app` answers with a 307 to `www.blendn.app`, and
- * both Apple and Google refuse an association file served behind a redirect —
- * so an apex link would never open the app.
- */
-export const INVITE_LINK_BASE = "https://www.blendn.app/f/"
 
 /**
  * A person as the friend surfaces show them: a name and one photo.
@@ -83,8 +75,13 @@ export function newInviteToken(): string {
 /** The shape `newInviteToken` produces. Anything else is refused before a query. */
 export const INVITE_TOKEN = /^[A-Za-z0-9_-]{22}$/
 
+/**
+ * Where an invite link points: `publicSiteOrigin()`, www in production and not
+ * the apex: `blendn.app` answers with a 307 to `www.blendn.app`, and both Apple
+ * and Google refuse an association file served behind a redirect.
+ */
 export function inviteUrl(token: string): string {
-  return `${INVITE_LINK_BASE}${token}`
+  return `${publicSiteOrigin()}/f/${token}`
 }
 
 /** This person's link, created on first ask. One per person. */

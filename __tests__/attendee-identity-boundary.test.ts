@@ -258,7 +258,7 @@ describe("the event's header, loader, Room chat, feedback digest and QR & link t
 
   it("encodes the event's id in the link and nothing about the viewer", () => {
     const share = code("lib/event-share.ts")
-    expect(share).toMatch(/return EVENT_LINK_BASE \+ encodeURIComponent\(eventId\)\s*\n\s*\}/)
+    expect(share).toMatch(/return `\$\{publicSiteOrigin\(\)\}\/event\/\$\{encodeURIComponent\(eventId\)\}`\s*\n\s*\}/)
     const page = code("app/dashboard/events/[id]/page.tsx")
     expect(page).toMatch(/url=\{eventShareUrl\(event\.id\)\}/)
   })
