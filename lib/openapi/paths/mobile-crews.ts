@@ -493,12 +493,13 @@ registry.registerPath({
   summary: "Wave for {crew}: wave at a crew here now",
   description:
     "The like above, shown to the crew it is for (crews 5-A): the same body, guardrails, refusals, Mix and limits — likes and waves share " +
-    "the 30 a day. Their crew chat gets a system line, \"Nebula waved at your crew\" (`metadata: { kind: \"crew_waved\", eventId, fromCrewId }`), " +
+    "the 30 a day. Their crew chat gets a system line, \"Nebula waved at your crew\" (`metadata: { kind: \"crew_waved\", eventId, occurrenceId, fromCrewId }`), " +
     "or for a person's wave \"<their pseudonym here> waved at the crew\" (`fromUserId`: their handle in this room, which Wave back sends " +
     "to `POST /events/:id/matches/likes` with `asCrewId`). Their card has `wavedAtYou`, pinned first. Your own crew chat says \"waved at " +
     "<crew> for the crew\" (`kind: crew_wave`). No push for a single wave. A wave or a like back opens the one Mix, and a wave that makes " +
     "it pushes \"<A> and <B> both waved. Say hi in the Mix.\" instead of the line. Waving twice is waving once; a wave over your side's " +
-    "own earlier like tells them once. A crew you hid is the same 404 as one not here.",
+    "own earlier like tells them once. A crew you hid is the same 404 as one not here. In the crew chat's history the line carries " +
+    "`answered` (this crew has waved or liked back), and a line from a crew the reader hid is left out of their history, chat list and socket.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid(), crewId: z.string().uuid() }),

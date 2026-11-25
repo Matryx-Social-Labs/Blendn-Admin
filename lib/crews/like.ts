@@ -16,6 +16,7 @@ import { eventRoomBan, ownerAdmits, ownerRoomClosesAt } from "../room-kind"
 import { CREWS_OFF, isRefusal, NO_CREW, NO_EVENT, type CrewRefusal } from "./crews"
 import { blocksExclude } from "./blocks"
 import { hidesCrew } from "./hides"
+import { hidersInRoom } from "./wave-lines"
 import { LISTED_IN_ROSTER, strangersApartBetween } from "../room-people"
 import {
   crewEvent,
@@ -91,13 +92,13 @@ import {
  */
 
 const NO_PERSON: CrewRefusal = { refusal: "User not found", status: 404 }
-const NOT_IN: CrewRefusal = { refusal: "Check in before liking anyone here.", status: 403 }
+const NOT_IN: CrewRefusal = { refusal: "Check in before you wave here.", status: 403 }
 const MY_CREW_NOT_HERE: CrewRefusal = {
   refusal: "Your crew isn’t here yet — two of you need to be checked in.",
   status: 403,
 }
 const NOT_OPTED_IN: CrewRefusal = {
-  refusal: "Turn on \"Open to joining a crew tonight\" to like a crew.",
+  refusal: "Turn on \"Open to joining a crew tonight\" to wave at a crew.",
   status: 403,
 }
 const NO_ROOM_FOR_ONE: CrewRefusal = {
@@ -197,7 +198,7 @@ export async function likeCrew(
       wave,
       likerCrewRoom: mine.room,
       likedLabel: target.name,
-      target: { room: target.room, content: `${mine.name} waved at your crew`, metadata: { kind: "crew_waved", eventId, fromCrewId: mine.id } },
+      target: { room: target.room, content: `${mine.name} waved at your crew`, metadata: { kind: "crew_waved", eventId, occurrenceId: here.occurrenceId, fromCrewId: mine.id } },
       mixNames: [mine.name, target.name],
     }
     const outcome = await like(here, likerId, { crewId: mine.id }, { crewId: target.id }, { a_crew_id: a, b_crew_id: b }, sides, telling)
@@ -218,7 +219,7 @@ export async function likeCrew(
     target: {
       room: target.room,
       content: `${pseudonym} waved at the crew`,
-      metadata: { kind: "crew_waved", eventId, fromUserId: roomHandle(eventId, likerId) },
+      metadata: { kind: "crew_waved", eventId, occurrenceId: here.occurrenceId, fromUserId: roomHandle(eventId, likerId) },
     },
     mixNames: ["Someone here", target.name],
   }
@@ -401,7 +402,7 @@ async function like(
    * line. ponytail: a line that fails to write is not retried (the wave is
    * already stored, so a second tap is not "told"); the pinned card still says it.
    */
-  if (result.told && !result.mutual && target?.room) await tellCrewWaved(target.room, target.content, target.metadata)
+  if (result.told && !result.mutual && target?.room) await tellCrewWaved(target.room, target.content, target.metadata, "crewId" in from ? from.crewId : null)
   if (result.told && !result.mutual && telling.toPerson) {
     const { userId, crewId, crewName } = telling.toPerson
     emitCrewWave(userId, { eventId: here.eventId, fromCrewId: crewId, fromName: crewName })
@@ -447,11 +448,17 @@ async function sayInCrew(room: { id: string; name: string }, likerId: string, li
 /**
  * "Nebula waved at your crew · Wave back", in the waved-at crew's chat. Authored
  * by the system user: a crew room names any author by first name
- * (`namesInRoom`), and the waver is a stranger to it. No push (the person
+ * (`namesInRoom`), and the waver is a stranger to it. Not sent live to a member
+ * who hid the crew that waved. No push (the person
  * Wave's rule: none for a single wave). Never throws: the wave stands, and
  * the pinned card says it too.
  */
-async function tellCrewWaved(room: { id: string; name: string }, content: string, metadata: Prisma.InputJsonObject): Promise<void> {
+async function tellCrewWaved(
+  room: { id: string; name: string },
+  content: string,
+  metadata: Prisma.InputJsonObject,
+  fromCrewId: string | null
+): Promise<void> {
   try {
     const message = await db.chat_messages.create({
       data: { chat_group_id: room.id, user_id: SYSTEM_USER_ID, type: "system", content: content, metadata: metadata },
@@ -465,6 +472,8 @@ async function tellCrewWaved(room: { id: string; name: string }, content: string
       senderAnonName: "Blend’n",
       message,
       preview: message.content,
+      // Nobody blocks the system user; the people left out are those who hid the crew that waved.
+      blocked: fromCrewId ? hidersInRoom(fromCrewId, room.id) : undefined,
     })
   } catch (error) {
     logger.warn("Crew wave line failed", { error: error instanceof Error ? error.message : String(error) })

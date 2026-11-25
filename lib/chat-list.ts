@@ -104,7 +104,7 @@ export interface LastMessageRow {
  * sort of every message of every room the viewer is in; a room with no visible
  * message is absent, as before. A sponsored send is not a message here.
  */
-export async function lastMessagesOf(chatGroupIds: string[], blockedIds: string[]): Promise<LastMessageRow[]> {
+export async function lastMessagesOf(chatGroupIds: string[], blockedIds: string[], hiddenLineIds: string[] = []): Promise<LastMessageRow[]> {
   if (chatGroupIds.length === 0) return []
   return db.$queryRaw<LastMessageRow[]>`
     SELECT cm.id, cm.chat_group_id, cm.content, cm.type, cm.created_at, cm.user_id,
@@ -116,6 +116,7 @@ export async function lastMessagesOf(chatGroupIds: string[], blockedIds: string[
       WHERE chat_group_id = g.id
         AND deleted_at IS NULL
         AND NOT (user_id = ANY(${blockedIds}::text[]))
+        AND NOT (id = ANY(${hiddenLineIds}::uuid[]))
         AND ${NOT_AN_ADVERT}
       ORDER BY created_at DESC
       LIMIT 1
@@ -129,7 +130,7 @@ export async function lastMessagesOf(chatGroupIds: string[], blockedIds: string[
  * Read markers, then what was said after each: the one pair of queries here
  * that cannot overlap, as the count is taken from the marker's timestamp.
  */
-export async function unreadAfterMarkers(rooms: { chat_group_id: string; last_read_message_id: string | null }[], notUnread: string[]) {
+export async function unreadAfterMarkers(rooms: { chat_group_id: string; last_read_message_id: string | null }[], notUnread: string[], hiddenLineIds: string[]) {
   const markerIds = rooms.flatMap((m) => (m.last_read_message_id ? [m.last_read_message_id] : []))
   const markers = markerIds.length > 0
     ? await db.chat_messages.findMany({ where: { id: { in: markerIds } }, select: { id: true, created_at: true } })
@@ -150,6 +151,7 @@ export async function unreadAfterMarkers(rooms: { chat_group_id: string; last_re
       FROM chat_messages
       WHERE deleted_at IS NULL
         AND NOT (user_id = ANY(${notUnread}::text[]))
+        AND NOT (id = ANY(${hiddenLineIds}::uuid[]))
         AND ${NOT_AN_ADVERT}
         AND (${Prisma.join(conditions, " OR ")})
       GROUP BY chat_group_id
@@ -160,7 +162,7 @@ export async function unreadAfterMarkers(rooms: { chat_group_id: string; last_re
 }
 
 /** Every message per room that can be unread: what is unread for a member who has read nothing. */
-export async function unreadTotalsOf(chatGroupIds: string[], notUnread: string[]): Promise<Map<string, number>> {
+export async function unreadTotalsOf(chatGroupIds: string[], notUnread: string[], hiddenLineIds: string[]): Promise<Map<string, number>> {
   if (chatGroupIds.length === 0) return new Map()
   const rows = await db.$queryRaw<Array<{ chat_group_id: string; total: bigint }>>`
     SELECT chat_group_id, COUNT(*) AS total
@@ -168,6 +170,7 @@ export async function unreadTotalsOf(chatGroupIds: string[], notUnread: string[]
     WHERE chat_group_id = ANY(${chatGroupIds}::uuid[])
       AND deleted_at IS NULL
       AND NOT (user_id = ANY(${notUnread}::text[]))
+      AND NOT (id = ANY(${hiddenLineIds}::uuid[]))
       AND ${NOT_AN_ADVERT}
     GROUP BY chat_group_id
   `
