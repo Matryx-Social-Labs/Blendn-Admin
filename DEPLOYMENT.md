@@ -133,19 +133,26 @@ migration (the backups section, ops task 04).
 `LAST_UNCHECKED` to this, and to locks that last as long as the table is big:
 
 - `DROP TABLE`, `DROP COLUMN` (or a bare `ALTER TABLE … DROP x`), `DROP TYPE`,
-  and any `RENAME` (a column, a table, a constraint or index the code catches by
-  name, an enum value) fail unless the file says `-- contract: <why> #<PR>`,
-  naming the PR after which nothing reads the old shape. `DROP CONSTRAINT`,
-  `DROP INDEX`, `DROP DEFAULT`, `DROP NOT NULL` and `DROP TRIGGER` are fine.
-- On a table the file does not create: a plain `CREATE INDEX` (use
-  `CONCURRENTLY`, alone in its file), `ADD CONSTRAINT … CHECK | FOREIGN KEY`
-  without `NOT VALID` (validate in a later migration), `ADD CONSTRAINT … UNIQUE
-  | PRIMARY KEY` without `USING INDEX`, `SET NOT NULL` and `ALTER COLUMN … TYPE`
-  fail unless the file says `-- lock-ok: <why>` (a table of 40 rows, say).
+  any other `DROP` but the ones below, any `RENAME` (a column, a table, a
+  constraint or index the code catches by name, an enum value), and `ADD COLUMN
+  … NOT NULL` with no `DEFAULT` (the previous build's inserts leave it out) fail
+  unless the file says `-- contract: <why> #<PR>`, naming the PR after which
+  nothing reads the old shape. `DROP CONSTRAINT`, `DROP INDEX`, `DROP DEFAULT`,
+  `DROP NOT NULL` and `DROP TRIGGER` are fine.
+- On a table the file has not created yet: a plain `CREATE INDEX` (use
+  `CONCURRENTLY`, alone in its file), a `CHECK` or `FOREIGN KEY` without `NOT
+  VALID` (and `VALIDATE CONSTRAINT` goes in a later migration: in the same
+  transaction it scans under the `ADD`'s lock), `UNIQUE` or `PRIMARY KEY`
+  without `USING INDEX`, `ADD COLUMN … REFERENCES | CHECK | GENERATED` or with a
+  volatile default (`gen_random_uuid()`), `SET NOT NULL` and `ALTER COLUMN …
+  TYPE` fail unless the file says `-- lock-ok: <why>` (a table of 40 rows, say).
   `lock_timeout` bounds the wait for the lock, not how long it is held.
-- A wrapped migration with DDL has `SET LOCAL lock_timeout` as its second
+- A wrapped migration has a non-zero `SET LOCAL lock_timeout` as its second
   statement: an `ALTER` queued behind a long transaction blocks every read of
-  the table while it waits.
+  the table while it waits, and an `UPDATE` waits on row locks the same way.
+
+A marker covers the whole file, so a migration that needs one is best kept to
+the statements it excuses.
 
 #### The test accounts are written by the same step
 

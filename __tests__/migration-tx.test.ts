@@ -9,7 +9,7 @@ const FIRST_WRAPPED = "20261009120000"
  * Postgres refuses `CONCURRENTLY` inside one. A single statement is atomic enough.
  */
 const UNWRAPPABLE = /^(ALTER TYPE .* ADD VALUE|(CREATE|DROP) (UNIQUE )?INDEX CONCURRENTLY)/i
-const statementsOf = (sql: string) => sql.replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)
+const statementsOf = (sql: string) => sql.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)
 
 describe("migrations are transactions", () => {
   const files = readdirSync(DIR).filter((d) => d >= FIRST_WRAPPED && /^\d{14}_/.test(d))
@@ -59,35 +59,49 @@ const LAST_UNCHECKED = "20261125120000"
 
 /**
  * Drops and renames the previous build may still read. A constraint, index, default, NOT NULL or trigger
- * changes no shape it reads, and a temp table's `ON COMMIT DROP` outlives nothing.
+ * changes no shape it reads, and a temp table's `ON COMMIT DROP` outlives nothing. A NOT NULL column
+ * with no default fails every insert the previous build makes.
  */
-const CONTRACTS = /(?<!\bCOMMIT\s+)\bDROP\s+(?!(CONSTRAINT|INDEX|DEFAULT|NOT\s+NULL|TRIGGER)\b)|\bRENAME\b/i
-/** Locks held for as long as the table takes to scan, rewrite or index. */
+const CONTRACTS = [
+  /(?<!\bCOMMIT\s+)\bDROP\s+(?!(CONSTRAINT|INDEX|DEFAULT|NOT\s+NULL|TRIGGER)\b)/i,
+  /\bRENAME\b/i,
+  /\bADD\s+COLUMN\b(?![\s\S]*\bDEFAULT\b)[\s\S]*\bNOT\s+NULL\b/i,
+]
+/** Locks held for as long as the table takes to scan, rewrite or index. Read per ALTER TABLE clause. */
 const LOCKS = [
   /\bCREATE\s+(UNIQUE\s+)?INDEX\s+(?!CONCURRENTLY\b)/i,
-  /\bADD\s+CONSTRAINT\s+\S+\s+(CHECK|FOREIGN\s+KEY)\b(?![\s\S]*\bNOT\s+VALID\b)/i,
-  /\bADD\s+CONSTRAINT\s+\S+\s+(UNIQUE|PRIMARY\s+KEY|EXCLUDE)\b(?!\s+USING\s+INDEX\b)/i,
+  /\bADD\s+(CONSTRAINT\s+\S+\s+)?(CHECK|FOREIGN\s+KEY)\b(?![\s\S]*\bNOT\s+VALID\b)/i,
+  /\bADD\s+(CONSTRAINT\s+\S+\s+)?(UNIQUE|PRIMARY\s+KEY|EXCLUDE)\b(?!\s+USING\s+INDEX\b)/i,
+  /\bADD\s+COLUMN\b[\s\S]*\b(REFERENCES|CHECK|GENERATED|DEFAULT\s+(gen_random_uuid|uuid_generate_v4|random|clock_timestamp|nextval)\s*\()/i,
   /\bSET\s+NOT\s+NULL\b/i,
   /\bALTER\s+(COLUMN\s+)?\S+\s+(SET\s+DATA\s+)?TYPE\b/i,
 ]
+const CLAUSE = /,\s*(?=(?:ADD|ALTER|DROP|RENAME|VALIDATE|SET|ENABLE|DISABLE)\b)/i
 const NAME = String.raw`(?:"?\w+"?\.)?"?(\w+)"?`
-const CREATED = new RegExp(String.raw`^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + NAME, "i")
+const CREATED = new RegExp(String.raw`^CREATE\s+(?:TEMP(?:ORARY)?\s+|UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + NAME, "i")
 const TARGET = new RegExp(String.raw`^(?:ALTER\s+TABLE(?:\s+IF\s+EXISTS)?(?:\s+ONLY)?|CREATE\s+(?:UNIQUE\s+)?INDEX\b[\s\S]*?\bON(?:\s+ONLY)?)\s+` + NAME, "i")
 
 function migrationViolations(sql: string): string[] {
   const statements = statementsOf(sql)
-  const created = new Set(statements.map((s) => CREATED.exec(s)?.[1]).filter(Boolean))
+  const created = new Set<string>()
   const contractOk = /^\s*--\s*contract:.*#\d+/m.test(sql)
   const lockOk = /^\s*--\s*lock-ok:\s*\S/m.test(sql)
   const out: string[] = []
   for (const s of statements) {
     const shown = s.replace(/\s+/g, " ")
-    if (!contractOk && CONTRACTS.test(s)) out.push(`contract: ${shown}`)
+    const made = CREATED.exec(s)?.[1]
+    if (made) created.add(made)
     const target = TARGET.exec(s)?.[1]
-    if (!lockOk && !(target && created.has(target)) && LOCKS.some((re) => re.test(s))) out.push(`lock: ${shown}`)
+    if (target && created.has(target)) continue // nobody else can see the table until COMMIT
+    const clauses = s.split(CLAUSE)
+    if (!contractOk && CONTRACTS.some((re) => clauses.some((c) => re.test(c)))) out.push(`contract: ${shown}`)
+    if (!lockOk && LOCKS.some((re) => clauses.some((c) => re.test(c)))) out.push(`lock: ${shown}`)
   }
-  const ddl = statements.some((s) => /^(ALTER|CREATE|DROP)\b/i.test(s))
-  if (statements[0]?.toUpperCase() === "BEGIN" && ddl && !/^SET\s+LOCAL\s+lock_timeout\b/i.test(statements[1] ?? "")) {
+  // VALIDATE scans without blocking writes only in a transaction of its own.
+  if (!lockOk && statements.some((s) => /\bNOT\s+VALID\b/i.test(s)) && statements.some((s) => /\bVALIDATE\s+CONSTRAINT\b/i.test(s))) {
+    out.push("lock: NOT VALID and VALIDATE CONSTRAINT in one transaction")
+  }
+  if (statements[0]?.toUpperCase() === "BEGIN" && !/^SET\s+LOCAL\s+lock_timeout\s*(=|TO)\s*'?[1-9]/i.test(statements[1] ?? "")) {
     out.push("lock_timeout: not the second statement")
   }
   return out
@@ -125,13 +139,16 @@ describe("migrationViolations", () => {
     `ALTER TABLE "x" ALTER COLUMN "y" DROP DEFAULT;`,
     `ALTER TABLE "x" ALTER COLUMN "y" DROP NOT NULL;`,
     `ALTER TABLE "x" ADD COLUMN "y" TEXT;`,
-    `UPDATE "x" SET "y" = 'dropped' WHERE "y" IS NULL;`,
+    `DROP TRIGGER IF EXISTS "t" ON "x";`,
     `CREATE TEMP TABLE "t" ON COMMIT DROP AS SELECT "id" FROM "x";`,
   ])("allows %s", (stmt) => {
     expect(migrationViolations(wrap(stmt))).toEqual([])
   })
   it("ignores DROP and RENAME in comments", () => {
-    expect(migrationViolations(wrap(`-- we may DROP COLUMN "y" or RENAME it later\nALTER TABLE "x" ADD COLUMN "z" TEXT;`))).toEqual([])
+    expect(migrationViolations(wrap(`-- we may DROP COLUMN "y" or RENAME it later\n/* DROP TABLE "x"; */\nALTER TABLE "x" ADD COLUMN "z" TEXT;`))).toEqual([])
+  })
+  it("reads lower-case SQL", () => {
+    expect(migrationViolations(`begin;\nset local lock_timeout = '5s';\nalter table "x" drop column "y";\ncreate index "i" on "x"("y");\ncommit;`)).toHaveLength(2)
   })
 
   it.each([
@@ -143,6 +160,14 @@ describe("migrationViolations", () => {
     `ALTER TABLE "x" ALTER COLUMN "y" SET NOT NULL;`,
     `ALTER TABLE "x" ALTER COLUMN "y" TYPE BIGINT;`,
     `ALTER TABLE "x" ALTER COLUMN "y" SET DATA TYPE TEXT;`,
+    `ALTER TABLE "x" ADD CHECK ("y" > 0);`,
+    `ALTER TABLE "x" ADD FOREIGN KEY ("y") REFERENCES "z"("id");`,
+    `ALTER TABLE "x" ADD UNIQUE ("y");`,
+    `ALTER TABLE "x" ADD COLUMN "y" UUID REFERENCES "z"("id");`,
+    `ALTER TABLE "x" ADD COLUMN "y" UUID DEFAULT gen_random_uuid();`,
+    `ALTER TABLE "x" ADD COLUMN "y" INT GENERATED ALWAYS AS ("z" + 1) STORED;`,
+    `ALTER TABLE "x" ADD CONSTRAINT "a" CHECK ("y" > 0), ADD CONSTRAINT "b" CHECK ("y" < 9) NOT VALID;`,
+    `ALTER TABLE "x" ADD CONSTRAINT "a" CHECK ("y" > 0) NOT VALID;\nALTER TABLE "x" VALIDATE CONSTRAINT "a";`,
   ])("refuses %s on an existing table without lock-ok", (stmt) => {
     expect(migrationViolations(wrap(stmt))).toHaveLength(1)
     expect(migrationViolations(`-- lock-ok: x has 40 rows\n` + wrap(stmt))).toEqual([])
@@ -152,15 +177,29 @@ describe("migrationViolations", () => {
     `ALTER TABLE "x" ADD CONSTRAINT "x_y_fkey" FOREIGN KEY ("y") REFERENCES "z"("id") NOT VALID;`,
     `ALTER TABLE "x" VALIDATE CONSTRAINT "x_y_check";`,
     `ALTER TABLE "x" ADD CONSTRAINT "x_y_key" UNIQUE USING INDEX "x_y_key";`,
+    `ALTER TABLE "x" ADD COLUMN "y" TIMESTAMPTZ NOT NULL DEFAULT now(), ADD COLUMN "z" TEXT NOT NULL DEFAULT 'a, b';`,
   ])("allows %s", (stmt) => {
     expect(migrationViolations(wrap(stmt))).toEqual([])
   })
+  it("refuses a NOT NULL column with no default, which the previous build's inserts leave out", () => {
+    expect(migrationViolations(wrap(`ALTER TABLE "x" ADD COLUMN "y" TEXT NOT NULL;`))).toEqual([`contract: ALTER TABLE "x" ADD COLUMN "y" TEXT NOT NULL`])
+  })
   it("allows the locking statements on a table the same file creates", () => {
-    const body = `CREATE TABLE "x" ("id" UUID NOT NULL, "y" UUID);
-CREATE INDEX "x_y_idx" ON "x"("y");
+    const body = `CREATE TABLE IF NOT EXISTS "public"."x" ("id" UUID NOT NULL, "y" UUID);
+CREATE INDEX "x_y_idx" ON ONLY "public"."x"("y");
+ALTER TABLE "x" ADD COLUMN "z" TEXT NOT NULL;
 ALTER TABLE "x" ADD CONSTRAINT "x_y_fkey" FOREIGN KEY ("y") REFERENCES "z"("id") ON DELETE CASCADE;
 ALTER TABLE "x" ALTER COLUMN "y" SET NOT NULL;`
     expect(migrationViolations(wrap(body))).toEqual([])
+  })
+  it("does not let a created table excuse another", () => {
+    expect(migrationViolations(wrap(`CREATE TABLE "a" ("id" UUID);\nCREATE INDEX "b_y_idx" ON "b"("y");`))).toHaveLength(1)
+  })
+  it("does not excuse what comes before the CREATE TABLE", () => {
+    expect(migrationViolations(wrap(`ALTER TABLE "x" RENAME TO "old_x";\nCREATE TABLE "x" ("id" UUID);`))).toHaveLength(1)
+  })
+  it("does not let contract excuse a lock", () => {
+    expect(migrationViolations(`-- contract: gone since #12\n` + wrap(`CREATE INDEX "x_y_idx" ON "x"("y");`))).toHaveLength(1)
   })
   it("does not let lock-ok excuse a DROP COLUMN", () => {
     expect(migrationViolations(`-- lock-ok: small\n` + wrap(`ALTER TABLE "x" DROP COLUMN "y";`))).toHaveLength(1)
@@ -170,12 +209,17 @@ ALTER TABLE "x" ALTER COLUMN "y" SET NOT NULL;`
     expect(migrationViolations(`DROP INDEX CONCURRENTLY IF EXISTS "x_y_idx";`)).toEqual([])
   })
 
-  it("wants SET LOCAL lock_timeout second in a wrapped migration with DDL", () => {
-    expect(migrationViolations(`BEGIN;\nALTER TABLE "x" ADD COLUMN "y" TEXT;\nCOMMIT;`)).toEqual(["lock_timeout: not the second statement"])
-    expect(migrationViolations(`BEGIN;\nALTER TABLE "x" ADD COLUMN "y" TEXT;\nSET LOCAL lock_timeout = '5s';\nCOMMIT;`)).toHaveLength(1)
+  it.each([
+    `BEGIN;\nALTER TABLE "x" ADD COLUMN "y" TEXT;\nCOMMIT;`,
+    `BEGIN;\nALTER TABLE "x" ADD COLUMN "y" TEXT;\nSET LOCAL lock_timeout = '5s';\nCOMMIT;`,
+    `BEGIN;\nSET LOCAL lock_timeout = 0;\nALTER TABLE "x" ADD COLUMN "y" TEXT;\nCOMMIT;`,
+    `BEGIN;\nSET LOCAL lock_timeout TO '0';\nCREATE TABLE "x" ("id" UUID);\nCOMMIT;`,
+    `BEGIN;\nUPDATE "x" SET "y" = 1;\nCOMMIT;`,
+  ])("wants a non-zero SET LOCAL lock_timeout second in every wrapped migration: %s", (sql) => {
+    expect(migrationViolations(sql)).toEqual(["lock_timeout: not the second statement"])
   })
-  it("does not want lock_timeout in a data-only migration", () => {
-    expect(migrationViolations(`BEGIN;\nUPDATE "x" SET "y" = 1;\nCOMMIT;`)).toEqual([])
+  it("takes lock_timeout as = or TO", () => {
+    expect(migrationViolations(`BEGIN;\nSET LOCAL lock_timeout TO '5s';\nUPDATE "x" SET "y" = 1;\nCOMMIT;`)).toEqual([])
   })
 })
 
