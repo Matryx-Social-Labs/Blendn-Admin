@@ -99,10 +99,12 @@ export interface ChatRowsInput {
   /** Never unread: a blocked person's line, nor your own. */
   notUnread: string[]
   blockedIds: string[]
+  /** Waves from crews they hid (`hiddenWaveLineIds`): never the preview, never unread. */
+  hiddenLineIds: string[]
   now: Date
 }
 
-export async function buildChatRows({ userId, memberships, others, notUnread, blockedIds, now }: ChatRowsInput) {
+export async function buildChatRows({ userId, memberships, others, notUnread, blockedIds, hiddenLineIds, now }: ChatRowsInput) {
   /*
    * One wave, not seven in series: nothing here waits on anything else but the
    * unread count, which waits (inside `unreadAfterMarkers`) on the read markers
@@ -114,9 +116,9 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
   const lobbyIds = others.flatMap((m) => (m.chat_group.kind === "board_post" ? [m.chat_group_id] : []))
   const [totals, lastMessagesRaw, unread, activeCheckIns, here, lobbyOthers] = await Promise.all([
     // Every visible message per room that is not an advert: what is unread for a member who has read nothing.
-    unreadTotalsOf(chatGroupIds, notUnread),
-    lastMessagesOf(chatGroupIds, blockedIds),
-    unreadAfterMarkers(allRooms, notUnread),
+    unreadTotalsOf(chatGroupIds, notUnread, hiddenLineIds),
+    lastMessagesOf(chatGroupIds, blockedIds, hiddenLineIds),
+    unreadAfterMarkers(allRooms, notUnread, hiddenLineIds),
     /*
      * Which of these rooms is the user standing in *right now*.
      *

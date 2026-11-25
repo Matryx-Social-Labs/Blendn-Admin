@@ -22,7 +22,7 @@ import { isUuid } from "./api-input"
 import { createEventBudget } from "./socket-budget"
 import { namesInRoom, recognisedInRoomBy } from "./identity"
 import { forVenue, type LiveSnapshot, type VenueLiveSnapshot } from "./live-metrics"
-import type { user_role } from "@prisma/client"
+import type { Prisma, user_role } from "@prisma/client"
 
 /** `error.data.code` on a refused handshake, by the account's state. */
 const SOCKET_REFUSAL_CODE = {
@@ -1773,6 +1773,8 @@ export function emitChatMessage(
     userImage?: string
     createdAt: string
     parentId?: string
+    /** A system line's own (`lib/room-delivery.ts`), as the history has it. */
+    metadata?: Prisma.JsonValue
   },
   excludeUserIds: readonly string[] = [],
   /** The room's handle scope, when the caller has it — saves `toChatRoom` a lookup. */

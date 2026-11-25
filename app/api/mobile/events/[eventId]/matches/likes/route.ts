@@ -127,7 +127,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }),
     ])
 
-    if (!mine || mine.kind === "staff") return forbiddenResponse("Check in before liking anyone here")
+    if (!mine || mine.kind === "staff") return forbiddenResponse("Check in before you wave here.")
     // Not "they weren't here" — that would confirm who did and did not attend to
     // anyone probing user ids.
     if (!theirs || !likedId) return notFoundResponse("User not found")

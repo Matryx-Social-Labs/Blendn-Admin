@@ -4,6 +4,7 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { blockCounterparties } from "@/lib/conversations"
+import { hiddenWaveLineIds } from "@/lib/crews/wave-lines"
 import { PAGINATION } from "@/lib/constants"
 import {
   buildChatRows,
@@ -64,8 +65,10 @@ export async function GET(request: NextRequest) {
      * these rooms have none. Not paged (`ownedRooms`), so sent with the
      * first page only.
      */
-    const [blockedIds, totalCount, rows, others] = await Promise.all([
+    const [blockedIds, hiddenLineIds, totalCount, rows, others] = await Promise.all([
       blockCounterparties(authUser.userId),
+      // Crew rooms go with the first page alone, and only they have these.
+      page > 1 ? [] : hiddenWaveLineIds(authUser.userId),
       db.chat_group_members.count({ where: eventRoomsWhere }),
       db.chat_group_members.findMany({
         where: eventRoomsWhere,
@@ -84,7 +87,7 @@ export async function GET(request: NextRequest) {
     const notUnread = [...blockedIds, authUser.userId]
     const memberships = eventRowsWithEvent(rows)
 
-    const built = await buildChatRows({ userId: authUser.userId, memberships, others, notUnread, blockedIds, now })
+    const built = await buildChatRows({ userId: authUser.userId, memberships, others, notUnread, blockedIds, hiddenLineIds, now })
     // Newest visible message first, then rooms with none yet.
     const rooms = [...built.rooms].sort((a, b) => (b.lastMessageAt?.getTime() ?? 0) - (a.lastMessageAt?.getTime() ?? 0))
 

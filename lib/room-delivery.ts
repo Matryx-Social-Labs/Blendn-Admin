@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client"
+
 import { logger } from "@/lib/logger"
 import { db } from "@/lib/db"
 import { keptApartIn } from "@/lib/conversations"
@@ -63,12 +65,14 @@ export async function deliverToRoom(input: {
     user_id: string
     created_at: Date
     parent_id?: string | null
+    metadata?: Prisma.JsonValue
   }
   /** What the lock screen says. Not the content for anything but text. */
   preview: string
   /**
    * `keptApartIn(sender, room kind)`, when the caller already started it: it is
    * independent of the write and of the moderation wait, so it ran beside them.
+   * For a system user's line, whoever it is kept from (a hidden crew's wave).
    */
   blocked?: Promise<string[]>
   /**
@@ -116,6 +120,8 @@ export async function deliverToRoom(input: {
         userImage: crewImage,
         createdAt: message.created_at.toISOString(),
         parentId: message.parent_id || undefined,
+        // A system line says what it is in its metadata, live as in the history (SCRUM-1110).
+        ...(message.type === "system" && message.metadata ? { metadata: message.metadata } : {}),
       },
       senderBlocked,
       input.scope

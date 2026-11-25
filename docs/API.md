@@ -3476,7 +3476,7 @@ side told: the same row (`crew_likes.is_wave`), body, guardrails, refusals and
 Mix, and the same 30 a day (likes and waves together, never also in the person
 Wave's W3/W4). The waved-at crew's chat gets a system line from the system
 user — *"Nebula waved at your crew"*, `metadata: { kind: "crew_waved", eventId,
-fromCrewId }`; for a person, *"Lunar Fox waved at the crew"* by their pseudonym
+occurrenceId, fromCrewId }`; for a person, *"Lunar Fox waved at the crew"* by their pseudonym
 here, with `fromUserId` = their handle in the event room, which Wave back sends
 to `POST /events/:id/matches/likes` with `asCrewId`. Their card gets
 `wavedAtYou: true` and comes first until they answer; yours `youWaved: true`.
@@ -3484,7 +3484,18 @@ Your own crew chat says *"waved at Orbit for the crew"* (`kind: crew_wave`). No
 push for a single wave. A wave or a like back makes the one Mix; when a wave
 made it the push is *"Orbit and Nebula both waved. Say hi in the Mix."* and no
 received line is written. A wave over your side's own like from an installed
-build turns it into a wave and tells them once.
+build turns it into a wave and tells them once. `…/wave` and `…/like` from
+outside the room are `403` *"Check in before you wave here."*, as is
+`POST /events/:id/matches/likes`.
+
+**A `crew_waved` line, per reader** (SCRUM-1110). In `GET
+/chat/groups/:id/messages` it carries `answered: boolean`: this crew has waved
+or liked back (the pair's Mix that night, open or over); no other line has the
+field. A wave from a crew **you** hid is not in your history, your chat list's
+`lastMessage` or `unreadCount`, or your `chat:message`, and a reply quoting it
+has the quote taken down; your crewmates read it, and showing the crew again
+(`DELETE …/hide`) brings it back. `chat:message` carries a system line's
+`metadata`, as the history does; a live `crew_waved` is always unanswered.
 
 A crew's wave at one **person** (S5 b2) is `POST /events/:eventId/waves {
 toUserId, asCrewId }`: the crew → person like with `is_wave`, shown to that
