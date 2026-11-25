@@ -99,14 +99,14 @@ describe("an erased account cannot be edited back into existence", () => {
   // The row menu is hidden, but a server action is callable without a menu.
   it("updateUser scopes its write to live rows", async () => {
     await updateUser("u1", { name: "Resurrected" })
-    expect(mockDb.user.update.mock.calls[0][0].where).toEqual({ id: "u1", deletedAt: null })
+    expect(mockDb.user.update.mock.calls[0][0].where).toMatchObject({ id: "u1", deletedAt: null })
     // And the read before it, so an erased row is refused before any write.
     expect(mockDb.user.findUnique.mock.calls.at(-1)![0].where).toEqual({ id: "u1", deletedAt: null })
   })
 
   it("updateUserRole does too", async () => {
     await updateUserRole("u1", "organizer")
-    expect(mockDb.user.update.mock.calls[0][0].where).toEqual({ id: "u1", deletedAt: null })
+    expect(mockDb.user.update.mock.calls[0][0].where).toMatchObject({ id: "u1", deletedAt: null })
   })
 })
 

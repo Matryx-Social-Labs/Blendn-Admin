@@ -25,7 +25,7 @@ test.afterAll(async () => {
 })
 
 async function attendee(email: string) {
-  const { id } = await db.user.create({ data: { email, name: `${tag} ${email.split("@")[1]}`, role: "attendee" } })
+  const { id } = await db.user.create({ data: { email, name: `${tag} ${email.split("@")[1]}`, role: "attendee", emailVerified: new Date() } })
   ids.push(id)
   return id
 }
@@ -56,7 +56,7 @@ test("a gmail attendee cannot be made an admin; a company address can", async ({
   await makeAdmin(page, gmail)
   await expect(
     page.getByText(
-      "Only @matrixsociallabs.com accounts can be admins. Set up the person's company account and make that one an admin."
+      "Only a verified @matrixsociallabs.com account can be an admin. Set up the person's company account and make that one an admin."
     )
   ).toBeVisible()
   expect(await readBack(gmailId)).toEqual({ role: "attendee", audit: [] })

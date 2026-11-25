@@ -34,9 +34,9 @@ afterAll(async () => {
   await closeDb()
 })
 
-async function person(email: string, role: "attendee" | "app_admin" = "attendee") {
+async function person(email: string, role: "attendee" | "app_admin" = "attendee", emailVerified: Date | null = new Date()) {
   const id = testId("lock")
-  await db.user.create({ data: { id, email: email.replace("@", `+${id.slice(-8)}@`), name: "Lock test", role } })
+  await db.user.create({ data: { id, email: email.replace("@", `+${id.slice(-8)}@`), name: "Lock test", role, emailVerified } })
   users.push(id)
   return id
 }
@@ -55,7 +55,17 @@ describe("making someone an admin", () => {
     await signedInAdmin()
     const id = await person("x@gmail.com")
 
-    await expect(updateUserRole(id, "app_admin")).rejects.toThrow("Only @matrixsociallabs.com accounts can be admins")
+    await expect(updateUserRole(id, "app_admin")).rejects.toThrow("Only a verified @matrixsociallabs.com account can be an admin")
+
+    expect(await roleOf(id)).toBe("attendee")
+    expect(await auditRows(id)).toEqual([])
+  })
+
+  it("refuses a company address nobody has proven they own: app sign-up sends no verification mail", async () => {
+    await signedInAdmin()
+    const id = await person("claimed@matrixsociallabs.com", "attendee", null)
+
+    await expect(updateUserRole(id, "app_admin")).rejects.toThrow("Only a verified @matrixsociallabs.com account can be an admin")
 
     expect(await roleOf(id)).toBe("attendee")
     expect(await auditRows(id)).toEqual([])

@@ -347,8 +347,9 @@ export async function updateUser(
       // `deletedAt: null` in the where: an erased account cannot be edited back
       // into existence. The row menu is hidden for those rows, but a server
       // action is callable without a menu. P2025 surfaces as the generic error.
+      // Role and email as checked above, so a promotion that raced this edit fails closed.
       await tx.user.update({
-        where: { id, deletedAt: null },
+        where: { id, deletedAt: null, role: before.role, email: before.email },
         data: updateData,
         // Nothing is read back: the row carries the password hash and the birth date.
         select: { id: true },
@@ -378,12 +379,14 @@ export async function updateUser(
 
 export async function updateUserRole(id: string, role: user_role) {
   const admin = await requireAdmin()
-  const before = id === SYSTEM_USER_ID ? null : await db.user.findUnique({ where: { id, deletedAt: null }, select: { role: true, email: true } })
+  const before = id === SYSTEM_USER_ID ? null : await db.user.findUnique({ where: { id, deletedAt: null }, select: { role: true, email: true, emailVerified: true } })
   if (!before) throw new Refusal("User not found")
-  // Admins are company staff only (launch gate 10, SCRUM-1235).
-  if (role === "app_admin" && !isStaffEmail(before.email)) {
+  // Admins are company staff only (launch gate 10, SCRUM-1235). Verified, because
+  // app sign-up takes any address unproven (lib/mobile-auth.ts) and a company one
+  // nobody has claimed yet would otherwise be promotable by whoever registered it.
+  if (role === "app_admin" && !(isStaffEmail(before.email) && before.emailVerified)) {
     throw new Refusal(
-      `Only @${COMPANY.staffEmailDomain} accounts can be admins. Set up the person's company account and make that one an admin.`
+      `Only a verified @${COMPANY.staffEmailDomain} account can be an admin. Set up the person's company account and make that one an admin.`
     )
   }
   await db.$transaction(async (tx) => {
@@ -391,10 +394,11 @@ export async function updateUserRole(id: string, role: user_role) {
       // Locks every live admin row, so two admins demoting each other at once
       // queue here and the second one sees who is left.
       const admins = await tx.$queryRaw<{ id: string }[]>`
-        SELECT id FROM "User" WHERE role = 'app_admin' AND "deletedAt" IS NULL AND suspended_at IS NULL FOR UPDATE`
+        SELECT id FROM "User" WHERE role = 'app_admin' AND "deletedAt" IS NULL AND suspended_at IS NULL ORDER BY id FOR UPDATE`
       if (!admins.some((a) => a.id !== id)) throw new Refusal("This is the last admin. Make someone else an admin first.")
     }
-    await tx.user.update({ where: { id, deletedAt: null }, data: { role }, select: { id: true } })
+    // The row as checked above, or nothing: a role or address changed since then fails closed (P2025).
+    await tx.user.update({ where: { id, deletedAt: null, role: before.role, email: before.email }, data: { role }, select: { id: true } })
     // A role change is the canonical audited admin action (CLAUDE.md): its row
     // commits with it, so a failed audit write changes nothing (SCRUM-131, SCRUM-1235).
     await auditInTx(tx, {
