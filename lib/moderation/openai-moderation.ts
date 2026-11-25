@@ -17,8 +17,8 @@ const OPENAI_MODERATION_URL = "https://api.openai.com/v1/moderations"
  *
  * The caller could not tell them apart, so it wrote `moderation_status: "clean"`
  * for all four. **An unchecked message was recorded as checked and clean**, and
- * `OPENAI_API_KEY` is marked optional in `lib/env.ts` and listed as not required
- * in `DEPLOYMENT.md` — so the ordinary deployment records every message as
+ * `OPENAI_API_KEY` was optional everywhere (production requires it at boot
+ * since SCRUM-1159) — so the ordinary deployment recorded every message as
  * moderated by a moderator that was never called.
  *
  * A moderator reading that column cannot distinguish a room nobody has abused

@@ -4450,7 +4450,7 @@ Messages go through a **pre-emit** pipeline — moderation runs before the messa
 
 Thresholds: `>=0.70` confidence → auto-hide, `>=0.40` → flag for review. Auto-mute after 3 hidden abusive messages in 1 hour (a message hidden only for a contact detail does not count). Auto-unmute after 1 hour with no new violations (checked on next send attempt).
 
-Requires `OPENAI_API_KEY` env var. Degrades gracefully to keyword-only if absent.
+Requires `OPENAI_API_KEY` env var: Railway production refuses to boot without it; elsewhere moderation degrades to keyword-only if absent.
 
 ### Reports from the app
 

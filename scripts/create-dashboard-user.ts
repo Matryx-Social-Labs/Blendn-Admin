@@ -2,9 +2,10 @@
  * Create or reset a dashboard login.
  *
  *   DATABASE_URL=... npx tsx scripts/create-dashboard-user.ts <email> [role]
- *   DATABASE_URL=... npx tsx scripts/create-dashboard-user.ts qa@blendn.app app_admin
+ *   DATABASE_URL=... npx tsx scripts/create-dashboard-user.ts someone@matrixsociallabs.com app_admin
  *
- * role defaults to app_admin; organizer and venue_owner are also accepted.
+ * role defaults to app_admin, which needs a company (matrixsociallabs.com)
+ * address; organizer and venue_owner are also accepted.
  * attendee is refused — attendees are mobile-only and middleware.ts bounces
  * them off /dashboard, so creating one here would produce an account that
  * cannot sign in to the thing this script exists to grant access to.
@@ -20,6 +21,7 @@ import { randomBytes } from "crypto"
 import { PrismaClient, type user_role } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
+import { COMPANY, isStaffEmail } from "../lib/company"
 
 const DASHBOARD_ROLES = ["app_admin", "organizer", "venue_owner"] as const
 
@@ -36,7 +38,9 @@ function generatePassword() {
 }
 
 async function main() {
-  const [email, role = "app_admin"] = process.argv.slice(2)
+  const [typed, role = "app_admin"] = process.argv.slice(2)
+  // Stored the way sign-in looks it up (lib/auth.ts).
+  const email = typed?.trim().toLowerCase()
 
   if (!email || !email.includes("@")) {
     console.error("usage: create-dashboard-user.ts <email> [app_admin|organizer|venue_owner]")
@@ -45,6 +49,12 @@ async function main() {
 
   if (!DASHBOARD_ROLES.includes(role as (typeof DASHBOARD_ROLES)[number])) {
     console.error(`role must be one of: ${DASHBOARD_ROLES.join(", ")} (got "${role}")`)
+    process.exit(1)
+  }
+
+  // Admins are company staff only (launch gate 10, SCRUM-1235).
+  if (role === "app_admin" && !isStaffEmail(email)) {
+    console.error(`app_admin needs a @${COMPANY.staffEmailDomain} address (got "${email}")`)
     process.exit(1)
   }
 

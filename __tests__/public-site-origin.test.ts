@@ -27,6 +27,7 @@ const BASE = {
   NEXTAUTH_URL: "http://localhost:3000",
   NEXTAUTH_SECRET: "x".repeat(32),
   MOBILE_JWT_SECRET: "y".repeat(32),
+  OPENAI_API_KEY: "sk-test", // production boots only with it (SCRUM-1159)
 }
 
 const saved = { ...process.env }

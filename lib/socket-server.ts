@@ -897,27 +897,33 @@ export function initSocketServer(httpServer: HttpServer): Server {
   })
 
   /*
-   * Cross-replica message delivery.
+   * Cross-replica message delivery, opt-in with SOCKET_REDIS_ADAPTER=1.
    *
-   * Without an adapter every replica keeps its own room membership, so a
-   * message emitted on replica A never reaches a client connected to replica
-   * B — chat silently half-works rather than failing loudly. That has not
-   * bitten because `.railway/railway.ts` sets one replica and the app runs as one
-   * instance; dashboard sockets are long-lived and bring that ceiling closer.
+   * One replica (`.railway/railway.ts`) uses the in-memory adapter, which is
+   * correct there. The Redis adapter makes every `fetchSockets` ask Redis how
+   * many servers exist first, so with it a Redis restart froze every room emit
+   * (SCRUM-1217); REDIS_URL alone, set for the rate limiter, must not attach it.
    *
-   * Opt-in on REDIS_URL. With no Redis provisioned this is a no-op and the
-   * default in-memory adapter stands, which is correct for one replica.
-   * **Do not raise the replica count until REDIS_URL is set** — that is the
-   * moment this stops being precautionary.
+   * A second replica needs all three of: this flag; sticky sessions, because
+   * the client falls back to long-polling; and a single owner for the per-process
+   * `opsTimers` loop, or each replica runs every dashboard's snapshot loop.
    */
   const redisUrl = process.env.REDIS_URL
-  if (redisUrl) {
+  if (redisUrl && process.env.SOCKET_REDIS_ADAPTER === "1") {
     void (async () => {
       try {
         const { createClient } = await import("redis")
         const { createAdapter } = await import("@socket.io/redis-adapter")
         const pubClient = createClient({ url: redisUrl })
         const subClient = pubClient.duplicate()
+        // Without a listener an emitted 'error' is an unhandled exception that takes the process down.
+        for (const client of [pubClient, subClient]) {
+          client.on("error", (error: unknown) => {
+            logger.warn("Socket.io Redis adapter error", {
+              error: error instanceof Error ? error.message : String(error),
+            })
+          })
+        }
         await Promise.all([pubClient.connect(), subClient.connect()])
         /*
          * `requestsTimeout` is how long a cross-replica request (`fetchSockets`,
@@ -938,6 +944,8 @@ export function initSocketServer(httpServer: HttpServer): Server {
         })
       }
     })()
+  } else {
+    logger.info("Socket.io in-memory adapter (one replica; SOCKET_REDIS_ADAPTER is not 1)")
   }
 
   /*

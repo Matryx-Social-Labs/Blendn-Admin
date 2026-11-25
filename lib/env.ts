@@ -33,7 +33,8 @@ const envSchema = z.object({
   MEDIA_WORKER_URL: z.string().url().optional(),
   MEDIA_WORKER_SECRET: z.string().min(32, "MEDIA_WORKER_SECRET must be at least 32 characters").optional(),
 
-  // OpenAI (optional — moderation degrades to keyword-only if absent)
+  // OpenAI: the moderation model. Required on Railway production (`openaiKeyProblem`);
+  // elsewhere optional, and without it moderation is the keyword list alone.
   OPENAI_API_KEY: z.string().optional(),
 
   // Landing-page lead ingest. Optional because an environment that does not
@@ -94,6 +95,20 @@ const envSchema = z.object({
   MAINTENANCE_MODE: z.string().optional(),
   /** The `Retry-After` of that 503, in seconds (default 300, at most 3600). */
   MAINTENANCE_RETRY_AFTER_SECONDS: z.string().optional(),
+  /**
+   * Redis for the rate limiter and the match deck's exposure counts. Unset:
+   * both count in this process's memory, correct at one replica. Set but down:
+   * the same, at once; neither waits on Redis (SCRUM-1217).
+   */
+  REDIS_URL: z.string().optional(),
+  /**
+   * `1`: attach the Socket.io Redis adapter (lib/socket-server.ts), which a
+   * second replica needs. Anything else: the in-memory adapter, which one
+   * replica wants, because with the Redis one a Redis restart froze every room
+   * emit. Never set on its own: see the comment there for the other two
+   * preconditions of a second replica.
+   */
+  SOCKET_REDIS_ADAPTER: z.string().optional(),
   DASHBOARD_HOST: z.string().optional(),
   API_HOST: z.string().optional(),
   /**
@@ -240,6 +255,23 @@ export function razorpayKeyModeProblem(
   return null
 }
 
+/**
+ * Why this environment may not run without OPENAI_API_KEY, or null.
+ *
+ * Without the key every model check is skipped: big rooms proceed, crew text
+ * skips its fail-closed, the Lobby and both re-check sweepers stop, and
+ * moderation is the keyword list alone, with nothing failing. Gated on the
+ * Railway name, not NODE_ENV: CI's e2e lane boots NODE_ENV=production with no
+ * key and must keep booting.
+ */
+export function openaiKeyProblem(
+  key: string | undefined,
+  environmentName: string | undefined
+): string | null {
+  if (environmentName !== "production" || key?.trim()) return null
+  return "OPENAI_API_KEY is required in production: without it moderation is the keyword list alone"
+}
+
 const DEFAULT_SITE_ORIGIN = "https://www.blendn.app"
 
 /**
@@ -280,6 +312,8 @@ export function publicSiteOrigin(): string {
 }
 
 const refinedEnvSchema = envSchema.superRefine((env, ctx) => {
+  const openai = openaiKeyProblem(env.OPENAI_API_KEY, env.RAILWAY_ENVIRONMENT_NAME)
+  if (openai) ctx.addIssue({ code: "custom", path: ["OPENAI_API_KEY"], message: openai })
   const site = publicSiteOriginProblem(env.PUBLIC_SITE_ORIGIN?.trim() || undefined, env.RAILWAY_ENVIRONMENT_NAME)
   if (site) ctx.addIssue({ code: "custom", path: ["PUBLIC_SITE_ORIGIN"], message: site })
   // Selling with no QR key issues tickets that cannot be checked at the door.

@@ -2447,10 +2447,16 @@
       "date": "2026-10-23"
     },
     "socket-redis-adapter.test.ts": {
-      "guards": "perf/chat-path: the socket server's Redis adapter is created with requestsTimeout: 1000, not the 5 s default (with two or more replicas one slow replica holds every fetchSockets up to 5 s, and a timeout drops that socket delivery).",
-      "mutation": "M1517 createAdapter(pubClient, subClient) with no options (the default 5000 ms).",
-      "observed": "2026-10-18: M1517: 1 of 1 failing. Reverted; 1 green.",
-      "date": "2026-10-18"
+      "guards": "SCRUM-1217: the Socket.io Redis adapter is attached only with SOCKET_REDIS_ADAPTER=1 (REDIS_URL alone, set for the rate limiter, made every fetchSockets ask Redis first on one replica, so a Redis restart froze room delivery); with the flag it is created with requestsTimeout: 1000 and both pub/sub clients carry an 'error' listener. Behaviour, through initSocketServer; replaces the 2026-10-18 source-shape test.",
+      "mutation": "M1 the flag check removed (`if (redisUrl)`). M2 the error listeners removed. M3 createAdapter(pubClient, subClient) with no options.",
+      "observed": "2026-11-26: on dev 354ded45 (no flag, no listeners) 2 of 2 failing. M1: 1 of 2 failing (createClient called). M2: 1 of 2 (no 'error' listener). M3: 1 of 2 (requestsTimeout). Each reverted; 2 of 2.",
+      "date": "2026-11-26"
+    },
+    "redis-not-ready.test.ts": {
+      "guards": "SCRUM-1217: with REDIS_URL set and Redis not ready (connect() never settles, isReady false), hit/hitRolling/peek/release/forget use memory and never reach Redis, a fail-closed key throws StoreUnavailable, and exposure counts come from memory, all within 2 s; a connect() that rejects is caught (no unhandled rejection); a healthy Redis at boot is waited for briefly (250 ms grace) so the first fail-closed key is counted, not refused; a client that drops mid-run is not used, and counting returns to Redis once ready.",
+      "mutation": "M1 rate-limit-store awaits connect() again (dev 354ded45). M2 the isReady check removed (`return client`). M3 exposure.ts awaits connect() again. M4 connect()'s .catch removed. M5 the boot grace removed.",
+      "observed": "2026-11-26: on dev 354ded45 (first version of the file) 4 of 4 failing, each timing out at 2 s. M1: 3 of 6 failing. M2: 3 of 6 failing (a not-ready client is used: memory paths reach Redis, the fail-closed key is counted, the mid-run drop times out). M3: 1 of 6 failing (exposure). M4: 1 of 6 failing (unhandled rejection). M5: 1 of 6 failing (the cold-start fail-closed key refused). Each reverted; 6 of 6.",
+      "date": "2026-11-26"
     },
     "event-counts-not-whole-table.itest.ts": {
       "guards": "perf/read-routes fix 1: the events list and detail count favourites, ratings and going RSVPs with exactly three GROUP BY statements, one per table, each restricted to the page's events (`\"event_id\" IN`), and not with a relation `_count` folded into the events statement; the counts themselves (4 / 2 / 3, waitlisted, maybe and not_going excluded).",
