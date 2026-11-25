@@ -512,8 +512,8 @@ function EditUserDialog({ user, open, onOpenChange, currentUserRole }: EditUserD
       }
       toast.success("User updated successfully")
       onOpenChange(false)
-    } catch {
-      toast.error("Failed to update user")
+    } catch (err) {
+      toast.error(refusalMessage(err, "Failed to update user"))
     } finally {
       setIsLoading(false)
     }
