@@ -1,5 +1,5 @@
 import { logger } from "./logger"
-import { dashboardHost } from "./env"
+import { dashboardHost, publicSiteOrigin } from "./env"
 import {
   approvedHtml,
   claimDecisionHtml,
@@ -379,7 +379,7 @@ export function domainVerifyEmail(domain: string, link: string) {
  * in the app, never in an email.
  */
 export function ticketOrderEmail(opts: { subject: string; heading: string; paragraphs: string[]; orderId: string }) {
-  const link = "https://www.blendn.app"
+  const link = publicSiteOrigin()
   const paragraphs = [...opts.paragraphs, `Order reference: ${opts.orderId.slice(0, 8).toUpperCase()}`]
   return {
     subject: opts.subject,

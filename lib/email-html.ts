@@ -24,6 +24,8 @@
  *     omitted when that is unset.
  */
 
+import { publicSiteOrigin } from "./env"
+
 /**
  * Read directly rather than importing `appUrl` from ./email.
  *
@@ -211,8 +213,8 @@ ${DESIGN_CSS}
 <!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="wrap" style="width:600px;max-width:100%">
 <tr><td style="padding:0 0 24px 0">
-<a href="https://www.blendn.app" style="text-decoration:none"><img class="lt" src="${BRAND_ASSETS}/lockup-dark.png" width="126" height="36" alt="Blend’n" style="display:block;width:126px;height:36px"></a>
-<!--[if !mso]><!-- --><a href="https://www.blendn.app" class="dk" style="text-decoration:none;display:none;mso-hide:all"><img class="dk" src="${BRAND_ASSETS}/lockup-white.png" width="126" height="36" alt="Blend’n" style="display:none;width:126px;height:36px;mso-hide:all"></a><!--<![endif]-->
+<a href="${publicSiteOrigin()}" style="text-decoration:none"><img class="lt" src="${BRAND_ASSETS}/lockup-dark.png" width="126" height="36" alt="Blend’n" style="display:block;width:126px;height:36px"></a>
+<!--[if !mso]><!-- --><a href="${publicSiteOrigin()}" class="dk" style="text-decoration:none;display:none;mso-hide:all"><img class="dk" src="${BRAND_ASSETS}/lockup-white.png" width="126" height="36" alt="Blend’n" style="display:none;width:126px;height:36px;mso-hide:all"></a><!--<![endif]-->
 </td></tr>
 <tr><td class="card" style="background-color:#FFFFFF;border-radius:14px" bgcolor="#FFFFFF">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
@@ -446,7 +448,7 @@ export function applyAgainHtml(kind: "account" | "pending", signInLink: string):
             "Somebody applied to host on Blend’n with this address, and we already have an application from it.",
             "A person is reviewing it, usually within two working days. You don’t need to apply again.",
           ],
-    button: kind === "account" ? { href: signInLink, label: "Sign in" } : { href: "https://www.blendn.app", label: "Visit Blend’n" },
+    button: kind === "account" ? { href: signInLink, label: "Sign in" } : { href: publicSiteOrigin(), label: "Visit Blend’n" },
     note: "Didn’t apply? Ignore this email. Nothing has changed on your account.",
     about: "account",
   })
