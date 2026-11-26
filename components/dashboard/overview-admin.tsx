@@ -14,10 +14,13 @@ import { DataTable, type Column } from "@/components/dashboard/data-table"
 import { Panel } from "@/components/dashboard/kit"
 import { EmptyState, HeroMetric } from "@/components/dashboard/primitives"
 import type { AdminOverview, CityRow, OrganiserSupplyRow } from "@/lib/dashboard-types"
-import { formatCompact, formatNumber } from "@/lib/dashboard-format"
+import { countLabel, dayInIndia, formatCompact, formatNumber } from "@/lib/dashboard-format"
+import { fewCount } from "@/lib/disclosure"
+import type { CohortRow, CohortStage, SignupCohorts } from "@/lib/loop-closure"
 
 /**
- * Admin overview — five panels, derived from what an admin needs answered.
+ * Admin overview — five panels, derived from what an admin needs answered,
+ * and a sixth under the loop since SCRUM-1281: sign-ups by week and by source.
  * On the kit since step 18 (`admin-decisions.jsx` AdminOverview): bordered
  * Panels for the loop, turn-up, supply and cities, in this order. The kit's
  * 7d/30d/90d tabs are not here — the top bar's range control already drives
@@ -183,6 +186,9 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
           </p>
         </Panel>
       </div>
+
+      {/* 2b — did each week's sign-ups turn up, and from where (SCRUM-1281) */}
+      <Cohorts cohorts={data.cohorts} now={new Date(data.generatedAt)} />
 
       {/* 3 and 4 — did they turn up, and is there anything to turn up to */}
       <div className="grid items-start gap-5 @3xl/main:grid-cols-2">
@@ -397,5 +403,138 @@ function Meter({
         <div className="h-full rounded-full" style={{ width: `${clamped}%`, background: colour }} />
       </div>
     </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Sign-ups by week and by source (SCRUM-1281). A table, not a chart: eight
+ * cohorts by four stages, read as numbers. The memorable detail is the
+ * staircase of "—" in the top right, stepping down as each window closes: a
+ * stage nobody has had the time for is not yet known, never a low number.
+ */
+function Cohorts({ cohorts, now }: { cohorts: SignupCohorts; now: Date }) {
+  const weekColumns: Column<CohortRow & { id: string; week: string }>[] = [
+    {
+      key: "week",
+      label: "Week of",
+      primary: true,
+      render: (row) => (
+        <>
+          {dayInIndia(`${row.week}T00:00:00+05:30`, now)}
+          <SignedUpUnder count={row.signedUp} />
+        </>
+      ),
+    },
+    ...stageColumns(false),
+  ]
+  return (
+    <Panel
+      title="Sign-ups by week"
+      hint={
+        <>
+          last 8 weeks · each stage a share of the week’s sign-ups · <span aria-hidden="true">—</span>
+          <span className="sr-only">a dash means</span> not yet known
+        </>
+      }
+    >
+      <DataTable
+        label="Sign-ups by week"
+        columns={weekColumns}
+        rows={cohorts.weeks.map((w) => ({ ...w, id: w.week }))}
+        emptyState={null}
+      />
+      <h3 className="mt-1.5 text-[0.8125rem] font-semibold">By where they came from</h3>
+      <DataTable
+        label="Sign-ups by where they came from"
+        columns={sourceColumns}
+        rows={cohorts.sources.map((s) => ({ ...s, id: s.source }))}
+        emptyState={<EmptyState icon={<IconMapPin />} title="Nobody signed up in the last 8 weeks" description="Sources appear as people sign up." />}
+      />
+      <p className="text-[0.75rem] text-faint-foreground">
+        RSVP’d within 7 days of signing up · checked in within 14 · came back for a second event within 30. A
+        source’s stage counts only people whose window has closed, so the 30-day column rests on the oldest weeks.
+      </p>
+    </Panel>
+  )
+}
+
+/** Where somebody came from, as staff say it. A source added to `ACQUISITION_SOURCES` later shows by its value. */
+const SOURCE_LABEL: Record<string, string> = {
+  door: "door QR",
+  link: "host’s link",
+  invite: "friend’s invite",
+  web: "website",
+  share: "a guest’s share",
+}
+
+const sourceColumns: Column<CohortRow & { id: string; source: string }>[] = [
+  {
+    key: "source",
+    label: "Source",
+    primary: true,
+    render: (row) => (
+      <>
+        {SOURCE_LABEL[row.source] ?? row.source}
+        <SignedUpUnder count={row.signedUp} />
+      </>
+    ),
+  },
+  ...stageColumns(true),
+]
+
+function stageColumns(withBase: boolean): Column<CohortRow & { id: string }>[] {
+  return [
+    {
+      key: "signedUp",
+      label: "Signed up",
+      align: "right",
+      // Folded under the row's label below the container's 2xl: five columns do not fit beside the sidebar at 768.
+      secondary: true,
+      render: (row) => countLabel(fewCount(row.signedUp)),
+    },
+    { key: "rsvp7", label: "RSVP’d", align: "right", render: (row) => <StageCell stage={row.rsvp7} withBase={withBase} /> },
+    { key: "checkIn14", label: "Checked in", align: "right", render: (row) => <StageCell stage={row.checkIn14} withBase={withBase} /> },
+    { key: "back30", label: "Came back", align: "right", render: (row) => <StageCell stage={row.back30} withBase={withBase} /> },
+  ]
+}
+
+function SignedUpUnder({ count }: { count: number }) {
+  return (
+    <span className="block text-[0.6875rem] text-muted-foreground @2xl/main:hidden">
+      {countLabel(fewCount(count))} signed up
+    </span>
+  )
+}
+
+/**
+ * A count, and its share of the people who have had the window. "a few" under
+ * 5 with no share; no share either when the base is a few, since the two
+ * together would give the count away.
+ */
+export function StageCell({ stage, withBase }: { stage: CohortStage; withBase: boolean }) {
+  if (!stage) {
+    return (
+      <span className="text-faint-foreground">
+        <span aria-hidden="true">—</span>
+        <span className="sr-only">not yet known</span>
+      </span>
+    )
+  }
+  const count = fewCount(stage.count)
+  const shown = count !== "few" && fewCount(stage.of) !== "few"
+  // Never 100% for a part, nor 0% for somebody.
+  const pct = Math.round((stage.count / stage.of) * 100)
+  const share = stage.count < stage.of ? Math.min(pct, 99) : pct
+  return (
+    <>
+      {countLabel(count)}
+      {shown ? (
+        <span className="block text-[0.6875rem] text-faint-foreground">
+          {stage.count > 0 ? Math.max(share, 1) : 0}%{withBase ? ` of ${formatNumber(stage.of)}` : ""}
+        </span>
+      ) : null}
+    </>
   )
 }
