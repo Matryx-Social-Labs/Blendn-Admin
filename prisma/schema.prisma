@@ -70,6 +70,13 @@ model User {
   mobile_sessions_revoked_at DateTime? @db.Timestamptz(6)
   suspended_by               String?
   suspension_reason          String?
+  /// A pending promotion to app_admin: the admin who asked and when. Another
+  /// admin confirms within 24 h (app/dashboard/users/actions.ts, SCRUM-1240).
+  /// No relation: an erased requester blocks nothing; audit_logs is the record.
+  /// Written only as a JS Date (ms): the approval matches it exactly in its update `where`,
+  /// so a µs value (`now()` in SQL) would make every confirmation fail closed.
+  admin_requested_by         String?
+  admin_requested_at         DateTime? @db.Timestamptz(6)
 
   accounts Account[]
   sessions Session[]
