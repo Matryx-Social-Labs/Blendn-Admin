@@ -42,6 +42,7 @@ import { cleanup, closeDb, db, makeUser, testId } from "./helpers"
 const page = require("@/app/dashboard/events/new/page") as typeof import("@/app/dashboard/events/new/page")
 const createRoute = require("@/app/api/events/route") as typeof import("@/app/api/events/route")
 const eventRoute = require("@/app/api/events/[id]/route") as typeof import("@/app/api/events/[id]/route")
+const { duplicateFor } = require("@/lib/event-duplicate") as typeof import("@/lib/event-duplicate")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const users: string[] = []
@@ -81,7 +82,8 @@ async function person(label: string, memberships: [string, Role][], role: "organ
 }
 
 const WEEK = 7 * 24 * 60 * 60 * 1000
-const MEDIA_URL = "https://media.example/events/dup-fixture/cover.jpg"
+const MEDIA_URL = "https://media.example/events/dup-fixture/gallery.jpg"
+const COVER_URL = "https://media.example/events/dup-fixture/cover.jpg"
 
 async function sourceEvent(opts: {
   creator: string
@@ -109,6 +111,7 @@ async function sourceEvent(opts: {
       latitude: 43.6435,
       longitude: -79.4239,
       geofence: { type: "circle", lat: 43.6435, lng: -79.4239, radius: 40, buffer: 20 },
+      cover_image_url: COVER_URL,
       deleted_at: opts.deleted ? new Date() : null,
       curated_at: opts.curated ? new Date() : null,
       details: { create: { full_description: "SOURCE-DESCRIPTION-SENTINEL long" } },
@@ -122,10 +125,10 @@ async function sourceEvent(opts: {
 const as = (u: { id: string; role: string }) => (session = { user: { id: u.id, role: u.role } })
 
 /** The page's element: `<EventEditor …props />`, or the redirect it threw. */
-async function open(from: string | undefined): Promise<{ props?: Record<string, unknown>; redirectedTo?: string }> {
+async function open(from: string | undefined): Promise<{ props?: Record<string, unknown>; key?: string | null; redirectedTo?: string }> {
   try {
     const el = (await page.default({ searchParams: Promise.resolve(from === undefined ? {} : { from }) })) as ReactElement<Record<string, unknown>>
-    return { props: el.props }
+    return { props: el.props, key: el.key }
   } catch (error) {
     const to = (error as { to?: string }).to
     if (to) return { redirectedTo: to }
@@ -156,13 +159,13 @@ beforeAll(async () => {
 
 beforeEach(() => mockRedirect.mockClear())
 
-function expectPlain(result: { props?: Record<string, unknown>; redirectedTo?: string }) {
+function expectPlain(result: { props?: Record<string, unknown>; redirectedTo?: string }, baseline = plainProps) {
   if (result.redirectedTo) {
     expect(result.redirectedTo).not.toContain(source.id)
     return
   }
   // The same props as /dashboard/events/new with no ?from: nothing says the id exists.
-  expect(result.props).toEqual(plainProps)
+  expect(result.props).toEqual(baseline)
   const text = JSON.stringify(result.props)
   expect(text).not.toContain("SOURCE-DESCRIPTION-SENTINEL")
   expect(text).not.toContain(source.title)
@@ -181,9 +184,40 @@ describe("who may duplicate", () => {
     expect(props?.copyNote).toEqual(expect.objectContaining({ lead: expect.stringContaining("A copy of your") }))
   })
 
+  it("keys the editor by its source, so moving between copies, or to a blank form, remounts it", async () => {
+    as(owner)
+    expect((await open(source.id)).key).toBe(source.id)
+    expect((await open(undefined)).key).toBe("new")
+    expect((await open(randomUUID())).key).toBe("new")
+  })
+
   it("an admin of the organising org (not its creator) gets the prefill", async () => {
     as(await person("dup-colleague", [[hostOrg, "admin"]]))
     expect((await open(source.id)).props?.initialEvent).toMatchObject({ title: source.title })
+  })
+
+  it("an owner of two orgs gets no prefill of the second org's event: the copy would land in the first", async () => {
+    const home = await org("dup-home")
+    const multi = await person("dup-multi", [[home, "owner"]])
+    await db.organisation_members.create({ data: { org_id: hostOrg, user_id: multi.id, role: "owner" } })
+    as(multi)
+    expectPlain(await open(source.id))
+  })
+
+  it("an app admin gets no prefill of an organisation's event: their copy would belong to no organisation", async () => {
+    as(await person("dup-admin-org", [], "app_admin"))
+    expectPlain(await open(source.id), (await open(undefined)).props)
+  })
+
+  it("the loader itself refuses staff, an organizer in no org, and the event's creator once they have left", async () => {
+    // The page redirects these before the loader (`mayCreateEvents`); this asks the loader directly.
+    const staff = await person("dup-staff-direct", [[hostOrg, "staff"]])
+    const orgless = await person("dup-orgless", [])
+    const leaver = await person("dup-leaver", [[otherOrg, "owner"]])
+    const left = await sourceEvent({ creator: leaver.id, orgId: hostOrg })
+    for (const [who, id] of [[staff, source.id], [orgless, source.id], [leaver, left.id]] as const) {
+      expect(await duplicateFor({ id: who.id, role: "organizer" }, id)).toBeNull()
+    }
   })
 
   it("a staff member of the organising org gets no prefill", async () => {
@@ -247,7 +281,10 @@ describe("nothing is written until Save", () => {
   it("opening the prefill writes no row and leaves the source as it was", async () => {
     as(owner)
     const before = await db.events.findUniqueOrThrow({ where: { id: source.id } })
-    const counts = async () => [await db.events.count(), await db.event_media.count(), await db.event_details.count(), await db.audit_logs.count()]
+    const counts = async () => [
+      await db.events.count(), await db.event_media.count(), await db.event_details.count(), await db.audit_logs.count(),
+      await db.event_occurrences.count(), await db.event_categories.count(), await db.event_amenities.count(), await db.chat_groups.count(),
+    ]
     const was = await counts()
 
     await open(source.id)
@@ -272,6 +309,7 @@ describe("media survive the source", () => {
     const copy = (await res.json()) as { id: string; organizer_org_id: string }
     events.push(copy.id)
     expect(copy.organizer_org_id).toBe(hostOrg)
+    expect((await db.events.findUniqueOrThrow({ where: { id: copy.id } })).cover_image_url).toBe(COVER_URL)
 
     const ctx = { params: Promise.resolve({ id: source.id }) }
     const patched = await eventRoute.PATCH(

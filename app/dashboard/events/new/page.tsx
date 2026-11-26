@@ -69,10 +69,13 @@ export default async function NewEventPage({ searchParams }: { searchParams: Pro
   })
 
   // "Duplicate" (SCRUM-1153): next week's copy of an event this person may edit; anything else is the plain form.
-  const copy = await duplicateFor(session.user, (await searchParams).from)
+  const { from } = await searchParams
+  const copy = await duplicateFor(session.user, from)
 
   return (
     <EventEditor
+      // A new key per source: the form takes its values once, on mount, so ?from=A → ?from=B (or → /new) must remount it.
+      key={copy ? String(from) : "new"}
       categories={categories}
       amenities={amenities}
       canFeature={session.user.role === "app_admin"}

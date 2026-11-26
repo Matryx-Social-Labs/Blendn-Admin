@@ -314,7 +314,7 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
         <div className="flex gap-2.5 rounded-[10px] border border-border bg-card px-3.5 py-3 text-[0.8125rem]">
           <IconCopy aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <p className="min-w-0 leading-5">
-            <b className="font-bold">{copyNote.lead}</b> <span className="text-muted-foreground">{copyNote.rest}</span>
+            <strong className="font-bold">{copyNote.lead}</strong> <span className="text-muted-foreground">{copyNote.rest}</span>
           </p>
         </div>
       ) : null}

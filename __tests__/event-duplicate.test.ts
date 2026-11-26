@@ -5,7 +5,7 @@
  * across a DST change), and nothing about guests, money or the room comes
  * along. Real `Intl` and `date-fns-tz`; the clock is the `now` argument.
  */
-import { duplicatePrefill, type DuplicateSource } from "@/lib/event-duplicate"
+import { duplicatePrefill, duplicateSourceSelect, type DuplicateSource } from "@/lib/event-duplicate"
 
 const TORONTO = "America/Toronto"
 
@@ -244,5 +244,22 @@ describe("duplicatePrefill allow-list", () => {
       expect(text).not.toContain(leaked)
     }
     expect(Object.keys(out.initialEvent).sort()).toEqual(EXPECTED_KEYS)
+  })
+})
+
+describe("duplicateSourceSelect", () => {
+  it("reads only the named columns: no include, no ids, nothing about money, curation or the room", () => {
+    expect(Object.keys(duplicateSourceSelect).sort()).toEqual(
+      [
+        "title", "description", "short_description", "venue_name", "venue_id", "address", "city", "state", "country",
+        "postal_code", "start_time", "end_time", "timezone", "visibility", "max_capacity", "min_age", "door_policy",
+        "latitude", "longitude", "cover_image_url", "crews_enabled", "check_in_radius", "geofence",
+        "details", "categories", "amenities", "media",
+      ].sort()
+    )
+    // The media rows are spread into the prefill, so their select is the allow-list: no id, no event_id.
+    expect(Object.keys(duplicateSourceSelect.media.select).sort()).toEqual(
+      ["type", "url", "thumbnail_url", "title", "description", "order", "width", "height", "duration_ms", "focal_x", "focal_y", "renditions"].sort()
+    )
   })
 })

@@ -4,6 +4,7 @@ import { formatInTimeZone, fromZonedTime } from "date-fns-tz"
 import type { EventEditorData } from "@/components/event-editor"
 import { isUuid } from "./api-input"
 import { db } from "./db"
+import { homeOrgIdFor } from "./event-ownership"
 import { eventClock } from "./event-phase"
 import type { Rendition } from "./media-clip"
 import { actorFor } from "./org-membership"
@@ -170,8 +171,9 @@ export function duplicatePrefill(source: DuplicateSource, now: Date): DuplicateP
 
 /**
  * The prefill for `?from=<id>`, or null: no uuid, no such event, a deleted
- * one, a venue day, or one this person may not edit all read the same, so a
- * stranger learns nothing about an id.
+ * one, a venue day, one this person may not edit, or one of an organisation
+ * a new event of theirs would not belong to all read the same, so a stranger
+ * learns nothing about an id.
  */
 export async function duplicateFor(
   user: { id: string; role: user_role },
@@ -184,5 +186,8 @@ export async function duplicateFor(
     select: { ...duplicateSourceSelect, ...eventPermissionSelect },
   })
   if (!source || !eventPermissions(await actorFor(user), source).canEdit) return null
+  // The save puts the copy in this person's home org (`owningOrgFor`), so only that org's events are offered:
+  // a copy always lands where its source is, never in a second org with the first one's venue (code review).
+  if (source.organizer_org_id !== (await homeOrgIdFor(user))) return null
   return duplicatePrefill(source, now)
 }
