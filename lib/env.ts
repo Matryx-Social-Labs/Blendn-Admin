@@ -34,7 +34,7 @@ const envSchema = z.object({
   MEDIA_WORKER_SECRET: z.string().min(32, "MEDIA_WORKER_SECRET must be at least 32 characters").optional(),
 
   // OpenAI: the moderation model. Required on Railway production (`openaiKeyProblem`);
-  // elsewhere optional, and without it moderation is the keyword list alone.
+  // optional elsewhere.
   OPENAI_API_KEY: z.string().optional(),
 
   // Landing-page lead ingest. Optional because an environment that does not
@@ -57,7 +57,7 @@ const envSchema = z.object({
   LEADS_SLACK_WEBHOOK_URL: z.string().url().optional(),
   /// Where staff hear about new reports and severe flags (`lib/staff-alert.ts`,
   /// every minute; counts and a link only). Same two free channels as the lead
-  /// alert, both optional: unset means an info log, never a throw. The webhook
+  /// alert, both optional: unset means a log line, never a throw. The webhook
   /// URL is a bearer secret and is never logged.
   STAFF_ALERT_SLACK_WEBHOOK_URL: z.string().url().optional(),
   STAFF_ALERT_EMAIL: z.string().email().optional(),
@@ -272,9 +272,7 @@ export function razorpayKeyModeProblem(
 /**
  * Why this environment may not run without OPENAI_API_KEY, or null.
  *
- * Without the key every model check is skipped: big rooms proceed, crew text
- * skips its fail-closed, the Lobby and both re-check sweepers stop, and
- * moderation is the keyword list alone, with nothing failing. Gated on the
+ * Production runs the model checks, so it refuses to boot without the key. Gated on the
  * Railway name, not NODE_ENV: CI's e2e lane boots NODE_ENV=production with no
  * key and must keep booting.
  */

@@ -250,8 +250,7 @@ export async function moderateBlurPhoto(url: string, userId: string): Promise<vo
     await recordPhotoCheck(url, userId, check.checked)
     // Replaced while it waited for this verdict: the write that replaced it left it
     // for us to judge, and it is clean, so it goes now (SCRUM-520). Clean is no
-    // result (the image check) or an "allow"; a borderline "flag" is recorded like
-    // a pass and is not one.
+    // result (the image check) or an "allow".
     if (check.checked && (!check.result || check.result.action === "allow")) {
       const current = await db.profiles.findUnique({ where: { id: userId }, select: { blur_photo: true } })
       if (current?.blur_photo !== url) await deleteReplacedBlur(url, userId)
