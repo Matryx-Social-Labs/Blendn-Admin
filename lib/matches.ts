@@ -19,7 +19,7 @@ import { roomHandle } from "@/lib/room-handle"
 import { waveStandings } from "@/lib/waves"
 import { notHostBannedFrom } from "@/lib/room-kind"
 import { visibleInRoom } from "@/lib/identity"
-import { roomPersonFacts, type RoomPersonFacts } from "@/lib/public-profile"
+import { roomPersonFacts, type RoomPersonFacts } from "@/lib/room-person-facts"
 import { IPL_PARENT_SLUG } from "@/lib/about-you"
 import {
   badgesFor,
@@ -699,8 +699,7 @@ export async function matchesForEvent(
       workField: card.showWorkField ? workFieldLabel(m.workField) : null,
       sharedWorkField: card.showWorkField && m.sharedWorkField,
       age: m.revealed ? m.age : null,
-      ageBand: facts.get(m.userId)?.ageBand ?? null,
-      tenure: facts.get(m.userId)?.tenure ?? null,
+      ...facts.get(m.userId)!,
       insideNow: m.insideNow,
       // Already floored by `rankMatches` — this only carries it to the card.
       sharedEvents: m.sharedEvents,

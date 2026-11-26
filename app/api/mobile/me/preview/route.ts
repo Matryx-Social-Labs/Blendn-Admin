@@ -4,7 +4,8 @@ import { notFoundResponse, serverErrorResponse, successResponse, unauthorizedRes
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { anonymousCard, latestRoom, personCardBody, publicUserSelect, roomPersonFacts } from "@/lib/public-profile"
+import { anonymousCard, latestRoom, personCardBody, publicUserSelect } from "@/lib/public-profile"
+import { roomPersonFacts } from "@/lib/room-person-facts"
 
 export const dynamic = "force-dynamic"
 

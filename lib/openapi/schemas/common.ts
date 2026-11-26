@@ -264,7 +264,7 @@ export const RoomLensSchema = z
   .openapi("RoomLens")
 
 /**
- * What a room row says about somebody before a reveal (D-030, SCRUM-1384; `roomPersonFacts` in lib/public-profile.ts).
+ * What a room row says about somebody before a reveal (D-030, SCRUM-1384; `roomPersonFacts` in lib/room-person-facts.ts).
  * Spread into every row and room card that carries them, so the two fields read the same everywhere.
  */
 export const RoomPersonFactsFields = {

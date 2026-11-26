@@ -4156,9 +4156,9 @@ can tell "no specialisms here" from "this field is unknown to me".
 
 **Suppressed in small rooms.** A match card omits `workField` when the room has
 fewer than 8 other attendees. The roster already gives an unrevealed person an
-age and a city; adding a field of work makes four attributes, and "29,
-Bengaluru, works in fintech, into techno and board games" is one specific person
-in a room of eight. Ranking still uses it there — the score never leaves the
+age band and a new / regular chip (D-030); adding a field of work makes four
+attributes, and "25-34, a regular, works in fintech, into techno and board
+games" is one specific person in a room of eight. Ranking still uses it there — the score never leaves the
 server, so suppressing the *attribute* costs nothing in ordering.
 
 **`sharedWorkField` is suppressed by the same floor, and must be.** The card also

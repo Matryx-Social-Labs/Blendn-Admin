@@ -24,7 +24,7 @@ import { identityForRef, nonEventRoomCard } from "@/lib/identity"
 import { roomPseudonymOrNull } from "@/lib/anonymous-names"
 import { citySlugFor, cityCatalogue } from "@/lib/cities"
 import { profileForSelfResponse } from "@/lib/self-profile"
-import { roomPersonFacts } from "@/lib/public-profile"
+import { roomPersonFacts } from "@/lib/room-person-facts"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { userIdFromRef } from "@/lib/room-handle"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -227,7 +227,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
        * Languages, home state and sign — labels, and only to somebody who can
        * see who this is. Before that they are Tier B (plan v2 §8.5): a card
        * shows one of them as a shared line in a room big enough to hide in,
-       * never the set beside an age and a city.
+       * never the set beside an age band and a chip.
        */
       ...(identified
         ? {

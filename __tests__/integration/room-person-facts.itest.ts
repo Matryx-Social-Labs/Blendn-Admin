@@ -12,7 +12,7 @@ import { Prisma } from "@prisma/client"
 import { ATTENDED } from "@/lib/counting"
 import { roomHandle } from "@/lib/room-handle"
 
-import { db, makeEvent, occurrenceOf, testId } from "./helpers"
+import { db, makeEvent, occurrenceOf, putInRoom, testId } from "./helpers"
 import { arrive, call, cleanupCrewWorld, crewOf, liveEvent, person, world, type Person } from "./crew-world"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -80,6 +80,8 @@ beforeAll(async () => {
   })
 
   for (const p of [viewer, a, b, d, host]) await arrive(eventId, occurrenceId, p)
+  // A 29-year-old working the door: staff, never in a band's count.
+  await putInRoom({ eventId, occurrenceId, userId: (await aged("rpf-staff", 29)).id, kind: "staff" })
   // B chose "show who I am" here.
   await db.event_match_preferences.create({ data: { event_id: eventId, user_id: b.id, revealed: true } })
 })
@@ -96,7 +98,7 @@ async function rows(as: Person): Promise<Map<string, Record<string, unknown>>> {
 }
 
 describe("the band waits for a third person in it", () => {
-  it("is null for A and B while only two 25-34s have checked in", async () => {
+  it("is null for A and B while only two 25-34 attendees have checked in (staff do not count)", async () => {
     const before = await rows(viewer)
     expect(before.get(h(a))).toMatchObject({ age: null, ageBand: null })
     expect((await card(h(a), viewer)).body.data).toMatchObject({ age: null, ageBand: null })
@@ -142,6 +144,10 @@ describe("GET /events/:id/people and /checkins", () => {
     const byId = new Map((res.body.data.people as Record<string, unknown>[]).map((p) => [p.userId, p]))
     expect(byId.get(h(a))).toMatchObject({ age: null, ageBand: "25-34", tenure: "regular" })
     expect(byId.get(h(d))).toMatchObject({ age: null, ageBand: null, tenure: "new" })
+    const asHost = await get(peopleRoute.GET, `/api/mobile/events/${eventId}/people`, host, { eventId })
+    const hostRows = asHost.body.data.people as Record<string, unknown>[]
+    expect(hostRows.length).toBeGreaterThan(0)
+    for (const row of hostRows) expect(row).toMatchObject({ age: null, ageBand: null, tenure: null })
   })
 
   it("checkins: no age and no city before a reveal", async () => {
@@ -149,6 +155,10 @@ describe("GET /events/:id/people and /checkins", () => {
     const byId = new Map((res.body.data.attendees as Record<string, unknown>[]).map((p) => [p.userId, p]))
     expect(byId.get(h(a))).toMatchObject({ age: null, location: null, ageBand: "25-34", tenure: "regular" })
     expect(byId.get(h(b))).toMatchObject({ age: 28, location: "Bengaluru" })
+    const asHost = await get(checkinsRoute.GET, `/api/mobile/events/${eventId}/checkins`, host, { eventId })
+    for (const row of asHost.body.data.attendees as Record<string, unknown>[]) {
+      if (row.userId !== host.id) expect(row).toMatchObject({ age: null, location: null, ageBand: null, tenure: null })
+    }
   })
 })
 

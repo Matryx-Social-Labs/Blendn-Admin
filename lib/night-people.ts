@@ -8,7 +8,7 @@ import { visibleInRoom } from "@/lib/identity"
 import { tierBBudget } from "@/lib/matching"
 import { displayTraitsOf, expandInterests, interestParents, iplTeamIds, type TraitProfile } from "@/lib/matches"
 import { NO_TRAITS, personCard, traitHolders, viewerTierB } from "@/lib/overlaps"
-import { roomPersonFacts, type RoomPersonFacts } from "@/lib/public-profile"
+import { roomPersonFacts, type RoomPersonFacts } from "@/lib/room-person-facts"
 import { idForViewer, roomMemberFromRef } from "@/lib/room-handle"
 import { eventRoomBan } from "@/lib/room-kind"
 import { notStrangersTo } from "@/lib/room-people"
@@ -246,8 +246,7 @@ async function cardsFor(
       displayName: named ? u!.name! : pseudonymOf.get(r.user_id) ?? "Attendee",
       photo: named ? u?.profile?.photos?.[0] ?? null : null,
       age: named ? ageFrom(u?.profile) : null,
-      ageBand: facts.get(r.user_id)?.ageBand ?? null,
-      tenure: facts.get(r.user_id)?.tenure ?? null,
+      ...facts.get(r.user_id)!,
       insideNow: r.inside_now,
       youLiked: liked.has(r.user_id),
       overlap: overlapOf.get(r.user_id) ?? null,

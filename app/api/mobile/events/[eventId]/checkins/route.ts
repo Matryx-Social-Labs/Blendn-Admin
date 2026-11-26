@@ -8,7 +8,7 @@ import { ageFrom } from "@/lib/age"
 import { db } from "@/lib/db"
 import { eventNotFoundResponse } from "@/lib/event-access"
 import { inRoomWhere } from "@/lib/event-kind"
-import { roomPersonFacts } from "@/lib/public-profile"
+import { roomPersonFacts } from "@/lib/room-person-facts"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { blockCounterparties } from "@/lib/conversations"
@@ -241,8 +241,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             // for somebody the room names to you; the keys stay, null.
             age: shown ? ageFrom(c.user.profile) : null,
             location: shown ? await normalizeLocationToCity(c.user.profile?.location, geocoding) : null,
-            ageBand: facts.get(c.user.id)?.ageBand ?? null,
-            tenure: facts.get(c.user.id)?.tenure ?? null,
+            ...facts.get(c.user.id)!,
             checkInTime: c.check_in_time,
           }
         })

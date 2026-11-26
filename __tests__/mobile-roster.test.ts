@@ -39,7 +39,7 @@ jest.mock("@/lib/anonymous-names", () => ({
 }))
 
 // The band and chip are `roomPersonFacts`' (room-person-facts.itest.ts); here only that the row carries them.
-jest.mock("@/lib/public-profile", () => ({
+jest.mock("@/lib/room-person-facts", () => ({
   roomPersonFacts: jest.fn(async (_v: string, _e: string, ids: string[]) => new Map(ids.map((id) => [id, { ageBand: "25-34", tenure: "new" }]))),
 }))
 
