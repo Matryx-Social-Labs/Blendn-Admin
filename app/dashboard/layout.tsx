@@ -6,8 +6,7 @@ import { OrgSuspendedNotice } from "@/components/org-suspended-notice"
 import { SiteHeader } from "@/components/site-header"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { attentionQueues } from "@/lib/attention-queues-query"
-import { planBadgeFor } from "@/lib/billing"
-import { mayBuyHere } from "@/lib/plan-market"
+import { mayBuyHereThisRequest, planBadgeFor } from "@/lib/billing"
 import { queueBadges } from "@/lib/attention-queues"
 import { getAuth } from "@/lib/auth"
 import { mayCreateEventsWith } from "@/lib/event-ownership"
@@ -81,12 +80,12 @@ export default async function DashboardLayout({
   // card above it names (venue plans are step 17's).
   // Decoration like the badges: a failure logs and drops the card, never the shell.
   // Where plans are not sold (`mayBuyHere`, SCRUM-1277) there is nothing to see plans for and Analytics is open:
-  // no card. Asked only without a live plan, so a paying organisation pays no query for it.
+  // no card. Asked only without a live plan, and once per request: the page's billingOrgFor reuses the answer.
   const home = orgs[0]
   const plan =
     user.role === "organizer" && home
       ? await planBadgeFor(home.id)
-          .then(async (b) => (b.analytics || (await mayBuyHere(home.id)) ? b : null))
+          .then(async (b) => (b.analytics || (await mayBuyHereThisRequest(home.id)) ? b : null))
           .then((b) => b && { analytics: b.analytics, date: b.date ? { word: b.date.word, at: b.date.at.toISOString() } : null })
           .catch((error: unknown) => {
             logger.error("plan badge or market check failed; rendering the nav without the plan card", {
