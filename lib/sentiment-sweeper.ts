@@ -1,6 +1,7 @@
 // Relative, not "@/lib/*" — reachable from server.ts, and `build:server`
 // compiles with plain tsc. Enforced by __tests__/server-import-boundary.test.ts.
 import { db } from "./db"
+import { beat } from "./heartbeat"
 import { logger } from "./logger"
 import { BATCH_SIZE, classifyMessages } from "./sentiment/classify"
 
@@ -255,6 +256,7 @@ export function startSentimentSweeper(): void {
   const run = async () => {
     try {
       const result = await sweepSentiment()
+      beat("sentiment", SWEEP_INTERVAL_MS)
       if (result.classified > 0) {
         logger.info("Sentiment sweep", { ...result })
       }
@@ -269,6 +271,7 @@ export function startSentimentSweeper(): void {
   }
 
   timer = setTimeout(() => void run(), SWEEP_INTERVAL_MS)
+  beat("sentiment", SWEEP_INTERVAL_MS)
 }
 
 export function stopSentimentSweeper(): void {

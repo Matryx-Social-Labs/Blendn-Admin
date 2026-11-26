@@ -2,6 +2,7 @@
 // requires, and `build:server` compiles with plain tsc — which emits the `@/`
 // alias verbatim into the require() and fails at boot.
 import { db } from "./db"
+import { beat } from "./heartbeat"
 import { logger } from "./logger"
 import { readLiveSnapshot } from "./live-snapshot"
 import { deriveAlerts, type LiveAlert } from "./live-metrics"
@@ -198,6 +199,7 @@ export function startIssueSweeper(): void {
     running = true
     try {
       await pass()
+      beat("issues", SWEEP_MS)
     } catch (error) {
       logger.error("Issue sweep failed", {
         error: error instanceof Error ? error.message : String(error),
@@ -208,6 +210,7 @@ export function startIssueSweeper(): void {
     }
   }
   timer = setTimeout(tick, SWEEP_MS).unref()
+  beat("issues", SWEEP_MS)
 }
 
 export function stopIssueSweeper(): void {

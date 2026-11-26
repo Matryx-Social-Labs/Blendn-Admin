@@ -3,6 +3,7 @@
 // v0.12.1 — that mistake built green and killed the container on boot.
 import { db } from "./db"
 import { logger } from "./logger"
+import { beat } from "./heartbeat"
 import { CHAT_WINDOW_HOURS } from "./chat-window"
 import { closeRoomSockets } from "./room-close"
 import { purgeLapsedCrewLikes, purgeLapsedCrewLinks, repairCrews } from "./crews/sweep"
@@ -140,6 +141,7 @@ async function runSweep(): Promise<void> {
   try {
     const result = await sweepExpiredChats()
     if (result.archived > 0) logger.info("Archived expired chat groups", { ...result })
+    beat("chat-lifecycle", SWEEP_INTERVAL_MS)
   } catch (error) {
     // Must never escape: this runs on a timer inside the same process as
     // Socket.io, and an unhandled rejection here would take the server down
@@ -223,6 +225,7 @@ async function runSweep(): Promise<void> {
  */
 export function startChatLifecycleSweeper(): void {
   if (sweepTimer) return
+  beat("chat-lifecycle", SWEEP_INTERVAL_MS)
 
   const loop = async () => {
     try {

@@ -1,6 +1,7 @@
 // Relative imports: reached from server.ts through lib/background.ts (`build:server`, plain tsc).
 import { db } from "./db"
 import { razorpayKeys, ticketingOn } from "./env"
+import { beat } from "./heartbeat"
 import { logger } from "./logger"
 import { releaseTransfer } from "./razorpay"
 import { PAYOUT_HOLD_AFTER_EVENT_MS } from "./ticket-payments"
@@ -113,6 +114,7 @@ let stopped = false
 async function run(): Promise<void> {
   try {
     const done = await releaseDuePayouts()
+    beat("payout-release", PAYOUT_RELEASE_MS)
     if (done.released || done.failed) logger.info("Ticket payouts released", done)
   } catch (error) {
     logger.error("Ticket payout release pass failed", { error: message(error) })
@@ -128,6 +130,7 @@ export function startPayoutReleaser(): void {
     timer = setTimeout(() => void run().finally(schedule), PAYOUT_RELEASE_MS)
     timer.unref?.()
   }
+  beat("payout-release", PAYOUT_RELEASE_MS)
   void run().finally(schedule)
 }
 

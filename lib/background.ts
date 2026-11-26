@@ -1,6 +1,7 @@
 // Relative imports: reachable from server.ts, and `build:server` compiles with
 // plain tsc, which emits the @/ alias verbatim into the require().
 import { logger } from "./logger"
+import { checkLoops } from "./heartbeat"
 import { startChatLifecycleSweeper, stopChatLifecycleSweeper } from "./chat-lifecycle"
 // The fourth sweeper. #265 added it to `initSocketServer` while #276 was
 // moving the other three out; neither branch could see the other's half, so
@@ -47,7 +48,18 @@ import { startTicketReconciler, stopTicketReconciler } from "./ticket-reconcile"
  * `sponsoredMessageScheduler` stays in `lib/socket-server.ts`: it emits into
  * chat rooms, so it genuinely needs `io` to exist first. It is stopped by the
  * same shutdown handler.
+ *
+ * ## The watchdog
+ *
+ * Every loop here, and the sponsored scheduler, beats when it starts and after a
+ * pass that worked (`lib/heartbeat.ts`). Once a minute the watchdog logs
+ * "Background loop stalled" for a loop quiet for three of its intervals, once
+ * per stall, and "Background loop recovered" when it beats again (SCRUM-1228).
+ * `logger.error` reaches Sentry, whose new-issue rule mails the team.
  */
+const WATCHDOG_MS = 60_000
+let watchdog: ReturnType<typeof setTimeout> | null = null
+
 export function startBackgroundWork(): void {
   // Chat rooms close themselves. No external cron to configure — and the
   // immediate pass on boot is the important one, since deploys restart this
@@ -88,6 +100,14 @@ export function startBackgroundWork(): void {
   // Organizers' payouts released once their event's floor has passed (SCRUM-1014); we are the only releaser. Same flag.
   startPayoutReleaser()
 
+  if (!watchdog) {
+    const watch = () => {
+      checkLoops()
+      watchdog = setTimeout(watch, WATCHDOG_MS).unref()
+    }
+    watchdog = setTimeout(watch, WATCHDOG_MS).unref()
+  }
+
   logger.info("Background work started", {
     // Listed exhaustively: this said three while starting four, so the log
     // could not be used to tell whether a loop had been dropped.
@@ -118,6 +138,8 @@ export function startBackgroundWork(): void {
  * the ops broadcast came to be the fifth timer nobody was stopping.
  */
 export function stopBackgroundWork(): void {
+  if (watchdog) clearTimeout(watchdog)
+  watchdog = null
   stopChatLifecycleSweeper()
   stopNotificationRetentionSweeper()
   stopPresenceSweeper()

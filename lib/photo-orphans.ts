@@ -1,6 +1,7 @@
 // Relative imports: reachable from `server.ts` (via `background.ts`), which
 // `build:server` compiles with plain tsc -- the `@/` alias would be emitted verbatim.
 import { db } from "./db"
+import { beat } from "./heartbeat"
 import { logger } from "./logger"
 import { deleteFile, extractKeyFromUrl, listPublicObjects } from "./tigris"
 
@@ -177,6 +178,7 @@ let stopped = false
 async function run(): Promise<void> {
   try {
     await sweepOrphanPhotos()
+    beat("photo-orphans", ORPHAN_SWEEP_INTERVAL_MS)
   } catch (error) {
     logger.error("Orphan photo sweep failed", { error: error instanceof Error ? error.message : String(error) })
   }
@@ -191,6 +193,7 @@ export function startOrphanPhotoSweeper(): void {
     timer = setTimeout(() => void run().finally(schedule), ORPHAN_SWEEP_INTERVAL_MS)
     timer.unref?.()
   }
+  beat("photo-orphans", ORPHAN_SWEEP_INTERVAL_MS)
   void run().finally(schedule)
 }
 
