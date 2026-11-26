@@ -1,6 +1,6 @@
 import { readFileSync } from "fs"
 import { join } from "path"
-import { EXPORT_CHECKLIST } from "@/scripts/export-user"
+import { EXPORT_CHECKLIST, runRefusal } from "@/scripts/export-user"
 
 /*
  * The export (scripts/export-user.ts) and the erasure (DELETE
@@ -26,4 +26,29 @@ it("reads the erasure's tables from the route (the parser still sees it)", () =>
 
 it.each(erasureTables(route))("the export's checklist covers %s", (table) => {
   expect(EXPORT_CHECKLIST).toHaveProperty([table])
+})
+
+describe("runRefusal: local databases only, unless the flag says otherwise", () => {
+  const local = "postgresql://u:p@127.0.0.1:55433/blendn"
+  const remote = "postgresql://u:p@db.railway.example:5432/railway"
+
+  it("runs against this machine's database", () => {
+    expect(runRefusal(local, ["asha@example.com"])).toBeNull()
+  })
+
+  it("refuses a remote database without --allow-remote, naming only the host", () => {
+    const refusal = runRefusal(remote, ["asha@example.com"])
+    expect(refusal).toMatch(/db\.railway\.example is not a local database/)
+    expect(refusal).not.toContain("u:p")
+  })
+
+  it("runs against a remote database with --allow-remote", () => {
+    expect(runRefusal(remote, ["asha@example.com", "--allow-remote"])).toBeNull()
+  })
+
+  it("refuses no target, an unknown flag, and no DATABASE_URL", () => {
+    expect(runRefusal(local, [])).toMatch(/usage/)
+    expect(runRefusal(local, ["asha@example.com", "--allow-remot"])).toMatch(/usage/)
+    expect(runRefusal(undefined, ["asha@example.com"])).toMatch(/DATABASE_URL/)
+  })
 })
