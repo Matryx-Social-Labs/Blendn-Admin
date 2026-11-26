@@ -15,6 +15,7 @@ import {
   applyAgainHtml,
   resultsHtml,
   inviteHtml,
+  liveAlertHtml,
   onboardingVerifyHtml,
   ticketOrderHtml,
 } from "./email-html"
@@ -598,6 +599,23 @@ export function nextNightEmail(r: { title: string; checkedIn: number | null; nex
       why: NEXT_NIGHT_WHY,
       unsubscribeUrl: r.unsubscribeUrl,
     }),
+  }
+}
+
+/**
+ * A critical live alert, to the organizer's owners and admins (SCRUM-1286). `body` is the alert's own body as the Live
+ * tab shows it (`deriveAlerts`, written down by the issue sweep), never a second version; `openedAt` is already on the
+ * event's clock, with no zone label. Transactional: no unsubscribe, because a safety alert must not be lost with the
+ * morning mail.
+ */
+export function liveAlertEmail(a: { eventTitle: string; alertTitle: string; body: string; openedAt: string; liveUrl: string }) {
+  const subject = `${a.eventTitle}: ${a.alertTitle}`
+  const lines = [a.body, `${a.eventTitle}, opened at ${a.openedAt}.`]
+  const why = "You get this as an owner or admin of the organization running this night, when a critical alert opens on it."
+  return {
+    subject,
+    text: [...lines.flatMap((l) => [l, ""]), "Open the Live tab:", a.liveUrl, "", "—", why].join("\n"),
+    html: liveAlertHtml({ title: subject, heading: a.alertTitle, lines, button: { href: a.liveUrl, label: "Open the Live tab" }, note: why }),
   }
 }
 
