@@ -347,14 +347,18 @@ describe("the venue owner on a venue day", () => {
     expect(await eventAttendees(platform, day.id)).toMatchObject({ view: "labels" })
   })
 
-  it("may moderate the room; an organiser of the same organisation may not", async () => {
+  it("may moderate the room, as may any member of its organisation; nobody outside it may", async () => {
     await db.chat_groups.create({ data: { event_id: day.id, name: "venue day room" } })
     const open = (id: string) => moderation.GET(new NextRequest(`http://localhost/api/events/${id}/chat/moderation`), { params: Promise.resolve({ id }) })
 
     as("venue_owner", venueOwner)
     expect((await open(day.id)).status).toBe(200)
 
+    // Membership, not User.role (SCRUM-1246): an organizer-role staff member of the venue's org moderates too.
     as("organizer", orgOrganiser)
+    expect((await open(day.id)).status).toBe(200)
+
+    as("organizer", viewer.id)
     expect((await open(day.id)).status).toBe(403)
 
     as("app_admin", admin)
