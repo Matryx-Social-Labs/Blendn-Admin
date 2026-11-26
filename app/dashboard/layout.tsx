@@ -7,6 +7,7 @@ import { SiteHeader } from "@/components/site-header"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { attentionQueues } from "@/lib/attention-queues-query"
 import { planBadgeFor } from "@/lib/billing"
+import { mayBuyHere } from "@/lib/plan-market"
 import { queueBadges } from "@/lib/attention-queues"
 import { getAuth } from "@/lib/auth"
 import { mayCreateEventsWith } from "@/lib/event-ownership"
@@ -79,10 +80,13 @@ export default async function DashboardLayout({
   // The sidebar's plan card: organisers only, for the home organisation the
   // card above it names (venue plans are step 17's).
   // Decoration like the badges: a failure logs and drops the card, never the shell.
+  // Where plans are not sold (`mayBuyHere`, SCRUM-1277) there is nothing to see plans for and Analytics is open:
+  // no card. Asked only without a live plan, so a paying organisation pays no query for it.
   const plan =
     user.role === "organizer" && orgs[0]
       ? await planBadgeFor(orgs[0].id)
-          .then((b) => ({ analytics: b.analytics, date: b.date ? { word: b.date.word, at: b.date.at.toISOString() } : null }))
+          .then(async (b) => (b.analytics || (await mayBuyHere(orgs[0].id)) ? b : null))
+          .then((b) => b && { analytics: b.analytics, date: b.date ? { word: b.date.word, at: b.date.at.toISOString() } : null })
           .catch((error: unknown) => {
             logger.error("plan badge failed; rendering the nav without the plan card", {
               error: error instanceof Error ? error.message : String(error),
