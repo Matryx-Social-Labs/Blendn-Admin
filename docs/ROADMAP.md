@@ -869,7 +869,7 @@ so ranking on it buys nothing and would cluster rooms by stars.
   including one in Germany, age gating, polygon and circle fences, draft and
   private negatives — and completely changed in what it looks like.
 
-  Every identifier was `QA`: accounts `qa-admin@blendn.app`, orgs "Blendn QA
+  Every identifier was `QA`: accounts (the QA admin and its siblings, now `RETIRED_TEST_ACCOUNTS` in `scripts/test-accounts.ts`), orgs "Blendn QA
   Events", venues "QA Circle Venue", events "QA Baseline — Bengaluru". Staging
   holds nothing but test data, so the prefix bought nothing and cost realism —
   and a fixture called "QA Event Without A Cover Image" is not a card anybody

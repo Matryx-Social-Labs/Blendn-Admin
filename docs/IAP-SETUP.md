@@ -51,7 +51,7 @@ store. ([Play: create a subscription](https://support.google.com/googleplay/andr
 | 11 | Engineer | EAS env vars (public SDK keys); rebuild and ship | [App](#app-eas) |
 | 12 | Owner | Apple sandbox testers; Google licence testers on the internal track | [Testing](#testing) |
 | 13 | Owner + engineer | One sandbox purchase per store; read the rows back | [Testing](#testing) |
-| 14 | Engineer | Review prep: `appreview@blendn.app` Blendn+ grant (dashboard → Users → ⋯ → Blendn+), paywall disclosures, notes, screenshots | [App Review](#app-review) |
+| 14 | Engineer | Review prep: the App Store reviewer account's Blendn+ grant (dashboard → Users → ⋯ → Blendn+), paywall disclosures, notes, screenshots | [App Review](#app-review) |
 | 15 | Owner | Apple: submit the version with all four products attached | [App Review](#app-review) |
 | 16 | Owner | Google: promote the release to production | [App Review](#app-review) |
 | 17 | Owner, later | Gate a city: set `PLUS_GATING` (e.g. `Bengaluru:2026-11-01`) on Railway, redeploy | [Server](#server-railway) |
@@ -331,8 +331,10 @@ refuses sandbox events; the purchase reaches only the staging webhook, where
 that user is unknown (`unknown_user`). So the review account is granted Plus in
 advance. ([RevenueCat: App Store rejections](https://www.revenuecat.com/docs/test-and-launch/app-store-rejections))
 
-1. **Engineer:** give `appreview@blendn.app` Blendn+ on **production** before
-   submitting: dashboard → **Users** → search `appreview` → the row's **⋯** →
+1. **Engineer:** give the App Store reviewer account (its address is
+   `APP_REVIEW_EMAIL`, `scripts/seed-review-account.ts`) Blendn+ on
+   **production** before submitting: dashboard → **Users** → search that
+   address → the row's **⋯** →
    **Blendn+** → **Grant Blendn+** → length (1 month is enough for a review) →
    the reason ("App Review account for the iOS submission") → **Grant**. It is
    audited; **End grant** in the same place takes it back after approval. While
@@ -355,7 +357,7 @@ advance. ([RevenueCat: App Store rejections](https://www.revenuecat.com/docs/tes
 
    > Blendn+ is sold by in-app purchase: three auto-renewable subscriptions in
    > the group "Blendn+" and Night Pass, a non-renewing 24-hour pass. Sign in
-   > as appreview@blendn.app; the paywall is at <path>. Purchases in the review
+   > as <the reviewer address>; the paywall is at <path>. Purchases in the review
    > sandbox are not credited by our production server; during our launch
    > season every Blendn+ feature is open to all accounts, so you can review
    > them directly. (Once a city is gated: "this account already has Blendn+".)
