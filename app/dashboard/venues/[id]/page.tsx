@@ -23,6 +23,7 @@ import { EndOfferButton } from "./end-offer-button"
 import { RatingBars } from "@/components/dashboard/primitives"
 import { organisationOptions } from "@/lib/onboarding-actions"
 import { OpenOnBlendn } from "./open-on-blendn"
+import { VenueHoursPanel } from "./venue-hours"
 import { VenueManage } from "./venue-manage"
 import { VenueNightsTable } from "./venue-nights-table"
 import { VenueTonightPanel } from "@/components/dashboard/venue-tonight-panel"
@@ -43,6 +44,7 @@ import { formatNumber, formatPct } from "@/lib/dashboard-format"
 import { resolveRange } from "@/lib/date-range"
 import { activeMembership, actorFor } from "@/lib/org-membership"
 import { venueTypeLabel } from "@/lib/venue-types"
+import { venueHours } from "@/lib/venue-hours"
 import { realEventsWhere } from "@/lib/event-kind"
 
 export const dynamic = "force-dynamic"
@@ -106,6 +108,7 @@ export default async function VenueDetailPage({
       venue_type: true,
       geofence: true,
       floors: true,
+      hours: true,
       open_on_blendn: true,
       created_by_org_id: true,
       owner_org: { select: { id: true, display_name: true } },
@@ -393,6 +396,9 @@ export default async function VenueDetailPage({
       {venue.owner_org && !venue.deleted_at ? (
         <OpenOnBlendn venueId={venue.id} name={venue.name} open={venue.open_on_blendn} />
       ) : null}
+
+      {/* When it is open, as the app shows it (SCRUM-1154). Only an admin or a member of the owning organisation reaches this branch, and both may write it. */}
+      {venue.deleted_at ? null : <VenueHoursPanel venueId={venue.id} hours={venueHours(venue.hours)} resetHour={venue.day_reset_hour} />}
 
       {/* The record last. "Is the pin right" is the third question a venue
           owner asks of this page, after "how busy" and "who books here" — and
