@@ -147,6 +147,12 @@ describe("profanity-only flags", () => {
     expect(await w.sweep()).toContain("1 severe flag;")
   })
 
+  it("alerts on the sentiment sweeper's array-shaped flag at 0.95, and never raises on it", async () => {
+    const w = nextWindow()
+    await w.flag(["safety_conduct"], 0.95, "auto_text")
+    expect(await w.sweep()).toContain("1 severe flag;")
+  })
+
   it("alerts on a report with no flag", async () => {
     const w = nextWindow()
     await w.report()
