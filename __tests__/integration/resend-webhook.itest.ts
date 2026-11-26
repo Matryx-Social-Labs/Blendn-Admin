@@ -7,6 +7,8 @@
 import { createHmac, randomBytes, randomUUID } from "crypto"
 import { NextRequest } from "next/server"
 
+import { sendEmail } from "@/lib/email"
+
 import { closeDb, db } from "./helpers"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -116,6 +118,23 @@ describe("refused: writes nothing and never answers 2xx", () => {
     expect(await rows(to)).toEqual([])
   })
 
+  it("a good delivery never counts toward the limit: 31 from one network are all 200", async () => {
+    const statuses: number[] = []
+    for (let i = 0; i < 31; i++) {
+      const raw = JSON.stringify(bounced(address("burst"), "Transient"))
+      statuses.push(await post(raw, signed(raw), "192.0.2.55"))
+    }
+    expect(statuses.every((s) => s === 200)).toBe(true)
+  })
+
+  it("a v2 signature alone is 401: only v1 is Svix's HMAC", async () => {
+    const to = address("v2")
+    const raw = JSON.stringify(bounced(to))
+    const h = signed(raw)
+    expect(await post(raw, { ...h, "svix-signature": h["svix-signature"].replace("v1,", "v2,") })).toBe(401)
+    expect(await rows(to)).toEqual([])
+  })
+
   it("a network that keeps failing the signature is rate-limited (429), in the route", async () => {
     const raw = JSON.stringify(bounced(address("flood")))
     const statuses: number[] = []
@@ -138,6 +157,15 @@ describe("accepted", () => {
     const raw = JSON.stringify(bounced(to, type))
     expect(await post(raw, signed(raw))).toBe(200)
     expect(await rows(to)).toEqual([])
+  })
+
+  it("verifies against any of several signatures, as during a secret rotation", async () => {
+    const to = address("rotation")
+    const raw = JSON.stringify(bounced(to))
+    const h = signed(raw)
+    const stale = signed(raw, { id: h["svix-id"], key: randomBytes(24) })["svix-signature"]
+    expect(await post(raw, { ...h, "svix-signature": `${stale} ${h["svix-signature"]}` })).toBe(200)
+    expect(await rows(to)).toEqual([{ email: to, reason: "bounce" }])
   })
 
   it("a signed complaint writes one complaint row", async () => {
@@ -174,6 +202,29 @@ describe("accepted", () => {
     expect(await rows(to)).toEqual([{ email: to, reason: "complaint" }])
   })
 
+  it("records every address in one delivery, and skips one too long to be an address rather than failing them all", async () => {
+    const a = address("multi-a")
+    const b = address("multi-b")
+    const long = `${"x".repeat(300)}@resend.dev`
+    addresses.push(long)
+    const body = bounced(a)
+    body.data.to = [a, long, b]
+    const raw = JSON.stringify(body)
+    expect(await post(raw, signed(raw))).toBe(200)
+    expect(await rows(a)).toEqual([{ email: a, reason: "bounce" }])
+    expect(await rows(b)).toEqual([{ email: b, reason: "bounce" }])
+    expect(await rows(long)).toEqual([])
+  })
+
+  it.each([
+    ["an event with data null", { type: "email.delivered", created_at: "x", data: null }],
+    ["a bounce with bounce null", { type: "email.bounced", created_at: "x", data: { to: ["x@resend.dev"], bounce: null } }],
+    ["a complaint with no to", { type: "email.complained", created_at: "x", data: {} }],
+  ])("%s, signed, is 200 and writes nothing: a 4xx would be retried and could switch the webhook off", async (_l, body) => {
+    const raw = JSON.stringify(body)
+    expect(await post(raw, signed(raw))).toBe(200)
+  })
+
   it("another event type is 200 and writes nothing", async () => {
     const to = address("delivered")
     const raw = JSON.stringify({ ...complained(to), type: "email.delivered" })
@@ -185,5 +236,40 @@ describe("accepted", () => {
     await expect(
       db.email_suppressions.create({ data: { email: address("check"), reason: "spam" } })
     ).rejects.toThrow()
+  })
+})
+
+describe("written by the webhook, read by sendEmail (one normaliser, the real table)", () => {
+  const ENV = { ...process.env }
+  let fetchMock: jest.Mock
+
+  beforeEach(() => {
+    process.env.RESEND_API_KEY = "re_itest"
+    process.env.EMAIL_FROM = "Blend'n <hello@blendn.app>"
+    delete process.env.RAILWAY_ENVIRONMENT_NAME
+    fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ id: "em_1" }) })
+    global.fetch = fetchMock as unknown as typeof fetch
+  })
+  afterEach(() => {
+    process.env.RESEND_API_KEY = ENV.RESEND_API_KEY
+    process.env.EMAIL_FROM = ENV.EMAIL_FROM
+  })
+
+  it("a hard bounce recorded in one spelling stops every send, the reset included, in another", async () => {
+    const to = address("roundtrip")
+    const raw = JSON.stringify(bounced(` ${to.toUpperCase()}`))
+    expect(await post(raw, signed(raw))).toBe(200)
+    expect(await sendEmail({ to: `${to.toUpperCase()} `, subject: "s", text: "t" })).toEqual({ sent: false, reason: "suppressed" })
+    expect(await sendEmail({ to, subject: "s", text: "t", stream: "password_reset" })).toEqual({ sent: false, reason: "suppressed" })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("a complaint stops an invite but not the reset the person asks for", async () => {
+    const to = address("roundtrip-c")
+    const raw = JSON.stringify(complained(to))
+    expect(await post(raw, signed(raw))).toBe(200)
+    expect((await sendEmail({ to, subject: "s", text: "t" })).sent).toBe(false)
+    expect((await sendEmail({ to, subject: "s", text: "t", stream: "password_reset" })).sent).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

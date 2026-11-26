@@ -25,8 +25,9 @@ import { readCapped } from "@/lib/webhook-body"
  *      the timestamp within five minutes either way, so a captured delivery cannot be replayed later. Missing,
  *      malformed, wrong and stale are one 401. A network that keeps failing is rate-limited; a good delivery never
  *      counts;
- *   3. only then JSON. `email.bounced` with `bounce.type` `Permanent` (a hard bounce) and `email.complained` are
- *      written; a soft bounce and every other event are answered 200 and dropped.
+ *   3. only then JSON (not JSON is a 400). `email.bounced` with `bounce.type` `Permanent` (a hard bounce) and
+ *      `email.complained` are written; a soft bounce, every other event and a shape we did not expect are answered
+ *      200 and dropped, because Svix retries a non-2xx and can switch the webhook off.
  *
  * Unset secret: the webhook is off and everything is a 401 (logged once per process).
  *
@@ -41,6 +42,8 @@ const MAX_BODY_BYTES = 64 * 1024
 const BAD_SIGNATURES = { max: 30, windowMs: 60_000 }
 /** Svix's own libraries' tolerance. */
 const TOLERANCE_SECONDS = 5 * 60
+/** The longest address a mailbox can have (RFC 5321 path, less the brackets); longer is not an address. */
+const MAX_ADDRESS = 254
 
 let reportedUnset = false
 
@@ -63,17 +66,23 @@ function verified(raw: Uint8Array, headers: Headers, key: Buffer): boolean {
   })
 }
 
+/*
+ * Lenient on purpose: a signed delivery is Resend's, and any non-2xx is retried and can switch the webhook off, so a
+ * shape we did not expect is dropped with a 200, never refused.
+ */
 const eventSchema = z.object({
-  type: z.string(),
-  data: z.object({
-    to: z.array(z.string()).default([]),
-    bounce: z.object({ type: z.string().optional() }).optional(),
-  }),
+  type: z.string().nullish(),
+  data: z
+    .object({
+      to: z.array(z.string()).nullish(),
+      bounce: z.object({ type: z.string().nullish() }).nullish(),
+    })
+    .nullish(),
 })
 
 function reasonFor(event: z.infer<typeof eventSchema>): "bounce" | "complaint" | null {
   if (event.type === "email.complained") return "complaint"
-  if (event.type === "email.bounced" && event.data.bounce?.type === "Permanent") return "bounce"
+  if (event.type === "email.bounced" && event.data?.bounce?.type === "Permanent") return "bounce"
   return null
 }
 
@@ -107,19 +116,25 @@ export async function POST(req: NextRequest) {
     return fail(400, "malformed")
   }
   const event = eventSchema.safeParse(json)
-  if (!event.success) return fail(400, "malformed")
+  if (!event.success) {
+    logger.warn("Resend webhook: a signed delivery of an unexpected shape, dropped", {})
+    return NextResponse.json({ ok: true, recorded: 0 })
+  }
 
   const reason = reasonFor(event.data)
   if (!reason) return NextResponse.json({ ok: true, recorded: 0 })
 
-  const emails = [...new Set(event.data.data.to.map(canonicalEmail))].filter((e) => e.includes("@"))
-  for (const email of emails) {
-    // Insert, or raise the reason: an unsubscribe gives way to anything, a complaint to a bounce.
-    await db.$executeRaw`
-      INSERT INTO email_suppressions (email, reason) VALUES (${email}, ${reason})
-      ON CONFLICT (email) DO UPDATE SET reason = EXCLUDED.reason
-      WHERE email_suppressions.reason = 'unsubscribe' OR EXCLUDED.reason = 'bounce'`
-  }
+  const emails = [...new Set((event.data.data?.to ?? []).map(canonicalEmail))].filter(
+    (e) => e.includes("@") && e.length <= MAX_ADDRESS
+  )
+  if (emails.length === 0) return NextResponse.json({ ok: true, recorded: 0 })
+  // Insert, or raise the reason, only ever to a stronger one: an unsubscribe gives way to either, a complaint to a
+  // bounce. One statement for every address, so one bad address cannot fail the rest.
+  await db.$executeRaw`
+    INSERT INTO email_suppressions (email, reason) SELECT unnest(${emails}::text[]), ${reason}
+    ON CONFLICT (email) DO UPDATE SET reason = EXCLUDED.reason
+    WHERE email_suppressions.reason = 'unsubscribe'
+       OR (email_suppressions.reason = 'complaint' AND EXCLUDED.reason = 'bounce')`
   // The domain only: the address is somebody's.
   logger.info("Resend webhook recorded a suppression", { reason, domains: emails.map((e) => e.split("@").pop()) })
   return NextResponse.json({ ok: true, recorded: emails.length })

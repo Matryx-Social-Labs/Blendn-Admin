@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
       // After the response, never awaited by it (L3).
       void sendEmail({ to: address, stream: "password_reset", ...passwordResetEmail(user.name ?? "there", link) })
         .then((result) => {
-          if (!result.sent) logger.error("Password reset email failed", { userId: user.id, reason: result.reason })
+          if (!result.sent && result.reason !== "suppressed") logger.error("Password reset email failed", { userId: user.id, reason: result.reason })
         })
         .catch((error: unknown) => logger.error("Password reset email failed", { userId: user.id, error: String(error) }))
     }

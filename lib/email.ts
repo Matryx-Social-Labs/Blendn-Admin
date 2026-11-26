@@ -253,13 +253,15 @@ export async function sendEmail(opts: {
         const sent = (await res.json().catch(() => ({}))) as { id?: string }
         return { sent: true, id: sent.id }
       }
+      const detail = await res.text().catch(() => "")
       if (last || !retryable(res.status)) {
-        const detail = await res.text().catch(() => "")
         logger.error("Email send failed", { status: res.status, attempt, detail: detail.slice(0, 300) })
         return { sent: false, reason: "provider_error", detail: `HTTP ${res.status}` }
       }
     } catch (err) {
-      if (last) {
+      // Not after our own timeout: the first send may still be in flight (a second would only get Resend's 409), and a
+      // second ten seconds would double what an awaiting caller waits.
+      if (last || (err instanceof Error && err.name === "TimeoutError")) {
         logger.error("Email send threw", { attempt, error: err instanceof Error ? err.message : String(err) })
         return { sent: false, reason: "provider_error", detail: String(err) }
       }

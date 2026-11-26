@@ -8,6 +8,7 @@ jest.mock("@/lib/db", () => ({
 }))
 
 import { sendEmail } from "@/lib/email"
+import { resendWebhookKey } from "@/lib/env"
 
 /*
  * SCRUM-1280 (launch gate 14): one retry on a transient failure, Reply-To,
@@ -70,10 +71,35 @@ describe("one retry on a transient failure", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it("does not retry after its own 10 s timeout: the first may still be sending, and a second wait doubles the caller's", async () => {
+    const timeout = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" })
+    fetchMock.mockRejectedValueOnce(timeout).mockResolvedValueOnce(ok())
+    expect(await send()).toMatchObject({ sent: false, reason: "provider_error" })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it("gives up after the second failure: two attempts, never three", async () => {
     fetchMock.mockResolvedValue(status(500))
     expect(await send()).toMatchObject({ sent: false, reason: "provider_error" })
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("gives up after two network throws", async () => {
+    fetchMock.mockRejectedValue(new TypeError("fetch failed"))
+    expect(await send()).toMatchObject({ sent: false, reason: "provider_error" })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([401, 404, 409, 422])("does not retry a %i", async (code) => {
+    fetchMock.mockResolvedValue(status(code))
+    await send()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("sends the same body twice", async () => {
+    fetchMock.mockResolvedValueOnce(status(503)).mockResolvedValueOnce(ok())
+    await send()
+    expect(fetchMock.mock.calls[1][1].body).toBe(fetchMock.mock.calls[0][1].body)
   })
 
   it("does not retry a 400: the same request is refused the same way", async () => {
@@ -95,7 +121,7 @@ describe("one retry on a transient failure", () => {
   it("waits about a second, with jitter, before the retry", async () => {
     fetchMock.mockResolvedValueOnce(status(502)).mockResolvedValueOnce(ok())
     await send()
-    const waits = (setTimeout as unknown as jest.Mock).mock.calls.map((c) => c[1] as number)
+    const waits = (setTimeout as unknown as jest.Mock).mock.calls.map((c) => c[1] as number).filter((ms) => ms >= 500)
     expect(waits).toHaveLength(1)
     expect(waits[0]).toBeGreaterThanOrEqual(1000)
     expect(waits[0]).toBeLessThan(1500)
@@ -171,5 +197,22 @@ describe("suppressed addresses", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(mockWarn).toHaveBeenCalledTimes(1)
     expect(JSON.stringify(mockWarn.mock.calls)).not.toContain("priya.rao")
+  })
+})
+
+describe("the webhook's signing key", () => {
+  it.each([undefined, "", "   ", "abc", "whsec_", `whsec_${Buffer.alloc(23, 1).toString("base64")}`])(
+    "is off for %j",
+    (secret) => {
+      if (secret === undefined) delete process.env.RESEND_WEBHOOK_SECRET
+      else process.env.RESEND_WEBHOOK_SECRET = secret
+      expect(resendWebhookKey()).toBeNull()
+    }
+  )
+
+  it("is the decoded bytes of a whsec_ secret", () => {
+    const key = Buffer.alloc(24, 7)
+    process.env.RESEND_WEBHOOK_SECRET = ` whsec_${key.toString("base64")} `
+    expect(resendWebhookKey()).toEqual(key)
   })
 })

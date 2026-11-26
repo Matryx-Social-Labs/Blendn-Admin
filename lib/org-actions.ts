@@ -362,7 +362,7 @@ export async function inviteMember(
     if (!result.sent) {
       // A suppressed address (it bounced or complained, SCRUM-1280) reads as refused: check it, or pass the link on.
       emailFailure = result.reason === "not_configured" ? "not_configured" : "provider_error"
-      logger.error("Invite email failed", { inviteId: invite.id, reason: result.reason })
+      if (result.reason !== "suppressed") logger.error("Invite email failed", { inviteId: invite.id, reason: result.reason })
     }
   }
 
@@ -663,14 +663,11 @@ export async function sendDomainVerifyEmail(
 
   const link = `${appUrl()}/verify-domain?token=${token}`
   const result = await sendEmail({ to: address.trim().toLowerCase(), ...domainVerifyEmail(row.domain, link) })
-  // A suppressed address bounced or complained (SCRUM-1280): trying again never works, and which it was is not the
-  // typist's business.
-  if (result.reason === "suppressed") {
-    return { ok: false, message: "We can’t send mail to that address. Use another address at the domain, or the DNS record." }
-  }
+  // One answer for every failure, a suppressed address included (SCRUM-1280): sendEmail has already retried, and the
+  // answer must not tell whoever typed the address that it bounced or complained. The reason is in the log.
   if (!result.sent) {
-    logger.error("Domain verify email failed", { domainId, reason: result.reason })
-    return { ok: false, message: "Could not send just now. Try again, or use the DNS record." }
+    if (result.reason !== "suppressed") logger.error("Domain verify email failed", { domainId, reason: result.reason })
+    return { ok: false, message: "We couldn’t send to that address. Use another address at the domain, or the DNS record." }
   }
 
   auditLog({

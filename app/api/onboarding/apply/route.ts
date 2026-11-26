@@ -66,7 +66,8 @@ const APPLY_AGAIN_WINDOW_MS = 24 * 60 * 60 * 1000
 function sendLater(message: Parameters<typeof sendEmail>[0], what: string): void {
   void sendEmail(message)
     .then((result) => {
-      if (!result.sent) logger.error(`${what} email failed`, { reason: result.reason })
+      // A suppressed address is logged by sendEmail at info: not mailing it is the point.
+      if (!result.sent && result.reason !== "suppressed") logger.error(`${what} email failed`, { reason: result.reason })
     })
     .catch((error: unknown) => logger.error(`${what} email failed`, { error: String(error) }))
 }

@@ -36,21 +36,21 @@
   ],
   "verified": {
     "domain-email-gate.test.ts": {
-      "guards": "SCRUM-1280: domain verification to a suppressed address says to use another address or the DNS record, never 'try again', and never says whether it bounced or complained.",
-      "mutation": "lib/org-actions.ts: the suppressed branch disabled (`if (false)`).",
-      "observed": "1 of 7 failing. Restored; 7/7.",
+      "guards": "SCRUM-1280: every failed domain-verification send (suppressed, provider error, not configured) gets one answer, another address or the DNS record, never 'try again', and never says whether the address bounced or complained.",
+      "mutation": "lib/org-actions.ts: the old message (\"Could not send just now. Try again, or use the DNS record.\") put back.",
+      "observed": "3 of 9 failing. Restored; 9/9.",
       "date": "2026-11-26"
     },
     "email-send.test.ts": {
       "guards": "SCRUM-1280: sendEmail retries a 429, a 5xx or a network throw once (about 1 s with jitter, one Idempotency-Key), never a 4xx; sends reply_to only with EMAIL_REPLY_TO; makes every header value one line; skips a suppressed address by the scope table (bounce blocks all, complaint all but the reset, unsubscribe only lifecycle); sends and warns when the lookup throws.",
-      "mutation": "lib/email.ts: M1 one attempt only; M2 a complaint blocks the reset; M3 an unsubscribe blocks every stream; M4 a throwing lookup suppresses; M5 headers passed raw; M6 a 4xx retried.",
-      "observed": "Before the change 18 of 24 failing. M1 6 of 24; M2 1; M3 2; M4 1; M5 1; M6 1 failing. Restored; 24/24.",
+      "mutation": "lib/email.ts: M1 one attempt only; M2 a complaint blocks the reset; M3 an unsubscribe blocks every stream; M4 a throwing lookup suppresses; M5 headers passed raw; M6 a 4xx retried; M7 a retry after our own 10 s timeout.",
+      "observed": "Before the change 18 of 24 failing. M1 6 of 24; M2 1; M3 2; M4 1; M5 1; M6 1 failing. After the review cases (38 tests): M7 1 of 38 failing. Restored; 38/38.",
       "date": "2026-11-26"
     },
     "integration/resend-webhook.itest.ts": {
       "guards": "SCRUM-1280: POST /api/webhooks/resend writes nothing and answers non-2xx unless the Svix signature over the raw body verifies within five minutes; rate-limits a failing network (429); writes one row for a hard bounce or a complaint, none for a soft bounce, by the canonical address; a replay stays one row; bounce outranks complaint outranks unsubscribe.",
-      "mutation": "app/api/webhooks/resend/route.ts: W1 signature check skipped; W2 timestamp tolerance removed; W3 any bounce type written; W4 the upsert's WHERE removed (last writer wins); W5 addresses not normalised.",
-      "observed": "Before the route existed the suite failed to load. W1 6 of 16 failing; W2 2; W3 2; W4 1; W5 1. Restored; 16/16 on a db:migrate database.",
+      "mutation": "app/api/webhooks/resend/route.ts: W1 signature check skipped; W2 timestamp tolerance removed; W3 any bounce type written; W4 the upsert's WHERE removed (last writer wins); W5 addresses not normalised; W6 no address length filter; W7 an unexpected signed shape refused 400; W8 every delivery counted and refused past the limit.",
+      "observed": "Before the route existed the suite failed to load. W1 6 of 16 failing; W2 2; W3 2; W4 1; W5 1. After the review cases (25 tests): W6 1; W7 2; W8 1 failing. Restored; 25/25 on a db:migrate database.",
       "date": "2026-11-26"
     },
     "server-statement-cap.test.ts": {
