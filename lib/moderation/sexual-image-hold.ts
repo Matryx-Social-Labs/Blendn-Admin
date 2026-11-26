@@ -29,7 +29,7 @@ const lastPaged = new Map<string, number>()
  * image, no name. Never throws: nothing here may stop, or undo, the pull.
  */
 export async function holdSexualImage(check: ModerationCheck, path: ImagePath, objectKey: string | null, userId: string): Promise<void> {
-  // In a log line only where no audit row holds them: the row's write failed, or it may not have run.
+  // The user id and key go in a log line only where the audit row may not hold them: its write failed, or the catch-all, which cannot tell.
   const context = { userId, objectKey }
   try {
     const categories = check.checked && check.result?.action === "hide" && check.result.source === "openai_image" ? check.result.categories : undefined
