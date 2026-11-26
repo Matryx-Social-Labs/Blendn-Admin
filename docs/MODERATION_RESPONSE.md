@@ -84,10 +84,9 @@ Be honest that this is one or two people, not a rota:
 | Reinstate a suspended account | Reports queue | Yes |
 | **Contact the reporter** | -- | **No** |
 | **Tell the organizer someone at their event is in trouble** | -- | **No** |
-| **Get paged when a flag lands** | -- | **No** |
+| **Get paged when a report or severe flag lands** | `lib/staff-alert.ts`, once a minute, to `STAFF_ALERT_SLACK_WEBHOOK_URL` / `STAFF_ALERT_EMAIL` | **Yes, once a channel is set** (SCRUM-1161) |
 
-The three gaps at the bottom are the work. The last one is the most urgent,
-because without it the response time above is aspirational.
+The two gaps above it are the work.
 
 ---
 

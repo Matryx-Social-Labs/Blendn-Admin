@@ -136,16 +136,16 @@ beforeAll(async () => {
   await db.events.update({ where: { id: eventId }, data: { organizer_org_id: orgId } })
   await db.events.update({ where: { id: otherEventId }, data: { organizer_org_id: otherOrgId } })
 
-  // Past the free window: the org's first event with five people ended 60
+  // Past the free window: the org's first event with eight people ended 120
   // days ago (lib/analytics-access.ts), so an Event Pass has something to open.
   const DAY = 24 * 60 * 60 * 1000
   const pastId = await makeEvent(owner)
   events.push(pastId)
-  const start = new Date(Date.now() - 60 * DAY)
+  const start = new Date(Date.now() - 120 * DAY)
   const end = new Date(start.getTime() + 3 * 60 * 60 * 1000)
   await db.events.update({ where: { id: pastId }, data: { organizer_org_id: orgId, start_time: start, end_time: end } })
   const occ = await db.event_occurrences.findFirstOrThrow({ where: { event_id: pastId } })
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 8; i++) {
     const guest = await makeUser(testId(`bill-guest${i}`))
     users.push(guest)
     await db.event_check_ins.create({
