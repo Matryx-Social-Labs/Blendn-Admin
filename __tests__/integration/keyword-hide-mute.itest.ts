@@ -175,6 +175,13 @@ describe.each(ROUTES)("the %s", (_name, send) => {
     expect(counted.every((f) => f.auto_action === "hidden" && "harassment" in (f.categories as object))).toBe(true)
   })
 
+  it("counts a line hidden for a contact detail when the model judged it abusive", async () => {
+    const r = await liveRoom()
+    // Each line: the contact hide (not counted) and the model's (counted).
+    for (let i = 1; i <= AUTO_MUTE_HIDDEN_COUNT; i++) await sendHidden(r, send, `${i} [abuse] call me on 98765 4321${i} or else`, 2 * i)
+    expect(await stateOf(r, (s) => s.status === "muted")).toMatchObject({ status: "muted", muted_by: null })
+  })
+
   it("does not count a keyword-hidden line the model could not judge", async () => {
     const r = await liveRoom()
     for (let i = 1; i <= AUTO_MUTE_HIDDEN_COUNT; i++) await sendHidden(r, send, `${i} [down] chutiya`, i)

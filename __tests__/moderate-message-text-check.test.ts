@@ -92,6 +92,13 @@ describe("a keyword hide on the async path (D-052a)", () => {
     expect(mockMute).toHaveBeenCalledWith("u1", "g1")
   })
 
+  it("asks again when the call failed outright, as the rest of the pipeline does, and counts a hide", async () => {
+    mockCheck.mockResolvedValue(HIDE)
+    await send("tu chutiya hai", Promise.resolve({ checked: false, reason: "error" }))
+    expect(mockCheck).toHaveBeenCalledTimes(1)
+    expect(mockMute).toHaveBeenCalledWith("u1", "g1")
+  })
+
   it("does not count the line when the model could not judge it", async () => {
     await send("tu chutiya hai", Promise.resolve({ checked: false, reason: "timeout" }))
     expect(mockFlag).toHaveBeenCalledTimes(1)

@@ -121,6 +121,15 @@ describe("the auto-mute count", () => {
     expect(await db.chat_group_members.findUniqueOrThrow({ where: { chat_group_id_user_id: { chat_group_id: r.groupId, user_id: r.userId } } })).toMatchObject({ status: "muted", muted_by: r.host })
   })
 
+  it("leaves a host's mute that landed before the count alone", async () => {
+    // The model's verdict on a hidden line is counted seconds after the send; a host may have muted in between.
+    const r = await room()
+    await db.chat_group_members.updateMany({ where: { chat_group_id: r.groupId, user_id: r.userId }, data: { status: "muted", muted_at: new Date(), muted_by: r.host } })
+    for (let i = 0; i < 3; i++) await flag(r, { harassment: 0.97 })
+    await checkAndAutoMute(r.userId, r.groupId)
+    expect(await db.chat_group_members.findUniqueOrThrow({ where: { chat_group_id_user_id: { chat_group_id: r.groupId, user_id: r.userId } } })).toMatchObject({ status: "muted", muted_by: r.host })
+  })
+
   it("lifts an automatic mute that only contact hides were holding up", async () => {
     const r = await room()
     await db.chat_group_members.updateMany({ where: { chat_group_id: r.groupId, user_id: r.userId }, data: { status: "muted", muted_at: new Date(), muted_by: null } })

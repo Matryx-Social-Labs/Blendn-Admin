@@ -133,7 +133,7 @@ const handleBanned: ChatMemberBannedCallback = (data) => {
 
 #### `chat:memberMuted` ← NEW — must add to client
 
-Fires when a user is auto-muted (3+ hidden abusive messages in 1 hour; a message hidden only for a contact detail does not count) or manually muted by admin.
+Fires when a user is auto-muted (3+ hidden abusive messages in 1 hour; a message hidden only for a contact detail or a swear word does not count) or manually muted by admin.
 
 **Step 1:** Add the event type in `lib/socketClient.ts`:
 
@@ -456,7 +456,7 @@ User sends "offensive word"
   → Message is NEVER emitted via Socket.io — other users never see it
   → API response to sender: { moderation_hidden: true, content: null }
   → Client should: show placeholder bubble, show warning toast
-  → If 3+ hidden abusive messages in 1 hour (contact-detail hides do not count) → auto-mute
+  → If 3+ hidden abusive messages in 1 hour (contact-detail and swear-word hides do not count) → auto-mute
   → Socket emits "chat:memberMuted" → client disables input
   → After 1 hour with no violations → next send auto-unmutes
 ```

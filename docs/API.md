@@ -4471,7 +4471,7 @@ Messages go through a **pre-emit** pipeline — moderation runs before the messa
 3. **OpenAI Moderation API** (pre-emit, 1s timeout) — Multilingual AI detection for hate, harassment, sexual, violence, self-harm. If caught within 1s, message hidden before broadcast. If timeout, emitted and falls back to async, except in an event room with more than 200 checked in, which waits for the verdict (up to 8s) and refuses the send (`503 MODERATION_UNAVAILABLE`) without one.
 4. **Image moderation** (async, if applicable) — OpenAI omni-moderation for images
 
-Thresholds: `>=0.70` confidence → auto-hide, `>=0.40` → flag for review. Auto-mute after 3 hidden abusive messages in 1 hour (a message hidden only for a contact detail does not count). Auto-unmute after 1 hour with no new violations (checked on next send attempt).
+Thresholds: `>=0.70` confidence → auto-hide, `>=0.40` → flag for review. Auto-mute after 3 hidden abusive messages in 1 hour (a message hidden only for a contact detail or a swear word does not count; a slur, or the model judging the line abusive, does). Auto-unmute after 1 hour with no new violations (checked on next send attempt).
 
 Requires `OPENAI_API_KEY` env var: Railway production refuses to boot without it; elsewhere the server boots with a warning.
 

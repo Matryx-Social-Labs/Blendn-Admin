@@ -54,7 +54,8 @@ function normalizeWords(text: string): string[] {
     .filter(Boolean)
 }
 
-// ── English slurs & profanity (high-precision exact match) ──
+// ── English slurs (high-precision exact match). A hide for one of these counts toward the auto-mute; a hide for any
+// other word on the lists is `profanity` and does not (D-052a, `abuseHiddenCount` in `actions.ts`).
 const ENGLISH_KEYWORDS = new Set([
   "nigger", "nigga", "faggot", "fag", "retard", "kike", "spic",
   "chink", "wetback", "tranny", "cunt",
@@ -215,7 +216,7 @@ export function checkKeywords(content: string): ModerationResult | null {
   return {
     action: confidence >= AUTO_HIDE_THRESHOLD ? "hide" : "flag",
     source: "keyword",
-    categories: { profanity: confidence },
+    categories: { [exact.some((k) => ENGLISH_KEYWORDS.has(k)) ? "slur" : "profanity"]: confidence },
     confidence,
     matched: [...new Set(matched)],
   }
