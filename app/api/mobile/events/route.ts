@@ -362,7 +362,6 @@ export async function GET(request: NextRequest) {
     if (cached && cached.expiresAt > Date.now()) {
       ;({ events, totalCount } = cached)
     } else {
-      // Build orderBy
       // `id` last: rows that tie (19:00 is everybody's) keep one order from page to page (SCRUM-1356).
       const orderBy: Prisma.eventsOrderByWithRelationInput[] = [
         shouldSortByDistance ? { start_time: "asc" } : { [sortBy === "distance" ? "start_time" : sortBy]: sortOrder },
