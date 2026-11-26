@@ -98,32 +98,32 @@ export async function pruneProductEvents(now: Date = new Date()): Promise<number
     ))`
 }
 
-/** Batches until one comes back short, or the cap. `capped` means rows may be left for the next pass. */
-async function drain(prune: (now: Date) => Promise<number>): Promise<{ deleted: number; batches: number; capped: boolean }> {
+/**
+ * Batches until one comes back short, or the cap, then one log line. A capped pass (20 batches, a minute, or the
+ * sweeper stopping) may leave rows for the next one, so it is a warning rather than a count.
+ */
+async function drain(message: string, prune: (now: Date) => Promise<number>): Promise<void> {
   const now = new Date()
   const started = Date.now()
   let deleted = 0
   for (let batches = 1; ; batches++) {
     const count = await prune(now)
     deleted += count
-    if (count < BATCH_LIMIT) return { deleted, batches, capped: false }
+    if (count < BATCH_LIMIT) {
+      if (deleted > 0) logger.info(message, { deleted, batches, capped: false })
+      return
+    }
     if (stopped || batches >= MAX_BATCHES || Date.now() - started >= MAX_DRAIN_MS) {
-      return { deleted, batches, capped: true }
+      logger.warn(message, { deleted, batches, capped: true })
+      return
     }
     await new Promise((resolve) => setTimeout(resolve, BATCH_PAUSE_MS))
   }
 }
 
-function logDrain(message: string, result: { deleted: number; batches: number; capped: boolean }): void {
-  if (result.deleted === 0) return
-  // A capped pass means the backlog outgrew 100,000 rows in six hours: worth a warning, not just a count.
-  if (result.capped) logger.warn(message, result)
-  else logger.info(message, result)
-}
-
 export async function runSweep(): Promise<void> {
   try {
-    logDrain("Pruned notifications", await drain(pruneNotifications))
+    await drain("Pruned notifications", pruneNotifications)
   } catch (error) {
     logger.error("Notification prune failed", { error: String(error) })
   }
@@ -133,7 +133,7 @@ export async function runSweep(): Promise<void> {
    * are unrelated and share only a cadence.
    */
   try {
-    logDrain("Pruned product events", await drain(pruneProductEvents))
+    await drain("Pruned product events", pruneProductEvents)
   } catch (error) {
     logger.error("Product event prune failed", { error: String(error) })
   }
