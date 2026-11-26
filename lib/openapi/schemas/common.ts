@@ -264,8 +264,7 @@ export const RoomLensSchema = z
   .openapi("RoomLens")
 
 /** A stored location as every read returns it (SCRUM-1229). */
-export const storedLocation = () =>
-  z.string().nullable().openapi({
-    description:
-      "The city as stored. Null when none is set, or while it is still stored as coordinates: a read never looks the city up and never returns coordinates.",
-  })
+export const StoredLocationSchema = z.string().nullable().openapi({
+  description:
+    "The city as stored. Null when none is set, or while it is still stored as coordinates: a read never looks the city up and never returns coordinates.",
+})

@@ -62,13 +62,14 @@ export async function reverseGeocodeCity(
       }
     )
     if (!response.ok) {
-      logger.warn("Reverse geocode refused", { status: response.status })
+      // An error, so it reaches Sentry: a sustained refusal (403/429: blocked under the usage policy) means no write gets a city.
+      logger.error("Reverse geocode refused", { status: response.status })
       return null
     }
     const data = (await response.json()) as { address?: NominatimAddress }
     return cityFrom(data.address)
   } catch (error) {
-    logger.warn("Reverse geocode failed", { error: error instanceof Error ? error.message : String(error) })
+    logger.error("Reverse geocode failed", { error: error instanceof Error ? error.message : String(error) })
     return null
   }
 }
@@ -92,8 +93,8 @@ export async function locationToStore(
 
 /**
  * An event's city on create, or on an edit that moves the pin: the city typed,
- * else the city at the coordinates (typed as `city` or the pin). Null when
- * neither gives one; the edit route then keeps the stored city.
+ * else the city at coordinates typed as `city`, else the city at the pin. Null
+ * when none gives one; the edit route then keeps the stored city.
  */
 export async function resolveEventCity(
   city: string | null | undefined,
@@ -102,8 +103,8 @@ export async function resolveEventCity(
 ): Promise<string | null> {
   const typed = storedCity(city)
   if (typed) return typed
-  const coordinates =
-    (city && parseCoordinateLocation(city)) ||
-    (latitude != null && longitude != null ? { lat: latitude, lon: longitude } : null)
-  return coordinates ? reverseGeocodeCity(coordinates.lat, coordinates.lon) : null
+  const typedCoordinates = city ? parseCoordinateLocation(city) : null
+  const fromTyped = typedCoordinates ? await reverseGeocodeCity(typedCoordinates.lat, typedCoordinates.lon) : null
+  if (fromTyped || latitude == null || longitude == null) return fromTyped
+  return reverseGeocodeCity(latitude, longitude)
 }

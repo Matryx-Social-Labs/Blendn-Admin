@@ -227,9 +227,6 @@ export async function updateUser(
   try {
     const admin = await requireAdmin()
 
-    // Undefined when not sent, or when coordinates could not be geocoded: either way the column is left alone.
-    const normalizedLocation = await locationToStore(data.profile?.location)
-
     // Read before the write, so the audit row carries what changed rather
     // than only what was sent.
     const before = await db.user.findUnique({
@@ -243,6 +240,19 @@ export async function updateUser(
     })
     // Its address is the one thing that keeps anybody from signing in as it.
     if (!before || id === SYSTEM_USER_ID) throw new Refusal("User not found")
+
+    /*
+     * Undefined leaves the column alone: when nothing was sent, when the
+     * coordinates could not be geocoded, and when what was sent is what the
+     * list showed. The dialog sends every field back, and a location still
+     * stored as coordinates lists as empty (`storedCity`), so without the last
+     * case editing only the phone erased it (SCRUM-1229 review).
+     */
+    const sentLocation = data.profile?.location
+    const normalizedLocation =
+      sentLocation !== undefined && (sentLocation?.trim() || null) === storedCity(before.profile?.location)
+        ? undefined
+        : await locationToStore(sentLocation)
 
     // Stored the way sign-in looks it up (lib/auth.ts): a capital letter typed here locked the person out.
     const email = data.email?.trim().toLowerCase()

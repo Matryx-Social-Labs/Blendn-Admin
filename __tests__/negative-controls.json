@@ -36,9 +36,9 @@
   ],
   "verified": {
     "no-geocoding-on-reads.test.ts": {
-      "guards": "SCRUM-1229: no read geocodes or returns coordinates. storedCity gives the stored text or null for coordinates with no request; locationToStore geocodes coordinates once, returns undefined (column left alone) when Nominatim fails, and remembers no failure; resolveEventCity keeps a typed city. Structural: the read-only files (sign-in, session, Apple, Google, signup, friends, favourites, the feed, event detail, check-ins, public-profile, self-profile, events.service) name no geocoder; the profile GET and the dashboard user list do not, the profile PUT and the dashboard user edit do.",
-      "mutation": "(RED) the suite on origin/dev 339403a1: 23 failed. (M1) event detail GET back to `await resolveEventCity(event.city, event.latitude, event.longitude)`. (M2) profile GET through `await locationToStore(...)`. (M3) the dashboard user list through `await locationToStore(...)`. (M4) locationToStore without `?? undefined`, so a failed geocode writes null.",
-      "observed": "RED 23 failing / 2 passing; M1, M2, M3 and M4 each 1 failing / 24 passing; reverted from a copy, 25 passing.",
+      "guards": "SCRUM-1229: no read geocodes or returns coordinates. storedCity gives the stored text or null for coordinates with no request; locationToStore geocodes coordinates once, returns undefined (column left alone) when Nominatim fails, and remembers no failure; resolveEventCity keeps a typed city, is null on failure and falls back to the pin. Structural: walking app/ and lib/, exactly the four writers (events POST, events [id] PATCH, profile PUT, dashboard users actions) name a geocoder; lib/location exports nothing the guard does not know; in each of those files the read (GET / getUsers) names none and the write calls it.",
+      "mutation": "(RED) the suite on origin/dev 339403a1: 23 failing. After the review pass (tree walk replaced the hand list): (M1) event detail GET back to `await resolveEventCity(event.city, event.latitude, event.longitude)`. (M2) profile GET through `await locationToStore(...)`. (M3) the dashboard user list through `await locationToStore(...)`. (M4) locationToStore without `?? undefined`, so a failed geocode writes null. (M5) a new export `cityAtPin = reverseGeocodeCity` in lib/location.ts.",
+      "observed": "RED 23 failing / 2 passing. M1 to M5 each 1 failing / 17 passing; reverted from a copy, 18 passing.",
       "date": "2026-11-27"
     },
     "staff-alert.itest.ts": {

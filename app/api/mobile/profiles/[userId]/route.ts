@@ -923,7 +923,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
        *
        * It was caught by making a real PUT to staging and reading the body.
        */
-      profile: { ...profileForSelfResponse(user!.profile), homeCitySlug: citySlugFor(catalogue, user!.profile?.home_city_id) },
+      // `location` as every read gives it: never coordinates, even ones this save kept because the lookup failed (SCRUM-1229).
+      profile: { ...profileForSelfResponse(user!.profile), location: storedCity(user!.profile?.location), homeCitySlug: citySlugFor(catalogue, user!.profile?.home_city_id) },
       interests: user!.user_interests.map((ui) => ({
         id: ui.category.id,
         name: ui.category.name,

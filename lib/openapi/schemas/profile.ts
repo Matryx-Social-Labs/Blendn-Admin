@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { ACCOUNT_MAX_AGE } from "@/lib/age"
 import { registry } from "@/lib/openapi/registry"
-import { FriendOfferSchema, PagedPaginationSchema, RoomLensSchema, UserRefParamSchema, storedLocation } from "./common"
+import { FriendOfferSchema, PagedPaginationSchema, RoomLensSchema, UserRefParamSchema, StoredLocationSchema } from "./common"
 
 /**
  * These mirror `lib/validations/profile.ts`, and a test holds them to it.
@@ -234,7 +234,7 @@ export const ProfileResponseSchema = z
       phone: z.string().nullable(),
       name: z.string().nullable(),
       age: z.number().nullable(),
-      location: storedLocation(),
+      location: StoredLocationSchema,
       bio: z.string().nullable(),
       occupation: z.string().nullable(),
       education: z.string().nullable(),
@@ -369,7 +369,7 @@ export const UserPublicProfileSchema = z
     image: z.string().nullable().optional(),
     photos: z.array(z.string()).optional(),
     age: z.number().nullable(),
-    location: storedLocation(),
+    location: StoredLocationSchema,
     bio: z.string().nullable().optional(),
     occupation: z.string().nullable().optional(),
     education: z.string().nullable().optional(),

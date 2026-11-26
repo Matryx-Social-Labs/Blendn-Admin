@@ -5,18 +5,23 @@
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
+// The dashboard's session, for the admin user edit (as admin-users-no-secrets-to-browser.itest.ts).
+let session: { user: { id: string; role: "app_admin" } } | null = null
+jest.mock("@/lib/auth", () => ({ getAuth: async () => (session ? { ...session, user: { signedInAt: Date.now(), ...session.user } } : null) }))
 process.env.NEXTAUTH_SECRET ??= "itest-redesign-secret-of-32-characters-x"
 process.env.MOBILE_JWT_SECRET ??= "itest-mobile-secret-0123456789abcdefghij"
 
 import { resetMemoryStore } from "@/lib/rate-limit-store"
-import { db } from "./helpers"
-import { arrive, call, cleanupCrewWorld, liveEvent, person } from "./crew-world"
+import { getUsers, updateUser } from "@/app/dashboard/users/actions"
+import { db, makeUser, testId } from "./helpers"
+import { arrive, befriend, call, cleanupCrewWorld, liveEvent, person, world } from "./crew-world"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const profileRoute = require("@/app/api/mobile/profiles/[userId]/route") as typeof import("@/app/api/mobile/profiles/[userId]/route")
 const sessionRoute = require("@/app/api/mobile/auth/session/route") as typeof import("@/app/api/mobile/auth/session/route")
 const eventRoute = require("@/app/api/mobile/events/[eventId]/route") as typeof import("@/app/api/mobile/events/[eventId]/route")
 const checkinsRoute = require("@/app/api/mobile/events/[eventId]/checkins/route") as typeof import("@/app/api/mobile/events/[eventId]/checkins/route")
+const friendRoute = require("@/app/api/mobile/friends/[userId]/route") as typeof import("@/app/api/mobile/friends/[userId]/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const COORDS = "12.969521,77.535842"
@@ -37,8 +42,11 @@ beforeAll(() => {
 })
 afterAll(async () => {
   global.fetch = realFetch
+  await db.audit_logs.deleteMany({ where: { resource_id: { in: world.users } } })
   await cleanupCrewWorld()
 })
+const failing = () => async () => new Response("busy", { status: 503 })
+const answering = () => async () => Response.json({ address: { city: "Bengaluru" } })
 beforeEach(() => {
   resetMemoryStore()
   nominatim.length = 0
@@ -61,15 +69,18 @@ describe("reads", () => {
     const session = await call(sessionRoute.GET, "/api/mobile/auth/session", asha)
     const room = await call(checkinsRoute.GET, `/api/mobile/events/${eventId}/checkins`, ravi, { params: { eventId } })
 
-    for (const res of [byOther, own, session, room]) expect(res.status).toBe(200)
-    expect(own.body.data.profile.location).toBeNull()
-    expect(session.body.data.profile.location).toBeNull()
-    expect(byOther.body.data.profile?.location ?? byOther.body.data.location ?? null).toBeNull()
+    await befriend(ravi, asha)
+    const asFriend = await call(friendRoute.GET, `/api/mobile/friends/${asha.id}`, ravi, { params: { userId: asha.id } })
+    for (const res of [byOther, own, session, room, asFriend]) expect(res.status).toBe(200)
+    expect(JSON.stringify(asFriend.body)).not.toContain("12.96")
+    expect(own.body.data.profile).toHaveProperty("location", null)
+    expect(session.body.data.profile).toHaveProperty("location", null)
+    expect(byOther.body.data.profile).toHaveProperty("location", null)
     expect(room.body.data.attendees.length).toBeGreaterThan(0)
     for (const a of room.body.data.attendees) expect(a.location).toBeNull()
     for (const res of [byOther, own, session, room]) expect(JSON.stringify(res.body)).not.toContain("12.96")
     expect(nominatim).toEqual([])
-    // Nothing was written either: the row heals on the next save, not on a read.
+    // Nothing was written either: a read never heals the row.
     expect(await location(asha.id)).toBe(COORDS)
   })
 
@@ -102,15 +113,65 @@ describe("the profile write", () => {
   it("keeps the stored city when the geocode fails, and still saves the rest", async () => {
     const asha = await person("geo-put-fail")
     await db.profiles.update({ where: { id: asha.id }, data: { location: "Mysuru" } })
-    nominatimAnswer = async () => new Response("busy", { status: 503 })
+    nominatimAnswer = failing()
     try {
       const res = await put(asha, { location: COORDS, bio: "still saved" })
       expect(res.status).toBe(200)
     } finally {
-      nominatimAnswer = async () => Response.json({ address: { city: "Bengaluru" } })
+      nominatimAnswer = answering()
     }
     expect(nominatim).toHaveLength(1)
     const row = await db.profiles.findUniqueOrThrow({ where: { id: asha.id }, select: { location: true, bio: true } })
     expect(row).toEqual({ location: "Mysuru", bio: "still saved" })
+  })
+
+  it("never echoes coordinates it kept", async () => {
+    const asha = await person("geo-put-echo")
+    await db.profiles.update({ where: { id: asha.id }, data: { location: COORDS } })
+    const res = await put(asha, { bio: "only the bio" })
+    expect(res.status).toBe(200)
+    expect(res.body.data.profile).toHaveProperty("location", null)
+    expect(JSON.stringify(res.body)).not.toContain("12.96")
+    expect(await location(asha.id)).toBe(COORDS)
+  })
+})
+
+describe("the dashboard user edit", () => {
+  const target = async (stored: string) => {
+    const adminId = await makeUser(testId("geo-admin"), "app_admin")
+    const id = await makeUser(testId("geo-edited"))
+    world.users.push(adminId, id)
+    session = { user: { id: adminId, role: "app_admin" } }
+    await db.profiles.create({ data: { id, name: "Edited", location: stored } })
+    return id
+  }
+  const changes = async (id: string) =>
+    (await db.audit_logs.findMany({ where: { resource_id: id }, select: { details: true } })).map((r) => JSON.stringify(r.details))
+
+  it("leaves a coordinate location alone when the dialog sends back the empty field it listed", async () => {
+    const id = await target(COORDS)
+    const { users } = await getUsers(id)
+    const listed = users.find((u) => u.id === id)!
+    expect(listed.profile?.location).toBeNull()
+    // What the Edit User dialog sends: every field, location as `formData.location || null`.
+    await updateUser(id, { name: "Renamed", profile: { location: listed.profile?.location || null, onboarded: true } })
+    const row = await db.user.findUniqueOrThrow({ where: { id }, select: { name: true, profile: { select: { location: true } } } })
+    expect(row).toEqual({ name: "Renamed", profile: { location: COORDS } })
+    for (const c of await changes(id)) expect(c).not.toContain("location")
+    expect(nominatim).toEqual([])
+  })
+
+  it("keeps the stored city when the geocode fails, and stores the city when it answers", async () => {
+    const id = await target("Mysuru")
+    nominatimAnswer = failing()
+    try {
+      await updateUser(id, { name: "Kept", profile: { location: COORDS } })
+    } finally {
+      nominatimAnswer = answering()
+    }
+    expect(await location(id)).toBe("Mysuru")
+    await updateUser(id, { profile: { location: COORDS } })
+    expect(await location(id)).toBe("Bengaluru")
+    expect(nominatim).toHaveLength(2)
   })
 })

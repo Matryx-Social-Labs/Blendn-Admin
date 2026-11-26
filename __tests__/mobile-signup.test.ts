@@ -32,7 +32,6 @@ jest.mock("@/lib/rate-limit", () => ({
   createAuthRateLimit: jest.fn().mockReturnValue({ windowMs: 1, maxRequests: 99 }),
 }))
 
-// Reverse geocoding would make a network call; the value is irrelevant here.
 import { NextRequest } from "next/server"
 import { ACCOUNT_MAX_AGE, AGE_TOO_OLD } from "@/lib/age"
 import { POST } from "@/app/api/mobile/auth/signup/route"

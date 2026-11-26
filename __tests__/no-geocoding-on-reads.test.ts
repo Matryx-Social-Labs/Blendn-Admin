@@ -1,5 +1,6 @@
-import { readFileSync } from "fs"
-import { join } from "path"
+import { readdirSync, readFileSync } from "fs"
+import { join, relative } from "path"
+import * as locationModule from "@/lib/location"
 import { locationToStore, resolveEventCity, storedCity } from "@/lib/location"
 
 /**
@@ -96,30 +97,39 @@ describe("resolveEventCity: an event write", () => {
     await expect(resolveEventCity("Toronto", 43.65, -79.38)).resolves.toBe("Toronto")
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  it("is null when the lookup fails, never the coordinates", async () => {
+    fetchMock.mockRejectedValue(new Error("timeout"))
+    await expect(resolveEventCity(null, 12.97, 77.59)).resolves.toBeNull()
+    await expect(resolveEventCity(COORDS, null, null)).resolves.toBeNull()
+  })
+
+  it("falls back to the pin when coordinates typed as the city name nothing", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("timeout"))
+    nominatimSays("Bengaluru")
+    await expect(resolveEventCity(COORDS, 12.97, 77.59)).resolves.toBe("Bengaluru")
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
 })
 
 /*
- * Every caller of the geocoders, read or write. A read-only file imports
- * nothing from lib/location that can make a request; a file holding both a
- * read and a write keeps the geocoder out of the read's body.
+ * Every caller of the geocoders, found by walking app/ and lib/ rather than by
+ * a list somebody has to remember to extend: exactly the writers below name
+ * one, and a file holding a read and a write keeps it out of the read's body.
  */
-const GEOCODERS = /\b(locationToStore|resolveEventCity|reverseGeocodeCity|normalizeLocationToCity)\b/
+const GEOCODERS = /\b(locationToStore|resolveEventCity|reverseGeocodeCity)\b/
 
-const READ_ONLY = [
-  "app/api/mobile/auth/signin/route.ts",
-  "app/api/mobile/auth/session/route.ts",
-  "app/api/mobile/auth/apple/route.ts",
-  "app/api/mobile/auth/google/route.ts",
-  "app/api/mobile/auth/signup/route.ts",
-  "app/api/mobile/friends/[userId]/route.ts",
-  "app/api/mobile/users/[userId]/favorites/route.ts",
-  "app/api/mobile/events/route.ts",
-  "app/api/mobile/events/[eventId]/route.ts",
-  "app/api/mobile/events/[eventId]/checkins/route.ts",
-  "lib/public-profile.ts",
-  "lib/self-profile.ts",
-  "lib/services/events.service.ts",
+const WRITERS = [
+  "app/api/events/[id]/route.ts", // PATCH, when the pin moves (its GET is checked below)
+  "app/api/events/route.ts", // POST (its GET is checked below)
+  "app/api/mobile/profiles/[userId]/route.ts", // PUT (its GET is checked below)
+  "app/dashboard/users/actions.ts", // updateUser (getUsers is checked below)
 ]
+
+const sourceFiles = (dir: string): string[] =>
+  readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? sourceFiles(join(dir, e.name)) : /\.tsx?$/.test(e.name) ? [join(dir, e.name)] : []
+  )
 
 const bodyOf = (src: string, start: RegExp, end: RegExp) => {
   const from = src.search(start)
@@ -130,19 +140,28 @@ const bodyOf = (src: string, start: RegExp, end: RegExp) => {
 }
 
 describe("no read reaches a geocoder", () => {
-  it.each(READ_ONLY)("%s", (file) => {
-    expect(code(file)).not.toMatch(GEOCODERS)
+  it("only the writers name one", () => {
+    const naming = [...sourceFiles("app"), ...sourceFiles("lib")]
+      .map((f) => relative(ROOT, join(ROOT, f)))
+      .filter((f) => f !== "lib/location.ts" && GEOCODERS.test(code(f)))
+      .sort()
+    expect(naming).toEqual([...WRITERS].sort())
   })
 
-  it("profiles/[userId]: the GET does not, the PUT does", () => {
-    const src = code("app/api/mobile/profiles/[userId]/route.ts")
-    expect(bodyOf(src, /export async function GET\(/, /export async function /)).not.toMatch(GEOCODERS)
-    expect(bodyOf(src, /export async function PUT\(/, /export async function /)).toMatch(/await locationToStore\(location\)/)
+  it("lib/location exports no geocoder the guard does not know", () => {
+    expect(Object.keys(locationModule).sort()).toEqual(
+      ["locationToStore", "parseCoordinateLocation", "resolveEventCity", "reverseGeocodeCity", "storedCity"].sort()
+    )
   })
 
-  it("dashboard users: the list does not, the edit does", () => {
-    const src = code("app/dashboard/users/actions.ts")
-    expect(bodyOf(src, /export async function getUsers\(/, /export async function /)).not.toMatch(GEOCODERS)
-    expect(bodyOf(src, /export async function updateUser\(/, /export async function /)).toMatch(/locationToStore\(/)
+  it.each([
+    ["app/api/mobile/profiles/[userId]/route.ts", /export async function GET\(/, /await locationToStore\(location\)/, /export async function PUT\(/],
+    ["app/dashboard/users/actions.ts", /export async function getUsers\(/, /locationToStore\(/, /export async function updateUser\(/],
+    ["app/api/events/route.ts", /export async function GET\(/, /resolveEventCity\(city, latitude, longitude\)/, /export async function POST\(/],
+    ["app/api/events/[id]/route.ts", /export async function GET\(/, /resolveEventCity\(city, latitude, longitude\)/, /export async function PATCH\(/],
+  ])("%s: the read does not, the write does", (file, read, writeCall, write) => {
+    const src = code(file)
+    expect(bodyOf(src, read, /export async function /)).not.toMatch(GEOCODERS)
+    expect(bodyOf(src, write, /export async function /)).toMatch(writeCall)
   })
 })

@@ -2,7 +2,7 @@ import { z } from "zod"
 import { ACCOUNT_MAX_AGE } from "@/lib/age"
 import { registry } from "@/lib/openapi/registry"
 import { MIN_PASSWORD_LENGTH } from "@/lib/password"
-import { DeviceInfoSchema, storedLocation } from "./common"
+import { DeviceInfoSchema, StoredLocationSchema } from "./common"
 
 /*
  * These duplicate `lib/validations/auth.ts` by hand, and they have to.
@@ -63,7 +63,7 @@ const UserProfileSchema = z.object({
   id: z.string().uuid(),
   phone: z.string().nullable(),
   age: z.number().nullable(),
-  location: storedLocation(),
+  location: StoredLocationSchema,
   bio: z.string().nullable(),
   occupation: z.string().nullable(),
   education: z.string().nullable(),
