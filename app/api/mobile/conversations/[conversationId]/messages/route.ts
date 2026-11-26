@@ -468,9 +468,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      *
      * This was `message.sender.name`, so a lock screen would carry the real
      * name of someone the recipient only knows by a pseudonym -- and a lock
-     * screen is not an authenticated surface. Unchanged for conversations that
-     * were never pseudonymous, which is all of them until the reveal work
-     * lands.
+     * screen is not an authenticated surface. A conversation that began as a
+     * request has real names for good, so its push carries neither the name
+     * nor the words (`notifyPrivateMessage` reads the conversation, SCRUM-1266);
+     * a friends' DM keeps both.
      */
     const senderName = displayNameInConversation(
       conversation,
@@ -490,7 +491,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           where: { conversation_id: conversationId, sender_id: authUser.userId, is_read: false, ...VISIBLE_DM },
         })
         .then((unread) =>
-          notifyPrivateMessage({ recipientId, senderName, preview: messagePreview, conversationId, unread })
+          notifyPrivateMessage({
+            recipientId,
+            senderName,
+            preview: messagePreview,
+            conversationId,
+            unread,
+            conversation,
+          })
         )
         .catch((err) =>
           logger.error("Push notification failed", { error: err instanceof Error ? err.message : String(err) })

@@ -96,7 +96,7 @@ describe("B3 — the socket roster is for people in the room", () => {
 })
 
 describe("G6 — declining says nothing to the sender", () => {
-  it("pushes on accept only, and names the accepter there", () => {
+  it("pushes on accept only, and names nobody there", () => {
     /*
      * Declining used to push "Message request declined" (first nameless, after
      * the decliner's real name had leaked from here). The product has no
@@ -108,10 +108,10 @@ describe("G6 — declining says nothing to the sender", () => {
     const src = code("app/api/mobile/message-requests/[requestId]/respond/route.ts")
     expect(src).not.toMatch(/Message request declined|Your message request was declined/)
     expect(src).not.toMatch(/\$\{responderName\} declined/)
-    expect(src).toMatch(/if \(action === "accept"\) \{\s*const responderName/)
-    // Accept still names them: it completes the documented crossing, and a live
-    // conversation exists by then anyway. docs/API.md:126.
-    expect(src).toMatch(/\$\{responderName\} accepted/)
+    expect(src).toMatch(/if \(action === "accept"\) \{[\s\S]*?sendPushNotification\(/)
+    // Nor does the accept name them (launch gate 7, SCRUM-1266): the conversation
+    // shows who, behind sign-in. Its exact words: request-push-no-name.test.ts.
+    expect(src).not.toMatch(/responderName/)
   })
 })
 
