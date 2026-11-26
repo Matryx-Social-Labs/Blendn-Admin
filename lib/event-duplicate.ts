@@ -162,21 +162,8 @@ export function duplicatePrefill(source: DuplicateSource, now: Date): DuplicateP
       additional_info: details?.additional_info ?? undefined,
       faq: details?.faq ?? undefined,
       accessibility_info: details?.accessibility_info ?? undefined,
-      media_items: source.media.map((m) => ({
-        type: m.type,
-        url: m.url,
-        thumbnail_url: m.thumbnail_url,
-        title: m.title,
-        description: m.description,
-        order: m.order,
-        width: m.width,
-        height: m.height,
-        duration_ms: m.duration_ms,
-        focal_x: m.focal_x,
-        focal_y: m.focal_y,
-        // Written only through `eventMediaRows`, from the schema's shape.
-        renditions: m.renditions as Rendition[] | null,
-      })),
+      // The select names each column, so a spread passes only those. Renditions are written only through `eventMediaRows`.
+      media_items: source.media.map((m) => ({ ...m, renditions: m.renditions as Rendition[] | null })),
     },
   }
 }
