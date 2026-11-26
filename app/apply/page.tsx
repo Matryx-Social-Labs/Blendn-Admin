@@ -261,7 +261,7 @@ export default function ApplyPage() {
               <Field label="Address">
                 <Textarea value={form.address} onChange={set("address")} rows={2} className="rounded-2xl" />
               </Field>
-              <Field label="GSTIN" hint="15 characters. Checked for format only — we don't share it.">
+              <Field label="GSTIN (India only)" hint="15 characters. Checked for format only — we don't share it. A website works anywhere.">
                 <Input
                   value={form.gstin}
                   onChange={set("gstin")}

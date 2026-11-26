@@ -799,7 +799,7 @@ describe("the webhook, against our rows (review H3, M2, M5; db M1, M2)", () => {
   it("the organisation’s Plan page never lists a sponsor link payment (review 16, db M3)", async () => {
     const { linkId } = await sentLink(420_000)
     await post(linkPaid(linkId, { amount: 420_000 }))
-    const page = await planPageData({ orgId: sponsorOrg, orgName: "x", memberRole: "owner", mayBuy: true })
+    const page = await planPageData({ orgId: sponsorOrg, orgName: "x", memberRole: "owner", mayBuy: true, mayBuyHere: true })
     expect(page.payments).toEqual([])
   })
 })

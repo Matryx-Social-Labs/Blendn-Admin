@@ -6,23 +6,25 @@ import { realEventsWhere } from "./event-kind"
 
 /**
  * May this organisation buy a plan where it runs events? The one market rule
- * (SCRUM-1275): the free-window mail asks it today; the Plan page's Buy and the
- * checkout (design/05) and the stay-open rule (insights/04) are to ask it too,
- * never a second rule.
+ * (SCRUM-1275): the free-window mail, the Plan page's Buy and every checkout
+ * (`lib/billing-actions.ts`, SCRUM-1151) ask it, and the stay-open rule
+ * (insights/04) is to ask it too, never a second rule.
  *
- * `organisations` has no country, so it is its events' cities, resolved through
- * the catalogue as `lib/ticketing-enable.ts` does. No, as soon as one is in
- * another market. A city the catalogue does not know (a typo, a neighbourhood)
- * and an organisation with no events say nothing, so they count as India: an
- * Indian host in an uncatalogued town can still buy. The cost is a Canadian
- * host whose every city is uncatalogued; the fix is a `match_names` row.
+ * `organisations` has no country, so it is its events' and its venues' cities
+ * (a venue owner's nights are venue days with no organisation, so its venues
+ * are its only evidence), resolved through the catalogue as
+ * `lib/ticketing-enable.ts` does, whatever the city's launch state. No, as soon
+ * as one is in another market. A city the catalogue does not know (a typo, a
+ * neighbourhood) and an organisation with neither say nothing, so they count as
+ * India: an Indian host in an uncatalogued town can still buy. The cost is a
+ * Canadian host whose every city is uncatalogued; the fix is a `match_names` row.
  */
 export function mayBuyIn(countries: readonly (string | null)[]): boolean {
   return countries.every((c) => c === null || c === PLAN_MARKET)
 }
 
 export async function mayBuyHere(orgId: string): Promise<boolean> {
-  const [catalogue, cities] = await Promise.all([
+  const [catalogue, events, venues] = await Promise.all([
     cityCatalogue(),
     // Any status, so a draft is evidence too; never a deleted event, so a Toronto test night removed is no reason.
     db.events.findMany({
@@ -30,6 +32,7 @@ export async function mayBuyHere(orgId: string): Promise<boolean> {
       select: { city: true },
       distinct: ["city"],
     }),
+    db.venues.findMany({ where: { owner_org_id: orgId, deleted_at: null }, select: { city: true }, distinct: ["city"] }),
   ])
-  return mayBuyIn(cities.map((e) => cityFor(catalogue, e.city)?.country ?? null))
+  return mayBuyIn([...events, ...venues].map((row) => cityFor(catalogue, row.city)?.country ?? null))
 }

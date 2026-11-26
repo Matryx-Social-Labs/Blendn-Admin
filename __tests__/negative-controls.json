@@ -2237,9 +2237,9 @@
       "date": "2026-10-11"
     },
     "venue-plan-row.test.tsx": {
-      "guards": "SCRUM-609: on /dashboard/plan a venue's row says \"Venue Pro can be bought\", and offers Buy, only when the checkout would take it: Listed and past its 28 days, or with only an abandoned `created` mandate (which a new purchase replaces). Paid Venue Pro, a founding grant, a paused (halted) or an authenticated mandate say neither, and keep \"28 of 28 days of data\". Review L7: with another organisation's mandate open, the row shows 'A previous plan on this venue is still being closed — contact support.', no Buy, no 'can be bought', and nothing of that mandate.",
-      "mutation": "M1443 the sentence printed whatever the plan. M1444 Buy offered beside an open mandate (the old `pro || !owned` condition). M1463 the row ignoring openElsewhere.",
-      "observed": "2026-10-11: M1443: 4 failing (every case that must not say it). M1444: 2 failing (paused, authenticated). Reverted; 6 green. 2026-10-11: M1463 1 failing (the L7 case). Reverted; 7 green.",
+      "guards": "SCRUM-609: on /dashboard/plan a venue's row says \"Venue Pro can be bought\", and offers Buy, only when the checkout would take it: Listed and past its 28 days, or with only an abandoned `created` mandate (which a new purchase replaces). Paid Venue Pro, a founding grant, a paused (halted) or an authenticated mandate say neither, and keep \"28 of 28 days of data\". Review L7: with another organisation's mandate open, the row shows 'A previous plan on this venue is still being closed — contact support.', no Buy, no 'can be bought', and nothing of that mandate. SCRUM-1151: a venue whose organisation is outside India shows no Buy, no 'can be bought', no data meter and no charge date, and the Venue Pro card says the launch line once in place of its price; a paid Venue Pro there keeps its state and Cancel; an Indian venue's page is unchanged.",
+      "mutation": "M1443 the sentence printed whatever the plan. M1444 Buy offered beside an open mandate (the old `pro || !owned` condition). M1463 the row ignoring openElsewhere. SCRUM-1151: (RED) the four new cases on origin/dev 216c4e8b; (M4) proBuyable without mayBuyHere and the DataMeter shown for every owned venue.",
+      "observed": "2026-10-11: M1443: 4 failing (every case that must not say it). M1444: 2 failing (paused, authenticated). Reverted; 6 green. 2026-10-11: M1463 1 failing (the L7 case). Reverted; 7 green. SCRUM-1151: RED 2 of 4 new cases failing; M4 2 of 13. Restored (cmp); 13 of 13.",
       "date": "2026-10-11"
     },
     "venue-area.test.ts": {
@@ -2930,6 +2930,12 @@
       "guards": "SCRUM-1342: the approval mail's one next step after the password step, in the text and the HTML: an organizer 'Next, create your first event:' and the dashboard's /dashboard/events/new ('Create your first event'); a venue owner 'Next, add your venue, or claim it if it’s already listed:' and /dashboard/venues ('Add or claim your venue'), never an event; a sponsor keeps the Members line, in the text and the HTML; neither of the first two carries the Members line; a promoted account with no password step gets it after the sign-in; the account box's address wraps (word-break), so a long address never pushes a 390 px screen sideways.",
       "mutation": "(A1) the role ignored (every account told to create an event); (A2) the Members line kept beside the next step; (A4) the account box's word-break removed. (A6) the HTML's Members note dropped for an account with no next step.",
       "observed": "A1: 2 of 44 failing. A2: 2 of 44. A4: 1 of 44 (the render at 390 px overflowed with a 54-character address before the fix). A6: 1 of 44. Restored each; 44 of 44.",
+      "date": "2026-11-26"
+    },
+    "plan-market.itest.ts": {
+      "guards": "SCRUM-1151 on a db:migrate database (the catalogue's Bengaluru IN and Toronto CA rows): mayBuyHere reads an organisation's events' and venues' cities; Analytics, Event Insights and Venue Pro checkouts for an organisation outside India are refused before any lock, row or Razorpay call (no billing_checkouts, entitlements or payment_events); an Indian organisation still reaches Razorpay; a paying mixed organisation keeps its plan and its Cancel; the Plan page shows the launch line and no price or buy control outside India.",
+      "mutation": "(RED) the suite on origin/dev 216c4e8b. (M1) requireSoldHere's body removed. (M2) the venues dropped from mayBuyHere. (M3) the Plan page's soldHere forced true.",
+      "observed": "RED: 7 of 22 failing. M1: 4 of 22 (the three checkouts and the mixed organisation's new purchase). M2: 2 of 22 (the Toronto venue owner's rule and its Venue Pro refusal). M3: 1 of 22 (the Toronto page). Restored each (cmp against copies); 22 of 22 on blendn_design_05.",
       "date": "2026-11-26"
     },
     "approval-set-password.itest.ts": {

@@ -2,7 +2,7 @@ import Link from "next/link"
 
 import { Panel, ProTag } from "@/components/dashboard/kit"
 import { PlanCard } from "@/components/dashboard/plan-card"
-import { BILLING_PLANS, grossRupees, gstSplit, rupees } from "@/lib/billing-plans"
+import { BILLING_PLANS, FREE_WHILE_LAUNCHING, grossRupees, gstSplit, rupees } from "@/lib/billing-plans"
 import { VENUE_DATA_DAYS, type VenuePlanPage, type VenuePlanRow } from "@/lib/venue-plan"
 
 import { CancelAnalytics, CheckoutProvider, VenueProBuy } from "./checkout"
@@ -16,6 +16,10 @@ import { CancelAnalytics, CheckoutProvider, VenueProBuy } from "./checkout"
  * 90 days of data"), and Buy appears only when it is past it, payments are on
  * and the person may buy. The plan itself is read from the server's own rows;
  * `?status=pending` only holds Buy back while the webhook is awaited.
+ *
+ * Where plans are not sold (`mayBuyHere`, SCRUM-1151), the Venue Pro card says
+ * "Free while we launch in your city." in its price's place, and no row offers
+ * Buy or counts down to a charge.
  */
 
 const DAY = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })
@@ -40,30 +44,38 @@ const PRO = [
  * L7). The checkout refuses all three (`lib/billing-actions.ts`); an
  * abandoned `created` one of ours is replaced by a new purchase.
  */
-const proBuyable = (v: VenuePlanRow) => !v.pro && !v.openElsewhere && v.subscriptions.every((s) => s.status === "created")
+const proBuyable = (v: VenuePlanRow) =>
+  v.mayBuyHere && !v.pro && !v.openElsewhere && v.subscriptions.every((s) => s.status === "created")
 
 export function VenuePlan({ view, pending }: { view: VenuePlanPage; pending: boolean }) {
   const monthly = BILLING_PLANS.venue_pro_monthly
   const yearly = BILLING_PLANS.venue_pro_yearly
   const anyBuyable = view.paymentsOn && view.venues.some((v) => v.mayBuy && v.readiness.chargeable && proBuyable(v))
+  const soldHere = view.venues.every((v) => !v.owned || v.mayBuyHere)
 
   const cards = (
     <div className="grid grid-cols-1 gap-5 @3xl/main:grid-cols-2">
       <PlanCard name="Listed" items={LISTED}>
-        <p className="text-[1.625rem] font-bold tabular-nums">₹0</p>
+        {soldHere ? <p className="text-[1.625rem] font-bold tabular-nums">₹0</p> : null}
       </PlanCard>
       <PlanCard name="Venue Pro" tag={<ProTag plan="Venue Pro" />} brand items={PRO}>
-        <div className="flex flex-col gap-1">
-          <p className="text-[1.625rem] font-bold tabular-nums">
-            {rupees(grossRupees(monthly))} <span className="text-[0.8125rem] font-normal text-muted-foreground">/ month per venue</span>
-          </p>
-          <p className="text-[0.75rem] tabular-nums text-faint-foreground">
-            {gstSplit(monthly)} · or {rupees(grossRupees(yearly))} a year, two months free
-          </p>
-        </div>
-        <p className="text-[0.8125rem] text-muted-foreground">
-          Nothing is charged until a venue has three months of data from people going live there.
-        </p>
+        {soldHere ? (
+          <>
+            <div className="flex flex-col gap-1">
+              <p className="text-[1.625rem] font-bold tabular-nums">
+                {rupees(grossRupees(monthly))} <span className="text-[0.8125rem] font-normal text-muted-foreground">/ month per venue</span>
+              </p>
+              <p className="text-[0.75rem] tabular-nums text-faint-foreground">
+                {gstSplit(monthly)} · or {rupees(grossRupees(yearly))} a year, two months free
+              </p>
+            </div>
+            <p className="text-[0.8125rem] text-muted-foreground">
+              Nothing is charged until a venue has three months of data from people going live there.
+            </p>
+          </>
+        ) : (
+          <p className="text-[0.9375rem] font-medium">{FREE_WHILE_LAUNCHING}</p>
+        )}
       </PlanCard>
     </div>
   )
@@ -87,7 +99,7 @@ export function VenuePlan({ view, pending }: { view: VenuePlanPage; pending: boo
 
       {cards}
 
-      {!view.paymentsOn ? (
+      {soldHere && !view.paymentsOn ? (
         <p className="text-[0.8125rem] text-muted-foreground">
           Payments aren&apos;t switched on here yet, so nothing can be bought on this page.
         </p>
@@ -153,8 +165,8 @@ function VenueRow({ venue, paymentsOn, pending }: { venue: VenuePlanRow; payment
           </Link>
           <span className="font-normal text-muted-foreground"> · {state}</span>
         </p>
-        {venue.owned ? <DataMeter venue={venue} /> : null}
-        {venue.owned && !venue.mayBuy ? (
+        {venue.owned && venue.mayBuyHere ? <DataMeter venue={venue} /> : null}
+        {venue.owned && venue.mayBuyHere && !venue.mayBuy ? (
           <p className="text-[0.75rem] text-faint-foreground">Only an owner or admin of {venue.orgName} can change this venue&apos;s plan.</p>
         ) : null}
       </div>

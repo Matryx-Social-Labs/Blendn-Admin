@@ -10,6 +10,7 @@ import { razorpayKeys } from "./env"
 import { realEventsWhere } from "./event-kind"
 import { logger } from "./logger"
 import { activeMembership, HOME_ORG_ORDER } from "./org-membership"
+import { mayBuyHere } from "./plan-market"
 import { mayManageBilling } from "./rbac"
 
 /**
@@ -24,6 +25,11 @@ import { mayManageBilling } from "./rbac"
  * ## Who may buy
  *
  * `mayManageBilling` (lib/rbac.ts): the organisation's owners and admins.
+ *
+ * ## Where
+ *
+ * `mayBuyHere` (lib/plan-market.ts): plans are sold only where their prices
+ * are. Elsewhere nothing is for sale, whoever is asking.
  */
 
 export interface BillingOrg {
@@ -31,6 +37,7 @@ export interface BillingOrg {
   orgName: string
   memberRole: org_role
   mayBuy: boolean
+  mayBuyHere: boolean
 }
 
 export async function billingOrgFor(user: { id: string; role: user_role }): Promise<BillingOrg | null> {
@@ -46,6 +53,7 @@ export async function billingOrgFor(user: { id: string; role: user_role }): Prom
     orgName: membership.org.display_name,
     memberRole: membership.role,
     mayBuy: mayManageBilling(membership.role),
+    mayBuyHere: await mayBuyHere(membership.org.id),
   }
 }
 
