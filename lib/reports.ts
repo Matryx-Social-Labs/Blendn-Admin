@@ -8,7 +8,7 @@ import { discloseGuests, discloseVenueCounts, MIN_CELL } from "./disclosure"
 import { stillArriving } from "./occurrences"
 import { hostNotSuspended } from "./event-access"
 import { realEventsWhere } from "./event-kind"
-import { claimedVenueEventsWhere, hostsEvent } from "./event-visibility"
+import { claimedVenueEventsWhere, reachedThroughBuilding } from "./event-visibility"
 import { activeMembership } from "./org-membership"
 
 /**
@@ -218,7 +218,8 @@ export async function reportScope(role: user_role, userId: string): Promise<Repo
     // The creator arm, for events with no organisation only: one that has an org is its members' (SCRUM-942).
     { organizer_id: userId, organizer_org_id: null, ...hostNotSuspended },
   ]
-  const venueArms = role === "venue_owner" ? await claimedVenueEventsWhere(orgIds) : []
+  // Any member of a venue's org, whatever their User.role (SCRUM-1246), as `eventPermissions` grants.
+  const venueArms = await claimedVenueEventsWhere(orgIds)
 
   return {
     all: { deleted_at: null, ...realEventsWhere, OR: [...hostedArms, ...venueArms] },
@@ -243,9 +244,13 @@ export async function reportScope(role: user_role, userId: string): Promise<Repo
   }
 }
 
-/** Every event this actor may report on. */
+/**
+ * The events whose guests this person may list one by one: the ones their
+ * organisation runs (`hosted`), never a venue's arms. A venue sees how many
+ * came, never who (SCRUM-501), whatever the viewer's User.role (SCRUM-1246).
+ */
 export async function eventScopeFor(role: user_role, userId: string): Promise<Prisma.eventsWhereInput> {
-  return (await reportScope(role, userId)).all
+  return (await reportScope(role, userId)).hosted
 }
 
 /**
@@ -366,9 +371,10 @@ export async function buildReport(
        */
       const attended = await distinctAttendeeCounts(rows.map((r) => r.id))
       /*
-       * A venue owner's row for another host's event is counts held back under
-       * the floor, as on every surface they see it (SCRUM-501). Their own
-       * events, and everybody else's exports, are exact.
+       * A row for another host's event, reached through the building, is counts
+       * held back under the floor, as on every surface they see it (SCRUM-501),
+       * whatever the person's User.role (SCRUM-1246). Events they run, and an
+       * admin's exports, are exact.
        */
       const counts = (r: (typeof rows)[number]) => {
         const exact = {
@@ -378,7 +384,7 @@ export async function buildReport(
           // with no cap is not an event that failed to fill.
           fillPct: r.max_capacity ? Math.round((r._count.rsvps / r.max_capacity) * 100) : null,
         }
-        return role === "venue_owner" && !hostsEvent(scopes.actor, r)
+        return reachedThroughBuilding(role, scopes.actor, r)
           ? discloseVenueCounts({ ...exact, capacity: r.max_capacity, arriving: stillArriving(r) })
           : exact
       }
@@ -399,8 +405,9 @@ export async function buildReport(
     }
 
     case "attendees": {
+      // Per guest, so the events they run only (`hosted`), never the venue arms of `all` (SCRUM-1246).
       // A host's: check-ins of settled nights up to each settle, never a late one (`checkedInBy`).
-      const settled = host ? (await hostNights(scope, inWindow)).settled : null
+      const settled = host ? (await hostNights(scopes.hosted, inWindow)).settled : null
       const fetched = await db.event_check_ins.findMany({
         /*
          * A host's by whole settled nights, never by check-in time (SCRUM-887,
@@ -412,7 +419,7 @@ export async function buildReport(
          */
         where: {
           status: { in: ["checked_in", "checked_out"] },
-          ...(settled ? checkedInBy(settled) : { event: scope, created_at: inWindow }),
+          ...(settled ? checkedInBy(settled) : { event: scopes.hosted, created_at: inWindow }),
         },
         select: { user_id: true, event_id: true, kind: true, event: { select: { organizer_org_id: true, start_time: true } } },
         /*

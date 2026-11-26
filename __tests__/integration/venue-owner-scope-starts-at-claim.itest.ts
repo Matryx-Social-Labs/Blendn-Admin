@@ -149,12 +149,29 @@ describe("a venue owner's list and exports start at the claim (F4)", () => {
     }
   })
 
-  it("gives an organiser-role member of the venue's org no venue arm", async () => {
+  it("gives an organiser-role member of the venue's org the venue's arm, from the claim on (SCRUM-1246)", async () => {
+    // Membership, not User.role: the colleague is an owner of the venue's org.
     as(w.colleague, "organizer")
     const ids = await listed()
-    expect(ids).not.toContain(n.after.id)
+    expect(ids).toContain(n.after.id)
+    for (const k of ["before", "justBefore", "straddle", "v2Before", "elsewhere"]) expect(ids).not.toContain(n[k].id)
     // Their org's own event, by the organiser arm, as for any organiser.
     expect(ids).toContain(n.ownBefore.id)
+  })
+
+  it("holds that member's counts back in the events export, as the venue owner's (SCRUM-1246)", async () => {
+    as(w.colleague, "organizer")
+    const out = await csv("events")
+    // Going 10, two came: attended under the floor, blank — not the host's exact figures.
+    expect(rowsFor(out, n.small.id)[0].split(",").slice(-2)).toEqual(["", ""])
+  })
+
+  it("never lists another host's guests to that member, one by one (SCRUM-1246)", async () => {
+    // The Attendees export is per guest: the nights their org runs only, never the venue's arms.
+    as(w.colleague, "organizer")
+    const out = await csv("attendees")
+    const labels = await labelsFor("organizer", w.colleague, n.after.id)
+    for (const g of n.after.guests[0]) expect(out).not.toContain(attendeeLabel(g, labels))
   })
 })
 
