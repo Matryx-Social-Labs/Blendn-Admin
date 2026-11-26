@@ -272,10 +272,12 @@ describe("a DM takes no photo (SCRUM-1165)", () => {
       { mediaUrl: OUTSIDE },
       { mediaUrl: upload(p.b), mediaType: "video" },
       { mediaUrl: "not a url" },
+      { text: "hi", mediaUrl: "" },
     ]) {
       const res = await send(p, body)
       expect(res.status).toBe(403)
-      expect(await res.json()).toMatchObject({ success: false, error: DM_PHOTOS_OFF, errorCode: "FORBIDDEN" })
+      // The literal: installed apps show it on the photo's bubble as it is.
+      expect(await res.json()).toMatchObject({ success: false, error: "Photos can’t be sent in messages yet.", errorCode: "FORBIDDEN" })
     }
     expect(sealUpload).not.toHaveBeenCalled()
     expect(await dms(p)).toBe(0)
@@ -284,7 +286,7 @@ describe("a DM takes no photo (SCRUM-1165)", () => {
   it("still takes words between the same two people", async () => {
     const p = await friends()
     // A text send that also says mediaType, as an installed app may, is still words.
-    for (const body of [{ text: "see you at the bar" }, { text: "on my way", mediaType: "image" }]) {
+    for (const body of [{ text: "see you at the bar" }, { text: "on my way", mediaType: "image", mediaUrl: null }]) {
       expect((await send(p, body)).status).toBe(200)
     }
     const rows = await db.private_messages.findMany({ where: { conversation_id: p.conversationId } })
@@ -292,6 +294,19 @@ describe("a DM takes no photo (SCRUM-1165)", () => {
       ["on my way", null, null],
       ["see you at the bar", null, null],
     ])
+  })
+
+  it("refuses a retry of a photo send that landed before, and writes nothing more", async () => {
+    const p = await friends()
+    const clientId = randomUUID()
+    const stored = `https://${process.env.TIGRIS_BUCKET || "blendn-media"}-private.fly.storage.tigris.dev/chat/sealed/${randomUUID()}`
+    await db.private_messages.create({
+      data: { conversation_id: p.conversationId, sender_id: p.a, media_url: stored, media_type: "image", client_id: clientId },
+    })
+    const res = await send(p, { mediaUrl: upload(p.a), mediaType: "image", clientId })
+    expect(res.status).toBe(403)
+    expect(((await res.json()) as { error?: string }).error).toBe(DM_PHOTOS_OFF)
+    expect(await dms(p)).toBe(1)
   })
 
   it("still serves a photo sent before, signed", async () => {
