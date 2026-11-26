@@ -587,6 +587,17 @@ jobs:
             /tmp/server.log
           retention-days: 7
 
+      # Screenshots a spec takes on purpose (page.screenshot into
+      # test-results/screens) so a dashboard drive run here can be read, green
+      # or red. Small: only what a spec chose to keep.
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: e2e-screens
+          path: test-results/screens/
+          if-no-files-found: ignore
+          retention-days: 7
+
   build:
     runs-on: ubuntu-latest
     # A squash-merge into dev is content this workflow already passed minutes
