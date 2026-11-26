@@ -74,6 +74,8 @@ test("the organizer's Events and Reports are their organisations' events, never 
   const labels = await tabs.allInnerTexts()
   const listed = labels.reduce((sum, label) => sum + Number(label.split("·").pop()!.trim()), 0)
   expect(listed, `tab counts ${labels.join(", ")} vs SELECT count(*) = ${expected}`).toBe(expected)
+  // The read-back, in the step log: the drive's record.
+  console.log(`[read-back] organizer orgs=${orgIds.length} SELECT count(*)=${expected} Events tabs=${labels.join(" | ")}`)
   await expect(page.getByText(LEGACY_TITLE)).toHaveCount(0)
 
   // Reports: the Events CSV over all time, from the same session.
