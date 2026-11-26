@@ -16,11 +16,12 @@ import { EmptyState, HeroMetric } from "@/components/dashboard/primitives"
 import type { AdminOverview, CityRow, OrganiserSupplyRow } from "@/lib/dashboard-types"
 import { countLabel, dayInIndia, formatCompact, formatNumber } from "@/lib/dashboard-format"
 import { fewCount } from "@/lib/disclosure"
-import type { CohortRow, CohortStage, SignupCohorts } from "@/lib/loop-closure"
+import type { CohortRow, CohortStage, SignupCohorts, StepRow } from "@/lib/loop-closure"
 
 /**
  * Admin overview — five panels, derived from what an admin needs answered,
- * and a sixth under the loop since SCRUM-1281: sign-ups by week and by source.
+ * and a sixth under the loop since SCRUM-1281: sign-ups by week, by source, and where onboarding stopped
+ * (SCRUM-1283).
  * On the kit since step 18 (`admin-decisions.jsx` AdminOverview): bordered
  * Panels for the loop, turn-up, supply and cities, in this order. The kit's
  * 7d/30d/90d tabs are not here — the top bar's range control already drives
@@ -456,7 +457,66 @@ function Cohorts({ cohorts, now }: { cohorts: SignupCohorts; now: Date }) {
         RSVP’d within 7 days of signing up · checked in within 14 · came back for a second event within 30. A
         source’s stage counts only people whose window has closed, so the 30-day column rests on the oldest weeks.
       </p>
+      <OnboardingStopped steps={cohorts.steps} />
     </Panel>
+  )
+}
+
+/** Each row as staff say it, and what placed somebody there. Keyed by the union, so a new step is a type error here. */
+const STEP_LABEL: Record<StepRow["step"], { label: string; read?: string }> = {
+  none: { label: "Nothing yet", read: "signed up, nothing filled" },
+  basics: { label: "Basics", read: "date of birth or gender" },
+  preferences: { label: "Preferences", read: "intent, orientation or how you enter rooms" },
+  details: { label: "Details", read: "interests or bio" },
+  media: { label: "Photos", read: "a photo" },
+  location: { label: "Location", read: "location sharing turned off" },
+  finished: { label: "Finished onboarding" },
+}
+
+const stepColumns: Column<StepRow & { id: string; of: number }>[] = [
+  {
+    key: "step",
+    label: "Furthest step",
+    primary: true,
+    render: (row) => (
+      <>
+        {STEP_LABEL[row.step].label}
+        {STEP_LABEL[row.step].read ? (
+          <span className="block whitespace-normal text-[0.6875rem] text-faint-foreground">{STEP_LABEL[row.step].read}</span>
+        ) : null}
+      </>
+    ),
+  },
+  {
+    key: "people",
+    label: "People",
+    align: "right",
+    render: (row) => <StageCell stage={{ count: row.people, of: row.of }} withBase={false} />,
+  },
+]
+
+/**
+ * Where onboarding stopped (SCRUM-1283): the same people as the weeks above, by the furthest step they filled. The
+ * memorable detail is that the column adds up: the footnote names the total, which is the weeks' sign-ups.
+ */
+export function OnboardingStopped({ steps }: { steps: StepRow[] }) {
+  const total = steps.reduce((n, s) => n + s.people, 0)
+  // The exact total less the rows shown would give a row of a few away, so it is named only when none is hidden.
+  const named = steps.every((s) => fewCount(s.people) !== "few")
+  return (
+    <>
+      <h3 className="mt-1.5 text-[0.8125rem] font-semibold">Where onboarding stopped</h3>
+      <DataTable
+        label="Where onboarding stopped"
+        columns={stepColumns}
+        rows={steps.map((s) => ({ ...s, id: s.step, of: total }))}
+        emptyState={null}
+      />
+      <p className="text-[0.75rem] text-faint-foreground">
+        The furthest step with anything filled in, read from the profile; a step answered with nothing, or location
+        left on, reads as the step before. Together the rows are the{named ? ` ${formatNumber(total)}` : ""} sign-ups above.
+      </p>
+    </>
   )
 }
 
