@@ -19,6 +19,8 @@ export function wallClockToUtc(local: string, timezone: string): string {
  * know reads as UTC, the rule the event's own pages use (`eventClock`).
  */
 export function nextLocalTime(after: Date, timeZone: string, hour: number): Date {
+  // An Invalid Date compares false both ways, and a sweep would read that as "due now".
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) throw new RangeError(`hour must be 0-23, got ${hour}`)
   const { zone } = eventClock(timeZone)
   const at = (day: string) => fromZonedTime(`${day}T${String(hour).padStart(2, "0")}:00:00`, zone)
   const day = formatInTimeZone(after, zone, "yyyy-MM-dd")

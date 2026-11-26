@@ -50,6 +50,16 @@ describe("nextLocalTime", () => {
     expect(nextLocalTime(at("2026-03-08T04:00:00Z"), "America/Toronto", 10)).toEqual(at("2026-03-08T14:00:00Z"))
   })
 
+  it("Toronto, a night that ends after 10:00 on the day the clocks went back: 10:00 EST the next day", () => {
+    // Sun 2026-11-01 12:00 EST.
+    expect(nextLocalTime(at("2026-11-01T17:00:00Z"), "America/Toronto", 10)).toEqual(at("2026-11-02T15:00:00Z"))
+  })
+
+  it("refuses an hour that is not 0-23, rather than return an Invalid Date a sweep reads as due", () => {
+    expect(() => nextLocalTime(at("2026-11-01T17:00:00Z"), "UTC", 24)).toThrow(RangeError)
+    expect(() => nextLocalTime(at("2026-11-01T17:00:00Z"), "UTC", 9.5)).toThrow(RangeError)
+  })
+
   it("a zone the runtime does not know reads as UTC, as the event's pages do (eventClock)", () => {
     expect(nextLocalTime(at("2026-11-28T19:30:00Z"), "Not/AZone", 10)).toEqual(at("2026-11-29T10:00:00Z"))
   })

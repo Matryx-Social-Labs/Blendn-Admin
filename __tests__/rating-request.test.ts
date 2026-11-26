@@ -201,6 +201,15 @@ describe("asked at 10:00 the next morning, on the event's clock", () => {
     expect(await sendRatingRequests(new Date("2026-11-01T15:00:00Z"))).toBe(6)
   })
 
+  it("a night that ends at 10:01 IST waits for 10:00 the next day, still inside the window", async () => {
+    const end = new Date("2026-09-29T04:31:00Z")
+    mockDb.events.findMany.mockResolvedValue([{ ...EVENT, end_time: end }])
+    expect(await sendRatingRequests(new Date("2026-09-30T04:25:00Z"))).toBe(0)
+    const next = new Date("2026-09-30T04:30:00Z")
+    expect(next.getTime() - end.getTime()).toBeLessThan(RATING_REQUEST_ENDED_WITHIN_MS)
+    expect(await sendRatingRequests(next)).toBe(6)
+  })
+
   it("claims only the due events in a pass that selected both", async () => {
     // Ended at 10:00 IST exactly, as NOW: its 10:00 is tomorrow's.
     const endedNow = { ...EVENT, id: "e0000000-0000-4000-8000-000000000002", end_time: NOW }

@@ -236,7 +236,8 @@ export async function sendEventReminders(minutesBefore: number = 60): Promise<nu
       const userIds = [...going, ...maybe]
       if (userIds.length === 0) continue
 
-      // "About": the window is 15 minutes wide, so it is sent 60–75 minutes ahead.
+      // "About": the window is 15 minutes wide, so it is sent 60–75 minutes ahead. The words
+      // assume the callers' 60 (the sweeper, the cron route); another lead needs other words.
       const venuePart = event.venue_name ? ` at ${event.venue_name}` : ""
       const message = `Starting in about an hour${venuePart}`
 
@@ -344,8 +345,8 @@ export async function sendRatingRequests(now: Date = new Date()): Promise<number
       },
       select: { id: true, title: true, end_time: true, timezone: true },
       orderBy: { end_time: "asc" },
-      // ponytail: the batch is taken before the 10:00 filter, so 50 ended-but-not-yet-due
-      // events could hold back due ones for a pass; raise the batch if that is ever seen.
+      // ponytail: the batch is taken before the 10:00 filter, so 50 older ended-but-not-yet-due
+      // events could hold back due ones until those come due; raise the batch if that is ever seen.
       take: RATING_REQUEST_BATCH,
     })
 

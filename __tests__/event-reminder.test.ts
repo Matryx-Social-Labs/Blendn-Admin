@@ -30,7 +30,7 @@ jest.mock("expo-server-sdk", () => ({
   },
 }))
 
-import { sendEventReminders } from "@/lib/services/event-notifications.service"
+import { notifyEventCancelled, sendEventReminders } from "@/lib/services/event-notifications.service"
 
 const EVENT = { id: "e0000000-0000-4000-8000-0000000000aa", title: "Quiz at Toit", start_time: new Date(), venue_name: "Toit" }
 const RSVPS = [
@@ -77,5 +77,24 @@ describe("sendEventReminders", () => {
     mockDb.events.findMany.mockResolvedValue([{ ...EVENT, venue_name: null }])
     await sendEventReminders(60)
     for (const m of sent) expect(m.body).toBe("Starting in about an hour")
+  })
+})
+
+/* Splitting maybe out of `others` must not change who hears a change: maybe keeps event_update. */
+describe("a cancellation, after maybe was split out", () => {
+  const rows = () =>
+    mockDb.notifications.createManyAndReturn.mock.calls
+      .flatMap(([a]) => a.data)
+      .map((r: { user_id: string; kind: string }) => `${r.user_id}:${r.kind}`)
+      .sort()
+
+  it("going get event_changed; maybe, waitlisted and saved get event_update, once each", async () => {
+    await notifyEventCancelled(EVENT.id, EVENT.title)
+    expect(rows()).toEqual(["going:event_changed", "maybe:event_update", "saved:event_update", "waitlisted:event_update"])
+  })
+
+  it("somebody already told (checked in) is not told again, maybe included", async () => {
+    await notifyEventCancelled(EVENT.id, EVENT.title, ["maybe", "going"])
+    expect(rows()).toEqual(["saved:event_update", "waitlisted:event_update"])
   })
 })
