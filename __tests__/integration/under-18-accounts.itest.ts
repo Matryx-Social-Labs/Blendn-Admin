@@ -53,11 +53,14 @@ describe("stamping", () => {
 
   it("is idempotent: a second run stamps nobody it stamped, and the first time stands", async () => {
     const teen = await person("u18-twice", { age: 15 })
+    const earlier = new Date(Date.now() - 9 * DAY_MS)
+    const preStamped = await person("u18-prestamped", { age: 15, under_18_since: earlier })
     const first = new Date(Date.now() - 3 * DAY_MS)
     await stampKnownMinors(db, first)
     const again = await stampKnownMinors(db, new Date())
     expect(again).not.toContain(teen)
     expect(await stampOf(teen)).toEqual(first)
+    expect(await stampOf(preStamped)).toEqual(earlier)
     expect(await knownMinorsUnstamped(db, new Date())).not.toContain(teen)
   })
 })

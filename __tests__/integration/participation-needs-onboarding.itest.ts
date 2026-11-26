@@ -32,6 +32,10 @@ const eventDetail = require("@/app/api/mobile/events/[eventId]/route") as typeof
 const interest = require("@/app/api/mobile/events/[eventId]/interest/route") as typeof import("@/app/api/mobile/events/[eventId]/interest/route")
 const boardRequests = require("@/app/api/mobile/events/[eventId]/board/[postId]/requests/route") as typeof import("@/app/api/mobile/events/[eventId]/board/[postId]/requests/route")
 const friendRequests = require("@/app/api/mobile/friends/requests/route") as typeof import("@/app/api/mobile/friends/requests/route")
+const friendRespond = require("@/app/api/mobile/friends/requests/[requestId]/route") as typeof import("@/app/api/mobile/friends/requests/[requestId]/route")
+const friendInvite = require("@/app/api/mobile/friends/invite/[token]/route") as typeof import("@/app/api/mobile/friends/invite/[token]/route")
+const friendConversation = require("@/app/api/mobile/friends/[userId]/conversation/route") as typeof import("@/app/api/mobile/friends/[userId]/conversation/route")
+const { mayJoinCrews } = require("@/lib/crews/crews") as typeof import("@/lib/crews/crews")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const users: string[] = []
@@ -145,6 +149,12 @@ describe("an account that skipped onboarding with no age on file", () => {
     expect(await db.event_check_ins.count({ where: { user_id: who.id } })).toBe(0)
   })
 
+  it("cannot send a friend request, told to finish as before (FORBIDDEN/PROFILE_INCOMPLETE)", async () => {
+    const other = await person("pno-friend", { onboarded: true, age: 30 })
+    await refused(await friendRequests.POST(req("/api/mobile/friends/requests", who.token, "POST", { userId: other.id })))
+    expect(await db.friend_requests.count({ where: { sender_id: who.id } })).toBe(0)
+  })
+
   it("cannot start a conversation, send a request, or send a DM", async () => {
     const other = await person("pno-other", { onboarded: true, age: 30 })
 
@@ -180,6 +190,7 @@ describe("accounts that may take part", () => {
     const who = await person("pno-adult-mid", { onboarded: false, age: 25 })
     const res = await rsvp.POST(req(`/api/mobile/events/${eventId}/rsvp`, who.token, "POST", { status: "going" }), eventParams(eventId))
     expect(res.status).toBe(200)
+    expect(await mayJoinCrews(who.id)).toBe(true)
   })
 
 })
@@ -202,6 +213,17 @@ async function refusedEverywhereAsMinor(who: { id: string; token: string }) {
   await refusedAsMinor(await rsvp.POST(req(`/api/mobile/events/${eventId}/rsvp`, who.token, "POST", { status: "going" }), eventParams(eventId)))
   await refusedAsMinor(await favorite.POST(req(`/api/mobile/events/${eventId}/favorite`, who.token, "POST"), eventParams(eventId)))
   await refusedAsMinor(await board.GET(req(`/api/mobile/events/${eventId}/board`, who.token, "GET"), eventParams(eventId)))
+  await refusedAsMinor(await interest.POST(req(`/api/mobile/events/${eventId}/interest`, who.token, "POST", {}), eventParams(eventId)))
+  await refusedAsMinor(
+    await board.POST(req(`/api/mobile/events/${eventId}/board`, who.token, "POST", { kind: "chat", body: "anyone here?" }), eventParams(eventId))
+  )
+  // The door is asked before the post, the request, the link or the friend is looked up, so any id reaches it.
+  const anyId = "00000000-0000-4000-8000-000000001169"
+  await refusedAsMinor(
+    await boardRequests.POST(req(`/api/mobile/events/${eventId}/board/${anyId}/requests`, who.token, "POST", {}), {
+      params: Promise.resolve({ eventId, postId: anyId }),
+    })
+  )
   await refusedAsMinor(
     await checkin.POST(req(`/api/mobile/events/${eventId}/checkin`, who.token, "POST", { latitude: 12.97, longitude: 77.59 }), eventParams(eventId))
   )
@@ -220,6 +242,18 @@ async function refusedEverywhereAsMinor(who: { id: string; token: string }) {
     })
   )
   await refusedAsMinor(await friendRequests.POST(req("/api/mobile/friends/requests", who.token, "POST", { userId: other.id })))
+  await refusedAsMinor(
+    await friendRespond.POST(req(`/api/mobile/friends/requests/${anyId}`, who.token, "POST", { action: "accept" }), {
+      params: Promise.resolve({ requestId: anyId }),
+    })
+  )
+  await refusedAsMinor(await friendInvite.GET(req("/api/mobile/friends/invite/any-token", who.token, "GET"), { params: Promise.resolve({ token: "any-token" }) }))
+  await refusedAsMinor(
+    await friendConversation.POST(req(`/api/mobile/friends/${other.id}/conversation`, who.token, "POST"), {
+      params: Promise.resolve({ userId: other.id }),
+    })
+  )
+  expect(await mayJoinCrews(who.id)).toBe(false)
 
   // Nothing was written by any of them.
   expect(await db.event_rsvps.count({ where: { user_id: who.id } })).toBe(0)
@@ -228,6 +262,7 @@ async function refusedEverywhereAsMinor(who: { id: string; token: string }) {
   expect(await db.message_requests.count({ where: { sender_id: who.id } })).toBe(0)
   expect(await db.private_messages.count({ where: { conversation_id: convo.id } })).toBe(0)
   expect(await db.friend_requests.count({ where: { sender_id: who.id } })).toBe(0)
+  expect(await db.board_posts.count({ where: { author_id: who.id } })).toBe(0)
 }
 
 describe("a known under-18 takes part nowhere (SCRUM-1169)", () => {

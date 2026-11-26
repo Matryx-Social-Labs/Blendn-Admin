@@ -262,6 +262,16 @@ describe("POST /venues/:id/live", () => {
     expect(await db.event_check_ins.count({ where: { user_id: p.id } })).toBe(0)
     expect((await venueDetail(p.token, v)).status).toBe(403)
   })
+
+  it("refuses an account stamped under 18 whatever age it now says (SCRUM-1169)", async () => {
+    const v = await venue()
+    const p = await person("glstamped", { age: 30 })
+    await db.profiles.update({ where: { id: p.id }, data: { under_18_since: new Date() } })
+    const { status, json } = await goLive(p.token, v)
+    expect(status).toBe(403)
+    expect(json).toMatchObject({ errorCode: "AGE_RESTRICTED", reasonCode: "AGE_RESTRICTED" })
+    expect(await db.event_check_ins.count({ where: { user_id: p.id } })).toBe(0)
+  })
 })
 
 describe("refusal precedence (PL-U08)", () => {
