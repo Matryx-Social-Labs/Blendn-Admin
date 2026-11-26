@@ -57,7 +57,7 @@ export default async function AnalyticsPage({
   }
 
   const params = await searchParams
-  const view = await analyticsPage(org.orgId, { range: parseRange(params.range), eventId: params.event })
+  const view = await analyticsPage(org, { range: parseRange(params.range), eventId: params.event })
   // No price where plans are not sold (SCRUM-1151): the Plan page says why.
   const pass = org.mayBuyHere ? rupees(grossRupees(BILLING_PLANS.event_pass)) : null
 

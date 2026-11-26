@@ -20,6 +20,8 @@ jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockGetA
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { randomUUID } from "crypto"
+import type React from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 
 import { resetMemoryStore } from "@/lib/rate-limit-store"
 
@@ -80,7 +82,7 @@ async function orgWithOwner(label: string, role: "organizer" | "venue_owner" = "
 }
 
 /** An event of the organisation's in `city`, ended `endedDaysAgo` days ago. */
-async function eventIn(orgId: string, owner: string, city: string | null, opts: { deleted?: boolean; status?: "cancelled"; endedDaysAgo?: number } = {}) {
+async function eventIn(orgId: string, owner: string, city: string | null, opts: { deleted?: boolean; status?: "cancelled" | "draft" | "completed"; endedDaysAgo?: number } = {}) {
   const id = await makeEvent(owner)
   events.push(id)
   const end = new Date(Date.now() - (opts.endedDaysAgo ?? 30) * DAY)
@@ -176,6 +178,10 @@ describe("mayBuyHere: the organisation's events and venues, by the catalogue's c
     ["no city at all counts as India", [{ city: null }], true],
     ["a deleted Toronto event is no reason", [{ city: "Bengaluru" }, { city: "Toronto", deleted: true }], true],
     ["a cancelled Toronto event still is", [{ city: "Bengaluru" }, { city: "Toronto", status: "cancelled" as const }], false],
+    // SCRUM-1277: not being able to buy now opens Analytics, so the evidence must cost something; a draft costs nothing.
+    ["a draft Toronto event is no reason", [{ city: "Bengaluru" }, { city: "Toronto", status: "draft" as const }], true],
+    ["an organisation whose only event is a Toronto draft counts as India", [{ city: "Toronto", status: "draft" as const }], true],
+    ["a completed Toronto event is", [{ city: "Toronto", status: "completed" as const }], false],
   ])("%s", async (_label, rows, expected) => {
     const { owner, orgId } = await orgWithOwner("pm-rule")
     for (const r of rows) await eventIn(orgId, owner, r.city, { deleted: "deleted" in r && r.deleted, status: "status" in r ? r.status : undefined })
@@ -320,6 +326,11 @@ describe("review: the cases the first pass missed", () => {
     expect(t).not.toContain("Every event is open while Analytics is free.")
     expect(t).not.toMatch(/"enabled":(true|false)/)
     expect(t).not.toMatch(/₹/)
+    // SCRUM-1277: everything is open there, so the status says design/05's words, names no event "open for good", and no date.
+    const html = renderToStaticMarkup((await page.default({ searchParams: Promise.resolve({}) })) as React.ReactElement)
+    expect(html).toContain("Every event you run, and the numbers you see for each one, cost nothing.")
+    expect(html).not.toMatch(/stay open for good|Open until|open until|See plans|₹/)
+    expect(await db.organisations.findUnique({ where: { id: orgId }, select: { first_free_event_id: true } })).toEqual({ first_free_event_id: night })
   })
 
   it("the payer of Venue Pro on a Toronto venue may still cancel it, and may not start a new one", async () => {

@@ -152,8 +152,8 @@ describe("one pass over organisations at every distance from their end", () => {
     expect(await markOf(edge.id)).toEqual(now)
   })
 
-  it("counts the organisations it mailed (these two, an uncatalogued city's and a deleted Toronto night's, and any other due row)", () => {
-    expect(count).toBeGreaterThanOrEqual(4)
+  it("counts the organisations it mailed (these two, an uncatalogued city's, a deleted Toronto night's, a Toronto draft's, and any other due row)", () => {
+    expect(count).toBeGreaterThanOrEqual(5)
   })
 
   it("names the date, the prices and the Plan page, with nothing unfilled", () => {
@@ -176,17 +176,18 @@ describe("one pass over organisations at every distance from their end", () => {
     }
   })
 
-  it("reads markets through the catalogue: an uncatalogued city and a deleted Toronto night say nothing, a Toronto draft says Canada", async () => {
+  // SCRUM-1277: a draft is no market any more (not being able to buy now opens Analytics), so a Toronto draft says nothing.
+  it("reads markets through the catalogue: an uncatalogued city, a deleted Toronto night and a Toronto draft say nothing", async () => {
     expect(mailedFor(uncatalogued, first)).toEqual([uncatalogued.owner, uncatalogued.admin].sort())
     expect(mailedFor(deletedToronto, first)).toEqual([deletedToronto.owner, deletedToronto.admin].sort())
-    expect(mailedFor(torontoDraft, first)).toEqual([])
-    expect(await markOf(torontoDraft.id)).toBeNull()
+    expect(mailedFor(torontoDraft, first)).toEqual([torontoDraft.owner, torontoDraft.admin].sort())
+    expect(await markOf(torontoDraft.id)).toEqual(now)
   })
 
   it("sends nothing on a second pass", async () => {
     mockSendEmail.mockClear()
     expect(await sendFreeWindowEndingMail(new Date(now.getTime() + 5 * 60_000))).toBe(0)
-    for (const org of [due, edge, uncatalogued, deletedToronto]) expect(mailedFor(org)).toEqual([])
+    for (const org of [due, edge, uncatalogued, deletedToronto, torontoDraft]) expect(mailedFor(org)).toEqual([])
   })
 })
 
