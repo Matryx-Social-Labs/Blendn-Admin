@@ -8,7 +8,7 @@ import { getAuth } from "@/lib/auth"
 import { auditLog } from "@/lib/audit-log"
 import { actorFor } from "@/lib/org-membership"
 import { realEventsWhere } from "@/lib/event-kind"
-import { eventPermissionSelect, eventPermissions } from "@/lib/rbac"
+import { eventPermissions } from "@/lib/rbac"
 import { claimedVenueEventsWhere, startsAfterClaim } from "@/lib/event-visibility"
 
 /**
@@ -260,12 +260,17 @@ export async function unlinkEventVenue(eventId: string, reason: string): Promise
     // Never a venue day: it is the building's own room, and unlinking one
     // would free its slot and split the room in two.
     where: { id: eventId, deleted_at: null, ...realEventsWhere },
+    // Hand-picked, not `eventPermissionSelect` spread: this select needs the
+    // venue's name too, and two fragments claiming `venue` is last-wins.
+    // `PermissionEvent` makes every column the resolver reads required.
     select: {
-      ...eventPermissionSelect,
       id: true,
+      kind: true,
+      organizer_org_id: true,
+      start_time: true,
       venue_id: true,
       venue_name: true,
-      venue: { select: { ...eventPermissionSelect.venue.select, name: true } },
+      venue: { select: { owner_org_id: true, claimed_at: true, name: true } },
     },
   })
   if (!event?.venue_id) throw new Refusal("This event is not linked to a venue.")
