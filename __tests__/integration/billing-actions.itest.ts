@@ -16,6 +16,9 @@
  *     refusing after Razorpay said yes, for every action that writes both —
  *     the final row, the audit, and that no access is left open. The role is
  *     the database's, not the session's.
+ *   - Event Insights is sold only for a night that has ended with at least
+ *     MIN_CELL (5) people checked in (SCRUM-1363): the Plan page lists no
+ *     other, and a checkout for one is refused before Razorpay is called.
  *
  * Razorpay's API is replaced by a stub `fetch` that records each call.
  */
@@ -28,6 +31,7 @@ jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 import { createHmac, randomUUID } from "crypto"
 import { NextRequest } from "next/server"
 
+import { MIN_CELL } from "@/lib/disclosure"
 import { logger } from "@/lib/logger"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
 
@@ -36,6 +40,7 @@ import { cleanup, closeDb, db, makeEvent, makeUser, refusingWrites as refusing, 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const actions = require("@/lib/billing-actions") as typeof import("@/lib/billing-actions")
 const route = require("@/app/api/webhooks/razorpay/route") as typeof import("@/app/api/webhooks/razorpay/route")
+const billing = require("@/lib/billing") as typeof import("@/lib/billing")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const users: string[] = []
@@ -51,6 +56,9 @@ let admin = ""
 let orgId = ""
 let eventId = ""
 let otherEventId = ""
+/** People who can check in to a fixture night; MIN_CELL of them attended `eventId`. */
+const guests: string[] = []
+const DAY = 24 * 60 * 60 * 1000
 
 const calls: { method: string; url: string; body: Record<string, unknown> | undefined }[] = []
 const realFetch = global.fetch
@@ -89,6 +97,31 @@ function stubRazorpay() {
     return json(404, { error: { description: "not stubbed" } })
   }) as typeof fetch
 }
+
+type Attendance = { user: string; kind?: "attendee" | "staff"; status?: "checked_in" | "checked_out" | "cancelled" }
+/** Move a fixture event so it ended `endedDaysAgo` days ago (negative: it has not ended), and check these people in. */
+async function night(id: string, endedDaysAgo: number, people: Attendance[]) {
+  const end = new Date(Date.now() - endedDaysAgo * DAY)
+  const start = new Date(end.getTime() - 3 * 60 * 60 * 1000)
+  await db.events.update({ where: { id }, data: { organizer_org_id: orgId, start_time: start, end_time: end } })
+  const occ = await db.event_occurrences.findFirstOrThrow({ where: { event_id: id } })
+  await db.event_occurrences.update({ where: { id: occ.id }, data: { start_time: start, end_time: end } })
+  for (const p of people) {
+    await db.event_check_ins.create({
+      data: { event_id: id, occurrence_id: occ.id, user_id: p.user, kind: p.kind ?? "attendee", status: p.status ?? "checked_out", check_in_time: start },
+    })
+  }
+}
+const attendees = (n: number): Attendance[] => guests.slice(0, n).map((user) => ({ user }))
+/** A new night of this organisation's, `endedDaysAgo` days ago, with these people. */
+async function newNight(endedDaysAgo: number, people: Attendance[]) {
+  const id = await makeEvent(owner)
+  events.push(id)
+  await night(id, endedDaysAgo, people)
+  return id
+}
+const listed = async () =>
+  (await billing.planPageData({ orgId, orgName: "x", memberRole: "owner", mayBuy: true, mayBuyHere: true })).events.map((e) => e.id)
 
 const as = (id: string, role: "organizer" | "app_admin" | "venue_owner") => mockGetAuth.mockResolvedValue({ user: { id, role } })
 const newOrg = async (label: string, status: "verified" | "suspended" = "verified") => {
@@ -136,22 +169,17 @@ beforeAll(async () => {
   await db.events.update({ where: { id: eventId }, data: { organizer_org_id: orgId } })
   await db.events.update({ where: { id: otherEventId }, data: { organizer_org_id: otherOrgId } })
 
-  // Past the free window: the org's first event with five people ended 60
+  // Past the free window: the org's first event with eight people ended 120
   // days ago (lib/analytics-access.ts), so an Event Pass has something to open.
-  const DAY = 24 * 60 * 60 * 1000
-  const pastId = await makeEvent(owner)
-  events.push(pastId)
-  const start = new Date(Date.now() - 60 * DAY)
-  const end = new Date(start.getTime() + 3 * 60 * 60 * 1000)
-  await db.events.update({ where: { id: pastId }, data: { organizer_org_id: orgId, start_time: start, end_time: end } })
-  const occ = await db.event_occurrences.findFirstOrThrow({ where: { event_id: pastId } })
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 8; i++) {
     const guest = await makeUser(testId(`bill-guest${i}`))
     users.push(guest)
-    await db.event_check_ins.create({
-      data: { event_id: pastId, occurrence_id: occ.id, user_id: guest, status: "checked_in", check_in_time: start },
-    })
+    guests.push(guest)
   }
+  await newNight(120, attendees(8))
+  // The night a pass is bought for: ended 30 days ago with exactly MIN_CELL
+  // people, the floor at which its pass features show (SCRUM-1363).
+  await night(eventId, 30, attendees(MIN_CELL))
 })
 
 beforeEach(() => {
@@ -304,6 +332,44 @@ describe("an Event Pass", () => {
     })
     as(owner, "organizer")
     await expect(actions.startEventPassCheckout(eventId)).rejects.toThrow("already has Event Insights")
+    expect(calls).toHaveLength(0)
+  })
+
+  it(`lists an ended night of ${MIN_CELL} and sells it: an order is created`, async () => {
+    as(owner, "organizer")
+    expect(await listed()).toContain(eventId)
+    await actions.startEventPassCheckout(eventId)
+    expect(await db.billing_checkouts.count({ where: { org_id: orgId, event_id: eventId, kind: "order" } })).toBe(1)
+  })
+
+  it(`an ended night of ${MIN_CELL - 1} is not listed, and its checkout is refused before Razorpay is called`, async () => {
+    const small = await newNight(20, attendees(MIN_CELL - 1))
+    as(owner, "organizer")
+    expect(await listed()).not.toContain(small)
+    await expect(actions.startEventPassCheckout(small)).rejects.toThrow(
+      `That night had fewer than ${MIN_CELL} people checked in, so there is nothing to show.`
+    )
+    expect(calls).toHaveLength(0)
+    expect(await db.billing_checkouts.count({ where: { org_id: orgId, event_id: small } })).toBe(0)
+  })
+
+  it("a night that has not ended, however full, is neither listed nor sold", async () => {
+    const coming = await newNight(-2, attendees(8))
+    as(owner, "organizer")
+    expect(await listed()).not.toContain(coming)
+    await expect(actions.startEventPassCheckout(coming)).rejects.toThrow("Event Insights can be bought once that night has ended.")
+    expect(calls).toHaveLength(0)
+  })
+
+  it("staff and a cancelled check-in do not count toward the floor (distinctAttendeeCounts' own rule)", async () => {
+    const short = await newNight(10, [
+      ...attendees(MIN_CELL - 1),
+      { user: guests[MIN_CELL], kind: "staff" },
+      { user: guests[MIN_CELL + 1], status: "cancelled" },
+    ])
+    as(owner, "organizer")
+    expect(await listed()).not.toContain(short)
+    await expect(actions.startEventPassCheckout(short)).rejects.toThrow(`fewer than ${MIN_CELL} people`)
     expect(calls).toHaveLength(0)
   })
 

@@ -408,6 +408,7 @@ describe("no field on the profile survives deletion unnoticed", () => {
     id: "the FK to User, which is kept so other people's history survives",
     created_at: "when the row was made — not about the person",
     updated_at: "bookkeeping",
+    signup_source: "which of five fixed channels brought the account (SCRUM-1273): not about the person, and cohorts keep counting it",
     user: "the relation, not a column",
     // The four settings booleans describe how the (now dead) account would
     // behave, not who the person was. Their defaults are already harmless and

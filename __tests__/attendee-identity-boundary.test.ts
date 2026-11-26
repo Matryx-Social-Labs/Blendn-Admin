@@ -258,8 +258,11 @@ describe("the event's header, loader, Room chat, feedback digest and QR & link t
 
   it("encodes the event's id in the link and nothing about the viewer", () => {
     const share = code("lib/event-share.ts")
-    expect(share).toMatch(/return `\$\{publicSiteOrigin\(\)\}\/event\/\$\{encodeURIComponent\(eventId\)\}`\s*\n\s*\}/)
+    // The id, and a source typed as one of five fixed words (SCRUM-1273): still nothing about a viewer.
+    expect(share).toMatch(/const url = `\$\{publicSiteOrigin\(\)\}\/event\/\$\{encodeURIComponent\(eventId\)\}`\s*\n\s*return source \? `\$\{url\}\?s=\$\{source\}` : url\s*\n\s*\}/)
+    expect(share).toMatch(/source\?: AcquisitionSource\)/)
     const page = code("app/dashboard/events/[id]/page.tsx")
-    expect(page).toMatch(/url=\{eventShareUrl\(event\.id\)\}/)
+    expect(page).toMatch(/doorUrl=\{eventShareUrl\(event\.id, "door"\)\}/)
+    expect(page).toMatch(/linkUrl=\{eventShareUrl\(event\.id, "link"\)\}/)
   })
 })

@@ -11,7 +11,8 @@ import type { ModerationCheck } from "./openai-moderation"
  * A small room still delivers the line unchecked and the re-check sweeper looks
  * again later. A BIG event room does not: past `BIG_ROOM_HERE_COUNT` people
  * inside, an unscreened line reaches the most people at the moment (a concert
- * flood) the vendor is most likely to be 429ing. No verdict, no message.
+ * flood) the vendor is most likely to be 429ing. No verdict, no message, except
+ * with no API key, which is configuration, not an outage (`verdictForBigRoom`).
  *
  * Both send routes use these two steps, so a third cannot pick its own rule.
  * Only event rooms are asked: `eventId` is null for every other kind.

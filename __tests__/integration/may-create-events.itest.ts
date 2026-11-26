@@ -18,12 +18,12 @@ afterAll(async () => {
   await closeDb()
 })
 
-async function member(label: string, status: "verified" | "suspended") {
+async function member(label: string, status: "verified" | "suspended", role: "owner" | "staff" = "owner") {
   const id = await makeUser(testId(label), "organizer")
   users.push(id)
   const org = await db.organisations.create({ data: { kind: "company", display_name: testId(`${label}-org`), status } })
   orgs.push(org.id)
-  await db.organisation_members.create({ data: { org_id: org.id, user_id: id, role: "owner" } })
+  await db.organisation_members.create({ data: { org_id: org.id, user_id: id, role } })
   return id
 }
 
@@ -45,4 +45,8 @@ it("says no to a role that never creates events", async () => {
   const attendee = await makeUser(testId("mce-attendee"))
   users.push(attendee)
   expect(await mayCreateEvents({ id: attendee, role: "attendee" })).toBe(false)
+})
+
+it("says no to a staff member, whose event would be one they cannot edit (SCRUM-1244)", async () => {
+  expect(await mayCreateEvents({ id: await member("mce-staff", "verified", "staff"), role: "organizer" })).toBe(false)
 })

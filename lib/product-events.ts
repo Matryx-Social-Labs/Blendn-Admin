@@ -57,6 +57,23 @@ export const PAYWALL_TRIGGERS = ["go_live_expiry", "second_event", "first_match"
 export type ProductEventName = (typeof PRODUCT_EVENTS)[keyof typeof PRODUCT_EVENTS]
 
 /**
+ * Where somebody came from (SCRUM-1273): the door QR, the host's copied link, a friend's invite, the website,
+ * or a guest's own share. Sent by the app as `?s=` on an event view, and as `source` on an RSVP and on the
+ * profile save that finishes sign-up. The CHECKs on `event_rsvps.source` and `profiles.signup_source` list
+ * the same five (`acquisition-source.test.ts` holds them together).
+ */
+export const ACQUISITION_SOURCES = ["door", "link", "invite", "web", "share"] as const
+export type AcquisitionSource = (typeof ACQUISITION_SOURCES)[number]
+
+/**
+ * The source, or null for anything else. Never a refusal: an analytics tag must not cost an RSVP or a profile
+ * save, and a newer app sending a source this server does not know yet must keep working.
+ */
+export function acquisitionSource(value: unknown): AcquisitionSource | null {
+  return (ACQUISITION_SOURCES as readonly unknown[]).includes(value) ? (value as AcquisitionSource) : null
+}
+
+/**
  * A day key in UTC.
  *
  * UTC rather than the viewer's timezone, deliberately: DAU has to be one number
@@ -91,7 +108,8 @@ export const dayKey = (at: Date): string => at.toISOString().slice(0, 10)
  * ## What a crash costs
  *
  * Up to one flush window of first-opens, and nothing else — because the write
- * is idempotent, the next request that person makes today records them. That is
+ * is idempotent, the next request that person makes today records them (a
+ * failed flush forgets its rows' keys so that request is not deduped). That is
  * the same trade `record` already makes by never throwing, and it is why this
  * needs no outbox: the requirement was exactly-once *counting*, and a unique
  * index plus a retry-by-accident gives that.
@@ -114,12 +132,15 @@ interface Pending {
   entity_id: string | null
   dedupe_key: string
   occurred_at: Date
+  props?: { source: AcquisitionSource }
 }
 
 let seenDay = ""
 let seen = new Set<string>()
 let buffer: Pending[] = []
 let lastFlush = 0
+/** The buffer-full drop warns once per flush window, not once per signal. */
+let bufferFullWarned = false
 /**
  * The one timer behind a non-empty buffer (SCRUM-756).
  *
@@ -162,6 +183,7 @@ export function resetProductEventCache(): void {
   seen = new Set<string>()
   buffer = []
   lastFlush = 0
+  bufferFullWarned = false
   flushing = null
   clearFlushTimer()
 }
@@ -173,13 +195,18 @@ export function resetProductEventCache(): void {
  * buffer at SIGTERM is one window of signals lost for no reason.
  */
 export async function flushProductEvents(): Promise<number> {
-  if (flushing) return flushing
+  // That flush took its batch before this call: wait for it, then write what was recorded since (SCRUM-1419).
+  if (flushing) {
+    await flushing
+    return flushProductEvents()
+  }
   if (buffer.length === 0) return 0
 
   clearFlushTimer()
   const batch = buffer
   buffer = []
   lastFlush = Date.now()
+  bufferFullWarned = false
 
   flushing = (async () => {
     try {
@@ -190,13 +217,15 @@ export async function flushProductEvents(): Promise<number> {
       return count
     } catch (error) {
       /*
-       * Dropped, not requeued. Requeueing a failing batch is how a buffer
-       * becomes unbounded, and every row in it is recoverable by the next
-       * request that person makes today.
+       * Dropped, not requeued: requeueing a failing batch is how a buffer
+       * becomes unbounded. Its keys leave the seen-set instead, so the next
+       * request that person makes today records the row again (SCRUM-1345).
        */
-      logger.debug("product events not flushed", {
+      for (const row of batch) seen.delete(row.dedupe_key)
+      logger.warn("product events not flushed", {
         dropped: batch.length,
-        error: String(error),
+        // The last line, which names the cause: a Prisma message quotes the rows (user ids) above it.
+        error: String(error).trim().split("\n").pop()?.slice(0, 200),
       })
       return 0
     } finally {
@@ -221,6 +250,8 @@ export function record(input: {
   entityKind?: string
   entityId?: string
   at?: Date
+  /** Written to `props`. Deduped like the rest, so the first source per person, entity and day is the one kept. */
+  props?: { source: AcquisitionSource }
 }): void {
   try {
     /*
@@ -257,9 +288,10 @@ export function record(input: {
       return
     }
     if (seen.size >= MAX_CACHED_KEYS) seen = new Set()
-    seen.add(key)
 
     if (buffer.length < MAX_BUFFERED) {
+      // Seen only once buffered: a dropped signal is recorded by the next request (SCRUM-1345).
+      seen.add(key)
       buffer.push({
         name: input.name,
         user_id: input.userId,
@@ -267,7 +299,11 @@ export function record(input: {
         entity_id: input.entityId ?? null,
         dedupe_key: key,
         occurred_at: at,
+        ...(input.props && { props: input.props }),
       })
+    } else if (!bufferFullWarned) {
+      bufferFullWarned = true
+      logger.warn("product events buffer full", { buffered: buffer.length })
     }
 
     if (Date.now() - lastFlush >= FLUSH_MS) {

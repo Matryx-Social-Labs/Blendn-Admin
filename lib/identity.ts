@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client"
 
-import { firstName, holdingPair, matchSelect, isPseudonymous, UNNAMED } from "./conversation-identity"
+import { beganAsRequest, firstName, holdingPair, matchSelect, UNNAMED } from "./conversation-identity"
 import { blockedEitherWay, conversationPair } from "./conversations"
 import { db } from "./db"
 import { inRoomWhere } from "./event-kind"
@@ -235,7 +235,7 @@ async function identityFor(
      * Nor does a pseudonymous one (a match, a board post), swapped or not: the
      * swap names them in that chat, not on their profile.
      */
-    else if (!c.origin_friendship && !isPseudonymous(c)) open.add(other)
+    else if (beganAsRequest(c)) open.add(other)
   }
   const friendVisible = new Set(
     friendsOptedIn.map((f) => (f.user1_id === viewerId ? f.user2_id : f.user1_id))

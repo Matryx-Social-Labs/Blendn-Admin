@@ -4,6 +4,29 @@ import { Pool } from "pg"
 
 declare global {
   var prisma: PrismaClient | undefined
+  /**
+   * The pool, held rather than handed to the adapter and forgotten, and on
+   * `globalThis` beside `prisma` rather than module-local (SCRUM-1221): Next
+   * bundles its own copy of this module and `server.ts` builds the client first,
+   * so a module-local pool read `null` in the Next layer (the `/api/health`
+   * gauge) and `closeDb()` ended it only from the copy that built it.
+   *
+   * `prisma.$disconnect()` does **not** close a pool the adapter created. The
+   * integration helper's own docblock says so in as many words, and closes both
+   * its client and its pool for exactly this reason — but nothing did the same
+   * for this one. Two consequences, and the second is not a test problem:
+   *
+   *   1. Every jest suite that touched `lib/db` leaked up to `POOL_MAX`
+   *      connections for the length of the run. Sequential suites are supposed
+   *      to be cheap; 35 of them at twenty apiece is `sorry, too many clients
+   *      already`, with real routes returning 500 because the pool was gone.
+   *   2. `server.ts` calls `db.$disconnect()` on SIGTERM under a comment saying
+   *      "Drain the connection pool", and it does not. Connections are dropped
+   *      when the process exits rather than closed, which on a rolling deploy is
+   *      the old container's sockets lingering while the new one is opening its
+   *      own.
+   */
+  var prismaPool: Pool | undefined
 }
 
 /**
@@ -33,31 +56,12 @@ declare global {
  * likely mechanism behind the timeouts the mobile client built a request queue
  * to work around.
  *
- * Five background loops, Socket.io and every request handler share this pool.
+ * Every background loop (`lib/background.ts`), Socket.io and every request
+ * handler share this pool.
  * Env-overridable because the right ceiling is a property of the Postgres plan,
  * not of the code.
  */
 const POOL_MAX = Number(process.env.DATABASE_POOL_MAX ?? 20)
-
-/**
- * The pool, held rather than handed to the adapter and forgotten.
- *
- * `prisma.$disconnect()` does **not** close a pool the adapter created. The
- * integration helper's own docblock says so in as many words, and closes both
- * its client and its pool for exactly this reason — but nothing did the same
- * for this one. Two consequences, and the second is not a test problem:
- *
- *   1. Every jest suite that touched `lib/db` leaked up to `POOL_MAX`
- *      connections for the length of the run. Sequential suites are supposed
- *      to be cheap; 35 of them at twenty apiece is `sorry, too many clients
- *      already`, with real routes returning 500 because the pool was gone.
- *   2. `server.ts` calls `db.$disconnect()` on SIGTERM under a comment saying
- *      "Drain the connection pool", and it does not. Connections are dropped
- *      when the process exits rather than closed, which on a rolling deploy is
- *      the old container's sockets lingering while the new one is opening its
- *      own.
- */
-let pool: Pool | null = null
 
 /**
  * How long an idle connection stays open. pg-pool's default is 10 s, so on a
@@ -70,12 +74,47 @@ let pool: Pool | null = null
  */
 const POOL_IDLE_MS = 5 * 60_000
 
+/**
+ * How long a query waits for a connection when all `POOL_MAX` are busy.
+ * pg-pool's default is 0, wait for ever: one slow query or a doors-open burst of
+ * 11-query fan-outs queued every request with no limit, the app gave up at 15 s
+ * and retried into the same queue. Now the waiter fails after 5 s ("timeout
+ * exceeded when trying to connect"), which the route turns into a fast 500.
+ */
+const POOL_ACQUIRE_TIMEOUT_MS = 5_000
+
+/**
+ * `statement_timeout` for every connection of this pool, from
+ * `DATABASE_STATEMENT_TIMEOUT_MS`. Unset means none: `server.ts` sets 8000
+ * before anything connects, and scripts (seeds, backfills, imports) that use
+ * this module leave it unset and keep no cap. `0` turns it off explicitly, as
+ * in Postgres. Anything else is refused loudly rather than ignored, because a
+ * typo would otherwise switch the cap off without a word.
+ */
+export function statementTimeoutMs(): number | undefined {
+  const raw = process.env.DATABASE_STATEMENT_TIMEOUT_MS?.trim()
+  if (!raw) return undefined
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(`DATABASE_STATEMENT_TIMEOUT_MS must be whole milliseconds, got "${raw}"`)
+  }
+  return Number(raw)
+}
+
 function createClient(): PrismaClient {
   const connectionString = process.env.DATABASE_URL
   if (!connectionString) {
     throw new Error("DATABASE_URL is not set")
   }
-  pool = new Pool({ connectionString, max: POOL_MAX, idleTimeoutMillis: POOL_IDLE_MS, keepAlive: true })
+  const pool = new Pool({
+    connectionString,
+    max: POOL_MAX,
+    idleTimeoutMillis: POOL_IDLE_MS,
+    keepAlive: true,
+    connectionTimeoutMillis: POOL_ACQUIRE_TIMEOUT_MS,
+    // A startup parameter: every backend the pool opens has it from the first statement.
+    statement_timeout: statementTimeoutMs(),
+  })
+  globalThis.prismaPool = pool
   return new PrismaClient({ adapter: new PrismaPg(pool) })
 }
 
@@ -88,10 +127,16 @@ function createClient(): PrismaClient {
 export async function closeDb(): Promise<void> {
   const client = globalThis.prisma
   globalThis.prisma = undefined
-  const owned = pool
-  pool = null
+  const owned = globalThis.prismaPool
+  globalThis.prismaPool = undefined
   if (client) await client.$disconnect().catch(() => {})
   if (owned) await owned.end().catch(() => {})
+}
+
+/** The pool's counts for `/api/health`; `null` until the first query builds it. */
+export function poolStats(): { total: number; idle: number; waiting: number } | null {
+  const pool = globalThis.prismaPool
+  return pool ? { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount } : null
 }
 
 function getClient(): PrismaClient {

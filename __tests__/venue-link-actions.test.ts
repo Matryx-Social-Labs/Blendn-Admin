@@ -33,9 +33,9 @@ const CLAIMED = new Date("2026-09-01T00:00:00Z")
 const AFTER = new Date("2026-09-10T20:00:00Z")
 const BEFORE = new Date("2026-08-20T20:00:00Z")
 
-function signIn(role: string, orgIds: string[] = [MY_ORG]) {
+function signIn(role: string, orgIds: string[] = [MY_ORG], orgRole: "owner" | "admin" | "staff" = "owner") {
   mockAuth.mockResolvedValue({ user: { id: "user_1", role } })
-  mockDb.organisation_members.findMany.mockResolvedValue(orgIds.map((org_id) => ({ org_id })))
+  mockDb.organisation_members.findMany.mockResolvedValue(orgIds.map((org_id) => ({ org_id, role: orgRole })))
 }
 
 beforeEach(() => {
@@ -192,8 +192,10 @@ describe("unlinkEventVenue — the organiser's side", () => {
     id: EVENT,
     venue_id: "venue_1",
     venue_name: "Toit Brewpub",
+    kind: "event",
+    start_time: AFTER,
     organizer_org_id: MY_ORG,
-    venue: { name: "Toit" },
+    venue: { name: "Toit", owner_org_id: THEIR_ORG, claimed_at: CLAIMED },
   }
 
   it("detaches immediately, with no review", async () => {
@@ -227,6 +229,19 @@ describe("unlinkEventVenue — the organiser's side", () => {
     signIn("organizer", [THEIR_ORG])
     mockDb.events.findUnique.mockResolvedValue(linked)
     await expect(unlinkEventVenue(EVENT, REASON)).rejects.toThrow(/forbidden/i)
+  })
+
+  it("refuses the organising org's staff member: unlinking edits the event (SCRUM-1244)", async () => {
+    signIn("organizer", [MY_ORG], "staff")
+    mockDb.events.findUnique.mockResolvedValue(linked)
+    await expect(unlinkEventVenue(EVENT, REASON)).rejects.toThrow(/forbidden/i)
+    expect(mockDb.events.update).not.toHaveBeenCalled()
+  })
+
+  it("lets the organising org's admin unlink", async () => {
+    signIn("organizer", [MY_ORG], "admin")
+    mockDb.events.findUnique.mockResolvedValue(linked)
+    await expect(unlinkEventVenue(EVENT, REASON)).resolves.toBeUndefined()
   })
 
   it("refuses the venue owner — disputing is their route, not detaching", async () => {
@@ -279,14 +294,24 @@ describe("getLinkedEventsForOwner", () => {
     expect(mockDb.venues.findMany).not.toHaveBeenCalled()
   })
 
-  it("returns nothing for an organiser rather than throwing", async () => {
+  it("returns nothing, and runs no event query, for a member whose orgs own no claimed venue", async () => {
     // This feeds a screen an organiser can reach; an empty list is the right
     // answer, not an error page.
     signIn("organizer")
+    mockDb.venues.findMany.mockResolvedValue([])
     expect(await getLinkedEventsForOwner()).toEqual({ rows: [], total: 0 })
     expect(mockDb.events.findMany).not.toHaveBeenCalled()
-    // And no count either: an organiser is refused before either query runs.
     expect(mockDb.events.count).not.toHaveBeenCalled()
+  })
+
+  it("gives an organizer-role member of the venue-owning org its linked events, as a venue_owner gets (SCRUM-1246)", async () => {
+    signIn("organizer")
+    mockDb.venues.findMany.mockResolvedValue([{ id: "venue_1", claimed_at: CLAIMED }])
+    mockDb.events.count.mockResolvedValue(0)
+    await getLinkedEventsForOwner()
+    expect(mockDb.events.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ OR: [{ venue_id: "venue_1", start_time: { gte: CLAIMED } }] }) })
+    )
   })
 
   it("refuses a signed-out caller", async () => {

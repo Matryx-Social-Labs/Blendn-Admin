@@ -35,6 +35,7 @@ import {
 } from "@/lib/email"
 import type { org_role } from "@prisma/client"
 import { activeMembership } from "@/lib/org-membership"
+import { hit } from "@/lib/rate-limit-store"
 
 /**
  * An organisation managing itself: members, invites, domains, join requests.
@@ -243,6 +244,14 @@ export async function getOrgMembers(orgId: string): Promise<{
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
+/** Invites one person may create, per window, across every organisation (SCRUM-1245). */
+const INVITES_PER_HOUR = { max: 20, windowMs: 60 * 60 * 1000 }
+const INVITES_PER_DAY = { max: 50, windowMs: 24 * 60 * 60 * 1000 }
+/** And per organisation: its admins' windows add up, and an admin can make more admins. */
+const ORG_INVITES_PER_DAY = { max: 100, windowMs: 24 * 60 * 60 * 1000 }
+/** Unanswered invites one organisation may have out at once. */
+const MAX_PENDING_INVITES = 50
+
 /** What the invitee is told they are being invited as. */
 const ROLE_LABELS: Record<org_role, string> = {
   owner: "an owner",
@@ -329,6 +338,35 @@ export async function inviteMember(
   })
   if (outstanding) return { ok: false, message: "They already have an invite outstanding." }
 
+  // ponytail: this count and the `outstanding` check above are read then create,
+  // not atomic: concurrent sends can pass 50 by a few, and parallel calls for one
+  // address can each create and mail. All bounded by the windows below. A
+  // transaction with an org row lock if either ever has to be exact.
+  const pending = await db.organisation_invites.count({
+    where: { org_id: orgId, accepted_at: null, revoked_at: null, expires_at: { gt: new Date() } },
+  })
+  if (pending >= MAX_PENDING_INVITES) {
+    return {
+      ok: false,
+      message: `${MAX_PENDING_INVITES} invites are still waiting for an answer. Revoke old ones before sending more.`,
+    }
+  }
+
+  // Counted here, just before the create, not at the top as billing's admin
+  // limit is: an outside-domain invite is two calls by design (needsReason, then
+  // the reason), and the refusals above send nothing. Every mail is counted.
+  if ((await hit(`org-invite:hour:${user.id}`, INVITES_PER_HOUR.windowMs)).count > INVITES_PER_HOUR.max) {
+    return { ok: false, message: `That’s ${INVITES_PER_HOUR.max} invites in an hour. Try again in an hour.` }
+  }
+  if ((await hit(`org-invite:day:${user.id}`, INVITES_PER_DAY.windowMs)).count > INVITES_PER_DAY.max) {
+    return { ok: false, message: `That’s ${INVITES_PER_DAY.max} invites today. Try again tomorrow.` }
+  }
+  // Last, and only once the sender's own windows have passed: a sender already
+  // refused must not spend the rest of the team's day.
+  if ((await hit(`org-invite:org-day:${orgId}`, ORG_INVITES_PER_DAY.windowMs)).count > ORG_INVITES_PER_DAY.max) {
+    return { ok: false, message: `Your team has sent ${ORG_INVITES_PER_DAY.max} invites today. Try again tomorrow.` }
+  }
+
   const token = newInviteToken()
   const invite = await db.organisation_invites.create({
     data: {
@@ -360,8 +398,9 @@ export async function inviteMember(
     })
     sent = result.sent
     if (!result.sent) {
-      emailFailure = result.reason ?? "provider_error"
-      logger.error("Invite email failed", { inviteId: invite.id, reason: result.reason })
+      // A suppressed address (it bounced or complained, SCRUM-1280) reads as refused: check it, or pass the link on.
+      emailFailure = result.reason === "not_configured" ? "not_configured" : "provider_error"
+      if (result.reason !== "suppressed") logger.error("Invite email failed", { inviteId: invite.id, reason: result.reason })
     }
   }
 
@@ -662,9 +701,11 @@ export async function sendDomainVerifyEmail(
 
   const link = `${appUrl()}/verify-domain?token=${token}`
   const result = await sendEmail({ to: address.trim().toLowerCase(), ...domainVerifyEmail(row.domain, link) })
+  // One answer for every failure, a suppressed address included (SCRUM-1280): sendEmail has already retried, and the
+  // answer must not tell whoever typed the address that it bounced or complained. The reason is in the log.
   if (!result.sent) {
-    logger.error("Domain verify email failed", { domainId, reason: result.reason })
-    return { ok: false, message: "Could not send just now. Try again, or use the DNS record." }
+    if (result.reason !== "suppressed") logger.error("Domain verify email failed", { domainId, reason: result.reason })
+    return { ok: false, message: "We couldn’t send to that address. Use another address at the domain, or the DNS record." }
   }
 
   auditLog({

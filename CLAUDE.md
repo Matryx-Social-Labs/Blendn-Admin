@@ -107,13 +107,16 @@ The API:
 
 | Function | Answers |
 |---|---|
-| `eventPermissions(actor, event)` | `{ canEdit, canOperate }` for one event. The main resolver. `canEdit` = edit/publish/cancel. `canOperate` = chat, moderation, the attendee list. |
+| `eventPermissions(actor, event)` | `{ canEdit, canOperate, canViewAttendees }` for one event. The main resolver. `canEdit` = edit/publish/cancel. `canOperate` = chat, moderation, the door. `canViewAttendees` = the attendee list. The organising org's `owner`/`admin` get all three; its `staff` get `canOperate` only, and create no events (SCRUM-1244). Any member of a claimed venue's owning org gets `canOperate` and the held-back count on events there from the claim on; a person with both gets the union, never `canEdit`. **Rights come from these organisation facts only: `PermissionActor.role` is read for `app_admin` and nothing else** (SCRUM-1246), so a host whose `User.role` is `attendee` or `sponsor` gets what an `organizer` member gets. |
 | `eventPermissionSelect` | The `select` fragment `eventPermissions` needs. Spread it rather than hand-picking columns; a select missing `venue` reads as "no venue" and silently denies a venue owner. |
 | `canBroadcast(actor, event, kind, maySponsor)` | Who may put a non-user message in a room. |
 | `broadcastMayCarryMedia(kind)` | Whether a broadcast kind may carry an image. |
 | `canAccessDashboard(role)` | Dashboard entry. Read by `middleware.ts`. |
+| `mayManageBilling(memberRole)`, `mayManageVenueBilling(memberRole)`, `maySendVenueOffers(memberRole)` | The org's `owner`/`admin`, from the membership the caller already holds in the paying or venue-owning org; never `User.role`. Door redemption at a venue is any active member of its owning org (the lookup in `redeemPass`). |
 
-Build the actor with `actorFor(user)` from `lib/org-membership.ts` — it loads memberships, and `PermissionActor.orgIds` is required precisely so a bare session user cannot typecheck into the resolver and silently deny everyone.
+Build the actor with `actorFor(user)` from `lib/org-membership.ts` — it loads memberships, and `PermissionActor.orgIds` and `editOrgIds` (the owner/admin subset) are required precisely so a bare session user cannot typecheck into the resolver and silently deny everyone.
+
+`User.role` grants no event, venue or billing right and revokes none (SCRUM-1246): to take someone's rights away, remove the membership, suspend the organisation, or suspend the user. Per-guest views (the Attendees export, the organisation's audience) read `reportScope(...).hosted` — events the person's org runs — never a venue's arms.
 
 Mobile routes must read the role from the database, not the JWT: the token carries no role, and a 30-day refresh cycle would outlive any role change baked into it.
 
@@ -123,7 +126,7 @@ Historical note, because this paragraph used to say otherwise: `canManageEvent` 
 
 ### Moderation pipeline
 
-`lib/moderation/` runs message content through multiple checks before a chat message is persisted or socket-emitted: `keyword-filter.ts` (deterministic banned-word matching), `spam-detector.ts`, `openai-moderation.ts` (OpenAI moderation API), orchestrated by `actions.ts`/`index.ts`. Moderation must complete and pass *before* the message is broadcast over Socket.io — emitting first and moderating after creates a window where flagged content is briefly visible to other users (this was a real bug; see recent git history). `moderation_flags` table records flagged content for audit/admin review.
+`lib/moderation/` runs a chat message's content through multiple checks: `keyword-filter.ts` (deterministic banned-word matching), `spam-detector.ts`, `openai-moderation.ts` (OpenAI moderation API), orchestrated by `actions.ts`/`index.ts`. In both room send routes the synchronous checks (`checkSpam`, then `preSaveCheck`: keywords and contact details) always finish before a room message is persisted, and nothing is socket-emitted before the OpenAI text check has answered or lost its 1 s race. In an event room with more than `BIG_ROOM_HERE_COUNT` people checked in, a late verdict is awaited too (`verdictForBigRoom`, up to the call's `MODERATION_TIMEOUT_MS`), and a send with no verdict is refused with a 503 and never emitted. In every other room a late verdict does not hold the message: it is emitted, `moderateMessage` finishes the check, and a hide removes it from the room (`hideMessage`). Never add a path that emits before the synchronous checks, and never widen the emit-then-check case beyond that late verdict: emitting first and moderating after is how flagged content once reached other users (this was a real bug; see recent git history). `moderation_flags` table records flagged content for audit/admin review.
 
 ### Real-time (Socket.io)
 
@@ -148,6 +151,10 @@ S3-compatible storage via Tigris (`lib/tigris.ts`, uses AWS S3 SDK against a Tig
 ### Audit logging
 
 Admin actions (role changes, moderation overrides, etc.) are recorded via `lib/audit-log.ts` into `audit_logs`. Use this rather than ad-hoc logging when an admin/organizer action changes state that matters for accountability.
+
+### Security findings
+
+Security findings live in Jira (Epic SCRUM-1126), not in this public repo. A gap that is still open, and anything about monitoring coverage or response times, stays out of repo files, code comments, commits and PR text until it is fixed; once fixed, the commit and its test explain it.
 
 ## Database
 
@@ -200,6 +207,7 @@ and therefore in every deployed environment:
 | `cities_licensed_min_age_floor` | a city's licensed-venue age default is never under the 18+ floor |
 | `cities_whatsapp_channel_url_shape` | a city's WhatsApp Channel is NULL or an https `whatsapp.com/channel/` link (Notification settings' "Your city" row) |
 | `mobile_refresh_tokens_revoked_reason_known` | a refresh token's `revoked_reason` is NULL, `password_reset` or `signout_all` — the two `endPhoneSessions` reasons (`lib/session-end.ts`) the refresh turns into `PASSWORD_RESET` / `SESSION_REVOKED_ELSEWHERE` |
+| `event_rsvps_source_known` / `profiles_signup_source_known` | an RSVP's `source` and a profile's `signup_source` are NULL or one of `ACQUISITION_SOURCES` (`door`, `link`, `invite`, `web`, `share`; `lib/product-events.ts`, SCRUM-1273). NOT VALID: every row was NULL when they were added |
 | `markets_ticket_fee_slabs_shape` | a market's service-fee slabs: thresholds and rates the same length, at least one, the first from ticket 1, no NULLs |
 | `markets_ticket_fee_slabs_ascending` | slab thresholds strictly ascending, through the IMMUTABLE SQL function `ticket_fee_slabs_ascending` (also `parseFeeSchedule`'s, `lib/ticket-fees.ts`) |
 | `markets_ticket_fee_rates_range` | slab rates, tax on the fee and processing are 0–10000 bps; the minimum fee is never negative |
@@ -231,6 +239,7 @@ and therefore in every deployed environment:
 | `ticket_orders_refunded_range` / `ticket_orders_refunded_has_refund` | the refunded amount is 0 to `total_minor`; a `refunded` order has Razorpay's refund id, time and an amount ≥ 1 — refunded only on Razorpay's word |
 | `ticket_payouts_status_shape` | a payout `pending` or `on_hold` has a linked account, and `on_hold` has Razorpay's transfer id; `releasing` and `released` have the transfer id and their time (`releasing_at`, `released_at`); `no_account` has neither. Transfers are held at Razorpay with no end and released only by `lib/payout-release.ts`, at GREATEST(`release_floor`, the event's holdFloor now); `release_floor` is set at payment and only raised (trigger `ticket_payouts_release_floor_only_up`, migration SQL) |
 | `ticket_payouts_amount_positive` / `…_reversed_range` / `…_currency_shape` / `…_linked_account_shape` | a payout is ≥ 1 minor unit; reversed 0 to its amount; an org debit ≥ 0; ISO currency; `acc_` account |
+| `email_suppressions_reason_known` | a suppressed address's reason is `bounce`, `complaint` (both from the Resend webhook) or `unsubscribe`; which sends each stops is `blocks` in `lib/email.ts` (SCRUM-1280) |
 
 Nor can it express a partial index, a trigger or a data row, and these exist
 only in migration SQL too: `events_one_venue_day_per_day` (one venue day per
@@ -276,7 +285,8 @@ three constraints were missing.
 Required: `DATABASE_URL`, `NEXTAUTH_URL`, `NEXTAUTH_SECRET` (32+ chars), `MOBILE_JWT_SECRET` (32+ chars). On Railway `production` also `OPENAI_API_KEY` (boot refuses without it; elsewhere it warns).
 
 Staging only: `SEED_PASSWORD` — the password of the dashboard test accounts
-(`admin@`, `organizer@`, `venue.owner@`, `sponsor@blendn.app`), which the
+(admin, organizer, venue owner, sponsor; addresses in `TEST_ACCOUNTS`,
+`scripts/test-accounts.ts`, never listed in a doc: this repo is public), which the
 pre-deploy step (`scripts/test-accounts.ts`) re-asserts on every deploy.
 `seed:qa --apply` refuses to run without it, and refuses any database that is
 not Railway `staging` or `localhost`.

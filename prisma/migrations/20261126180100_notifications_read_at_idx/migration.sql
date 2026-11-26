@@ -1,0 +1,14 @@
+-- The retention sweep's read rule, `read_at < now() - 30 days` (SCRUM-1224, lib/notification-retention.ts). With the
+-- created_at index beside it the sweep's OR is a BitmapOr of two index scans, so a batch that finds nothing reads a few
+-- index pages rather than the table (EXPLAIN in the PR). The existing ("user_id", "read_at") index cannot serve it: it
+-- does not lead with "read_at". Partial, because unread rows are never on this rule; so it lives here and not in
+-- schema.prisma (CLAUDE.md, db push).
+--
+-- CONCURRENTLY, alone in its file and not wrapped: it cannot run inside a transaction, and a plain CREATE INDEX would
+-- hold every bell write in the product for the length of a scan of the whole table (__tests__/migration-tx.test.ts).
+-- If it fails, Prisma records the migration as failed and every later deploy stops (P3009) until it is resolved, and
+-- the failed build can leave an INVALID "notifications_read_at_idx" that IF NOT EXISTS would skip on a retry. Recovery is an ops step,
+-- not a new migration (no later migration runs while this one is failed): `DROP INDEX CONCURRENTLY IF EXISTS
+-- "notifications_read_at_idx";`, then `prisma migrate resolve --rolled-back` for this folder, then redeploy. Afterwards
+-- `SELECT indisvalid FROM pg_index WHERE indexrelid = '"notifications_read_at_idx"'::regclass` reads true.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "notifications_read_at_idx" ON "notifications" ("read_at") WHERE "read_at" IS NOT NULL;

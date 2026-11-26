@@ -80,9 +80,7 @@ deletes their account:
   report was filed before the deletion and is still pending waits on a pointer (`retained_report_media`: account id, object key,
   message id) until the report is decided, and for at most 15 days past the purge (`REPORT_HOLD_DAYS`, the grievance period of
   IT Rules 2021 r.3(2)(a)(i)); the sweep warns in the last 5. The record, profile media and photo checks go on schedule. A flag
-  nobody cleared loses its image at 180 days. Nothing in the product records a legal hold. Images sent since SCRUM-427 are in the private bucket and served
-  only through signed URLs. Known gaps: images from before SCRUM-427 that are
-  kept stay in the public bucket until then. A report filed after the deletion
+  nobody cleared loses its image at 180 days. Nothing in the product records a legal hold. A report filed after the deletion
   finds the image already gone, and the reports screen says so with the date.
 - **Profile photos** (SCRUM-479): a photo moderation pulls, and the blur of a
   pulled primary, are recorded `photo_checks.hidden` and moved from the public
@@ -119,7 +117,7 @@ Alert switches (`board_alert_preferences`) go at the close.
 
 **What the room felt is kept, anonymously** (owner, 2026-11-06). The purge does
 not delete `event_feedback`: before it takes an event's first message it freezes
-the event's figures in `event_feedback_tallies` (distinct people per category and per positive topic,
+the event's figures in `event_feedback_tallies` (distinct people per category and per positive topic, the largest single person's messages per category for the dominance rule,
 counted as the digest counts them, and the room's member count), then detaches
 each feedback row from its message (`message_id` null) and from the staff member
 who corrected it (`corrected_by` null). What stays is mood, category, topic,
@@ -184,13 +182,3 @@ server's sealed copy (`sealUpload`), stored with `Cache-Control: no-cache`, so
 deleting it (account deletion, a removed photo, a moderation takedown) stops it
 being served at once. Objects sealed before SCRUM-445 keep the storage default
 and stay fetchable at the edge for up to an hour after a delete.
-
-**Known gaps, not yet fixed:**
-
-- **User file deletes.** `DELETE /api/mobile/uploads/delete` lets a user delete
-  their own files in `profile/`, `chat/` and `events/` whatever their moderation
-  state. That includes images in hidden or reported messages.
-- **Delisted events.** After an admin delists an event, the organizer can still
-  edit its title and description, and its `visibility` too
-  (`PUT /api/events/[id]`). The delisting's audit entry keeps only the subject
-  id, so nothing keeps the original text.

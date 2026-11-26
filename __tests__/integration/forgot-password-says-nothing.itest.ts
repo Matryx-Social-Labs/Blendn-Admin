@@ -10,11 +10,11 @@
  * hash of the same string the account is looked up by.
  */
 let mailDelayMs = 0
-const sent: Array<{ to: string; text: string }> = []
+const sent: Array<{ to: string; text: string; stream?: string }> = []
 jest.mock("@/lib/email", () => ({
   ...jest.requireActual("@/lib/email"),
   emailConfigured: () => true,
-  sendEmail: jest.fn(async (m: { to: string; text: string }) => {
+  sendEmail: jest.fn(async (m: { to: string; text: string; stream?: string }) => {
     if (mailDelayMs) await new Promise((r) => setTimeout(r, mailDelayMs))
     sent.push(m)
     return { sent: true }
@@ -90,6 +90,13 @@ it("never waits for the mail", async () => {
   // Lands after the answer — and before the next test, which counts mail.
   while (sent.length === 0) await settled()
   expect(sent[0].to).toBe(email)
+})
+
+it("sends the reset as a password reset, so a complaint does not stop it (SCRUM-1280)", async () => {
+  const email = await account()
+  await ask(email)
+  await settled()
+  expect(sent).toEqual([expect.objectContaining({ to: email, stream: "password_reset" })])
 })
 
 it("past the cap, the same answer, no mail, and no new token", async () => {

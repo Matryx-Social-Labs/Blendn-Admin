@@ -1,8 +1,12 @@
 // Relative imports: this is reached from `lib/background.ts`, which `server.ts`
 // requires, and `build:server` compiles with plain tsc — which emits the `@/`
 // alias verbatim into the require() and fails at boot.
+import { sendFreeWindowEndingMail } from "./free-window-mail"
 import { logger } from "./logger"
 import { cleanupExpiredTokens } from "./mobile-auth"
+import { checkPushReceipts, pruneIdlePushTokens, releaseHeldNotifications } from "./push-notifications"
+import { sendFirstNightNudges, sendNextNightNudges } from "./next-night-nudge"
+import { sendResultsMails } from "./results-mail"
 import { sendEventReminders, sendRatingRequests } from "./services/event-notifications.service"
 
 /**
@@ -30,25 +34,63 @@ let timer: NodeJS.Timeout | null = null
 let running = false
 
 async function pass(): Promise<void> {
-  /*
-   * 60 minutes, matching the cron route's argument. The client also schedules a
-   * local T-1h notification, so this is the server's half of a promise the app
-   * already makes — and the server's half is the one that can be corrected
-   * when an event moves.
-   */
+  await pushUpkeep()
+
+  // The host's morning results (SCRUM-1282), the night's figures to the organization's owners and admins. Second, and
+  // never throws, so a reminder step that does cannot cost a host their morning mail.
+  const mailed = await sendResultsMails()
+  if (mailed > 0) logger.info("Results mails sent", { mailed })
+  // A week on, "list your next" to the hosts with nothing coming up (SCRUM-1284). Here, not after the reminders: a step
+  // below that throws ends the pass, and this mail has a one-day window. Never throws, like the results mail.
+  const nudged = await sendNextNightNudges()
+  if (nudged > 0) logger.info("Next-night nudges sent", { nudged })
+  // Three days after approval with nothing listed, "list your first night" (SCRUM-1342). Here for the same reason.
+  const firstNudged = await sendFirstNightNudges()
+  if (firstNudged > 0) logger.info("First-night nudges sent", { nudged: firstNudged })
+
+  // 60 minutes, matching the cron route's argument. The client schedules no local reminder: this is the only one.
   const notified = await sendEventReminders(60)
   if (notified > 0) logger.info("Event reminders sent", { notified })
 
   /*
-   * The other end of the night: "rate who you met", once per event, soon after
-   * it ends. Same claim-before-send idempotency as the reminder, same cadence,
-   * so it rides this loop rather than adding a seventh timer.
+   * The other end of the night: "rate who you met", once per event, at 10:00
+   * on the event's clock the morning after it ends. Same claim-before-send
+   * idempotency as the reminder, same cadence, so it rides this loop rather
+   * than adding a seventh timer.
    */
   const asked = await sendRatingRequests()
   if (asked > 0) logger.info("Rating requests sent", { asked })
 
   const pruned = await cleanupExpiredTokens()
   if (pruned > 0) logger.info("Expired refresh tokens pruned", { pruned })
+
+  // Last, and caught here (SCRUM-1275): a failing mail never stops or delays the pilot's reminders and ratings above.
+  await sendFreeWindowEndingMail().then(
+    (orgs) => {
+      if (orgs > 0) logger.info("Free-window ending mails sent", { orgs })
+    },
+    (error: unknown) =>
+      logger.warn("Free-window ending mail failed", { error: error instanceof Error ? error.message : String(error) })
+  )
+}
+
+/**
+ * Expo push receipts, idle tokens (SCRUM-1270) and the 09:00 release of held pushes (SCRUM-1276). First, and each step caught:
+ * a reminder query that throws must not stop the receipt read, which is the only
+ * place wrong FCM or APNs credentials show up. Logs every pass, so a quiet log
+ * means the pass did not run.
+ */
+async function pushUpkeep(): Promise<void> {
+  const failed = (step: string) => (error: unknown) =>
+    logger.error("Push upkeep failed", { step, error: error instanceof Error ? error.message : String(error) })
+  await checkPushReceipts().then((receipts) => logger.info("Push receipts read", { ...receipts }), failed("receipts"))
+  await pruneIdlePushTokens().then((idle) => {
+    if (idle > 0) logger.info("Idle push tokens pruned", { idle })
+  }, failed("prune"))
+  // Quiet hours (SCRUM-1276): what was held overnight rings once, at 09:00 on the recipient's clock.
+  await releaseHeldNotifications().then((held) => {
+    if (held.released > 0) logger.info("Held pushes released", { ...held })
+  }, failed("quiet-hours release"))
 }
 
 /**

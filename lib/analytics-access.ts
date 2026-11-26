@@ -1,6 +1,6 @@
-import "server-only"
-
+// Relative imports and no "server-only": the reminder sweeper reaches `freeWindow` from server.ts (SCRUM-1421).
 import { distinctAttendeeCounts } from "./attendee-counts"
+import { MIN_ATTENDEES } from "./connection-metrics"
 import { db } from "./db"
 import { MIN_CELL } from "./disclosure"
 import { eventPassesFor, liveEntitlement } from "./entitlements"
@@ -13,24 +13,26 @@ import { realEventsWhere } from "./event-kind"
  *
  * 1. **Analytics** — a paid subscription or an admin's grant — opens
  *    everything: every cross-event view, and every event's pass features.
- * 2. **Until the paywall starts, everything is open.** It starts 30 days after
- *    the end of the organisation's first event that clears the privacy floor
- *    (at least `MIN_CELL` people checked in). An organisation whose events have
- *    all been too small to show anything has nothing to pay for yet, so the
- *    clock has not started (audit §5.1: a first event of six shows held-back
- *    tiles and sells nothing). Once found, the date and the event are written
- *    to the organisation ONCE (`analytics_free_until`, `first_free_event_id`)
- *    and never re-derived, so soft-deleting that event, or a check-in fixed
- *    later, cannot restart the 30 days.
+ * 2. **Until the paywall starts, everything is open.** It starts
+ *    `FREE_WINDOW_DAYS` after the end of the organisation's first event with at
+ *    least `MIN_ATTENDEES` people checked in, the floor at which the "met
+ *    someone" figures show (DECISIONS 2026-11-25). An organisation whose events
+ *    have all been smaller has seen too little to pay for, so the clock has not
+ *    started. Once found, the date and the event are written to the
+ *    organisation ONCE (`analytics_free_until`, `first_free_event_id`) and
+ *    never re-derived, so soft-deleting that event, or a check-in fixed later,
+ *    cannot restart the window.
  * 3. **That first event's analytics stay free for good.**
- * 4. **An Event Pass** opens one event's pass features.
+ * 4. **An Event Pass** opens one event's pass features. It is sold only for
+ *    a night that has ended with at least `MIN_CELL` people checked in
+ *    (`worthAPass`): under that floor every pass feature is held back.
  *
  * Every paid figure is computed only after this says yes
  * (`lib/org-analytics.ts`); a locked screen is drawn from
  * `lib/sample-analytics.ts` and never touches the organisation's rows.
  */
 
-export const FREE_WINDOW_DAYS = 30
+export const FREE_WINDOW_DAYS = 90
 const DAY_MS = 24 * 60 * 60 * 1000
 
 export type AccessReason = "analytics" | "grant" | "free_window" | "free"
@@ -69,7 +71,19 @@ export function mayOpenEvent(access: AnalyticsAccess, eventId: string): boolean 
 }
 
 /**
- * The organisation's first event that has ended with at least `MIN_CELL`
+ * Which of these events Event Insights may be sold for: ended, with at least
+ * `MIN_CELL` people checked in. Every pass feature goes through
+ * `lib/disclosure.ts`, so a smaller night would buy only held-back tiles
+ * (SCRUM-1363). The Plan page's list and the checkout both ask this.
+ */
+export async function worthAPass(events: readonly { id: string; end_time: Date }[], now: Date): Promise<Set<string>> {
+  const ended = events.filter((e) => e.end_time < now)
+  const people = await distinctAttendeeCounts(ended.map((e) => e.id))
+  return new Set(ended.filter((e) => (people.get(e.id) ?? 0) >= MIN_CELL).map((e) => e.id))
+}
+
+/**
+ * The organisation's first event that has ended with at least `MIN_ATTENDEES`
  * people checked in. Oldest first; stops at the first that qualifies.
  */
 async function firstQualifyingEvent(orgId: string, now: Date): Promise<{ id: string; end: Date } | null> {
@@ -84,7 +98,7 @@ async function firstQualifyingEvent(orgId: string, now: Date): Promise<{ id: str
     })
     if (ended.length === 0) return null
     const people = await distinctAttendeeCounts(ended.map((e) => e.id))
-    const first = ended.find((e) => (people.get(e.id) ?? 0) >= MIN_CELL)
+    const first = ended.find((e) => (people.get(e.id) ?? 0) >= MIN_ATTENDEES)
     if (first) return { id: first.id, end: first.end_time }
     if (ended.length < PAGE) return null
   }
@@ -93,9 +107,10 @@ async function firstQualifyingEvent(orgId: string, now: Date): Promise<{ id: str
 /**
  * The organisation's free window, from its row once written; otherwise found
  * now and written once (a concurrent first read writes the same answer, and
- * only the first write lands).
+ * only the first write lands). The one writer of the window: `analyticsAccess`
+ * on a view, and the free-window mail's pass for a host who never opened one.
  */
-async function freeWindow(orgId: string, now: Date): Promise<{ until: Date; eventId: string } | null> {
+export async function freeWindow(orgId: string, now: Date): Promise<{ until: Date; eventId: string } | null> {
   const org = await db.organisations.findUnique({
     where: { id: orgId },
     select: { analytics_free_until: true, first_free_event_id: true },

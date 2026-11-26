@@ -1,7 +1,7 @@
 /*
  * A venue owner can save the event the dashboard offers them (SCRUM-320).
  *
- * "Host it yourself and you are the organiser" (DESIGN_BRIEF_VENUES_AND_CONTROL):
+ * A venue owner who hosts their own event is its organiser:
  * `canCreateEvents` has included `venue_owner` since #285, and so have
  * /events/new, the Events page and `mayCreateEvents` — but `POST /api/events`
  * kept its March gate of admin-or-organiser. Driven on staging as

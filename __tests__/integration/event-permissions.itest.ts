@@ -202,3 +202,45 @@ describe("admin is unaffected by venue linkage", () => {
     }
   })
 })
+
+describe("an org's staff member, against real rows (SCRUM-1244)", () => {
+  it("operates the org's event but neither edits it nor reads its roster; the owner keeps everything", async () => {
+    const owner = await makeUser("perm_staff_owner", "organizer")
+    const volunteer = await makeUser("perm_staff_door", "organizer")
+    users.push(owner, volunteer)
+    const hostOrg = await makeOrg(owner)
+    await db.organisation_members.create({ data: { org_id: hostOrg, user_id: volunteer, role: "staff" } })
+    const eventId = await makeEventAt(owner, null, hostOrg)
+
+    // actorFor reads the role with the membership: one query, both lists.
+    expect(await actorFor({ id: volunteer, role: "organizer" })).toEqual({ id: volunteer, role: "organizer", orgIds: [hostOrg], editOrgIds: [] })
+    expect(await resolve(volunteer, "organizer", eventId)).toEqual({ canEdit: false, canOperate: true, canViewAttendees: false })
+    expect(await resolve(owner, "organizer", eventId)).toEqual({ canEdit: true, canOperate: true, canViewAttendees: true })
+  })
+
+  it("reads each membership's own role: staff at one org, owner of another", async () => {
+    const owner = await makeUser("perm_two_owner", "organizer")
+    const person = await makeUser("perm_two_hats", "organizer")
+    users.push(owner, person)
+    const theirs = await makeOrg(owner)
+    const own = await makeOrg(person)
+    await db.organisation_members.create({ data: { org_id: theirs, user_id: person, role: "staff" } })
+
+    const actor = await actorFor({ id: person, role: "organizer" })
+    expect([...actor.orgIds].sort()).toEqual([theirs, own].sort())
+    expect(actor.editOrgIds).toEqual([own])
+    expect((await resolve(person, "organizer", await makeEventAt(owner, null, theirs))).canEdit).toBe(false)
+    expect((await resolve(person, "organizer", await makeEventAt(person, null, own))).canEdit).toBe(true)
+  })
+
+  it("gives an org admin everything", async () => {
+    const owner = await makeUser("perm_admin_owner", "organizer")
+    const colleague = await makeUser("perm_admin_colleague", "organizer")
+    users.push(owner, colleague)
+    const hostOrg = await makeOrg(owner)
+    await db.organisation_members.create({ data: { org_id: hostOrg, user_id: colleague, role: "admin" } })
+    const eventId = await makeEventAt(owner, null, hostOrg)
+
+    expect(await resolve(colleague, "organizer", eventId)).toEqual({ canEdit: true, canOperate: true, canViewAttendees: true })
+  })
+})

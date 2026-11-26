@@ -1,6 +1,7 @@
 import { doorsAt } from "@/lib/chat-window"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
+import type { AcquisitionSource } from "@/lib/product-events"
 import { sendPushNotification } from "@/lib/push-notifications"
 
 /**
@@ -55,7 +56,9 @@ export function seatsFree(goingCount: number, capacity: number | null): number {
 export async function placeRsvp(
   eventId: string,
   userId: string,
-  requested: "going" | "maybe" | "not_going"
+  requested: "going" | "maybe" | "not_going",
+  /** Where they came from, written on the row's first insert only: a later change of mind never overwrites it. */
+  source: AcquisitionSource | null = null
 ): Promise<{ status: "going" | "maybe" | "not_going" | "waitlisted"; goingCount: number }> {
   const [event, existing, goingCount] = await Promise.all([
     db.events.findUnique({ where: { id: eventId }, select: { max_capacity: true, start_time: true, status: true } }),
@@ -77,7 +80,7 @@ export async function placeRsvp(
 
   await db.event_rsvps.upsert({
     where: { event_id_user_id: { event_id: eventId, user_id: userId } },
-    create: { event_id: eventId, user_id: userId, status },
+    create: { event_id: eventId, user_id: userId, status, ...(source && { source }) },
     update: { status, updated_at: now, cancelled_at },
   })
 

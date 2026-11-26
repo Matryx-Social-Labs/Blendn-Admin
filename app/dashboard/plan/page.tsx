@@ -5,9 +5,11 @@ import { Panel, ProTag } from "@/components/dashboard/kit"
 import { PlanCard } from "@/components/dashboard/plan-card"
 import { EmptyState } from "@/components/dashboard/primitives"
 import { FIRST_EVENT_RULE } from "@/lib/access-line-copy"
+import { FREE_WINDOW_DAYS } from "@/lib/analytics-access"
+import { MIN_ATTENDEES } from "@/lib/connection-metrics"
 import { getAuth } from "@/lib/auth"
 import { billingOrgFor, planPageData, type PlanDate, type PlanPageData } from "@/lib/billing"
-import { BILLING_PLANS, grossRupees, gstSplit, rupees } from "@/lib/billing-plans"
+import { BILLING_PLANS, FREE_WHILE_LAUNCHING, grossRupees, gstSplit, planDay as day, rupees } from "@/lib/billing-plans"
 import { mayReachRoute } from "@/lib/dashboard-nav"
 import { routeMetadata } from "@/lib/dashboard-route-content"
 import { venuePlanPage } from "@/lib/venue-plan"
@@ -21,7 +23,7 @@ export const metadata = routeMetadata("/dashboard/plan")
 export const dynamic = "force-dynamic"
 
 /**
- * An organisation's plan: Free, an Event Pass for one event, or Analytics
+ * An organisation's plan: Free, Event Insights for one event, or Analytics
  * (plan v2 §9.1b; the kit's Plan screen, `screens-org.jsx`).
  *
  * What it says about the plan comes from the server's own rows: the
@@ -32,10 +34,13 @@ export const dynamic = "force-dynamic"
  *
  * Every price is the GST-inclusive figure with its split beneath it, the same
  * number the statement will show (the screen's one memorable detail).
+ *
+ * Where plans are not sold (`mayBuyHere`, SCRUM-1151: an organisation running
+ * anything outside India), each paid card says "Free while we launch in your
+ * city." in its price's place: no price, no Buy, nobody asked to change a
+ * plan. What it already pays for keeps its status and its Cancel.
  */
 
-const DAY = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })
-const day = (d: Date) => DAY.format(d)
 const dated = (d: PlanDate | null) => (d ? `${d.word} ${day(d.at)}` : null)
 
 const FREE = [
@@ -106,26 +111,32 @@ export default async function PlanPage({
   // the "still locked" list, which the page cannot tie to the one bought, so
   // it waits on the time-out instead.
   const pending = params.status === "pending" && !(pendingFor === "analytics" && view.analytics)
-  const canBuy = view.paymentsOn && org.mayBuy
+  const soldHere = org.mayBuyHere
+  const canBuy = view.paymentsOn && org.mayBuy && soldHere
+  const launching = () => <p className="text-[0.9375rem] font-medium">{FREE_WHILE_LAUNCHING}</p>
 
   const cards = (
     <div className="grid grid-cols-1 gap-5 @3xl/main:grid-cols-3">
       <PlanCard name="Free" current={!view.analytics} items={FREE}>
-        <p className="text-[1.625rem] font-bold tabular-nums">₹0</p>
+        {soldHere ? <p className="text-[1.625rem] font-bold tabular-nums">₹0</p> : null}
       </PlanCard>
 
       <PlanCard name="Event Insights" tag={<ProTag />} items={PASS}>
-        <div className="flex flex-col gap-1">
-          <p className="text-[1.625rem] font-bold tabular-nums">
-            {rupees(grossRupees(BILLING_PLANS.event_pass))}{" "}
-            <span className="text-[0.8125rem] font-normal text-muted-foreground">per event</span>
-          </p>
-          <p className="text-[0.75rem] tabular-nums text-faint-foreground">
-            {gstSplit(BILLING_PLANS.event_pass)} · one payment, that event for good
-          </p>
-        </div>
+        {soldHere ? (
+          <div className="flex flex-col gap-1">
+            <p className="text-[1.625rem] font-bold tabular-nums">
+              {rupees(grossRupees(BILLING_PLANS.event_pass))}{" "}
+              <span className="text-[0.8125rem] font-normal text-muted-foreground">per event</span>
+            </p>
+            <p className="text-[0.75rem] tabular-nums text-faint-foreground">
+              {gstSplit(BILLING_PLANS.event_pass)} · one payment, that event for good
+            </p>
+          </div>
+        ) : null}
         {view.analytics ? (
           <p className="text-[0.8125rem] text-muted-foreground">Analytics already covers every event.</p>
+        ) : !soldHere ? (
+          launching()
         ) : view.free.reason === "free_window" ? (
           <p className="text-[0.8125rem] text-muted-foreground">Every event is open while Analytics is free.</p>
         ) : (
@@ -142,6 +153,8 @@ export default async function PlanPage({
           <p className="text-[0.8125rem] text-muted-foreground">
             {view.date ? `On, ${dated(view.date)}.` : "On."}
           </p>
+        ) : !soldHere ? (
+          launching()
         ) : (
           <AnalyticsBuy enabled={canBuy} pending={pending} />
         )}
@@ -157,7 +170,7 @@ export default async function PlanPage({
 
       {canBuy ? <CheckoutProvider>{cards}</CheckoutProvider> : cards}
 
-      {!org.mayBuy ? (
+      {!soldHere ? null : !org.mayBuy ? (
         <p className="text-[0.8125rem] text-muted-foreground">
           Only an owner or admin of {org.orgName} can change its plan.
         </p>
@@ -200,11 +213,11 @@ function StatusPanel({ view, pending, pendingFor }: { view: PlanPageData; pendin
         : "Analytics switches on as soon as Razorpay confirms the payment, usually within a minute."
   } else if (view.free.reason === "free_window" && view.free.until) {
     headline = `Free · Analytics open until ${day(view.free.until)}`
-    const first = view.free.firstEventTitle ? `${view.free.firstEventTitle}, ${FIRST_EVENT_RULE},` : `Your first event with at least 5 people checked in`
-    detail = `${first} opened every Analytics view for 30 days. That event stays open for good.`
+    const first = view.free.firstEventTitle ? `${view.free.firstEventTitle}, ${FIRST_EVENT_RULE},` : `Your first event with at least ${MIN_ATTENDEES} people checked in`
+    detail = `${first} opened every Analytics view for ${FREE_WINDOW_DAYS} days. That event stays open for good.`
   } else if (view.free.reason === "free_window") {
     headline = "Free · Analytics open for now"
-    detail = `Every Analytics view is open until 30 days after ${FIRST_EVENT_RULE}.`
+    detail = `Every Analytics view is open until ${FREE_WINDOW_DAYS} days after ${FIRST_EVENT_RULE}.`
   } else {
     headline = "Free"
     detail = view.free.firstEventTitle
@@ -265,10 +278,10 @@ const PAYMENT_STATUS: Record<string, string> = {
 
 function Payments({ view }: { view: PlanPageData }) {
   return (
-    <Panel title="Payments" hint="Invoices are issued through Razorpay by Matryx Social Labs Private Limited">
+    <Panel title="Payments" hint="Payments are taken by Razorpay for Matryx Social Labs Private Limited">
       {view.payments.length === 0 ? (
         <p className="text-[0.8125rem] text-muted-foreground">
-          Nothing paid yet. Each payment appears here with its Razorpay invoice or payment reference.
+          Nothing paid yet. Each payment appears here with its Razorpay payment reference.
         </p>
       ) : (
         <table className="w-full text-[0.8125rem]">

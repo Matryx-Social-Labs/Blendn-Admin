@@ -26,8 +26,8 @@ import { emitChatMessage } from "@/lib/socket-server"
  *
  * Every number that leaves this module goes through `lib/disclosure.ts`. In a
  * room of six, "1 vote · Leaving early" names that person to everyone still in
- * it, and `DESIGN_HANDOFF.md` guarantees small rooms are normal — check-in never
- * refuses, so capacity is a signal and not a door.
+ * it, and small rooms are normal: check-in never refuses, so capacity is a
+ * signal and not a door.
  *
  * Suppressing the small cell alone is not enough, which is the whole reason that
  * module exists: publishing the total lets you subtract, and hiding all but one

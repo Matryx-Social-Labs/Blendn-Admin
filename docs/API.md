@@ -827,7 +827,7 @@ event's change and a report's outcome have no switch here. Stored as
   accepted, declined, dismissed, withdrawn or gone; absent on every other kind.
 - **`data.reason`** on `event_update` and `event_changed`: `cancelled`, `time` or
   `venue`, the most important when several moved (`data.changed` has them all,
-  comma-joined). A reminder ("starts in an hour") carries none.
+  comma-joined). A reminder ("Starting in about an hour") carries none.
 
 **Reading the bell as an older build.** A build that does not know `event_changed`
 has no tap for it, so the feed is served to it the way its push is (`channelSet`
@@ -1087,9 +1087,26 @@ names both of them to anyone who was there. `attendees` still reports.
 
 ---
 
+### Where somebody came from (`?s=`, `source`)
+
+SCRUM-1273. One of five words: `door` (the host's door QR), `link` (the host's
+copied link), `invite`, `web`, `share` (a guest's own share). The QR & link tab
+encodes `/event/<id>?s=door` in the code and the door slide, and
+`/event/<id>?s=link` in the link to copy.
+
+| Where | Field | Kept |
+|---|---|---|
+| `GET /events/:eventId` | query `s` | on the day's first `event_viewed` for this person and event (`product_events.props`); a refused view is not recorded |
+| `POST /events/:eventId/rsvp` | body `source` | `event_rsvps.source`, when the RSVP is created; a later status change keeps it (a withdrawal before the doors deletes the RSVP, so the next one is new) |
+| `PUT /profiles/:userId` | body `source` | `profiles.signup_source`, the first one sent; later ones are ignored |
+
+Unknown values are ignored: the request answers exactly as it would without
+one, and nothing is stored. A request with no source is unchanged. The source
+is never in a response.
+
 ### RSVP and the waitlist
 
-`POST /events/:eventId/rsvp` with `{ status: "going" | "maybe" | "not_going" }`.
+`POST /events/:eventId/rsvp` with `{ status: "going" | "maybe" | "not_going", source? }` (`source`: above).
 
 When the event has a `max_capacity` and is already full, a `going` request comes
 back as **`waitlisted`** rather than being refused. Releasing a seat — cancelling,
@@ -2285,7 +2302,10 @@ place and time are not separate fields: the post's words carry them, as `name`.
 `groups` and `rooms` alike, `lastMessage` and `unreadCount` leave out messages
 from anybody you blocked or who blocked you — the same filter the room's
 history applies — so a blocked person's line is never previewed, named or
-counted. Your own messages are never unread. Reading a room's newest page
+counted. Your own messages are never unread. **`unreadCount` stops at 10** on
+every row (SCRUM-1223): the app says "9+" above 9, and a capped count reads at
+most ten rows a room however long its history, a room with a read marker only
+after it. Reading a room's newest page
 (`GET /chat/groups/:chatGroupId/messages` without `before`) marks it read, as
 `GET /events/:eventId/chat` does for an event's room. On `rooms`, `lastMessageAt` is the time of the newest message you can
 see, and the list is ordered by it. (A `groups` row's `lastMessageAt`, and the
@@ -2557,8 +2577,8 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 2. **Keyword filter** (sync, <1ms) — slurs/profanity in 9 languages → saves as hidden, returns `moderation_hidden: true`
 3. **OpenAI Moderation** (pre-emit, 1s timeout) — AI content analysis → hides before broadcast
 
-If caught, response returns `{ moderation_hidden: true, content: null }`. The message is never emitted via socket.
-If OpenAI times out (>1s), message is broadcast and moderation falls back to async (socket delete event).
+If caught before the send returns, response returns `{ moderation_hidden: true, content: null }` and the message is never emitted via socket.
+If OpenAI has not answered within 1s, the message is broadcast and moderation falls back to async (socket delete event), except in a busy event room, which waits for the verdict (below).
 
 **While OpenAI is down** (5 consecutive failed calls open a 30 s breaker per server process): a room of 200 or fewer inside, and every room that is not an event's, still delivers the line, and a sweeper re-checks every `unchecked` room message from the last 24 h each minute, hiding or flagging late through the usual actions. A **busy event room (more than 200 inside now) refuses instead**: when the 1 s race has no verdict the route waits for the call in flight (its own 8 s deadline); with still none it deletes the row it just wrote (nothing was emitted) and answers `503 MODERATION_UNAVAILABLE`, `retryAfter: 5` in the body and `Retry-After`, error "This room is busy and messages can’t be checked right now. Try again in a few seconds." With the breaker already open the refusal comes before anything is written. Resend with the same `clientId`. A missing `OPENAI_API_KEY` is not an outage and never refuses.
 
@@ -3023,8 +3043,11 @@ un-reveal anything already seen — nothing can.
 | POST | `/message-requests` | Send a message request |
 | POST | `/message-requests/:id/respond` | Accept / decline / block |
 
-**Only an accept tells the sender** (SCRUM-621): a push and a bell row naming the
-accepter. `decline` and `block` send nothing and write nothing the sender reads;
+**Only an accept tells the sender** (SCRUM-621): a push and a bell row, "Message
+request accepted" / "Your message request was accepted", naming nobody (launch
+gate 7, SCRUM-1266: a lock screen is not an authenticated surface; the
+conversation shows who). The request's own push is "New message request" /
+"Someone wants to connect", without the sender's name. `decline` and `block` send nothing and write nothing the sender reads;
 the product has no declined state and a no is silent. The response to the
 responder is unchanged.
 
@@ -4445,12 +4468,12 @@ Returns: `{ flags: [...], stats: { pending, autoHidden, total }, pagination }`
 Messages go through a **pre-emit** pipeline — moderation runs before the message is broadcast to other users:
 1. **Spam check** (sync, blocks before save) — burst rate (5 msgs/10s), duplicate detection, link density (max 2)
 2. **Keyword filter** (sync, before save, <1ms) — Exact-match wordlists for English + 8 Indian languages. If matched, message saved as hidden and never broadcast.
-3. **OpenAI Moderation API** (pre-emit, 1s timeout) — Multilingual AI detection for hate, harassment, sexual, violence, self-harm. If caught within 1s, message hidden before broadcast. If timeout, emitted and falls back to async.
+3. **OpenAI Moderation API** (pre-emit, 1s timeout) — Multilingual AI detection for hate, harassment, sexual, violence, self-harm. If caught within 1s, message hidden before broadcast. If timeout, emitted and falls back to async, except in an event room with more than 200 checked in, which waits for the verdict (up to 8s) and refuses the send (`503 MODERATION_UNAVAILABLE`) without one.
 4. **Image moderation** (async, if applicable) — OpenAI omni-moderation for images
 
 Thresholds: `>=0.70` confidence → auto-hide, `>=0.40` → flag for review. Auto-mute after 3 hidden abusive messages in 1 hour (a message hidden only for a contact detail does not count). Auto-unmute after 1 hour with no new violations (checked on next send attempt).
 
-Requires `OPENAI_API_KEY` env var: Railway production refuses to boot without it; elsewhere moderation degrades to keyword-only if absent.
+Requires `OPENAI_API_KEY` env var: Railway production refuses to boot without it; elsewhere the server boots with a warning.
 
 ### Reports from the app
 
@@ -4995,11 +5018,12 @@ them any more. Rows written before that are hidden, and retention removes them.
 
 | What happened | Who gets a push | On the phone |
 |---|---|---|
-| A DM | The recipient, when the conversation goes from read to unread; while it stays unread, at most once every 5 minutes, as "N new messages" | One notification per conversation, replaced in place (`dm:{conversationId}`) |
+| A DM | The recipient, when the conversation goes from read to unread; while it stays unread, at most once every 5 minutes, as "N new messages". Titled with the sender's name as the conversation shows it (a match's pseudonym until both swap) and the message's first 100 characters; in a conversation that began as a message request, "New message" / "Open Blend’n to read it", with no name and no words (SCRUM-1266) | One notification per conversation, replaced in place (`dm:{conversationId}`) |
 | A room message | **Nobody** | — |
 | A reply to your room message | Its author, if still in the room and not in a block with the sender; at most once per room every 3 minutes. `data: { type: "group_message", chatGroupId, senderId, kind }` — `kind` is the room's: `event` (a venue day's room too), `crew` (with `crewId`), `blend` (with `blendId`) or `board_post`; open the tap as that room | `room:{chatGroupId}`, replaced in place |
 | A check-in | **Nobody** — the live roster carries arrivals | — |
-| An event you RSVP'd to or saved changes time or place, is cancelled, or starts in an hour | Going (`event_changed`: time, place, cancel), and maybe, waitlisted and saved (`event_update`) | `event:{eventId}`, replaced in place: only the latest state is true |
+| An event you RSVP'd to or saved changes time or place, or is cancelled | Going (`event_changed`: time, place, cancel), and maybe, waitlisted and saved (`event_update`) | `event:{eventId}`, replaced in place: only the latest state is true |
+| An event you are going or maybe to starts in about an hour | Going and maybe only, not waitlisted or saved, once per event, 60–75 minutes ahead: `event_update`, "Starting in about an hour at {venue}" (no venue: "Starting in about an hour"), no `reason` | `event:{eventId}`, replaced in place |
 | An event you are checked in to is cancelled (SV7) | Everyone who was checked in at that moment, once, in batches of 500: `data: { type: "event_cancelled", eventId }`, "This event has been cancelled. You are no longer checked in." Their check-in is already cancelled and their presence closed. They are not sent the going/saved line above as well, so somebody inside and going hears it once. A build that has not declared channel set 2 is sent `event_update` instead (it opens the event), push and bell row alike, as for `event_changed` | `event:{eventId}` on `events`, replaced in place; one bell row of kind `event_cancelled` |
 | An organizer announcement | Everyone in the room | Stacked with its event, never replaced |
 | Friend request / accepted, match, reveal, Lobby, message request | The person it is about, immediately | One each |
@@ -5007,10 +5031,26 @@ them any more. Rows written before that are hidden, and retention removes them.
 | "Going together" | Every other crew member who has not muted the crew chat or blocked the planner (`crew_here`, `kind: "crew_plan"`, `crewId`, `chatGroupId`), once per crew per night; "Priya wants to go together. Open the crew to see the night." — no place | One each |
 | "We're here" / "With {crew}" at the hold | Every other crew member who has not muted the crew chat or blocked the tapper (`crew_here`, `crewId`, `chatGroupId`, `occurrenceId`, `count`), once per person per night; "Priya and Arjun are in. Hold to Blend’n when you get there." — who is in by first name, never who is not, no place | One each |
 | A Mix | Everyone the Mix room lets in, but the person whose like made it (`blend`, `blendId`, `chatGroupId`); no name, nothing about who liked first | One each |
-| An event you checked in to ends | Everyone with a check-in row, once per event, within ~5 minutes of the end (only events that ended in the last 6 hours). `data: { type: "rating_request", eventId }` → the app opens `/rate/[eventId]`. People with a mutual like to rate (blocks excluded) get "rate the people you met"; the rest "rate the night"; somebody who already rated and has nobody to rate is skipped | `rate:{eventId}` on `events`, replaced in place |
+| An event you checked in to ends | Everyone with a check-in row, once per event, at 10:00 on the event's clock the morning after it ends (the first 10:00 after `end_time`: a night ending at 01:00 is asked at 10:00 that day, one ending at 18:00 at 10:00 the next; only events that ended in the last 34 hours; an unknown time zone reads as UTC). `data: { type: "rating_request", eventId }` → the app opens `/rate/[eventId]`. People with a mutual like to rate (blocks excluded) get "rate the people you met"; the rest "rate the night"; somebody who already rated and has nobody to rate is skipped | `rate:{eventId}` on `events`, replaced in place |
 
 A room you muted (`POST /chat/groups/:id/mute`) sends you neither the reply push
 nor announcements.
+
+**Quiet hours, 23:00–09:00 on the recipient's clock (SCRUM-1276).** The clock is
+the event's zone when the push names an event, else the home city's, else
+Asia/Kolkata. In those hours a push is **held, not dropped**: its bell row is
+written as above, with `held_until` (not served) set to the next 09:00, and no push
+goes out. At 09:00 (within the reminder loop's 5 minutes) a person with held rows
+still unread gets **one** push, the newest of them as itself (its kind, title, body
+and `data.notificationId`); somebody who read them overnight gets none. A held row
+about a conversation that has since closed (an unmatch or a block) or an event that
+has already started is passed over. The Lobby's opt-in alerts (`board_match`,
+`board_host_post`) have no bell row, so in quiet hours they are dropped; the Lobby
+shows them. **Always sent, at any hour:** a DM, a reply to your room message, a
+message request and its answer, a crew's "We're here" and "Going together", a
+report's outcome, a Lobby post taken down; anything about an event you are going
+to or have a check-in row at; and **everything**, any kind, while you have an open
+check-in anywhere, so a night out is never muted.
 
 Every push carries an Android `channelId` the app creates — `messages`,
 `rooms`, `events` or `offers` ("Offers from venues", a venue's offer only) —

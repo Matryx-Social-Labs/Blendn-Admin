@@ -26,7 +26,7 @@ jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { 
 jest.mock("next/headers", () => ({ headers: jest.fn().mockResolvedValue({ get: () => "203.0.113.9" }) }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 jest.mock("@/lib/rate-limit-store", () => ({ hit: jest.fn().mockResolvedValue({ count: 1 }) }))
-jest.mock("@/lib/event-ownership", () => ({ owningOrgFor: jest.fn() }))
+jest.mock("@/lib/event-ownership", () => ({ ...jest.requireActual("@/lib/event-ownership"), owningOrgFor: jest.fn() }))
 const sent: { to: string; subject: string; text: string }[] = []
 jest.mock("@/lib/email", () => {
   const actual = jest.requireActual("@/lib/email")
@@ -42,6 +42,7 @@ jest.mock("@/lib/email", () => {
 
 import { decideEventClaim, fileEventClaim } from "@/lib/event-claim-actions"
 import { getAuth } from "@/lib/auth"
+import { owningOrgFor, StaffMayNotCreate } from "@/lib/event-ownership"
 
 /*
  * A mock that honours `select`, so a wrong column list is a wrong answer here
@@ -180,5 +181,15 @@ describe("filing with somebody else's application", () => {
     })
     expect(result).toEqual({ ok: false, error: "That application does not match this email address" })
     // No `create` on the mock at all — a write would have thrown, not returned.
+  })
+})
+
+describe("filing as an organisation's staff member (SCRUM-1244)", () => {
+  it("is told to ask an owner or admin, not sent down the no-organisation path", async () => {
+    ;(getAuth as jest.Mock).mockResolvedValueOnce({ user: { id: "volunteer", role: "organizer" } })
+    ;(owningOrgFor as jest.Mock).mockRejectedValueOnce(new StaffMayNotCreate())
+    const result = await fileEventClaim({ eventId: "0b6f3a52-6a7e-4c3e-9d0e-5f2d7c1a9b41", contactEmail: "door@toit.in" })
+    expect(result).toEqual({ ok: false, error: "Ask an owner or admin of your organization to claim this event." })
+    expect(mockDb.organiser_onboarding_requests.findUnique).not.toHaveBeenCalled()
   })
 })

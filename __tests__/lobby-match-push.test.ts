@@ -7,15 +7,15 @@ import { notifyLobbyMatch } from "@/lib/push-notifications"
 /*
  * "Someone offers what you're looking for" is one push per person per event
  * per half hour (SCRUM-1026 security review): an offerer posting ten offers
- * must not ring a seeker ten times. No device is registered here, so `failed`
+ * must not ring a seeker ten times. No device is registered here, so `noDevice`
  * counts the people the throttle let through.
  */
 const event = { id: "e-1", title: "Kerala Design Week" }
 
 it("lets each person through once per event in the window", async () => {
-  expect(await notifyLobbyMatch(["a", "b"], event, "p1", "ride")).toEqual({ sent: 0, failed: 2 })
-  expect(await notifyLobbyMatch(["a", "b", "c"], event, "p2", "ride")).toEqual({ sent: 0, failed: 1 })
-  expect(await notifyLobbyMatch(["a"], { ...event, id: "e-2" }, "p3", "ride")).toEqual({ sent: 0, failed: 1 })
+  expect(await notifyLobbyMatch(["a", "b"], event, "p1", "ride")).toEqual({ sent: 0, failed: 0, noDevice: 2 })
+  expect(await notifyLobbyMatch(["a", "b", "c"], event, "p2", "ride")).toEqual({ sent: 0, failed: 0, noDevice: 1 })
+  expect(await notifyLobbyMatch(["a"], { ...event, id: "e-2" }, "p3", "ride")).toEqual({ sent: 0, failed: 0, noDevice: 1 })
 })
 
 it("asks for devices behind the event's switch", async () => {

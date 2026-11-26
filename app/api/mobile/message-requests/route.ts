@@ -275,13 +275,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Fetch sender name for push notification (authUser doesn't carry name)
-    const sender = await db.user.findUnique({
-      where: { id: authUser.userId },
-      select: { name: true },
-    })
-    const senderName = sender?.name || "Someone"
-
     // Create the message request
     const messageRequest = await db.message_requests.create({
       data: {
@@ -302,9 +295,10 @@ export async function POST(request: NextRequest) {
     sendPushNotification({
       userId: recipientId,
       title: "New message request",
-      // Deliberately generic: push bodies render on a locked screen, so the
-      // request text stays in the app rather than on the lock screen.
-      body: `${senderName} wants to connect`,
+      // Neither the request's words nor the sender's name: a lock screen is not
+      // an authenticated surface. The request list shows who, behind sign-in
+      // (launch gate 7, SCRUM-1266).
+      body: "Someone wants to connect",
       data: { type: "message_request", requestId: messageRequest.id },
     }).catch((err: unknown) =>
       // Push is best-effort and must not fail the request, but swallowing the

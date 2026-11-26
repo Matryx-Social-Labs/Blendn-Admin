@@ -69,6 +69,8 @@ type RedisMulti = {
 
 type RedisLike = {
   multi(): RedisMulti
+  get(key: string): Promise<string | null>
+  set(key: string, value: string): Promise<unknown>
 }
 
 /** How long the first callers wait for a healthy Redis to connect. */
@@ -356,6 +358,35 @@ export async function release(key: string): Promise<void> {
   }
   const existing = memory.get(key)
   if (existing && Date.now() <= existing.resetAt && existing.count > 0) existing.count -= 1
+}
+
+/**
+ * A plain value kept in Redis with no expiry: a sweeper's "last run" mark that
+ * should outlive a restart (the staff alert's). Null without Redis or on any
+ * failure, and a failed write is a warning: the caller keeps its own copy in
+ * memory and falls back to it, so this is best-effort by design. Bounded like
+ * every command here (`bounded`): a sweeper awaiting a stalled Redis would stop
+ * for good, silently.
+ */
+export async function readMark(key: string): Promise<string | null> {
+  const redis = await getRedis()
+  if (!redis) return null
+  try {
+    return await bounded(redis.get(key))
+  } catch (error) {
+    logger.warn("Redis mark read failed", { key, error: error instanceof Error ? error.message : String(error) })
+    return null
+  }
+}
+
+export async function writeMark(key: string, value: string): Promise<void> {
+  const redis = await getRedis()
+  if (!redis) return
+  try {
+    await bounded(redis.set(key, value))
+  } catch (error) {
+    logger.warn("Redis mark write failed", { key, error: error instanceof Error ? error.message : String(error) })
+  }
 }
 
 export function resetMemoryStore(): void {

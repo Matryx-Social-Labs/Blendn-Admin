@@ -6,7 +6,7 @@ import { EventPassPanels, OrgPanels } from "@/components/dashboard/analytics-pan
 import { Locked, Panel, PillTabs } from "@/components/dashboard/kit"
 import { EmptyState, HeroMetric } from "@/components/dashboard/primitives"
 import { Button } from "@/components/ui/button"
-import { analyticsAccessLine } from "@/lib/access-line-copy"
+import { analyticsAccessLine, FIRST_EVENT_RULE } from "@/lib/access-line-copy"
 import { dayInIndia } from "@/lib/dashboard-format"
 import { getAuth } from "@/lib/auth"
 import { billingOrgFor } from "@/lib/billing"
@@ -58,7 +58,8 @@ export default async function AnalyticsPage({
 
   const params = await searchParams
   const view = await analyticsPage(org.orgId, { range: parseRange(params.range), eventId: params.event })
-  const pass = rupees(grossRupees(BILLING_PLANS.event_pass))
+  // No price where plans are not sold (SCRUM-1151): the Plan page says why.
+  const pass = org.mayBuyHere ? rupees(grossRupees(BILLING_PLANS.event_pass)) : null
 
   return (
     <>
@@ -129,7 +130,7 @@ function AccessLine({ view }: { view: AnalyticsPageView }) {
   )
 }
 
-function EventSection({ view, pass }: { view: AnalyticsPageView; pass: string }) {
+function EventSection({ view, pass }: { view: AnalyticsPageView; pass: string | null }) {
   const selected = view.selected
   if (!selected) {
     return (
@@ -165,7 +166,7 @@ function EventSection({ view, pass }: { view: AnalyticsPageView; pass: string })
       </Button>
     </form>
   )
-  const hint = `${day(selected.startsAt)}${isFirstFree && !view.access.org ? " · free for good: your first event that cleared the floor" : ""}`
+  const hint = `${day(selected.startsAt)}${isFirstFree && !view.access.org ? ` · free for good: ${FIRST_EVENT_RULE}` : ""}`
 
   if (selected.open) {
     if (!selected.data) {
@@ -192,7 +193,7 @@ function EventSection({ view, pass }: { view: AnalyticsPageView; pass: string })
       <Locked
         height={280}
         title="See how this night went"
-        body={`How long people stayed, when they arrived, first-time vs returning, and app views → RSVPs. ${pass} for this event, or Analytics for every event.`}
+        body={`How long people stayed, when they arrived, first-time vs returning, and app views → RSVPs.${pass ? ` ${pass} for this event, or Analytics for every event.` : ""}`}
         sample={<EventPassPanels data={SAMPLE_EVENT_ANALYTICS} />}
         action={
           <Button asChild size="sm">

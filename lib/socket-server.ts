@@ -21,7 +21,7 @@ import { mayEmitTyping } from "./typing-gate"
 import { isUuid } from "./api-input"
 import { createEventBudget } from "./socket-budget"
 import { namesInRoom, recognisedInRoomBy } from "./identity"
-import { forVenue, type LiveSnapshot, type VenueLiveSnapshot } from "./live-metrics"
+import { forVenue, OPS_INTERVAL_MS, type LiveSnapshot, type VenueLiveSnapshot } from "./live-metrics"
 import type { Prisma, user_role } from "@prisma/client"
 
 /** `error.data.code` on a refused handshake, by the account's state. */
@@ -55,6 +55,8 @@ declare global {
 }
 const shared = globalThis as typeof globalThis & {
   __blendnSocketIo?: Server<ClientToServerEvents, ServerToClientEvents> | null
+  /** When each room above `TYPING_ROOM_CAP` was last told `typing:several`. */
+  __blendnTypingSeveralAt?: Map<string, number>
 }
 function currentIo(): Server<ClientToServerEvents, ServerToClientEvents> | null {
   return shared.__blendnSocketIo ?? null
@@ -213,6 +215,8 @@ export interface ServerToClientEvents {
     userName: string
     isTyping: boolean
   }) => void
+  /** A room above `TYPING_ROOM_CAP` sockets: somebody is typing. No names, no count, no stop. */
+  "typing:several": (data: { chatGroupId: string }) => void
   /*
    * The tally, never who reacted (CHAT.md:119). This still declared the old
    * `{ userId, emoji, action }` shape after the emitter moved to counts; it
@@ -335,12 +339,6 @@ export type AuthenticatedSocket = Socket<
  */
 
 
-/**
- * Join `room` only if `check` authorizes it, otherwise tell the client.
- *
- * Fails closed: a throwing check (malformed UUID from a hostile client, DB
- * blip) denies the join rather than leaking the room.
- */
 /*
  * Per-event snapshot broadcasting.
  *
@@ -361,8 +359,6 @@ const opsTimers = new Map<string, OpsLoop>()
 /** Events a socket may send per window; a reconnect re-joining dozens of rooms is far below it. */
 const SOCKET_EVENT_BUDGET = 120
 const SOCKET_EVENT_WINDOW_MS = 10_000
-
-const OPS_INTERVAL_MS = 5000
 
 export function startOpsBroadcast(eventId: string): void {
   const io = currentIo()
@@ -477,6 +473,33 @@ export function stopAllOpsBroadcasts(): void {
   for (const eventId of Array.from(opsTimers.keys())) stopOpsBroadcast(eventId)
 }
 
+/** What a join whose access check could not be answered is told (SCRUM-1402). */
+export const JOIN_RETRY_MESSAGE = "Could not join right now. Try again."
+
+/**
+ * The access check threw: the database did not answer (a pool wait past 5 s, a
+ * statement cancelled at 8 s, #1061). That is not a refusal, so the client is
+ * told to try again -- never FORBIDDEN, which a valid, checked-in guest read as
+ * "not allowed" in the doors-open burst. No retry here: the client asks again.
+ */
+function joinCheckFailed(socket: AuthenticatedSocket, room: string, error: unknown): void {
+  // An error line reaches Sentry, one issue for the burst: a saturated pool at doors-open must be seen.
+  logger.error("Socket join check failed", {
+    room,
+    userId: socket.data.userId,
+    error: error instanceof Error ? error.message : String(error),
+  })
+  // `ErrorCode.SERVER_ERROR` (lib/api-response.ts), spelled out like FORBIDDEN here.
+  socket.emit("error", { message: JOIN_RETRY_MESSAGE, code: "SERVER_ERROR" })
+}
+
+/**
+ * Join `room` only if `check` authorizes it, otherwise tell the client.
+ *
+ * A malformed id is refused before any read. A check that says no is
+ * FORBIDDEN; a check that throws is `joinCheckFailed` (try again). Either way
+ * the socket stays out of the room.
+ */
 export async function guardJoin(
   socket: AuthenticatedSocket,
   room: string,
@@ -490,24 +513,72 @@ export async function guardJoin(
     socket.emit("error", { message: denyMessage, code: "FORBIDDEN" })
     return
   }
+  let allowed: boolean
   try {
-    if (await check()) {
-      socket.join(room)
-      logger.debug("Socket joined room", { room, userId: socket.data.userId })
-      return
-    }
+    allowed = await check()
   } catch (error) {
-    // Room IDs are `@db.Uuid`, so a malformed one from a hostile client makes
-    // Prisma throw. Socket.io does not await listeners, so an escaping rejection
-    // would take down the process — deny instead.
-    logger.warn("Socket join authorization check failed", {
-      room,
-      userId: socket.data.userId,
-      error: error instanceof Error ? error.message : String(error),
-    })
+    // Socket.io does not await listeners: an escaping rejection would take the process down.
+    joinCheckFailed(socket, room, error)
+    return
   }
+  if (!allowed) {
+    socket.emit("error", { message: denyMessage, code: "FORBIDDEN" })
+    return
+  }
+  socket.join(room)
+  logger.debug("Socket joined room", { room, userId: socket.data.userId })
+}
 
-  socket.emit("error", { message: denyMessage, code: "FORBIDDEN" })
+/** The dashboard's Live tab joins its copy of an event's live operations (`event:<id>:ops:<view>`). */
+export async function joinEventOps(socket: AuthenticatedSocket, rawEventId: string): Promise<void> {
+  // A uuid or nothing: the id names the room and keys the broadcast loop,
+  // so an object or a second spelling would start a loop of its own.
+  if (!isUuid(rawEventId) || socket.data.principal !== "dashboard" || !socket.data.role) {
+    // An attendee token must never reach ops aggregates, even if the user
+    // behind it also happens to hold a dashboard role.
+    socket.emit("error", { message: "Not authorized", code: "OPS_FORBIDDEN" })
+    return
+  }
+  const eventId = rawEventId.toLowerCase()
+  const principal = {
+    userId: socket.data.userId,
+    email: socket.data.email,
+    role: socket.data.role,
+  }
+  /*
+   * Not `guardJoin`: which room is decided by who is asking. Whoever runs
+   * the event and the venue it is held at are sent different copies of the
+   * snapshot, to different rooms (SCRUM-516). A refusal carries the code
+   * the dashboard hook reads as "denied"; a check that threw is "try again"
+   * (`joinCheckFailed`), which the hook reads as "connection lost" and asks
+   * again.
+   */
+  // Out of both first: a socket asking again after its access changed keeps
+  // neither copy it had, whatever the answer is now -- or if there is none.
+  socket.leave(opsRoom(eventId, "host"))
+  socket.leave(opsRoom(eventId, "venue"))
+  let view: OpsView | null
+  try {
+    view = await eventOpsView(principal, eventId)
+  } catch (error) {
+    joinCheckFailed(socket, `event:${eventId}:ops`, error)
+    return
+  }
+  if (!view) {
+    socket.emit("error", { message: "Not authorized to watch this event", code: "OPS_FORBIDDEN" })
+    return
+  }
+  socket.join(opsRoom(eventId, view))
+  startOpsBroadcast(eventId)
+  // One snapshot now, so the screen is populated on open rather than blank
+  // until the first tick -- read through the loop's hold, so a crowd of
+  // dashboards opening at once costs one read of "Meeting tonight", not one each.
+  const snapshot = await buildLiveSnapshot(eventId, opsTimers.get(eventId)?.held, { social: view === "host" }).catch((error: unknown) => {
+    // The 5 s tick sends the next one; this says why the screen waited for it.
+    logger.warn("Initial ops snapshot failed", { eventId, error: error instanceof Error ? error.message : String(error) })
+    return null
+  })
+  if (snapshot) socket.emit("ops:snapshot", asSeenBy(view, snapshot))
 }
 
 async function readTypingMembership(userId: string, chatGroupId: string) {
@@ -529,11 +600,31 @@ async function readTypingMembership(userId: string, chatGroupId: string) {
   })
 }
 
+/** Above this many sockets in a room, typing is one nameless `typing:several` (SCRUM-1309). */
+export const TYPING_ROOM_CAP = 50
+/** At most one `typing:several` per room in this window. */
+const TYPING_SEVERAL_MS = 5_000
+
+// On `shared` (`globalThis`), like the server: Next bundles a second copy of this module.
+// ponytail: one entry per room that has ever been above the cap in this process, never pruned; prune when there are thousands of those.
+const severalSentAt = (shared.__blendnTypingSeveralAt ??= new Map<string, number>())
+
 /**
  * Broadcast a typing indicator to a chat room, under the sender's anonymous name.
  *
  * No-ops for muted or banned members. The join guard can't cover this on its
  * own: a member banned *after* joining stays in the room until they disconnect.
+ *
+ * The join is the door: a socket not in the room types to nobody and costs no
+ * read. The room is named in lower case, as every broadcast names it.
+ *
+ * Above `TYPING_ROOM_CAP` sockets a start costs no read: per-person typing in a
+ * room of thousands is reads and packets enough to take the room down before
+ * its messages do. The room hears one `typing:several` every 5 s at most; no
+ * names, so no block, mute or naming read is needed (a muted member counts too;
+ * a ban takes the socket out of the room), and no stop: the app lets it expire,
+ * as it forgets a named typer 3 s after the last `chat:typing`. The size is this
+ * process's adapter: right at one replica (DECISIONS 2026-11-25).
  */
 export async function emitChatTyping(
   socket: AuthenticatedSocket,
@@ -541,6 +632,18 @@ export async function emitChatTyping(
   isTyping: boolean
 ): Promise<void> {
   if (!mayEmitTyping(socket, "chat", chatGroupId, isTyping)) return
+  // `mayEmitTyping` let only a uuid through.
+  const chatRoom = `chat:${chatGroupId.toLowerCase()}`
+  if (!socket.rooms.has(chatRoom)) return
+  if ((socket.nsp.adapter.rooms.get(chatRoom)?.size ?? 0) > TYPING_ROOM_CAP) {
+    if (!isTyping) return
+    const now = Date.now()
+    if (now - (severalSentAt.get(chatRoom) ?? -Infinity) < TYPING_SEVERAL_MS) return
+    severalSentAt.set(chatRoom, now)
+    // Nameless, so the app cannot drop its own: the typist's other devices are left out here.
+    socket.to(chatRoom).except(`user:${socket.data.userId}`).volatile.emit("typing:several", { chatGroupId })
+    return
+  }
   try {
     const membership = await readTypingMembership(socket.data.userId, chatGroupId)
     if (!membership || membership.status !== "active") return
@@ -570,7 +673,7 @@ export async function emitChatTyping(
      * this module is running.
      */
     await emitAsSeenBy(
-      socket.nsp.in(`chat:${chatGroupId}`).except(hidden.map((id) => `user:${id}`)),
+      socket.nsp.in(chatRoom).except(hidden.map((id) => `user:${id}`)),
       roomScope(membership.chat_group),
       "chat:typing",
       (idFor) => ({
@@ -582,8 +685,8 @@ export async function emitChatTyping(
       socket.id
     )
   } catch (error) {
-    // Same fail-safe as guardJoin: chat_group_id is `@db.Uuid`, and an
-    // escaping rejection from this listener would take down the process.
+    // chat_group_id is `@db.Uuid`, and an escaping rejection from this
+    // listener would take down the process.
     logger.warn("Typing indicator lookup failed", {
       chatGroupId,
       userId: socket.data.userId,
@@ -1098,52 +1201,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
      * carries attendee-facing traffic including check-in names, and a host must
      * not receive it. This one carries aggregates only.
      */
-    authSocket.on("join:eventOps", async (rawEventId) => {
-      // A uuid or nothing: the id names the room and keys the broadcast loop,
-      // so an object or a second spelling would start a loop of its own.
-      if (!isUuid(rawEventId) || authSocket.data.principal !== "dashboard" || !authSocket.data.role) {
-        // An attendee token must never reach ops aggregates, even if the user
-        // behind it also happens to hold a dashboard role.
-        authSocket.emit("error", { message: "Not authorized", code: "OPS_FORBIDDEN" })
-        return
-      }
-      const eventId = rawEventId.toLowerCase()
-      const principal = {
-        userId: authSocket.data.userId,
-        email: authSocket.data.email,
-        role: authSocket.data.role,
-      }
-      /*
-       * Not `guardJoin`: which room is decided by who is asking. Whoever runs
-       * the event and the venue it is held at are sent different copies of the
-       * snapshot, to different rooms (SCRUM-516). Fails closed the same way --
-       * a throw (a malformed id from a hostile client) denies -- and with the
-       * code the dashboard hook reads as "denied" rather than "connection lost".
-       */
-      const view = await eventOpsView(principal, eventId).catch((error: unknown) => {
-        logger.warn("Socket join authorization check failed", {
-          room: `event:${eventId}:ops`,
-          userId: authSocket.data.userId,
-          error: error instanceof Error ? error.message : String(error),
-        })
-        return null
-      })
-      // Out of both first: a socket asking again after its access changed keeps
-      // neither copy it had, whatever the answer is now.
-      authSocket.leave(opsRoom(eventId, "host"))
-      authSocket.leave(opsRoom(eventId, "venue"))
-      if (!view) {
-        authSocket.emit("error", { message: "Not authorized to watch this event", code: "OPS_FORBIDDEN" })
-        return
-      }
-      authSocket.join(opsRoom(eventId, view))
-      startOpsBroadcast(eventId)
-      // One snapshot now, so the screen is populated on open rather than blank
-      // until the first tick -- read through the loop's hold, so a crowd of
-      // dashboards opening at once costs one read of "Meeting tonight", not one each.
-      const snapshot = await buildLiveSnapshot(eventId, opsTimers.get(eventId)?.held, { social: view === "host" }).catch(() => null)
-      if (snapshot) authSocket.emit("ops:snapshot", asSeenBy(view, snapshot))
-    })
+    authSocket.on("join:eventOps", (rawEventId) => void joinEventOps(authSocket, rawEventId))
 
     authSocket.on("leave:eventOps", (eventId) => {
       authSocket.leave(opsRoom(eventId, "host"))
@@ -1257,7 +1315,10 @@ type Payload<E extends keyof ServerToClientEvents> = Parameters<ServerToClientEv
  * always was. A payload is built once per user and a handle once per person,
  * however many sockets they hold.
  *
- * `skipSocketId` is `socket.to()`'s "not back to the sender" for typing.
+ * `typingSocketId`, for a typing tick from that socket: never sent back to it
+ * (`socket.to()`'s "not back to the sender"), and sent volatile, so a client
+ * that cannot take it now loses it rather than having it queued. A socket on
+ * another instance (`RemoteSocket`) has no volatile flag and gets a plain emit.
  *
  * `about`, for a payload that names one person: each copy is also told whether
  * its recipient may recognise that person in this room (`recognisedInRoomBy`,
@@ -1309,7 +1370,7 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
   scope: RoomScope,
   event: E,
   build: (idFor: (userId: string) => string, recognises: boolean, viewer: string) => Payload<E>,
-  skipSocketId?: string,
+  typingSocketId?: string,
   about?: string
 ): Promise<void> {
   let sockets = await audience.fetchSockets()
@@ -1340,7 +1401,7 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
   }
   const copies = new Map<string, Payload<E>>()
   for (const recipient of sockets) {
-    if (recipient.id === skipSocketId) continue
+    if (recipient.id === typingSocketId) continue
     // No user on the socket means nobody is "own": every id goes out handled.
     const viewer = recipient.data?.userId ?? ""
     // A venue day's room: only the people live in it now.
@@ -1350,7 +1411,9 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
       const idFor = (userId: string) => (userId === viewer ? userId : handleOf(userId))
       copies.set(viewer, (copy = build(idFor, recognising.has(viewer), viewer)))
     }
-    ;(recipient.emit as (ev: E, payload: Payload<E>) => boolean)(event, copy)
+    // A local socket is the real `Socket`, which has `volatile`; a `RemoteSocket` does not.
+    const target = typingSocketId && "volatile" in recipient ? (recipient as unknown as Socket).volatile : recipient
+    ;(target.emit as (ev: E, payload: Payload<E>) => boolean)(event, copy)
   }
 }
 

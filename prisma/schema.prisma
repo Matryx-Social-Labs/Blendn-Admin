@@ -70,6 +70,13 @@ model User {
   mobile_sessions_revoked_at DateTime? @db.Timestamptz(6)
   suspended_by               String?
   suspension_reason          String?
+  /// A pending promotion to app_admin: the admin who asked and when. Another
+  /// admin confirms within 24 h (app/dashboard/users/actions.ts, SCRUM-1240).
+  /// No relation: an erased requester blocks nothing; audit_logs is the record.
+  /// Written only as a JS Date (ms): the approval matches it exactly in its update `where`,
+  /// so a µs value (`now()` in SQL) would make every confirmation fail closed.
+  admin_requested_by         String?
+  admin_requested_at         DateTime? @db.Timestamptz(6)
 
   accounts Account[]
   sessions Session[]
@@ -311,6 +318,9 @@ model profiles {
   goals         String[]
   looking_for   String[]
   onboarded     Boolean   @default(false)
+  /// Where the account came from (SCRUM-1273): `ACQUISITION_SOURCES` in lib/product-events.ts, written once by
+  /// `PUT /profiles/:id` (the first source wins). Analytics only: never in a response. CHECK in migration SQL.
+  signup_source String?
 
   /// What this person is generally open to. Overridable per event — people
   /// differ on a Tuesday and a Saturday — so this is the default, not the truth.
@@ -659,6 +669,9 @@ model events {
   /// Null means not yet asked. Claimed with a conditional update before the
   /// send, like `reminded_at`, so two passes or two replicas never both send.
   rating_requested_at DateTime?           @db.Timestamptz(6)
+  /// When the host's morning results mail went to the organization's owners and admins (SCRUM-1282, lib/results-mail.ts).
+  /// Null means not yet mailed. Claimed with a conditional update before the send, like `rating_requested_at`.
+  results_mailed_at   DateTime?           @db.Timestamptz(6)
 
   event_issues            event_issues[]
   board_posts             board_posts[]
@@ -1285,6 +1298,15 @@ model event_occurrences {
   @@index([start_time])
 }
 
+/// An address Blend'n does not mail (SCRUM-1280). `reason` is `bounce` or `complaint` (the Resend webhook) or
+/// `unsubscribe` (a lifecycle mail's List-Unsubscribe); CHECK `email_suppressions_reason_known` in migration SQL.
+/// Which sends each stops: `blocks` in lib/email.ts. `email` is trimmed and lower-cased (`canonicalEmail`).
+model email_suppressions {
+  email      String   @id
+  reason     String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+}
+
 model mobile_refresh_tokens {
   id             String    @id @default(uuid()) @db.Uuid
   user_id        String
@@ -1476,6 +1498,10 @@ model notifications {
   /// boolean back into a time is not possible.
   read_at    DateTime? @db.Timestamptz(6)
   created_at DateTime  @default(now()) @db.Timestamptz(6)
+  /// Quiet hours (SCRUM-1276): the push was held at night and rings at this time, the next 09:00 on the recipient's
+  /// clock (`lib/quiet-hours.ts`); null once released, or for a push that rang at once. The row is in the bell either
+  /// way. Its partial index (`held_until IS NOT NULL`, what the release reads) lives in migration SQL only.
+  held_until DateTime? @db.Timestamptz(6)
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
@@ -1483,6 +1509,8 @@ model notifications {
   @@index([user_id, created_at])
   // The unread count, which the bell asks for on every screen.
   @@index([user_id, read_at])
+  // The retention sweep's unread rule (SCRUM-1224). Its read rule has a partial `read_at` index, in migration SQL only.
+  @@index([created_at])
 }
 
 // Private Messaging
@@ -1760,6 +1788,9 @@ model event_rsvps {
   /// `not_going` rather than being deleted, so a late "can't make it" is not read as a no-show (`withdrawRsvp`,
   /// lib/waitlist.ts). NULL otherwise, including a `not_going` said before the doors.
   cancelled_at DateTime?   @db.Timestamptz(6)
+  /// Where the RSVP came from (SCRUM-1273): `ACQUISITION_SOURCES` in lib/product-events.ts, written on the row's
+  /// first insert only (`placeRsvp`); a later change of mind keeps it. CHECK in migration SQL.
+  source       String?
 
   event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
   user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
@@ -1873,24 +1904,24 @@ model venues {
 /// individual organiser to exist without a registered company: one member, no
 /// GSTIN. A venue owner must be `company` with a legal name and GSTIN.
 model organisations {
-  id                      String                  @id @default(uuid()) @db.Uuid
-  kind                    organisation_kind       @default(individual)
-  display_name            String
-  legal_name              String?
+  id                              String                  @id @default(uuid()) @db.Uuid
+  kind                            organisation_kind       @default(individual)
+  display_name                    String
+  legal_name                      String?
   /// Validated by checksum offline. There is no free official verification
   /// API — confirming a GSTIN is *registered* needs a paid provider.
-  gstin                   String?
-  address                 String?
-  website                 String?
-  status                  organisation_status     @default(pending)
+  gstin                           String?
+  address                         String?
+  website                         String?
+  status                          organisation_status     @default(pending)
   /// Suspension means something (SCRUM-8). Setting `status = suspended` also
   /// flips the org's published events to `draft` (remembered in
   /// `events.pre_suspension_status`) so every attendee surface goes dark, and
   /// `actorFor` stops loading the membership so every dashboard door closes.
   /// The reason is on the row because the members' banner reads it; the audit
   /// log has it too. Both null on reinstatement, which flips the events back.
-  suspended_at            DateTime?               @db.Timestamptz(6)
-  suspension_reason       String?
+  suspended_at                    DateTime?               @db.Timestamptz(6)
+  suspension_reason               String?
   /// May this organisation mark a broadcast as `sponsored`?
   ///
   /// An organisation-level flag rather than a role, because the permission
@@ -1900,26 +1931,34 @@ model organisations {
   /// Off by default and granted by an admin. "Sponsored" is a claim that
   /// somebody paid; if everyone who can announce can also mark a message
   /// sponsored, the label stops meaning anything and becomes a styling choice.
-  may_sponsor             Boolean                 @default(false)
-  /// When Analytics stops being free for this organisation: 30 days after the
-  /// end of its first event with at least 5 people checked in, and that event
-  /// (step 16, lib/analytics-access.ts). Written ONCE, by the first read that
-  /// finds such an event, and never moved: soft-deleting the event, or a
-  /// later re-count, cannot restart the 30 days. A plain id, no foreign key:
+  may_sponsor                     Boolean                 @default(false)
+  /// When Analytics stops being free for this organisation: 90 days after the
+  /// end of its first event with at least 8 people checked in, and that event
+  /// (SCRUM-1269, lib/analytics-access.ts). Written ONCE, by the first read that
+  /// finds such an event, and never re-derived: soft-deleting the event, or a
+  /// later re-count, cannot restart the window. A window written under the old
+  /// 30-day rule is moved by 60 days in a data migration that lands after the
+  /// pilot (Sun 2026-11-29 14:00 IST; SCRUM-1269). A plain id, no foreign key:
   /// it is a record of a decision, kept if the event goes.
-  analytics_free_until    DateTime?               @db.Timestamptz(6)
-  first_free_event_id     String?                 @db.Uuid
-  verified_at             DateTime?               @db.Timestamptz(6)
-  verified_by             String?
+  analytics_free_until            DateTime?               @db.Timestamptz(6)
+  first_free_event_id             String?                 @db.Uuid
+  /// When the one mail 14 days before `analytics_free_until` was claimed (SCRUM-1275,
+  /// lib/free-window-mail.ts): set before the send, never cleared, so it goes once per window.
+  analytics_free_ending_mailed_at DateTime?               @db.Timestamptz(6)
+  /// When the "list your next" nudge was last claimed (SCRUM-1284, lib/next-night-nudge.ts): set before the send, so
+  /// an organisation gets at most one in 30 days. 09a's first-event nudge shares it.
+  next_event_nudged_at            DateTime?               @db.Timestamptz(6)
+  verified_at                     DateTime?               @db.Timestamptz(6)
+  verified_by                     String?
   /// The Razorpay Route linked account (`acc_` + 14) the organizer's share of a ticket sale is
   /// transferred to (SCRUM-1011). KYC is Razorpay's. `enableTicketing` refuses unless it is active;
   /// shape CHECK `organisations_razorpay_account_id_shape` in migration SQL.
-  razorpay_account_id     String?
+  razorpay_account_id             String?
   /// Its onboarding state at Razorpay. Only `active` (with an account id, CHECK
   /// `organisations_razorpay_active_has_account`) may sell (`payoutStatus`, lib/payout-status.ts).
-  razorpay_account_status razorpay_account_status @default(not_started)
-  created_at              DateTime                @default(now()) @db.Timestamptz(6)
-  updated_at              DateTime                @default(now()) @updatedAt @db.Timestamptz(6)
+  razorpay_account_status         razorpay_account_status @default(not_started)
+  created_at                      DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at                      DateTime                @default(now()) @updatedAt @db.Timestamptz(6)
 
   members           organisation_members[]
   ticket_payouts    ticket_payouts[]
@@ -2690,6 +2729,8 @@ model event_feedback_tallies {
   contributors Json
   /// `{ [topic]: distinct people }` over the positive messages; null on a tally frozen before topics (2026-11-24).
   topics       Json?
+  /// `{ [category]: the largest single person's messages }`, the dominance rule's numerator (SCRUM-1285); null on a tally frozen before 2026-11-26, which then reads without it.
+  top_messages Json?
   frozen_at    DateTime @default(now()) @db.Timestamptz(6)
 
   event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
@@ -4214,6 +4255,9 @@ model event_issues {
   /// one worth asking about afterwards.
   acknowledged_at DateTime? @db.Timestamptz(6)
   acknowledged_by String?
+  /// The organizer's owners and admins were mailed about this opening (SCRUM-1286, `lib/live-alert-mail.ts`): claimed
+  /// before the send, given back if nobody got it. A critical kind mails again only 30 minutes after the last of these.
+  mailed_at DateTime? @db.Timestamptz(6)
 
   event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
   ///

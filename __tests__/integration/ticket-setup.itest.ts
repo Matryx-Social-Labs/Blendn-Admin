@@ -88,7 +88,7 @@ describe("turning ticket selling on", () => {
     expect((await db.events.findUniqueOrThrow({ where: { id: eventId } })).ticketing_mode).toBe("off")
   })
 
-  it("lets a staff member turn on an event once an owner accepted, and refuses them the acceptance itself", async () => {
+  it("refuses a staff member before and after an owner accepted: they run the night and edit none of it (SCRUM-1244)", async () => {
     const terms = readOrganizerTicketingTerms()
     const first = await freshEvent()
     const staff = await makeUser(testId("tix-staff"), "organizer")
@@ -102,13 +102,17 @@ describe("turning ticket selling on", () => {
     })
     expect(await db.legal_acceptances.count({ where: { org_id: first.orgId } })).toBe(0)
 
-    // The owner accepts on this event; staff then turns on a second event of the same organization.
+    // The owner accepts on this event; staff still cannot turn on a second event of the same organization.
     expect(await turnOnTicketing(first.eventId, { id: first.host, role: "organizer" }, { documentSha256: terms.sha256, refundPolicy: "none", feesAbsorbed: false })).toMatchObject({ ok: true })
     const second = await db.events.create({
       data: { slug: testId("evt2"), title: "Second", description: "x", start_time: new Date(Date.now() + 86_400_000), end_time: new Date(Date.now() + 90_000_000), timezone: "UTC", status: "published", organizer_id: first.host, organizer_org_id: first.orgId, city: "Bengaluru" },
     })
     w.events.push(second.id)
-    expect(await turnOnTicketing(second.id, { id: staff, role: "organizer" }, { documentSha256: terms.sha256, refundPolicy: "none", feesAbsorbed: false })).toMatchObject({ ok: true })
+    expect(await turnOnTicketing(second.id, { id: staff, role: "organizer" }, { documentSha256: terms.sha256, refundPolicy: "none", feesAbsorbed: false })).toMatchObject({
+      ok: false,
+      reason: "not_authorized",
+    })
+    expect((await db.events.findUniqueOrThrow({ where: { id: second.id } })).ticketing_mode).toBe("off")
     expect(await db.legal_acceptances.count({ where: { org_id: first.orgId } })).toBe(1)
   })
 

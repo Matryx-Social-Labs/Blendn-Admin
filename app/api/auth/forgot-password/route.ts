@@ -7,7 +7,7 @@ import { logger } from "@/lib/logger"
 import { rateLimit } from "@/lib/rate-limit"
 import { auditLog, getRequestIp } from "@/lib/audit-log"
 import { emailDomain } from "@/lib/org-invites"
-import { sendEmail, passwordResetEmail, emailConfigured } from "@/lib/email"
+import { canonicalEmail, sendEmail, passwordResetEmail, emailConfigured } from "@/lib/email"
 import { issuePasswordResetLink } from "@/lib/password-reset"
 import { readJson } from "@/lib/api-input"
 
@@ -26,17 +26,6 @@ import { readJson } from "@/lib/api-input"
 
 /** One hour. Short, because this token changes a credential. */
 const RESET_TTL_MS = 60 * 60 * 1000
-
-/**
- * The one form of an address this route uses, for the lookup and the limit
- * alike: trimmed and lower-cased, which is how every account's address is
- * stored (SCRUM-328) and how sign-in looks it up. No Unicode folding and no
- * `+tag` stripping: either would make two stored accounts one string, and the
- * lookup is an exact match on the stored form. Anything not a string is "".
- */
-function canonicalEmail(raw: unknown): string {
-  return typeof raw === "string" ? raw.trim().toLowerCase() : ""
-}
 
 /**
  * Every answer takes at least this long, and the email goes after it (step 18
@@ -128,9 +117,9 @@ export async function POST(req: NextRequest) {
 
     if (emailConfigured()) {
       // After the response, never awaited by it (L3).
-      void sendEmail({ to: address, ...passwordResetEmail(user.name ?? "there", link) })
+      void sendEmail({ to: address, stream: "password_reset", ...passwordResetEmail(user.name ?? "there", link) })
         .then((result) => {
-          if (!result.sent) logger.error("Password reset email failed", { userId: user.id, reason: result.reason })
+          if (!result.sent && result.reason !== "suppressed") logger.error("Password reset email failed", { userId: user.id, reason: result.reason })
         })
         .catch((error: unknown) => logger.error("Password reset email failed", { userId: user.id, error: String(error) }))
     }

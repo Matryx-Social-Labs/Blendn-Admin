@@ -4,7 +4,6 @@ import { Panel } from "@/components/dashboard/kit"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { activeMembership } from "@/lib/org-membership"
-import { mayRedeemAtVenue } from "@/lib/rbac"
 import { DoorRedeem } from "./door-redeem"
 
 export const dynamic = "force-dynamic"
@@ -31,13 +30,12 @@ export default async function DoorPage({ params }: { params: Promise<{ id: strin
     select: { id: true, name: true, owner_org_id: true },
   })
   if (!venue) notFound()
-  const member =
-    venue.owner_org_id && mayRedeemAtVenue(session.user.role)
-      ? await db.organisation_members.findFirst({
-          where: { user_id: session.user.id, org_id: venue.owner_org_id, ...activeMembership },
-          select: { id: true },
-        })
-      : null
+  const member = venue.owner_org_id
+    ? await db.organisation_members.findFirst({
+        where: { user_id: session.user.id, org_id: venue.owner_org_id, ...activeMembership },
+        select: { id: true },
+      })
+    : null
   if (!member) redirect("/dashboard/venues")
 
   return (

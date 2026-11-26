@@ -68,6 +68,18 @@ describe("who may receive a domain verification link", () => {
     expect(mockSend).toHaveBeenCalledTimes(1)
   })
 
+  it.each(["suppressed", "provider_error", "not_configured"])(
+    "a %s send gets the one answer: another address or the DNS record, never 'try again', never why (SCRUM-1280)",
+    async (reason) => {
+      mockSend.mockResolvedValue({ sent: false, reason })
+      const result = await sendDomainVerifyEmail(ORG, "dom_1", "postmaster@acme.com")
+      expect(result).toEqual({
+        ok: false,
+        message: "We couldn’t send to that address. Use another address at the domain, or the DNS record.",
+      })
+    }
+  )
+
   it("builds the emailed link through appUrl(), not from the raw environment variable (SCRUM-654)", async () => {
     // appUrl is mocked to a fixed origin: the old `NEXTAUTH_URL ?? ""` gave a relative link here.
     await sendDomainVerifyEmail(ORG, "dom_1", "admin@acme.com")

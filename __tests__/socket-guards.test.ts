@@ -15,16 +15,27 @@ const mockDb = {
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("socket.io", () => ({ Server: class {} }))
 jest.mock("@/lib/mobile-auth", () => ({ verifyAccessToken: jest.fn() }))
+const mockEventOpsView = jest.fn()
+jest.mock("@/lib/socket-ops-auth", () => ({
+  ...jest.requireActual("@/lib/socket-ops-auth"),
+  eventOpsView: (...args: unknown[]) => mockEventOpsView(...args),
+}))
+jest.mock("@/lib/live-snapshot", () => ({ buildLiveSnapshot: jest.fn().mockResolvedValue(null) }))
 
 import { startSponsoredScheduler, stopSponsoredScheduler } from "@/lib/sponsored-scheduler"
 import {
   guardJoin,
+  joinEventOps,
+  JOIN_RETRY_MESSAGE,
   emitChatTyping,
   emitPrivateTyping,
   emitPrivateRead,
+  TYPING_ROOM_CAP,
 } from "@/lib/socket-server"
 import type { AuthenticatedSocket } from "@/lib/socket-server"
 import { roomHandle } from "@/lib/room-handle"
+import { logger } from "@/lib/logger"
+import { opsRoom } from "@/lib/socket-ops-auth"
 
 const USER = "user_self"
 const CHAT_ID = "11111111-1111-1111-1111-111111111111"
@@ -45,10 +56,13 @@ const member = (anonymous_name: string | null, status: string, venueDayWindow?: 
 // can only fail on a genuine email leak.
 const EMAIL_LOCAL_PART = "zaphod.beeblebrox"
 
-function makeSocket() {
+/** `roomSize`: the sockets the adapter holds in the chat room, the typist's included (`TYPING_ROOM_CAP`). */
+function makeSocket({ roomSize = 3, chatId = CHAT_ID, inRoom = true } = {}) {
   const roomEmit = jest.fn()
   const except = jest.fn()
-  const broadcast = { emit: roomEmit, except }
+  // `socket.to(room).volatile.emit`: the room-level `typing:several`.
+  const volatileRoomEmit = jest.fn()
+  const broadcast = { emit: roomEmit, except, volatile: { emit: volatileRoomEmit } }
   except.mockReturnValue(broadcast)
   /*
    * The chat room as `fetchSockets` returns it: somebody else, the typist's
@@ -70,14 +84,20 @@ function makeSocket() {
     id: "sock-self",
     data: { userId: USER, email: `${EMAIL_LOCAL_PART}@example.com` },
     join: jest.fn(),
+    leave: jest.fn(),
     emit: jest.fn(),
     to: jest.fn(() => broadcast),
-    nsp: { in: jest.fn(() => chatRoom) },
+    rooms: new Set(inRoom ? ["sock-self", `chat:${chatId}`] : ["sock-self"]),
+    nsp: {
+      in: jest.fn(() => chatRoom),
+      adapter: { rooms: new Map([[`chat:${chatId}`, new Set(Array.from({ length: roomSize }, (_, i) => `sock-${i}`))]]) },
+    },
   }
   return {
     socket: socket as unknown as AuthenticatedSocket,
     raw: socket,
     roomEmit,
+    volatileRoomEmit,
     except,
     ownOtherDeviceEmit,
     typingSocketEmit,
@@ -87,6 +107,8 @@ function makeSocket() {
 beforeEach(() => {
   jest.clearAllMocks()
 })
+
+afterEach(() => jest.restoreAllMocks())
 
 describe("guardJoin", () => {
   it("joins the room when the check authorizes", async () => {
@@ -108,24 +130,32 @@ describe("guardJoin", () => {
     })
   })
 
-  it("denies instead of crashing when the check throws", async () => {
-    // This is the fail-closed path. Socket.io does not await its listeners, so
-    // before this guard a rejection here escaped as an unhandledRejection and
-    // terminated the process — any authenticated client could trigger it with
-    // a malformed room ID.
+  /*
+   * A check that threw is not a refusal (SCRUM-1402). Since #1061 a read that
+   * waits for a pool connection fails after 5 s and a statement is cancelled at
+   * 8 s, so under the doors-open burst a checked-in guest's join throws -- and
+   * was told FORBIDDEN. A malformed id never gets this far (the uuid check
+   * below), so a throw here is the database failing to answer: "try again".
+   */
+  it.each([
+    ["a pool acquire timeout", new Error("timeout exceeded when trying to connect")],
+    ["a cancelled statement (57014)", Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" })],
+  ])("answers try-again, not FORBIDDEN, when the check throws %s", async (_, failure) => {
     const { socket, raw } = makeSocket()
+    const logged = jest.spyOn(logger, "error").mockImplementation(() => undefined)
 
+    // Socket.io does not await listeners: an escaping rejection would take the process down.
     await expect(
       guardJoin(socket, `chat:${CHAT_ID}`, "Not authorized to join this chat", async () => {
-        throw new Error("Inconsistent column data: Error creating UUID")
+        throw failure
       })
     ).resolves.toBeUndefined()
 
     expect(raw.join).not.toHaveBeenCalled()
-    expect(raw.emit).toHaveBeenCalledWith("error", {
-      message: "Not authorized to join this chat",
-      code: "FORBIDDEN",
-    })
+    expect(raw.emit).toHaveBeenCalledTimes(1)
+    expect(raw.emit).toHaveBeenCalledWith("error", { message: JOIN_RETRY_MESSAGE, code: "SERVER_ERROR" })
+    // An error line, so a saturated pool reaches Sentry; once per join.
+    expect(logged).toHaveBeenCalledTimes(1)
   })
 
   it("denies a room whose id is not a uuid, without asking the check (SCRUM-940)", async () => {
@@ -142,16 +172,67 @@ describe("guardJoin", () => {
     expect(check).not.toHaveBeenCalled()
   })
 
-  it("does not leak whether the room exists — same denial either way", async () => {
-    const missing = makeSocket()
-    await guardJoin(missing.socket, `chat:${CHAT_ID}`, "Not authorized to join this chat", async () => false)
+  it("does not leak whether the room exists: a malformed id and a refusal answer alike", async () => {
+    const malformed = makeSocket()
+    await guardJoin(malformed.socket, "chat:abc", "Not authorized to join this chat", async () => true)
 
-    const throwing = makeSocket()
-    await guardJoin(throwing.socket, `chat:${CHAT_ID}`, "Not authorized to join this chat", async () => {
-      throw new Error("boom")
-    })
+    const refused = makeSocket()
+    await guardJoin(refused.socket, `chat:${CHAT_ID}`, "Not authorized to join this chat", async () => false)
 
-    expect(missing.raw.emit.mock.calls).toEqual(throwing.raw.emit.mock.calls)
+    expect(malformed.raw.emit.mock.calls).toEqual(refused.raw.emit.mock.calls)
+  })
+})
+
+describe("joinEventOps (the Live tab's join)", () => {
+  const dashboard = () => {
+    const made = makeSocket()
+    Object.assign(made.raw.data, { principal: "dashboard", role: "organizer" })
+    return made
+  }
+
+  it("answers try-again, not OPS_FORBIDDEN, when the access check throws, and leaves both copies (SCRUM-1402)", async () => {
+    const { socket, raw } = dashboard()
+    jest.spyOn(logger, "error").mockImplementation(() => undefined)
+    mockEventOpsView.mockRejectedValue(new Error("timeout exceeded when trying to connect"))
+
+    await joinEventOps(socket, EVENT_ID)
+
+    expect(raw.emit).toHaveBeenCalledTimes(1)
+    expect(raw.emit).toHaveBeenCalledWith("error", { message: JOIN_RETRY_MESSAGE, code: "SERVER_ERROR" })
+    expect(raw.join).not.toHaveBeenCalled()
+    expect(raw.leave).toHaveBeenCalledWith(opsRoom(EVENT_ID, "host"))
+    expect(raw.leave).toHaveBeenCalledWith(opsRoom(EVENT_ID, "venue"))
+  })
+
+  it("still refuses with OPS_FORBIDDEN when the check says no", async () => {
+    const { socket, raw } = dashboard()
+    mockEventOpsView.mockResolvedValue(null)
+
+    await joinEventOps(socket, EVENT_ID)
+
+    expect(raw.emit).toHaveBeenCalledWith("error", { message: "Not authorized to watch this event", code: "OPS_FORBIDDEN" })
+    expect(raw.join).not.toHaveBeenCalled()
+  })
+
+  it("is out of both copies before it asks, so a failed re-check keeps neither", async () => {
+    const { socket, raw } = dashboard()
+    let answer: (view: string | null) => void = () => undefined
+    mockEventOpsView.mockReturnValue(new Promise((resolve) => (answer = resolve)))
+
+    const joining = joinEventOps(socket, EVENT_ID)
+    expect(raw.leave).toHaveBeenCalledTimes(2)
+    answer("host")
+    await joining
+
+    expect(raw.join).toHaveBeenCalledWith(opsRoom(EVENT_ID, "host"))
+    expect(raw.emit).not.toHaveBeenCalled()
+  })
+
+  it("never asks for a phone socket", async () => {
+    const { socket, raw } = makeSocket()
+    await joinEventOps(socket, EVENT_ID)
+    expect(raw.emit).toHaveBeenCalledWith("error", { message: "Not authorized", code: "OPS_FORBIDDEN" })
+    expect(mockEventOpsView).not.toHaveBeenCalled()
   })
 })
 
@@ -284,6 +365,123 @@ describe("emitChatTyping", () => {
 
     await expect(emitChatTyping(socket, "not-a-uuid", true)).resolves.toBeUndefined()
     expect(roomEmit).not.toHaveBeenCalled()
+  })
+})
+
+describe("emitChatTyping above TYPING_ROOM_CAP (SCRUM-1309)", () => {
+  // Each test its own room: the 5 s window is per room and process-wide.
+  let n = 0
+  const room = () => `abcdef33-3333-4333-8333-${String(++n).padStart(12, "0")}`
+  const reads = () =>
+    mockDb.chat_group_members.findUnique.mock.calls.length +
+    mockDb.blocked_users.findMany.mock.calls.length +
+    mockDb.events.findUnique.mock.calls.length
+
+  it("is 50", () => {
+    expect(TYPING_ROOM_CAP).toBe(50)
+  })
+
+  it("at the cap keeps today's per-person event, sent volatile", async () => {
+    mockDb.chat_group_members.findUnique.mockResolvedValue(member("Cosmic Panda", "active"))
+    const plain = jest.fn()
+    const volatile = jest.fn()
+    const { socket, raw, volatileRoomEmit } = makeSocket({ roomSize: TYPING_ROOM_CAP })
+    raw.nsp.in.mockReturnValue({
+      except: () => ({ fetchSockets: async () => [{ id: "sock-peer", data: { userId: "user_peer" }, emit: plain, volatile: { emit: volatile } }] }),
+    } as never)
+
+    await emitChatTyping(socket, CHAT_ID, true)
+
+    expect(volatile).toHaveBeenCalledWith("chat:typing", expect.objectContaining({ userName: "Cosmic Panda", isTyping: true }))
+    expect(plain).not.toHaveBeenCalled()
+    expect(volatileRoomEmit).not.toHaveBeenCalled()
+  })
+
+  it("above it reads nothing and sends one room-level typing:several, no names", async () => {
+    const id = room()
+    const { socket, raw, roomEmit, volatileRoomEmit, except } = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id })
+
+    await emitChatTyping(socket, id, true)
+
+    expect(reads()).toBe(0)
+    expect(raw.nsp.in).not.toHaveBeenCalled()
+    expect(raw.to).toHaveBeenCalledWith(`chat:${id}`)
+    // Nameless, so the app cannot drop its own: the typist's other devices are left out here.
+    expect(except).toHaveBeenCalledWith(`user:${USER}`)
+    expect(volatileRoomEmit).toHaveBeenCalledTimes(1)
+    expect(volatileRoomEmit).toHaveBeenCalledWith("typing:several", { chatGroupId: id })
+    expect(roomEmit).not.toHaveBeenCalled()
+  })
+
+  it("sends it at most once every 5 s per room, whoever types", async () => {
+    const id = room()
+    const now = jest.spyOn(Date, "now").mockReturnValue(1_000_000)
+    const a = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id })
+    const b = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id })
+
+    await emitChatTyping(a.socket, id, true)
+    now.mockReturnValue(1_004_999)
+    await emitChatTyping(b.socket, id, true)
+    expect(a.volatileRoomEmit).toHaveBeenCalledTimes(1)
+    expect(b.volatileRoomEmit).not.toHaveBeenCalled()
+
+    now.mockReturnValue(1_005_000)
+    await emitChatTyping(a.socket, id, true)
+    expect(a.volatileRoomEmit).toHaveBeenCalledTimes(2)
+    expect(reads()).toBe(0)
+  })
+
+  it("sends no stop: the app lets it expire", async () => {
+    const id = room()
+    const { socket, volatileRoomEmit, roomEmit } = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id })
+
+    await emitChatTyping(socket, id, true)
+    await emitChatTyping(socket, id, false)
+
+    expect(volatileRoomEmit).toHaveBeenCalledTimes(1)
+    expect(roomEmit).not.toHaveBeenCalled()
+    expect(reads()).toBe(0)
+  })
+
+  it("reads nothing and says nothing for a socket that is not in the room, at any size", async () => {
+    // The join is the door; a socket that never passed it, or was taken out, types into nothing.
+    const id = room()
+    const outsider = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id, inRoom: false })
+    mockDb.chat_group_members.findUnique.mockResolvedValue(member("Cosmic Panda", "active"))
+    const small = makeSocket({ roomSize: 3, inRoom: false })
+
+    await emitChatTyping(outsider.socket, id, true)
+    await emitChatTyping(small.socket, CHAT_ID, true)
+
+    expect(outsider.volatileRoomEmit).not.toHaveBeenCalled()
+    expect(small.roomEmit).not.toHaveBeenCalled()
+    expect(reads()).toBe(0)
+    // And an outsider does not spend the room's 5 s: a member right after is heard.
+    const member_ = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id })
+    await emitChatTyping(member_.socket, id, true)
+    expect(member_.volatileRoomEmit).toHaveBeenCalledTimes(1)
+  })
+
+  it("names the room in lower case, as every broadcast does: an upper-case spelling is still a big room", async () => {
+    const id = room()
+    const { socket, volatileRoomEmit } = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id })
+
+    await emitChatTyping(socket, id.toUpperCase(), true)
+
+    expect(reads()).toBe(0)
+    expect(volatileRoomEmit).toHaveBeenCalledTimes(1)
+  })
+
+  it("a muted member above the cap still says typing:several: nothing names them", async () => {
+    // A mute is read nowhere on this path, by design; a ban takes the socket out of the room.
+    mockDb.chat_group_members.findUnique.mockResolvedValue(member("Cosmic Panda", "muted"))
+    const id = room()
+    const { socket, volatileRoomEmit } = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id })
+
+    await emitChatTyping(socket, id, true)
+
+    expect(volatileRoomEmit).toHaveBeenCalledTimes(1)
+    expect(reads()).toBe(0)
   })
 })
 

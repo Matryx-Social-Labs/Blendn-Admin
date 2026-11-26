@@ -20,15 +20,15 @@ import {
 const ORG = "org-host"
 const VENUE_ORG = "org-venue"
 
-const admin: PermissionActor = { id: "u-admin", role: "app_admin", orgIds: [] }
-const host: PermissionActor = { id: "u-host", role: "organizer", orgIds: [ORG] }
+const admin: PermissionActor = { id: "u-admin", role: "app_admin", orgIds: [], editOrgIds: [] }
+const host: PermissionActor = { id: "u-host", role: "organizer", orgIds: [ORG], editOrgIds: [ORG] }
 const venueOwner: PermissionActor = {
   id: "u-venue",
   role: "venue_owner",
-  orgIds: [VENUE_ORG],
+  orgIds: [VENUE_ORG], editOrgIds: [VENUE_ORG],
 }
-const stranger: PermissionActor = { id: "u-x", role: "organizer", orgIds: ["org-other"] }
-const attendee: PermissionActor = { id: "u-a", role: "attendee", orgIds: [] }
+const stranger: PermissionActor = { id: "u-x", role: "organizer", orgIds: ["org-other"], editOrgIds: ["org-other"] }
+const attendee: PermissionActor = { id: "u-a", role: "attendee", orgIds: [], editOrgIds: [] }
 
 // Claimed long before the event, so the venue owner operates it (SCRUM-355).
 const event: PermissionEvent = {
@@ -41,6 +41,10 @@ const event: PermissionEvent = {
 describe("announcement — whoever runs the event", () => {
   it("lets the organising org broadcast", () => {
     expect(canBroadcast(host, event, "announcement")).toBe(true)
+  })
+
+  it("refuses the organising org's staff member: speaking for the event is an edit (SCRUM-1244)", () => {
+    expect(canBroadcast({ ...host, editOrgIds: [] }, event, "announcement")).toBe(false)
   })
 
   it("refuses the venue owner on an event another org runs in their building", () => {
@@ -76,7 +80,7 @@ describe("announcement — whoever runs the event", () => {
 
   it("refuses an actor with no organisation at all", () => {
     // The `orgIds: []` hole, in its broadcast form.
-    expect(canBroadcast({ ...host, orgIds: [] }, event, "announcement")).toBe(false)
+    expect(canBroadcast({ ...host, orgIds: [], editOrgIds: [] }, event, "announcement")).toBe(false)
   })
 })
 
@@ -203,7 +207,7 @@ describe("an event with no venue", () => {
 
 describe("fails closed", () => {
   it("refuses a half-built actor", () => {
-    const broken = { id: "", role: "organizer", orgIds: [ORG] } as PermissionActor
+    const broken = { id: "", role: "organizer", orgIds: [ORG], editOrgIds: [ORG] } as PermissionActor
     for (const kind of ["announcement", "sponsored", "system"] as BroadcastKind[]) {
       expect(
         canBroadcast(broken, event, kind, {

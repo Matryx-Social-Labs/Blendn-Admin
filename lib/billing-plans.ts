@@ -12,13 +12,24 @@
  * year (two months free, audit §6.2); all before 18% GST. India shows consumer prices
  * with tax in, and the plan says to (₹2,359 / ₹589), so what Razorpay charges
  * is the GST-inclusive figure rounded to the rupee — the number on the card is
- * the number on the statement. The invoice splits it back out; issuing it with
- * the right GSTIN is Razorpay Invoices' job, configured by the owner.
+ * the number on the statement. No invoice is issued yet: nothing sends a GSTIN
+ * to Razorpay, and whether and how one is issued is the legal Epic's question
+ * (SCRUM-1269), so no page promises one.
  *
  * Pure and client-safe: no database, no secrets.
  */
 
 export const GST_RATE_PERCENT = 18
+
+/**
+ * Where these plans are sold: the market the prices above are in (rupees, GST).
+ * Elsewhere Analytics stays free (DECISIONS: Canada until a Canadian host asks
+ * to pay). The rule that applies it is `mayBuyHere` (lib/plan-market.ts).
+ */
+export const PLAN_MARKET = "IN"
+
+/** What the Plan page says in place of a price and Buy where plans are not sold (SCRUM-1151). */
+export const FREE_WHILE_LAUNCHING = "Free while we launch in your city."
 
 export type BillingPlanKey =
   | "analytics_monthly"
@@ -132,6 +143,10 @@ export function rupees(amount: number): string {
     maximumFractionDigits: 0,
   }).format(amount)
 }
+
+/** A plan date as the Plan page says it: "3 Jan 2027", on India's clock, no zone label (plans are sold in India only). */
+const PLAN_DAY = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })
+export const planDay = (d: Date): string => PLAN_DAY.format(d)
 
 /** The card's small print: "₹1,999 + ₹360 GST". */
 export function gstSplit(plan: BillingPlan): string {

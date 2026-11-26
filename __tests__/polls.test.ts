@@ -83,7 +83,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockDb.$transaction.mockImplementation((fn: (tx: unknown) => unknown) => fn(mockDb))
   mockAuth.mockResolvedValue({ user: { id: USER, role: "organizer" } })
-  mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: ORG }])
+  mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: ORG, role: "owner" }])
   mockDb.events.findUnique.mockResolvedValue({
     id: EVENT,
     start_time: new Date(NOW - HOUR),

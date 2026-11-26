@@ -39,7 +39,7 @@ type Role = "organizer" | "venue_owner"
  */
 const REASSURANCES = [
   "Free to run events — check-in, the live headcount and room moderation cost nothing.",
-  "Analytics is an optional paid plan, for when you want to know which nights worked.",
+  "Analytics is free for your first three months of events, then an optional paid plan.",
   "Read by a person, not a filter. Usually within two working days.",
 ] as const
 
@@ -261,7 +261,7 @@ export default function ApplyPage() {
               <Field label="Address">
                 <Textarea value={form.address} onChange={set("address")} rows={2} className="rounded-2xl" />
               </Field>
-              <Field label="GSTIN" hint="15 characters. Checked for format only — we don't share it.">
+              <Field label="GSTIN (India only)" hint="15 characters. Checked for format only — we don't share it. A website works anywhere.">
                 <Input
                   value={form.gstin}
                   onChange={set("gstin")}
@@ -316,7 +316,7 @@ export default function ApplyPage() {
                 <Callout tone={proofGiven ? "success" : "warning"}>
                   {proofGiven
                     ? "Thanks — that's enough to submit from a personal address."
-                    : "That's a personal email address. Add a GSTIN or your website above and you can submit — a company address needs neither."}
+                    : "That's a personal email address. Add your website (or, in India, a GSTIN) above and you can submit — a company address needs neither."}
                 </Callout>
               ) : null}
             </div>

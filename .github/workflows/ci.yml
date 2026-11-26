@@ -17,9 +17,11 @@ name: CI
 
 on:
   workflow_dispatch:
+  # No paths filter on PRs: lint-and-types, test and build are required checks
+  # on dev, and a docs-only PR that skipped them stayed BLOCKED for good
+  # (SCRUM-1406). The push filter below stays: nothing waits on a push run.
   pull_request:
     branches: [dev, staging, prod]
-    paths-ignore: ["**.md", "docs/**", ".benchmarks/**"]
   # `push` only on dev. staging and prod are only ever reached through a
   # promotion PR, which already ran this workflow on the identical content —
   # re-running on the post-merge push was ~11 of the 60 runs measured in a day.
@@ -585,6 +587,15 @@ jobs:
             test-results/
             /tmp/memory.log
             /tmp/server.log
+          retention-days: 7
+
+      # Screens a spec saved on purpose (test-results/screens/), for reading against the approved mockup.
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: e2e-screens
+          path: test-results/screens/
+          if-no-files-found: ignore
           retention-days: 7
 
   build:

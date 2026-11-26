@@ -83,12 +83,12 @@ to verify, not research. The dashboard shows prices including GST.
 
 - **Organizers run events free, forever.** Everything already shipped stays
   free; Analytics sells only what is new (step 16). **Event Pass** ₹499 per
-  event; **Analytics** ₹1,999/mo or ₹19,990/yr — shown and charged as ₹589,
-  ₹2,359 and ₹23,588 with GST (`lib/billing-plans.ts`, the one price table). The paywall starts 30 days after the
-  organisation's first event that clears the privacy floors. Founding grant: 6
+  event, sold only for a night that has ended with at least 5 people checked in (SCRUM-1363); **Analytics** ₹1,999/mo or ₹19,990/yr — shown and charged as ₹589,
+  ₹2,359 and ₹23,588 with GST (`lib/billing-plans.ts`, the one price table). The paywall starts 90 days after the
+  organisation's first event with at least 8 people checked in (SCRUM-1269). Founding grant: 6
   months of Analytics.
-- **Venues pay nothing until venue days are live and a venue has 4 weeks of
-  data.** Listed is free, with 30 days of aggregate insights. **Venue Pro**
+- **Venues pay nothing until venue days are live and a venue has three months
+  (90 days) of data** (SCRUM-1320). Listed is free, with 30 days of aggregate insights. **Venue Pro**
   ₹2,999/mo per venue. Venue Max is deferred. Promoted nights are sold à la
   carte at ₹699–999 a night; Pro includes 4. Founding grant: 3 months of Pro per
   claimed Bengaluru venue.
@@ -102,7 +102,7 @@ to verify, not research. The dashboard shows prices including GST.
 
 
 **Leaving a match.** Reviewed twice by `/plan-eng-review` and Codex; the second
-pass found a live exploit path rather than a gap.
+pass found an exploit path (T17, below), closed in #197.
 
 | # | What | State |
 |---|---|---|
@@ -205,9 +205,6 @@ cached page could be served to a minor inside the 30-second TTL. Discovery only
 that function. It is now `lib/events-cache-key.ts`, out of the route so it can
 be tested, and `__tests__/events-cache-key.test.ts` asserts the property
 directly: two requests that would compute different lists never share a key.
-
-**Still open:** `app/api/geocode/route.ts` restricts geocoding to
-`countrycodes=in`, which quietly makes the product India-only.
 
 
 **Onboarding, and the age that goes stale underneath it.** The app has one
@@ -438,7 +435,7 @@ testing is complete; branded to the product; developer docs later and private.
 
 ### 4. Designed features still in scope
 
-From `DESIGN_HANDOFF.md`. In the Figma, in neither repo. **Profile strength was
+These are designed in the Figma and built in neither repo. **Profile strength was
 cut** — see *Validated — not doing*. None of these three is a wedge; do them when
 they are cheap, not before the three items above.
 
@@ -869,7 +866,7 @@ so ranking on it buys nothing and would cluster rooms by stars.
   including one in Germany, age gating, polygon and circle fences, draft and
   private negatives — and completely changed in what it looks like.
 
-  Every identifier was `QA`: accounts `qa-admin@blendn.app`, orgs "Blendn QA
+  Every identifier was `QA`: accounts (the QA admin and its siblings, now `RETIRED_TEST_ACCOUNTS` in `scripts/test-accounts.ts`), orgs "Blendn QA
   Events", venues "QA Circle Venue", events "QA Baseline — Bengaluru". Staging
   holds nothing but test data, so the prefix bought nothing and cost realism —
   and a fixture called "QA Event Without A Cover Image" is not a card anybody

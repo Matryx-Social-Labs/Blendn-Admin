@@ -5,11 +5,12 @@ import { revalidatePath } from "next/cache"
 import type { Prisma } from "@prisma/client"
 import { z } from "zod"
 
-import { analyticsAccess, mayOpenEvent } from "@/lib/analytics-access"
+import { analyticsAccess, mayOpenEvent, worthAPass } from "@/lib/analytics-access"
 import { billingOrgFor, ONE_OPEN_PER_ORG, ONE_OPEN_PER_VENUE, OPEN_SUBSCRIPTION_STATUSES } from "@/lib/billing"
 import { BILLING_PLANS, chargeMinor, type BillingPlanKey } from "@/lib/billing-plans"
 import { currentUser, requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
+import { MIN_CELL } from "@/lib/disclosure"
 import { endGrants, grantEntitlement, hasEntitlement, liveEntitlement, liveGrant, livePlus, revokePaid } from "@/lib/entitlements"
 import { razorpayKeys } from "@/lib/env"
 import { realEventsWhere } from "@/lib/event-kind"
@@ -25,6 +26,7 @@ import {
   RazorpayError,
 } from "@/lib/razorpay"
 import { activeMembership } from "@/lib/org-membership"
+import { mayBuyHere } from "@/lib/plan-market"
 import { mayManageVenueBilling } from "@/lib/rbac"
 import { Refusal } from "@/lib/refusal"
 import { cancelThenRecord } from "@/lib/subscription-cancel"
@@ -58,6 +60,7 @@ import { venueReadiness } from "@/lib/venue-plan"
  */
 
 const PAYMENTS_OFF = "Payments aren’t switched on here yet."
+const NOT_SOLD_HERE = "Plans aren’t sold in your city yet. Free while we launch there."
 const STARTS = { max: 5, windowMs: 60_000 }
 /** The lock is held across up to two Razorpay calls (≤15 s each: a previous owner's checkout cancelled, then ours made), so the transaction may run that long and a little more. */
 const TX = { maxWait: 10_000, timeout: 40_000 }
@@ -108,8 +111,9 @@ async function payable(rateKey: string): Promise<string> {
 const NOT_YOUR_VENUE = "That venue isn’t one of your organisation’s."
 
 /**
- * The caller may change this venue's plan: a venue owner who is an owner or
- * admin of the organisation that owns it (`mayManageVenueBilling`), with
+ * The caller may change this venue's plan: an owner or admin of the
+ * organisation that owns it (`mayManageVenueBilling`), whatever their
+ * User.role (SCRUM-1246), with
  * payments on and under the rate. Anyone else's venue is "not yours", the
  * same answer as a venue that does not exist.
  */
@@ -126,10 +130,21 @@ async function requireVenueBuyer(venueId: string) {
     select: { role: true },
   })
   if (!member) throw new Refusal(NOT_YOUR_VENUE)
-  if (!mayManageVenueBilling(user.role, member.role)) {
+  if (!mayManageVenueBilling(member.role)) {
     throw new Refusal("Only an owner or admin of the venue’s organisation can change its plan.")
   }
   return { user, orgId: venue.owner_org_id, keyId: await payable(`venue:${venue.id}`) }
+}
+
+/**
+ * Plans are sold only where their prices are (`mayBuyHere`, SCRUM-1151): the
+ * server's gate, not the page's. Asked by each of the three starts (Analytics,
+ * Event Insights, Venue Pro) once the buyer and payments are checked, before
+ * any of the start's own refusals, a lock, a row or a Razorpay call; never by
+ * a cancel, so an organisation that already pays can always stop it.
+ */
+async function requireSoldHere(orgId: string): Promise<void> {
+  if (!(await mayBuyHere(orgId))) throw new Refusal(NOT_SOLD_HERE)
 }
 
 /** The organisation's purchases, one at a time, until the transaction ends. */
@@ -307,6 +322,7 @@ async function startSubscription(
 export async function startAnalyticsCheckout(period: "monthly" | "yearly"): Promise<SubscriptionCheckout> {
   const chosen = parse(periodSchema, period, "Choose monthly or yearly.")
   const { user, org, keyId } = await requireBuyer()
+  await requireSoldHere(org.orgId)
   const plan = BILLING_PLANS[chosen === "monthly" ? "analytics_monthly" : "analytics_yearly"]
   return startSubscription(
     { orgId: org.orgId, venueId: null, already: "Your organisation already has an Analytics subscription. Manage it below." },
@@ -319,7 +335,7 @@ export async function startAnalyticsCheckout(period: "monthly" | "yearly"): Prom
 /**
  * Start (or resume) a Venue Pro subscription for one venue (plan v2 §9.1b).
  *
- * Refused until the venue has four weeks of venue-day data (the owner's
+ * Refused until the venue has three months of venue-day data (the owner's
  * no-charge rule, `lib/venue-plan.ts`), and while Pro is already live on it —
  * a founding grant included: subscribe when it ends, never a charge on top of
  * a gift.
@@ -328,12 +344,13 @@ export async function startVenueProCheckout(venueId: string, period: "monthly" |
   const id = parse(idSchema, venueId, NOT_YOUR_VENUE)
   const chosen = parse(periodSchema, period, "Choose monthly or yearly.")
   const { user, orgId, keyId } = await requireVenueBuyer(id)
+  await requireSoldHere(orgId)
   const ready = await venueReadiness(id)
   if (!ready.chargeable) {
     throw new Refusal(
       ready.chargeableFrom
-        ? `Venue Pro can be bought from ${GRANT_DAY.format(ready.chargeableFrom)}: four weeks after people first went live here.`
-        : "Venue Pro can be bought four weeks after people first go live at this venue."
+        ? `Venue Pro can be bought from ${GRANT_DAY.format(ready.chargeableFrom)}: three months after people first went live here.`
+        : "Venue Pro can be bought three months after people first go live at this venue."
     )
   }
   const live = await liveEntitlement({ kind: "venue", id }, "venue_pro")
@@ -358,8 +375,10 @@ export interface OrderCheckout {
 export async function startEventPassCheckout(eventId: string): Promise<OrderCheckout> {
   const id = parse(idSchema, eventId, "That event isn’t one of your organisation’s.")
   const { user, org, keyId } = await requireBuyer()
+  await requireSoldHere(org.orgId)
   const subject = { kind: "org" as const, id: org.orgId }
   const plan = BILLING_PLANS.event_pass
+  const now = new Date()
   let orphan: string | null = null
   try {
     const order = await db.$transaction(async (tx) => {
@@ -368,7 +387,7 @@ export async function startEventPassCheckout(eventId: string): Promise<OrderChec
       // found", the same answer as one that does not exist.
       const event = await tx.events.findFirst({
         where: { id, organizer_org_id: org.orgId, deleted_at: null, ...realEventsWhere },
-        select: { id: true },
+        select: { id: true, end_time: true },
       })
       if (!event) throw new Refusal("That event isn’t one of your organisation’s.")
       if (await hasEntitlement(subject, "analytics")) {
@@ -379,9 +398,15 @@ export async function startEventPassCheckout(eventId: string): Promise<OrderChec
       }
       // Nothing to sell while it is open anyway: the free window, or the first
       // event that cleared the floor (lib/analytics-access.ts).
-      const access = await analyticsAccess(org.orgId)
+      const access = await analyticsAccess(org.orgId, now)
       if (access.org) throw new Refusal("Every event’s analytics are free for now, so there’s nothing to buy yet.")
       if (mayOpenEvent(access, id)) throw new Refusal("That event’s analytics are already open to you.")
+      // Never a deliverable the buyer cannot receive (SCRUM-1363): the list
+      // on the Plan page asks the same, but a request can name any event.
+      if (event.end_time >= now) throw new Refusal("Event Insights can be bought once that night has ended.")
+      if (!(await worthAPass([event], now)).has(id)) {
+        throw new Refusal(`That night had fewer than ${MIN_CELL} people checked in, so there is nothing to show.`)
+      }
       // An unpaid order for this event is the one to pay: never a second.
       const open = await tx.billing_checkouts.findFirst({
         where: { org_id: org.orgId, kind: "order", event_id: id, status: "created" },
@@ -456,7 +481,7 @@ export async function cancelVenuePro(venueId: string): Promise<void> {
       select: { org_id: true, role: true },
     })
   )
-    .filter((m) => mayManageVenueBilling(user.role, m.role))
+    .filter((m) => mayManageVenueBilling(m.role))
     .map((m) => m.org_id)
   if (payers.length === 0) throw new Refusal("Only an owner or admin of the organisation that pays can cancel Venue Pro.")
   // Keyed on the caller: `venue:<id>` is the venue's own bucket (starting a plan spends it),

@@ -1,7 +1,9 @@
 import type { Metadata } from "next"
 
 import { PolicyPage } from "@/components/policy-page"
+import { FREE_WINDOW_DAYS } from "@/lib/analytics-access"
 import { BILLING_PLANS, grossRupees, gstSplit, rupees, type BillingPlan } from "@/lib/billing-plans"
+import { MIN_ATTENDEES } from "@/lib/connection-metrics"
 
 export const metadata: Metadata = { title: "Pricing" }
 
@@ -83,20 +85,20 @@ export default function PricingPage() {
     <PolicyPage
       path="/pricing"
       title="Pricing"
-      updated="26 October 2026"
+      updated="26 November 2026"
       lede="What the Blend'n dashboard sells to event hosts, venues and sponsors. Prices are in Indian rupees; the first figure is what you pay, GST included."
     >
       <h2>Hosts (organizers)</h2>
       <PriceTable caption="Plans for hosts" rows={HOSTS} />
       <p className="mt-3 text-[0.8125rem]">
-        Analytics is free for a new organisation until 30 days after its first event with at least five people
-        checked in, and that event&apos;s analytics stay free for good.
+        Analytics is free for a new organisation for {FREE_WINDOW_DAYS} days from its first event with at least{" "}
+        {MIN_ATTENDEES} people checked in, and that event&apos;s analytics stay free for good.
       </p>
 
       <h2>Venues</h2>
       <PriceTable caption="Plans for venues" rows={VENUES} />
       <p className="mt-3 text-[0.8125rem]">
-        Listing a venue on Blend&apos;n is free. Venue Pro can be bought once the venue has four weeks of data.
+        Listing a venue on Blend&apos;n is free. Venue Pro can be bought once the venue has three months of data.
       </p>
 
       <h2>Sponsors</h2>
@@ -108,13 +110,9 @@ export default function PricingPage() {
       <h2>How you pay</h2>
       <p>
         Plans are bought on the dashboard&apos;s Plan page, by the organisation&apos;s owner or an admin, and paid
-        through Razorpay&apos;s checkout. Monthly and yearly plans renew automatically until cancelled; an Event
-        Pass is a single payment. Every payment is listed on the Plan page with its Razorpay invoice or payment
-        reference.
+        through Razorpay&apos;s checkout. Monthly and yearly plans renew automatically until cancelled; Event
+        Insights is a single payment. Every payment is listed on the Plan page with its Razorpay payment reference.
       </p>
-
-      <h2>Not sold here</h2>
-      <p>Blend&apos;n+ for attendees is bought inside the Blend&apos;n app, through the App Store or Google Play.</p>
     </PolicyPage>
   )
 }
