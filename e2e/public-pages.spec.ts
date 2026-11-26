@@ -97,7 +97,7 @@ test("Apply says what the plan is, not that pricing is undecided", async ({ base
   const ctx = await browser.newContext({ baseURL })
   const page = await ctx.newPage()
   await page.goto("/apply")
-  await expect(page.getByText("Analytics is an optional paid plan", { exact: false })).toBeVisible()
+  await expect(page.getByText("Analytics is free for your first three months of events, then an optional paid plan", { exact: false })).toBeVisible()
   // Superseded by the Free / Analytics model (the kit's NOTES-2).
   await expect(page.getByText("pricing isn't decided", { exact: false })).toHaveCount(0)
   // Person-reviewed (R6): no account is made by applying.

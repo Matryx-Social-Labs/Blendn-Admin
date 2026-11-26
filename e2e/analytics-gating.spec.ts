@@ -11,14 +11,14 @@ import { randomUUID } from "node:crypto"
  * Fixtures are their own organisations, so the shared seed world is not
  * changed:
  *
- *   - Org A, past its free window: a first event of six that ended 60 days ago
+ *   - Org A, past its free window: a first event of eight that ended 120 days ago
  *     (open for good, stay 1h 35m); a canary event ten days ago whose every
  *     figure is a needle — 12 people, median stay 2h 53m, the middle half
  *     2h 53m – 3h 50m, 58% left early, 42% of stays ended by the sweeper, every
  *     arrival in the 10-minute slot that starts at 4:20 am IST, and 13 people
  *     who looked in the app; and a pass event twenty days ago (stay 2h 11m)
  *     with an Event Pass.
- *   - Org B, inside its free window: one event of five, five days ago (stay
+ *   - Org B, inside its free window: one event of eight, five days ago (stay
  *     1h 47m).
  *
  * Each page is fetched twice with a minted session: as HTML (with the RSC
@@ -149,8 +149,8 @@ test.beforeAll(async () => {
   ids.orgA = await org("org A", ids.owner, ids.staff)
   ids.orgB = await org("org B", ids.ownerB)
 
-  const firstPeople = await people("first", 6)
-  ids.first = await event(ids.orgA, ids.owner, "first", daysAgoAt(now, 60), firstPeople.map((user_id) => ({ user_id, minutes: 95 })))
+  const firstPeople = await people("first", 8)
+  ids.first = await event(ids.orgA, ids.owner, "first", daysAgoAt(now, 120), firstPeople.map((user_id) => ({ user_id, minutes: 95 })))
 
   // 04:20 IST, ten days ago: a slot the sample's evening arrivals never use.
   const tenDaysAgo = new Date(now - 10 * DAY)
@@ -185,7 +185,7 @@ test.beforeAll(async () => {
     },
   })
 
-  const freshPeople = await people("fresh", 5)
+  const freshPeople = await people("fresh", 8)
   ids.fresh = await event(ids.orgB, ids.ownerB, "fresh", daysAgoAt(now, 5), freshPeople.map((user_id) => ({ user_id, minutes: 107 })))
 })
 

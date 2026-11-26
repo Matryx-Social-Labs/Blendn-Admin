@@ -1908,11 +1908,12 @@ model organisations {
   /// somebody paid; if everyone who can announce can also mark a message
   /// sponsored, the label stops meaning anything and becomes a styling choice.
   may_sponsor             Boolean                 @default(false)
-  /// When Analytics stops being free for this organisation: 30 days after the
-  /// end of its first event with at least 5 people checked in, and that event
-  /// (step 16, lib/analytics-access.ts). Written ONCE, by the first read that
-  /// finds such an event, and never moved: soft-deleting the event, or a
-  /// later re-count, cannot restart the 30 days. A plain id, no foreign key:
+  /// When Analytics stops being free for this organisation: 90 days after the
+  /// end of its first event with at least 8 people checked in, and that event
+  /// (SCRUM-1269, lib/analytics-access.ts). Written ONCE, by the first read that
+  /// finds such an event, and never re-derived: soft-deleting the event, or a
+  /// later re-count, cannot restart the window. Moved once, by 60 days, when
+  /// the window went from 30 to 90 (migration 20261126100000). A plain id, no foreign key:
   /// it is a record of a decision, kept if the event goes.
   analytics_free_until    DateTime?               @db.Timestamptz(6)
   first_free_event_id     String?                 @db.Uuid
