@@ -645,7 +645,7 @@ export async function POST(
     let examinedInline = false
 
     // --- Pre-emit moderation: OpenAI check with 1s timeout ---
-    // Run the OpenAI text check before broadcasting, raced against 1 s. Without a
+    // Race the OpenAI text check (started beside the write) against 1 s. Without a
     // verdict by then, an event room with more than `BIG_ROOM_HERE_COUNT` people
     // here waits for it or refuses (`verdictForBigRoom`; a missing key never
     // waits); any other room emits now, and `moderateMessage` finishes the check,
