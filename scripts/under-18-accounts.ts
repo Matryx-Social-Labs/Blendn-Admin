@@ -103,11 +103,10 @@ export async function knownMinorsUnstamped(db: PrismaClient, now: Date): Promise
 }
 
 /** Stamp every live, unstamped account with a known age under 18. A stamp already set is never moved. */
-export async function stampKnownMinors(db: PrismaClient, now: Date): Promise<{ ids: string[]; stamped: number }> {
+export async function stampKnownMinors(db: PrismaClient, now: Date): Promise<string[]> {
   const ids = await knownMinorsUnstamped(db, now)
-  if (ids.length === 0) return { ids, stamped: 0 }
-  const { count } = await db.profiles.updateMany({ where: { id: { in: ids }, under_18_since: null }, data: { under_18_since: now } })
-  return { ids, stamped: count }
+  if (ids.length > 0) await db.profiles.updateMany({ where: { id: { in: ids }, under_18_since: null }, data: { under_18_since: now } })
+  return ids
 }
 
 /** Live accounts stamped `DELETE_AFTER_DAYS` or more days before `now`, oldest stamp first. */
@@ -170,9 +169,7 @@ async function main() {
       return
     }
     if (command.mode === "apply") {
-      const { ids, stamped } = await stampKnownMinors(db, now)
-      printIds(`stamped now (known age under 18)`, ids)
-      if (stamped !== ids.length) console.log(`  (${ids.length - stamped} were stamped by another run first)`)
+      printIds("stamped now (known age under 18)", await stampKnownMinors(db, now))
     } else {
       printIds("would stamp (known age under 18, no stamp)", await knownMinorsUnstamped(db, now))
     }
