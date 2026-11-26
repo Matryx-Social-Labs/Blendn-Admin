@@ -278,8 +278,10 @@ describe("the rate-who-you-met push", () => {
     const late = await person("rq-late")
 
     // The clock is injected (SCRUM-1274): a night that ended at 01:00 IST, asked at 10:00 IST.
-    const ten = nextLocalTime(new Date(), "Asia/Kolkata", 10)
+    // A week back, so the clock is never in the future: from 10:00 IST "the next 10:00" was tomorrow, and the
+    // sweep, which reads the whole shared database, also asked about other suites' nights that had just ended.
     const H = 3600_000
+    const ten = nextLocalTime(new Date(Date.now() - 7 * 24 * H), "Asia/Kolkata", 10)
     const ended = await makeEvent(host)
     const ancient = await makeEvent(host)
     events.push(ended, ancient)
