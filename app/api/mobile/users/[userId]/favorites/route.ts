@@ -16,6 +16,7 @@ import { createdBefore, keysetPage, NEWEST_FIRST, pagedPagination, parsePageOrCu
 import { isUuid } from "@/lib/api-input"
 import { savedEventWhere } from "@/lib/saved-events"
 import { changeSummaryForResponse } from "@/lib/event-change"
+import { hostPayload } from "@/lib/event-host"
 
 interface RouteParams {
   params: Promise<{ userId: string }>
@@ -84,13 +85,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       include: {
         event: {
           include: {
-            organizer: {
-              select: {
-                id: true,
-                name: true,
-                image: true,
-              },
-            },
+            // What `hostPayload` reads besides the row's own columns. Not the creating user's id or picture.
+            organizer: { select: { name: true } },
+            organizer_org: { select: { display_name: true } },
             categories: {
               include: {
                 category: {
@@ -173,7 +170,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         // The event read's `changedAt`/`changedFields`; the include above already holds the columns.
         ...changeSummaryForResponse(event),
         isFeatured: event.is_featured,
-        organizer: event.organizer,
+        // The org, never the creating user (`hostPayload`, SCRUM-1146): this route used to send the user row whole.
+        organizer: hostPayload(event),
         categories: event.categories.map((c) => c.category),
         coverImage: event.media[0] || null,
         checkInCount: attended.get(event.id) ?? 0,

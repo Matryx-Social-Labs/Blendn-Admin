@@ -4,7 +4,7 @@ import { phoneCheckInRadius } from "@/lib/geofence"
 import { distinctAttendeeCounts, hereCounts } from "@/lib/attendee-counts"
 import { resolveEventCity, geocodeBudget, type GeocodeBudget } from "@/lib/location"
 import { haversineDistance } from "@/lib/geo"
-import { eventHost } from "@/lib/event-host"
+import { eventHostSelect, hostPayload } from "@/lib/event-host"
 import { appUrl } from "@/lib/email"
 import { eventSession, sessionOccurrencesSelect } from "@/lib/occurrences"
 import { eventVenue, eventVenueSelect } from "@/lib/venue-visibility"
@@ -23,7 +23,6 @@ export const eventListSelect = {
   // Per-day windows, so `session` below can say which day is on. See `eventSession`.
   occurrences: sessionOccurrencesSelect,
   timezone: true,
-  venue_name: true,
   // The only fragment here that claims `venue`, so nothing can narrow it.
   ...eventVenueSelect,
   address: true,
@@ -46,37 +45,9 @@ export const eventListSelect = {
   // What a row may say about tickets (`lib/event-list-price.ts`): the mode, and the snapshot holding its currency.
   ticketing_mode: true,
   ticket_fee_schedule: true,
-  /*
-   * `organizer` is the row's CREATOR, which for a curated event is the admin
-   * who ran the curation -- so that column alone would ship a founder's real
-   * name, avatar and user id to every attendee browsing the city.
-   * `lib/event-host.ts` is what answers "who to show".
-   *
-   * But NOT `...eventHostSelect`, and the reason is a rule this codebase
-   * already paid for once.
-   *
-   * `eventHostSelect` claims `organizer` too, with a narrower `{ name }`. Spread
-   * after this one it silently wins and `id`/`image` vanish -- the same
-   * collision `broadcastAuthorSelect` hit through `venue`, which is why the
-   * rule is "a fragment may not claim a relation another fragment claims".
-   * Here `tsc` caught it (TS2783) because both fragments are typed; through a
-   * relation it would have been silent.
-   *
-   * So the columns are named, and the shape below is a strict SUPERSET of
-   * `HostSource` -- `{ id, name, image }` satisfies `{ name }` structurally, so
-   * `eventHost` still gets everything it needs and nothing is hand-picked away
-   * from it.
-   */
-  curated_at: true,
+  // Who to show as the host (`hostPayload`; brings `venue_name`, `kind`, `curated_at` too), and whether a claim is still open.
+  ...eventHostSelect,
   claimed_at: true,
-  organizer_org: { select: { display_name: true } },
-  organizer: {
-    select: {
-      id: true,
-      name: true,
-      image: true,
-    },
-  },
   categories: {
     select: {
       category: {
@@ -264,22 +235,8 @@ async function transformEvent(
      */
     ticketed: price.ticketed,
     fromPrice: price.fromPrice,
-    /*
-     * Resolved, never passed through.
-     *
-     * `eventHost` answers org -> platform -> creating user, and the platform
-     * branch is the one that matters: a curated event has an admin in
-     * `organizer_id` and must never show them. The response SHAPE is unchanged
-     * -- `EventDetailScreen.tsx:258` reads `d.organizer?.name || ''` and
-     * `:283` reads `d.organizer?.id`, both optional-chained -- so this needs no
-     * client release, which is what makes it shippable ahead of one.
-     */
-    organizer: (() => {
-      const host = eventHost(event)
-      return host.isPlatform
-        ? { id: null, name: host.name, image: null, kind: host.kind }
-        : { id: event.organizer.id, name: host.name, image: event.organizer.image, kind: host.kind }
-    })(),
+    // The org, never the creating user (`hostPayload`, SCRUM-1146).
+    organizer: hostPayload(event),
     /*
      * How the real organiser ever finds out.
      *
