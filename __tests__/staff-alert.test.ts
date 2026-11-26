@@ -304,3 +304,6 @@ describe("the loop", () => {
     expect(mockDb.user_reports.count).toHaveBeenCalledTimes(3)
   })
 })
+
+// A module, not a script: its top-level names must not collide with other test files under tsc.
+export {}

@@ -67,3 +67,6 @@ it("does nothing without Redis", async () => {
   expect(mockClient.set).not.toHaveBeenCalled()
   process.env.REDIS_URL = "redis://local:6379"
 })
+
+// A module, not a script: its top-level names must not collide with other test files under tsc.
+export {}
