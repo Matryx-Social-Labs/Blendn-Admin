@@ -202,4 +202,4 @@ fault.
 - `lib/moderation/` -- the pipeline
 - `docs/chat-moderation.md` -- how it works
 - `docs/client-chat-moderation-guide.md` -- what the app must render
-- `docs/SECURITY_BACKLOG.md` -- the security ledger
+- Jira, Epic SCRUM-1126 -- security findings (private)
