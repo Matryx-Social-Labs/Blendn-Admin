@@ -72,7 +72,7 @@ const badgeOf = (id: string) => mockSent.filter((m) => m.to === `ExponentPushTok
 /** A pending message request from `from` to `to`, with its bell row, the way `POST /message-requests` writes them. */
 async function messageRequest(from: string, to: string) {
   const r = await db.message_requests.create({ data: { sender_id: from, recipient_id: to, message: "hi", status: "pending" } })
-  await sendPushNotification({ userId: to, title: "New message request", body: "x wants to connect", data: { type: "message_request", requestId: r.id } })
+  await sendPushNotification({ userId: to, title: "New message request", body: "Someone wants to connect", data: { type: "message_request", requestId: r.id } })
   return r
 }
 

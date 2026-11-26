@@ -177,20 +177,17 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * whole leak. The sender's own list still reads the request as it always
      * has, and `block` was never announced.
      *
-     * The accepter is named: the message request is the documented crossing from
-     * pseudonym to real name (`docs/API.md:126`), and a live conversation exists
-     * from here, at which point `maySeeIdentity` returns true anyway. (Declining
-     * used to carry no name for the same reason it now carries no message.)
+     * The accepter is not named on it (launch gate 7, SCRUM-1266). The request
+     * is the crossing to real names, but in the app, behind sign-in: a lock
+     * screen is not an authenticated surface. The conversation the push opens
+     * shows who.
      */
     if (action === "accept") {
-      const responderName =
-        (await db.user.findUnique({ where: { id: authUser.userId }, select: { name: true } }))?.name || "Someone"
-
       // Async, don't await: push is best-effort and must not fail the request.
       sendPushNotification({
         userId: messageRequest.sender_id,
-        title: "Message request accepted 🎉",
-        body: `${responderName} accepted your message request`,
+        title: "Message request accepted",
+        body: "Your message request was accepted",
         data: {
           type: "message_request_response",
           requestId,
