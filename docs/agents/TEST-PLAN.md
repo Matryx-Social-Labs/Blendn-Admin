@@ -20,10 +20,10 @@ Every unit of testing is a Jira Task labelled `tq`, under one of these Epics.
 |---|---|
 | [SCRUM-209](https://matrixsociallabs.atlassian.net/browse/SCRUM-209) TQ-V | Merged fixes waiting on a drive: the In Review tickets. **Priority 0.** |
 | [SCRUM-210](https://matrixsociallabs.atlassian.net/browse/SCRUM-210) TQ-C | Attendee journeys in the app, on iOS **and** Android |
-| [SCRUM-211](https://matrixsociallabs.atlassian.net/browse/SCRUM-211) TQ-DA | Dashboard as `admin@` |
-| [SCRUM-212](https://matrixsociallabs.atlassian.net/browse/SCRUM-212) TQ-DO | Dashboard as `organizer@`, plus the no-org control `daniel.weber@` |
-| [SCRUM-213](https://matrixsociallabs.atlassian.net/browse/SCRUM-213) TQ-DV | Dashboard as `venue.owner@`: operate, never edit |
-| [SCRUM-214](https://matrixsociallabs.atlassian.net/browse/SCRUM-214) TQ-DS | Dashboard as `sponsor@` |
+| [SCRUM-211](https://matrixsociallabs.atlassian.net/browse/SCRUM-211) TQ-DA | Dashboard as the admin test account |
+| [SCRUM-212](https://matrixsociallabs.atlassian.net/browse/SCRUM-212) TQ-DO | Dashboard as the organizer test account, plus the no-org control (Daniel Weber) |
+| [SCRUM-213](https://matrixsociallabs.atlassian.net/browse/SCRUM-213) TQ-DV | Dashboard as the venue-owner test account: operate, never edit |
+| [SCRUM-214](https://matrixsociallabs.atlassian.net/browse/SCRUM-214) TQ-DS | Dashboard as the sponsor test account |
 | [SCRUM-215](https://matrixsociallabs.atlassian.net/browse/SCRUM-215) TQ-P | Public pages: apply, claim, sign-in and reset, API docs |
 | [SCRUM-216](https://matrixsociallabs.atlassian.net/browse/SCRUM-216) TQ-A | Mobile API: auth, the wrong-user sweep, contract, limits, uploads |
 | [SCRUM-217](https://matrixsociallabs.atlassian.net/browse/SCRUM-217) TQ-S | Sockets: join rules, delivery, eviction, presence |
@@ -99,38 +99,46 @@ letter), or your worktree name.
 
 ## 3 · Accounts, and not trampling each other
 
-The password for every account below is `SEED_PASSWORD` on Railway staging
+The password for every account below, except the App Store reviewer, is
+`SEED_PASSWORD` on Railway staging
 (`Blendn-Admin`). Read it with
 `railway variables --environment staging --service Blendn-Admin`. Never write it
 to a file, a flow or a ticket.
 
-**Dashboard roles (shared, re-asserted on every deploy by `scripts/test-accounts.ts`):**
-`admin@` · `organizer@` (Nightshift Collective) · `venue.owner@` (Indiranagar
-Hospitality Group) · `sponsor@` (Blue Tokai). Read and operate freely.
-The paid-plan personas (SCRUM-561, `scripts/seed-pro-personas.ts`, re-asserted on
-every deploy): `organizer.pro@` (Pro Collective (QA): a live Analytics **grant**,
-three ended nights of twelve at its venue) and `venue.pro@` (Pro Hospitality (QA):
-a claimed venue with a live Venue Pro grant). A grant, never a payment; `organizer@`
-and `venue.owner@` are the free controls. If an admin ends a grant, the next
+This repo is public, so accounts are named here by role and persona. Their
+addresses are in the scripts named below, and `seed:qa` prints them.
+
+**Dashboard roles (shared, re-asserted on every deploy by `scripts/test-accounts.ts`,
+addresses in `TEST_ACCOUNTS`):** admin · organizer (Nightshift Collective) ·
+venue owner (Indiranagar Hospitality Group) · sponsor (Blue Tokai). Read and
+operate freely.
+The paid-plan personas (SCRUM-561, `scripts/seed-pro-personas.ts`, addresses in
+`PRO_ACCOUNTS`, re-asserted on every deploy): the pro organizer (Pro Collective
+(QA): a live Analytics **grant**, three ended nights of twelve at its venue) and
+the pro venue owner (Pro Hospitality (QA): a claimed venue with a live Venue Pro
+grant). A grant, never a payment; the organizer and venue-owner test accounts
+are the free controls. If an admin ends a grant, the next
 deploy gives a fresh one. **Never
 change their password, role or org** — every session depends on them.
 
 **Attendee lanes.** Two sessions driving the same attendee overwrite each
 other's rooms, bans and profile edits. Take a lane and state it in your claim:
 
-| Lane | Attendees |
+| Lane | Attendees (addresses in `ATTENDEES`, `scripts/seed-qa.ts`) |
 |---|---|
-| A | `ananya.b@`, `rohan.d@` |
-| B | `vikram.s@`, `kavya.n@` |
-| C | `sneha.p@`, `imran.q@` |
+| A | Ananya Bhat, Rohan Desai |
+| B | Vikram Shetty, Kavya Nair |
+| C | Sneha Pillai, Imran Qureshi |
 
 Lanes are held across machines, so they're claimed where every machine can see
 them: a comment on SCRUM-208, `LANE B → <tag>`, and `LANE B released` when
 you stop. The latest comment for a lane decides who holds it. Device locks
 (`qa lock`) are local files and only keep sessions on one machine apart.
 
-**Shared controls, read-only:** `teen.tester@` (16, the minor), `daniel.weber@`
-(organizer with no org). **Never touch** `appreview@` (the App Store reviewer).
+**Shared controls, read-only:** the under-18 account (Aarav Menon, 16, the
+minor; `ATTENDEES`) and Daniel Weber (organizer with no org; `ACCOUNTS`, both in
+`scripts/seed-qa.ts`). **Never touch** the App Store reviewer account (its
+address is `APP_REVIEW_EMAIL`, `scripts/seed-review-account.ts`).
 
 **Destructive work** (suspend, delete, ban, password change, role change) goes
 on a person **your session created**: sign one up through the app as

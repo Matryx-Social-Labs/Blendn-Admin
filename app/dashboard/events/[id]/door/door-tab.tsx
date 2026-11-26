@@ -207,9 +207,10 @@ function ArrivalRow({ arrival, timezone, fresh, onRemove }: { arrival: DoorArriv
       <span aria-hidden className="grid size-9 shrink-0 place-items-center rounded-full bg-secondary text-[0.75rem] font-bold text-muted-foreground">
         {initials}
       </span>
-      <span className="min-w-0 flex-1 text-[0.9375rem] [overflow-wrap:anywhere]">
-        {arrival.pseudonym}
-        {fresh ? <span className="text-[0.8125rem] font-medium whitespace-nowrap text-foreground dark:text-success"> · just now</span> : null}
+      {/* A pseudonym is one unit: never wrapped, cut with an ellipsis only past the row (the full name stays in the text). */}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-[0.9375rem]">{arrival.pseudonym}</span>
+        {fresh ? <span className="text-[0.8125rem] font-medium text-foreground dark:text-success">just now</span> : null}
       </span>
       <time dateTime={arrival.at} className="shrink-0 text-[0.9375rem] tabular-nums text-muted-foreground">
         {clockTime(at, timezone)}
