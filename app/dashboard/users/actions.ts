@@ -3,7 +3,7 @@
 import { Refusal } from "@/lib/refusal"
 import { logger } from "@/lib/logger"
 import { db } from "@/lib/db"
-import { normalizeLocationToCity } from "@/lib/location"
+import { locationToStore, storedCity } from "@/lib/location"
 import { revalidatePath } from "next/cache"
 import { requireAdmin } from "@/lib/current-user"
 import { auditInTx } from "@/lib/audit-log"
@@ -181,14 +181,6 @@ export async function getUsers(
     const checkInsBy = new Map(checkIns.map((r) => [r.user_id, r._count._all]))
     const favouritesBy = new Map(favourites.map((r) => [r.user_id, r._count._all]))
 
-    await Promise.all(
-      users.map(async (user) => {
-        if (!user.profile?.location) return
-        const normalized = await normalizeLocationToCity(user.profile.location)
-        user.profile.location = normalized
-      })
-    )
-
     const shaped = users.map((user) => ({
       ...user,
       _count: {
@@ -201,6 +193,8 @@ export async function getUsers(
       profile: user.profile
         ? {
             ...user.profile,
+            // The stored city, or none while it is still coordinates: a list never geocodes (SCRUM-1229).
+            location: storedCity(user.profile.location),
             date_of_birth: undefined,
             age: ageFrom(user.profile),
             ageFromBirthDate: user.profile.date_of_birth != null,
@@ -233,10 +227,8 @@ export async function updateUser(
   try {
     const admin = await requireAdmin()
 
-    // Only when sent: `normalizeLocationToCity(undefined)` is null, and a null
-    // here would clear the column on a partial edit.
-    const normalizedLocation =
-      data.profile?.location !== undefined ? await normalizeLocationToCity(data.profile.location) : undefined
+    // Undefined when not sent, or when coordinates could not be geocoded: either way the column is left alone.
+    const normalizedLocation = await locationToStore(data.profile?.location)
 
     // Read before the write, so the audit row carries what changed rather
     // than only what was sent.

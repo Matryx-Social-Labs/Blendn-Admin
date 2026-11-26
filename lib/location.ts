@@ -1,6 +1,5 @@
 import { cityFrom, type NominatimAddress } from "./address"
-
-const coordinateCache = new Map<string, string | null>()
+import { logger } from "./logger"
 
 function toNumber(value: string): number | null {
   const parsed = Number.parseFloat(value)
@@ -25,15 +24,28 @@ export function parseCoordinateLocation(
   return { lat, lon }
 }
 
+/**
+ * A stored location as a read returns it (SCRUM-1229): the text, or null while
+ * it is still coordinates. A read never geocodes -- that cost up to 3.5 s per
+ * user read against a public API with a 1 req/s policy -- and never shows the
+ * coordinates either: a profile other people fetch must not say where somebody
+ * was standing. The client already renders a missing city.
+ */
+export function storedCity(location: string | null | undefined): string | null {
+  const trimmed = location?.trim()
+  if (!trimmed || parseCoordinateLocation(trimmed)) return null
+  return trimmed
+}
+
+/**
+ * Reverse-geocodes on a write only. Null when Nominatim fails or has no city;
+ * nothing is remembered, so the next write asks again rather than a failure
+ * hiding a city until the next deploy.
+ */
 export async function reverseGeocodeCity(
   lat: number,
   lon: number
 ): Promise<string | null> {
-  const cacheKey = `${lat.toFixed(4)},${lon.toFixed(4)}`
-  if (coordinateCache.has(cacheKey)) {
-    return coordinateCache.get(cacheKey) ?? null
-  }
-
   try {
     const response = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=10&addressdetails=1`,
@@ -47,108 +59,51 @@ export async function reverseGeocodeCity(
           "User-Agent": "blendn-admin/1.0",
         },
         signal: AbortSignal.timeout(3500),
-        cache: "force-cache",
       }
     )
-
     if (!response.ok) {
-      coordinateCache.set(cacheKey, null)
+      logger.warn("Reverse geocode refused", { status: response.status })
       return null
     }
-
     const data = (await response.json()) as { address?: NominatimAddress }
-
-    const normalized = cityFrom(data.address)
-    coordinateCache.set(cacheKey, normalized)
-    return normalized
-  } catch {
-    coordinateCache.set(cacheKey, null)
+    return cityFrom(data.address)
+  } catch (error) {
+    logger.warn("Reverse geocode failed", { error: error instanceof Error ? error.message : String(error) })
     return null
   }
 }
 
-export async function normalizeLocationToCity(
-  location: string | null | undefined,
-  budget?: GeocodeBudget
-): Promise<string | null> {
-  if (!location) return null
-  const trimmed = location.trim()
+/**
+ * What a profile write stores for `location`: the text as typed, the city at
+ * coordinates, null to clear, or undefined to leave the column alone -- when
+ * nothing was sent, or when the coordinates could not be geocoded, so a failed
+ * lookup never writes null over a city that was there.
+ */
+export async function locationToStore(
+  location: string | null | undefined
+): Promise<string | null | undefined> {
+  if (location === undefined) return undefined
+  const trimmed = location?.trim()
   if (!trimmed) return null
-
   const coordinates = parseCoordinateLocation(trimmed)
   if (!coordinates) return trimmed
-
-  /*
-   * A `city` that is literally "12.97,77.59" geocodes too, which is the second
-   * way into Nominatim from a read path -- and the one the budget missed at
-   * first, because `resolveEventCity` consults this before it reaches its own
-   * coordinate branch. Same budget, both doors.
-   */
-  const cacheKey = `${coordinates.lat.toFixed(4)},${coordinates.lon.toFixed(4)}`
-  if (coordinateCache.has(cacheKey)) return coordinateCache.get(cacheKey) ?? null
-  if (budget && !budget.take()) return null
-
-  return reverseGeocodeCity(coordinates.lat, coordinates.lon)
+  return (await reverseGeocodeCity(coordinates.lat, coordinates.lon)) ?? undefined
 }
 
 /**
- * How many reverse-geocodes one request may make.
- *
- * The discovery feed called `resolveEventCity` per event, so a page of 20
- * null-city rows fanned out **20 concurrent Nominatim requests** on a
- * user-facing read -- against a public API with a courtesy rate limit, from a
- * path that is polled. The cap is not a tuning knob: past it the answer is
- * null, and the card renders without a city rather than the page waiting.
- *
- * Low on purpose. A null city is a row that should have been resolved at write
- * time, so needing more than three in one page means the backfill is behind,
- * not that the cap is wrong. `resolveEventCityPersisting` writes results back,
- * so a hot page heals itself a few rows at a time.
+ * An event's city on create, or on an edit that moves the pin: the city typed,
+ * else the city at the coordinates (typed as `city` or the pin). Null when
+ * neither gives one; the edit route then keeps the stored city.
  */
-export const MAX_GEOCODES_PER_REQUEST = 3
-
-/**
- * A per-request budget for reverse-geocoding.
- *
- * Made by the list route and passed down, rather than held module-level: a
- * module-level counter is shared by every concurrent request, so one busy page
- * would exhaust the budget for everybody else's.
- */
-export function geocodeBudget(limit: number = MAX_GEOCODES_PER_REQUEST) {
-  let spent = 0
-  return {
-    take(): boolean {
-      if (spent >= limit) return false
-      spent++
-      return true
-    },
-    get exhausted() {
-      return spent >= limit
-    },
-  }
-}
-
-export type GeocodeBudget = ReturnType<typeof geocodeBudget>
-
 export async function resolveEventCity(
   city: string | null | undefined,
   latitude: number | null | undefined,
-  longitude: number | null | undefined,
-  budget?: GeocodeBudget
+  longitude: number | null | undefined
 ): Promise<string | null> {
-  const normalizedCity = await normalizeLocationToCity(city, budget)
-  if (normalizedCity) return normalizedCity
-
-  if (latitude == null || longitude == null) return null
-
-  /*
-   * An already-cached coordinate costs nothing, so it does not spend budget --
-   * otherwise a page of twenty events at one venue would stop after three.
-   */
-  const cacheKey = `${latitude.toFixed(4)},${longitude.toFixed(4)}`
-  if (coordinateCache.has(cacheKey)) return coordinateCache.get(cacheKey) ?? null
-
-  if (budget && !budget.take()) return null
-
-  return reverseGeocodeCity(latitude, longitude)
+  const typed = storedCity(city)
+  if (typed) return typed
+  const coordinates =
+    (city && parseCoordinateLocation(city)) ||
+    (latitude != null && longitude != null ? { lat: latitude, lon: longitude } : null)
+  return coordinates ? reverseGeocodeCity(coordinates.lat, coordinates.lon) : null
 }

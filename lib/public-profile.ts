@@ -4,7 +4,7 @@ import { ageFrom } from "@/lib/age"
 import { homeStateLabel, languageLabels, signLabel } from "@/lib/about-you"
 import { distinctEventsAttended } from "@/lib/attendee-counts"
 import { firstName } from "@/lib/conversation-identity"
-import { normalizeLocationToCity } from "@/lib/location"
+import { storedCity } from "@/lib/location"
 import { profileBadges } from "@/lib/profile-badges"
 import { savedCount } from "@/lib/saved-events"
 
@@ -66,7 +66,7 @@ export async function anonymousCard(user: PublicUser, id: string, room: { name: 
     name: room.name,
     ...(room.pseudonym && { pseudonym: room.name }),
     age: ageFrom(user.profile),
-    location: await normalizeLocationToCity(user.profile?.location),
+    location: storedCity(user.profile?.location),
     isOwnProfile: false,
     identityVisible: false,
   }
@@ -123,7 +123,7 @@ export async function personCardBody(
         }),
     // Derived — see `ageFrom` in lib/age.ts. The date itself is never returned: this is an explicit field list.
     age: ageFrom(p),
-    location: await normalizeLocationToCity(p?.location),
+    location: storedCity(p?.location),
     // The whole list only to somebody who may see who this is; the key stays, empty, for clients that read it (SCRUM-827).
     interests: identified ? user.user_interests.map((ui) => ui.category) : [],
     memberSince: user.createdAt,
