@@ -2574,7 +2574,7 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 2. **Keyword filter** (sync, <1ms) — slurs/profanity in 9 languages → saves as hidden, returns `moderation_hidden: true`
 3. **OpenAI Moderation** (pre-emit, 1s timeout) — AI content analysis → hides before broadcast
 
-If caught, response returns `{ moderation_hidden: true, content: null }`. The message is never emitted via socket.
+If caught before the send returns, response returns `{ moderation_hidden: true, content: null }` and the message is never emitted via socket.
 If OpenAI has not answered within 1s, the message is broadcast and moderation falls back to async (socket delete event), except in a busy event room, which waits for the verdict (below).
 
 **While OpenAI is down** (5 consecutive failed calls open a 30 s breaker per server process): a room of 200 or fewer inside, and every room that is not an event's, still delivers the line, and a sweeper re-checks every `unchecked` room message from the last 24 h each minute, hiding or flagging late through the usual actions. A **busy event room (more than 200 inside now) refuses instead**: when the 1 s race has no verdict the route waits for the call in flight (its own 8 s deadline); with still none it deletes the row it just wrote (nothing was emitted) and answers `503 MODERATION_UNAVAILABLE`, `retryAfter: 5` in the body and `Retry-After`, error "This room is busy and messages can’t be checked right now. Try again in a few seconds." With the breaker already open the refusal comes before anything is written. Resend with the same `clientId`. A missing `OPENAI_API_KEY` is not an outage and never refuses.

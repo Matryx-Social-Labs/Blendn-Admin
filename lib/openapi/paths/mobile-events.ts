@@ -901,9 +901,10 @@ registry.registerPath({
   description: [
     "Send a message to an event chat. Same moderation pipeline as group chat:",
     "",
-    "1. **Spam check** → 2. **Keyword filter** (instant) → 3. **OpenAI Moderation** (1s timeout)",
+    "1. **Spam check** → 2. **Keyword filter** (instant) → 3. **OpenAI Moderation** (raced against 1 s; a later verdict is waited for in an event room with more than 200 people inside, " +
+      "and in a smaller room the message is broadcast at once and removed again if the verdict hides it)",
     "",
-    "If caught, response has `moderation_hidden: true`, `content: null`. Message is never broadcast.",
+    "If caught before the send returns, response has `moderation_hidden: true`, `content: null`. Message is never broadcast.",
     "",
     "**Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `NOT_CHECKED_IN` (403), `SPAM_BLOCKED` (429), `MODERATION_UNAVAILABLE` (503)",
     "",

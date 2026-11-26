@@ -34,7 +34,11 @@ export function preSaveCheck(content: string): { result: ModerationResult; autoM
 
 /**
  * Main moderation orchestrator.
- * Runs asynchronously after a message is saved and emitted via socket.
+ * Started fire-and-forget by both room send routes for a message their 1 s text
+ * check left unexamined: the route emits without waiting for it, and a hide here
+ * removes the message from the room (`hideMessage`). An event room with more
+ * than `BIG_ROOM_HERE_COUNT` people here waits for the verdict in
+ * `verdictForBigRoom` instead, unless no API key is set.
  *
  * Pipeline:
  * 1. Keyword filter (sync, <1ms)
