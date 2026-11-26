@@ -89,8 +89,10 @@ export function environmentRefusal(env: Env, environment: string | undefined): s
 /** Live accounts with a known age under 18 and no stamp, by id. */
 export async function knownMinorsUnstamped(db: PrismaClient, now: Date): Promise<string[]> {
   // A superset in SQL (a stored age under 18, or a birth date after the cut-off); `isKnownMinor` decides, as the routes do.
+  // A day early, so 29 February's roll-over to 1 March cannot leave a birthday out.
   const cutoff = new Date(now)
   cutoff.setUTCFullYear(cutoff.getUTCFullYear() - ACCOUNT_MIN_AGE)
+  cutoff.setUTCDate(cutoff.getUTCDate() - 1)
   const rows = await db.profiles.findMany({
     where: {
       under_18_since: null,
