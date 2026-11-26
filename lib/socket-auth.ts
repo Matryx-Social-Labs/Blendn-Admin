@@ -12,9 +12,10 @@ import { eventPermissionSelect, eventPermissions } from "./rbac"
  * server. Semantics are unchanged — see __tests__/socket-auth.test.ts.
  *
  * All three take untrusted client input. The ID columns are `@db.Uuid`, so a
- * malformed ID makes Prisma throw rather than return null; callers must treat a
- * rejection as "denied" (see `guardJoin` in socket-server.ts) instead of letting
- * it escape as an unhandled rejection.
+ * malformed ID makes Prisma throw rather than return null; `guardJoin` in
+ * socket-server.ts refuses a non-uuid before asking. A rejection that gets here
+ * is the database not answering, which `guardJoin` answers as "try again"
+ * (SCRUM-1402), never as a grant and never as an escaping rejection.
  */
 
 /**

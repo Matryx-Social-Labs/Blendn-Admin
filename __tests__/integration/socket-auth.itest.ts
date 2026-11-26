@@ -62,9 +62,9 @@ describe("canJoinChat against a real database", () => {
   })
 
   it("rejects a malformed room id instead of returning a result", async () => {
-    // chat_group_id is @db.Uuid. guardJoin depends on this REJECTING so it can
-    // fail closed — if Prisma ever starts returning null here instead, the
-    // fail-closed path silently becomes a fail-open one.
+    // chat_group_id is @db.Uuid. This must REJECT, never resolve true: guardJoin
+    // refuses a non-uuid before asking, but any other caller relies on the
+    // rejection to keep a malformed id out.
     await expect(canJoinChat("someone", "not-a-uuid")).rejects.toThrow()
   })
 })

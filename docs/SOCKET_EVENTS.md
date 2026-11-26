@@ -70,6 +70,18 @@ Refusals are deliberately indistinguishable: a room that does not exist, a
 malformed ID, and a room you simply lack access to all return the same
 `FORBIDDEN`, so the events cannot be used to enumerate valid IDs.
 
+**A join the server could not check is not a refusal** (SCRUM-1402). When the
+access read itself fails (the database pool is saturated: a connection wait past
+5 s, or a statement cancelled at 8 s) the socket stays out of the room and is
+told to try again, with the same code on every join including `join:eventOps`:
+
+```js
+socket.on("error", ({ message, code }) => { /* code === "SERVER_ERROR": ask again later */ })
+```
+
+The server does not retry. The dashboard's Live tab asks again on its 20 s quiet
+timer; the attendee app logs it and rejoins on its next reconnect.
+
 Authorization is re-checked on every join, including the automatic rejoins the
 client performs after a reconnect.
 
