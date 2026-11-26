@@ -10,7 +10,7 @@ import { mailOwnersAndAdmins } from "./results-mail"
  * A room on the line (100 in, 99, 100 again) closes and reopens its issue every pass, each a new row; one mail per
  * event and kind while openings keep coming closer together than this.
  */
-export const LIVE_ALERT_QUIET_MS = 30 * 60_000
+const LIVE_ALERT_QUIET_MS = 30 * 60_000
 
 type OpenedIssue = { id: string; eventId: string; kind: string; title: string; body: string; openedAt: Date }
 
