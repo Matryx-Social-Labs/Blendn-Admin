@@ -483,3 +483,21 @@ export function ticketOrderHtml(opts: { heading: string; paragraphs: string[]; l
     about: "ticket order",
   })
 }
+
+/**
+ * 14 days before an organisation's free Analytics ends (SCRUM-1275). The
+ * paragraphs come from `freeWindowEndingEmail` (lib/email.ts) as plain text,
+ * so the text and HTML parts say the same thing; each is escaped here.
+ */
+export function freeWindowEndingHtml(opts: { heading: string; paragraphs: string[]; link: string; note: string }): string {
+  return designEmail({
+    title: opts.heading,
+    preheader: opts.paragraphs[0] ?? opts.heading,
+    eyebrow: "Your plan",
+    heading: opts.heading,
+    paragraphs: opts.paragraphs.map((p) => esc(p).replace(/\n/g, "<br>")),
+    button: { href: opts.link, label: "See your plan" },
+    note: esc(opts.note),
+    about: "plan",
+  })
+}

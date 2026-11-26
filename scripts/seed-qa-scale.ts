@@ -459,8 +459,9 @@ async function refreshRooms(checkInIds: string[], sessionIds: string[], now: Dat
  * as `active: true, source: "grant"` and Manage shows as "Blend'n+ until <date> ·
  * nothing renews". It is the row the dashboard's Users-page grant writes
  * (`grantEntitlement`), with a reference that names it ours; no store state is
- * invented. `lib/entitlements.ts` cannot load outside Next (`server-only`), so
- * this is the one script allowed to write the table; the boundary test pins it
+ * invented. Written here rather than through `lib/entitlements.ts`, which could
+ * not load outside Next until SCRUM-1275 dropped its `server-only`; this is the
+ * one script allowed to write the table, and the boundary test pins it
  * to `source: "grant"` and this reference.
  */
 async function grantPlus(email: string, now: Date) {
