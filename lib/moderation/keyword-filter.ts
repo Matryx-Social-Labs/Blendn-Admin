@@ -145,6 +145,7 @@ const REVIEW_ONLY_KEYWORDS = new Set([
   "শালা", "বাল", "chod", "magi", "shala", "bal",
   "ghando",
 ])
+const REVIEW_WORDS: ReadonlySet<string> = new Set([...REVIEW_ONLY_KEYWORDS].map((k) => normalizeWords(k)[0]))
 
 /**
  * Check message content against the keyword wordlists.
@@ -177,7 +178,10 @@ const REVIEW_ONLY_KEYWORDS = new Set([
  */
 export function checkKeywords(content: string): ModerationResult | null {
   const aggressive = normalizeAggressive(content)
-  const wordSet = new Set(normalizeWords(content))
+  const words = normalizeWords(content)
+  // A review word glued back onto the word before it ("madar chod") is the word it spells.
+  const glued = words.slice(1).flatMap((word, i) => (REVIEW_WORDS.has(word) ? [words[i] + word] : []))
+  const wordSet = new Set([...words, ...glued])
   // Every keyword is one word (`keyword-banter.test.ts`): a whole-word hit is one lookup.
   const isWord = (keyword: string) => wordSet.has(normalizeWords(keyword)[0])
 

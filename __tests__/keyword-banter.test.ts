@@ -115,3 +115,12 @@ it("a review-only word spelled out says nothing, in leetspeak it is the same wor
   expect(checkKeywords("sh@la")).toMatchObject({ action: "flag", matched: ["shala"] })
   expect(checkKeywords("b.h.e.n.c.h.o.d")).toMatchObject({ action: "flag", matched: ["bhenchod"] })
 })
+
+it.each(["madar chod", "behen chod", "bhen chod", "teri maa ki madar chod"])("a review word glued back onto the word before it is the slur it spells: %p hides", (line) => {
+  expect(checkKeywords(line)?.action).toBe("hide")
+})
+
+it("only the word before it: two ordinary words never make a slur, and a word after a review word stays itself", () => {
+  expect(checkKeywords("chod do")?.action).toBe("flag")
+  expect(checkKeywords("my re-entry, and then Di said hi")?.action).not.toBe("hide")
+})
