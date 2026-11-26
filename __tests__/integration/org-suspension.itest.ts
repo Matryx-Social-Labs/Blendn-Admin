@@ -164,7 +164,7 @@ describe("suspending an organisation", () => {
     const visible = await db.events.findMany({ where: await visibleEventsWhere({ id: f.host, role: "organizer" }), select: { id: true } })
     const visibleIds = new Set(visible.map((e) => e.id))
     expect(visibleIds.has(f.upcoming)).toBe(false)
-    expect(visibleIds.has(f.legacy)).toBe(true) // the creator floor keeps a legacy event
+    expect(visibleIds.has(f.legacy)).toBe(false) // no creator floor any more (SCRUM-1250): org-less is nobody's
 
     // ⌘K: the host's own search lists nothing of the org either, and — the leak
     // the review found on the way — an organiser at ANOTHER org never sees it.
