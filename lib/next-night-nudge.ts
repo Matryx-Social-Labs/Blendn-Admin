@@ -87,6 +87,7 @@ export async function sendFirstNightNudges(now: Date = new Date()): Promise<numb
         status: "approved",
         requested_role: "organizer",
         reviewed_at: { gt: new Date(now.getTime() - FIRST_AFTER_MS - 3 * DAY_MS), lte: new Date(now.getTime() - FIRST_AFTER_MS) },
+        // any-kind: a venue day never has an organization (CHECK events_venue_day_shape), so only the org's own events match.
         org: { status: { not: "suspended" }, suspended_at: null, next_event_nudged_at: null, events: { none: {} } },
       },
       select: { org_id: true, reviewed_at: true, city: true, org: { select: { display_name: true } } },
