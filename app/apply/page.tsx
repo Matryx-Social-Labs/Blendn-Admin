@@ -39,7 +39,7 @@ type Role = "organizer" | "venue_owner"
  */
 const REASSURANCES = [
   "Free to run events — check-in, the live headcount and room moderation cost nothing.",
-  "Analytics is an optional paid plan, for when you want to know which nights worked.",
+  "Analytics is free for your first three months of events, then an optional paid plan.",
   "Read by a person, not a filter. Usually within two working days.",
 ] as const
 

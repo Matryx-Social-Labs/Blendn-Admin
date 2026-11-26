@@ -5,6 +5,8 @@ import { Panel, ProTag } from "@/components/dashboard/kit"
 import { PlanCard } from "@/components/dashboard/plan-card"
 import { EmptyState } from "@/components/dashboard/primitives"
 import { FIRST_EVENT_RULE } from "@/lib/access-line-copy"
+import { FREE_WINDOW_DAYS } from "@/lib/analytics-access"
+import { MIN_ATTENDEES } from "@/lib/connection-metrics"
 import { getAuth } from "@/lib/auth"
 import { billingOrgFor, planPageData, type PlanDate, type PlanPageData } from "@/lib/billing"
 import { BILLING_PLANS, grossRupees, gstSplit, rupees } from "@/lib/billing-plans"
@@ -200,11 +202,11 @@ function StatusPanel({ view, pending, pendingFor }: { view: PlanPageData; pendin
         : "Analytics switches on as soon as Razorpay confirms the payment, usually within a minute."
   } else if (view.free.reason === "free_window" && view.free.until) {
     headline = `Free · Analytics open until ${day(view.free.until)}`
-    const first = view.free.firstEventTitle ? `${view.free.firstEventTitle}, ${FIRST_EVENT_RULE},` : `Your first event with at least 5 people checked in`
-    detail = `${first} opened every Analytics view for 30 days. That event stays open for good.`
+    const first = view.free.firstEventTitle ? `${view.free.firstEventTitle}, ${FIRST_EVENT_RULE},` : `Your first event with at least ${MIN_ATTENDEES} people checked in`
+    detail = `${first} opened every Analytics view for ${FREE_WINDOW_DAYS} days. That event stays open for good.`
   } else if (view.free.reason === "free_window") {
     headline = "Free · Analytics open for now"
-    detail = `Every Analytics view is open until 30 days after ${FIRST_EVENT_RULE}.`
+    detail = `Every Analytics view is open until ${FREE_WINDOW_DAYS} days after ${FIRST_EVENT_RULE}.`
   } else {
     headline = "Free"
     detail = view.free.firstEventTitle
@@ -265,10 +267,10 @@ const PAYMENT_STATUS: Record<string, string> = {
 
 function Payments({ view }: { view: PlanPageData }) {
   return (
-    <Panel title="Payments" hint="Invoices are issued through Razorpay by Matryx Social Labs Private Limited">
+    <Panel title="Payments" hint="Payments are taken by Razorpay for Matryx Social Labs Private Limited">
       {view.payments.length === 0 ? (
         <p className="text-[0.8125rem] text-muted-foreground">
-          Nothing paid yet. Each payment appears here with its Razorpay invoice or payment reference.
+          Nothing paid yet. Each payment appears here with its Razorpay payment reference.
         </p>
       ) : (
         <table className="w-full text-[0.8125rem]">

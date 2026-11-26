@@ -6,7 +6,7 @@ import { EventPassPanels, OrgPanels } from "@/components/dashboard/analytics-pan
 import { Locked, Panel, PillTabs } from "@/components/dashboard/kit"
 import { EmptyState, HeroMetric } from "@/components/dashboard/primitives"
 import { Button } from "@/components/ui/button"
-import { analyticsAccessLine } from "@/lib/access-line-copy"
+import { analyticsAccessLine, FIRST_EVENT_RULE } from "@/lib/access-line-copy"
 import { dayInIndia } from "@/lib/dashboard-format"
 import { getAuth } from "@/lib/auth"
 import { billingOrgFor } from "@/lib/billing"
@@ -165,7 +165,7 @@ function EventSection({ view, pass }: { view: AnalyticsPageView; pass: string })
       </Button>
     </form>
   )
-  const hint = `${day(selected.startsAt)}${isFirstFree && !view.access.org ? " · free for good: your first event that cleared the floor" : ""}`
+  const hint = `${day(selected.startsAt)}${isFirstFree && !view.access.org ? ` · free for good: ${FIRST_EVENT_RULE}` : ""}`
 
   if (selected.open) {
     if (!selected.data) {
