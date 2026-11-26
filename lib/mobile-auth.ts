@@ -271,11 +271,14 @@ export type RevokedReason = keyof typeof REVOKED_REASON_CODE
  * - reason: a row of the same user, revoked, carrying a `revoked_reason`.
  *
  * Anything else (forged, expired, an ordinary sign-out, a rotation) is null: the
- * plain 401 it always was.
+ * plain 401 it always was. A suspension carries its `owner`, the verified token's
+ * account, so its holder is told the category (`accountRefusal`).
  */
 export type RefusedRefreshReason = "ACCOUNT_SUSPENDED" | "ACCOUNT_DELETED" | (typeof REVOKED_REASON_CODE)[RevokedReason]
 
-export async function refusedRefreshReason(token: string): Promise<RefusedRefreshReason | null> {
+export async function refusedRefreshReason(
+  token: string
+): Promise<{ code: RefusedRefreshReason; owner?: { suspension_reason: string | null } } | null> {
   let claim: DecodedToken
   try {
     claim = jwt.verify(token, getJwtSecret()) as DecodedToken
@@ -290,18 +293,19 @@ export async function refusedRefreshReason(token: string): Promise<RefusedRefres
       user_id: true,
       revoked_at: true,
       revoked_reason: true,
-      user: { select: { suspended_at: true, deletedAt: true } },
+      user: { select: { suspended_at: true, deletedAt: true, suspension_reason: true } },
     },
   })
   if (!row) {
     const user = await db.user.findUnique({ where: { id: claim.userId }, select: { deletedAt: true } })
-    return user?.deletedAt ? "ACCOUNT_DELETED" : null
+    return user?.deletedAt ? { code: "ACCOUNT_DELETED" } : null
   }
   if (row.user_id !== claim.userId) return null
 
   const suspendedAt = row.user.suspended_at
-  if (!row.user.deletedAt && suspendedAt && row.revoked_at && row.revoked_at >= suspendedAt) return "ACCOUNT_SUSPENDED"
-  if (row.revoked_at && row.revoked_reason) return REVOKED_REASON_CODE[row.revoked_reason as RevokedReason] ?? null
+  if (!row.user.deletedAt && suspendedAt && row.revoked_at && row.revoked_at >= suspendedAt) return { code: "ACCOUNT_SUSPENDED", owner: row.user }
+  const code = row.revoked_at && row.revoked_reason ? REVOKED_REASON_CODE[row.revoked_reason as RevokedReason] : undefined
+  if (code) return { code }
   return null
 }
 

@@ -29,14 +29,9 @@ import { readJson } from "@/lib/api-input"
  * so its holder is told the category and where to appeal.
  */
 async function refusedRefresh(token: string) {
-  const reason = await refusedRefreshReason(token)
-  if (reason === "ACCOUNT_SUSPENDED") {
-    // Verified there: our signature, unexpired, its row this user's and revoked by the suspension.
-    const { userId } = jwt.decode(token) as { userId: string }
-    const owner = await db.user.findUnique({ where: { id: userId }, select: { suspension_reason: true } })
-    return accountRefusal("suspended", owner)
-  }
-  if (reason) return errorResponse("Invalid or expired refresh token", 401, reason, reason)
+  const refused = await refusedRefreshReason(token)
+  if (refused?.code === "ACCOUNT_SUSPENDED") return accountRefusal("suspended", refused.owner)
+  if (refused) return errorResponse("Invalid or expired refresh token", 401, refused.code, refused.code)
   return errorResponse("Invalid or expired refresh token", 401, ErrorCode.UNAUTHORIZED)
 }
 
