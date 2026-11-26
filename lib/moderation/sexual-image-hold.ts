@@ -49,13 +49,16 @@ export async function holdSexualImage(check: ModerationCheck, path: ImagePath, o
     const now = Date.now()
     for (const [id, at] of lastPaged) if (now - at >= PAGE_COOLDOWN_MS) lastPaged.delete(id)
     if (lastPaged.has(userId)) return
+    // Taken before the send, so a second pull arriving during it waits out the window too; given back unless a page went.
+    lastPaged.set(userId, now)
     const result = await notifyStaff(
       `Sexual image pulled (${path}). A person must check it for a minor or a non-consensual image. key ${objectKey} user ${userId}\n` +
         `More from this user in the next 10 minutes go to the audit log only.\n${dashboardUrl()}/dashboard/moderation`
     )
-    // A failed page starts no cooldown: the next pull tries again.
-    if (result !== "failed") lastPaged.set(userId, now)
-    if (result !== "sent") logger.error("Sexual image hold: staff were not paged", { ...context, result })
+    if (result !== "sent") {
+      lastPaged.delete(userId)
+      logger.error("Sexual image hold: staff were not paged", { ...context, result })
+    }
   } catch (error) {
     logger.error("Sexual image hold failed", { ...context, error: error instanceof Error ? error.message : String(error) })
   }

@@ -295,6 +295,23 @@ describe("one page per user per 10 minutes", () => {
     expect(page).toHaveBeenCalledTimes(3)
   })
 
+  it("two pulls at the same moment page once", async () => {
+    await Promise.all([
+      holdSexualImage(SEXUAL_HIDE, "profile", PROFILE_KEY, USER),
+      holdSexualImage(SEXUAL_HIDE, "blur", BLUR_KEY, USER),
+    ])
+    expect(audit).toHaveBeenCalledTimes(2)
+    expect(page).toHaveBeenCalledTimes(1)
+  })
+
+  it("no channel configured starts no cooldown: nobody was paged", async () => {
+    page.mockResolvedValueOnce("unconfigured")
+    await holdSexualImage(SEXUAL_HIDE, "profile", PROFILE_KEY, USER)
+    await holdSexualImage(SEXUAL_HIDE, "blur", BLUR_KEY, USER)
+
+    expect(page).toHaveBeenCalledTimes(2)
+  })
+
   it("a page that failed does not start the cooldown", async () => {
     page.mockResolvedValueOnce("failed")
     await holdSexualImage(SEXUAL_HIDE, "profile", PROFILE_KEY, USER)
