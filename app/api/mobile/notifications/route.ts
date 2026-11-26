@@ -65,7 +65,8 @@ export async function GET(request: NextRequest) {
         kind: { notIn: NOT_IN_THE_BELL },
         ...(unreadOnly ? { read_at: null } : {}),
       },
-      orderBy: { created_at: "desc" },
+      // `id` last: a Prisma cursor on a sort that ties repeats or skips the rows that share its row's time (SCRUM-1356).
+      orderBy: [{ created_at: "desc" }, { id: "desc" }],
       // One extra, so `cursorPaginationMeta` can tell whether there is another
       // page without a second count query.
       take: limit + 1,

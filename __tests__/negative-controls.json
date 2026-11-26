@@ -3011,9 +3011,9 @@
       "date": "2026-11-26"
     },
     "paged-lists-tie-break.itest.ts": {
-      "guards": "SCRUM-1356 on a db:migrate database: every offset-paged mobile list ends its order with a unique key, so 25 rows that tie on the route's sort, paged by 10, come back each exactly once: GET /events (date page and the distance pre-read), /events/search (raw SQL), /chat/groups (25 rooms with no message, NULL last_message_at), /chat/groups/:id/participants, /events/:id/checkins, /events/:id/chat and /message-requests.",
-      "mutation": "(RED) the suite on origin/dev 028f391d, all eight lists without their tie-break. The same with ALTER DATABASE SET enable_indexscan, enable_indexonlyscan and enable_bitmapscan off, to force sort nodes.",
-      "observed": "RED 1 failing / 7 passing, three runs: participants (role, joined_at) served one person twice and dropped another. The other seven kept one order on this planner, with index scans on or off: for them the test is a guard only, not a reproduction. GREEN 8 of 8, three runs, on blendn_serving_09a.",
+      "guards": "SCRUM-1356 on a db:migrate database: every offset-paged mobile list ends its order with a unique key, and so does the bell's cursor, so 25 rows that tie on the route's sort, paged by 5, come back each exactly once: GET /events (date page and the distance pre-read), /events/search (raw SQL), /chat/groups (25 rooms with no message, NULL last_message_at), /chat/groups/:id/participants, /events/:id/checkins, /events/:id/chat, /message-requests and /notifications (Prisma cursor).",
+      "mutation": "(RED) the suite against origin/dev 028f391d's app/api/mobile, every tie-break absent. First at PAGE 10, also with ALTER DATABASE SET enable_indexscan, enable_indexonlyscan and enable_bitmapscan off; then at PAGE 5, which puts page 2 through Postgres's bounded top-N heapsort (more than 2 x (OFFSET + LIMIT) rows to sort), the one that hands tied rows back rotated.",
+      "observed": "PAGE 10: 1 failing / 7 passing (participants only), index scans on or off. PAGE 5: 6 failing / 3 passing, three runs: date page, search, chat groups, participants, notifications, message requests each repeat a row and drop one. The 3 that pass on old code are guards only: check-ins and event chat are walked from their index (event_id,check_in_time; chat_group_id,created_at), so the tie order is the index's; the distance read is one capped list sliced in memory. GREEN 9 of 9, three runs, on blendn_serving_09a.",
       "date": "2026-11-27"
     }
   },

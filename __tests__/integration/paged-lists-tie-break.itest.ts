@@ -10,13 +10,16 @@ import { arrive, call, cleanupCrewWorld, liveEvent, person, routes, world, type 
  * Every offset-paged mobile list ends its order with a unique key (SCRUM-1356).
  *
  * Postgres promises no order among rows that tie on the ORDER BY, and two
- * queries with different OFFSET/LIMIT are free to break the tie differently (a
- * top-N heapsort keeps a different heap for LIMIT 10 than for LIMIT 20). So 25
- * events at one start time, paged by 10, could repeat one on page 2 and never
- * show another; the app hides the repeat, and the lost event is simply not in
- * the scroll. The same for rooms with no messages (all NULL `last_message_at`)
- * and every other paged list below, each built here as 25 rows that tie on the
- * route's sort.
+ * queries with different OFFSET/LIMIT are free to break the tie differently.
+ * Measured on PG 17: once the rows to sort are more than twice OFFSET + LIMIT,
+ * it keeps a bounded top-N heap, which hands the tied rows back rotated, so page
+ * 2 repeats page 1's first row and drops its own first. 25 events at one start
+ * time, paged by 5, did exactly that; the app hides the repeat, and the lost
+ * event is simply not in the scroll. The same for rooms with no messages (all
+ * NULL `last_message_at`) and every other paged list below, each built here as
+ * 25 rows that tie on the route's sort. PAGE is 5 for that reason: at 10, page
+ * 2 (OFFSET 10 LIMIT 10 of 25) is a plain quicksort that keeps scan order, and
+ * the old code passed.
  */
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -34,8 +37,8 @@ afterAll(async () => {
 })
 
 const N = 25
-const PAGE = 10
-const PAGES = Math.ceil(N / PAGE) // 3: the last one short
+const PAGE = 5
+const PAGES = N / PAGE
 const WORD = `tiebreak${randomUUID().replace(/-/g, "").slice(0, 10)}`
 const CITY = `Tiecity${randomUUID().replace(/-/g, "").slice(0, 8)}`
 /** One start time for all 25, on the minute, two days out: 19:00 is everybody's. */
@@ -92,19 +95,22 @@ beforeAll(async () => {
   await db.chat_group_members.createMany({
     data: others.map((user_id, i) => ({ chat_group_id: roomId, user_id, anonymous_name: `Heron ${i}`, joined_at: AT })),
   })
-  // 25 lines at one instant, and 25 message requests to the viewer at one instant.
+  // 25 lines at one instant, 25 message requests and 25 notifications to the viewer at one instant.
   await db.chat_messages.createMany({
     data: others.map((user_id) => ({ chat_group_id: roomId, user_id, content: "same moment", created_at: AT })),
   })
   await db.message_requests.createMany({
     data: others.map((sender_id) => ({ sender_id, recipient_id: viewer.id, created_at: AT, updated_at: AT })),
   })
+  await db.notifications.createMany({
+    data: others.map(() => ({ user_id: viewer.id, kind: "announcement" as const, title: "t", body: "b", created_at: AT })),
+  })
 }, 120_000)
 
-/** Pages 1..PAGES of a list, every id in the order served. */
+/** Pages 1..PAGES of a list and one more (the chat list also holds the live room), every id in the order served. */
 async function paged(read: (page: number) => Promise<string[]>) {
   const seen: string[] = []
-  for (let page = 1; page <= PAGES; page++) seen.push(...(await read(page)))
+  for (let page = 1; page <= PAGES + 1; page++) seen.push(...(await read(page)))
   return seen
 }
 
@@ -128,6 +134,8 @@ describe("offset-paged mobile lists never repeat or skip a row that ties on the 
     expectEach(seen, eventIds)
   })
 
+  // A guard only: every page reads the same capped candidate list and slices it in memory, so the `id` added to
+  // that read matters only when the cap cuts through a tie.
   it("GET /events?sortBy=distance: 25 events at one place and one time", async () => {
     const seen = await paged(async (page) =>
       (
@@ -193,6 +201,20 @@ describe("offset-paged mobile lists never repeat or skip a row that ties on the 
         ),
       N
     )
+  })
+
+  it("GET /notifications (cursor, not offset): 25 notifications at one instant", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const bell = require("@/app/api/mobile/notifications/route") as typeof import("@/app/api/mobile/notifications/route")
+    const seen: string[] = []
+    let cursor: string | undefined
+    do {
+      const data = await get(bell.GET, `/api/mobile/notifications?limit=${PAGE}${cursor ? `&cursor=${cursor}` : ""}`)
+      seen.push(...data.notifications.map((n: { id: string }) => n.id))
+      cursor = data.pagination.nextCursor
+    } while (cursor && seen.length <= 2 * N)
+    const mine = await db.notifications.findMany({ where: { user_id: viewer.id }, select: { id: true } })
+    expectEach(seen, mine.map((n) => n.id))
   })
 
   it("GET /message-requests: 25 requests received at one instant", async () => {
