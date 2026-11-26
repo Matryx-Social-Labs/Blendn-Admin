@@ -507,10 +507,11 @@ function EditUserDialog({ user, open, onOpenChange, currentUserRole }: EditUserD
           onboarded: formData.onboarded,
         },
       })
-      if (currentUserRole === "app_admin" && editRole !== user.role) {
-        await updateUserRole(user.id, editRole)
-      }
-      toast.success("User updated successfully")
+      const roleChange =
+        currentUserRole === "app_admin" && editRole !== user.role ? await updateUserRole(user.id, editRole) : null
+      // A promotion to admin waits for a second admin (SCRUM-1240): the role has not changed, so neither does the select.
+      if (roleChange?.pending) setEditRole(user.role)
+      toast.success(roleChange?.pending ? "Waiting for a second admin to confirm within 24 hours" : "User updated successfully")
       onOpenChange(false)
     } catch (err) {
       toast.error(refusalMessage(err, "Failed to update user"))

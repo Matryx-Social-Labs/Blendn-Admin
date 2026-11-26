@@ -102,7 +102,6 @@ const BASELINE: Record<string, string[]> = {
   "app/api/onboarding/apply/route.ts": ["kind", "tier"],
   "app/dashboard/events/[id]/feedback/actions.ts": ["category", "sentiment"],
   "app/dashboard/events/curate/actions.ts": ["geofence"],
-  "app/dashboard/users/actions.ts": ["role"],
   // Moved with the check-in core out of the event check-in route (step 4).
   "lib/check-in-core.ts": ["anonymous_name"],
   "lib/admin-role-actions.ts": ["name", "role", "status"],
