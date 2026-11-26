@@ -141,6 +141,8 @@ async function account(label: string, state: AccountState | "ok" = "ok") {
       password: await bcrypt.hash(PASSWORD, 4),
       role: state === "staff" ? "organizer" : "attendee",
       suspended_at: state === "suspended" ? new Date() : null,
+      // A category, so a route that loses the column from its select says community guidelines and fails.
+      suspension_reason: state === "suspended" ? "harassment" : null,
       deletedAt: state === "deleted" ? new Date() : null,
       oauth_accounts: {
         create: [
@@ -172,7 +174,7 @@ function blocklistJustRead() {
  */
 const THE_REFUSALS = [
   // Each case proves the account (password, provider token, its own refresh or access token), so it is told why (SCRUM-1174).
-  ["suspended", 403, "ACCOUNT_SUSPENDED", suspendedMessageFor(null)],
+  ["suspended", 403, "ACCOUNT_SUSPENDED", suspendedMessageFor("harassment")],
   ["staff", 403, "ACCOUNT_STAFF", STAFF_MESSAGE],
 ] as const
 
@@ -760,7 +762,8 @@ describe("refresh against sign-out-everywhere, interleaved: no session survives"
   })
 
   it.each([
-    ["suspension", { suspended_at: new Date() }, 403, { errorCode: "FORBIDDEN", reasonCode: "ACCOUNT_SUSPENDED" }],
+    // The category is read under the lock too (SCRUM-1174).
+    ["suspension", { suspended_at: new Date(), suspension_reason: "spam" }, 403, { error: suspendedMessageFor("spam"), errorCode: "FORBIDDEN", reasonCode: "ACCOUNT_SUSPENDED" }],
     ["deletion", { deletedAt: new Date() }, 401, { errorCode: "ACCOUNT_DELETED", reasonCode: "ACCOUNT_DELETED" }],
   ] as const)("a %s that holds the user row first: the refresh waits, then refuses, and stores nothing", async (_what, change, status, body) => {
     const a = await onePhone(`race-${_what}`)
