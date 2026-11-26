@@ -8,6 +8,7 @@ import { getAuth } from "@/lib/auth"
 import { auditLog } from "@/lib/audit-log"
 import { actorFor } from "@/lib/org-membership"
 import { realEventsWhere } from "@/lib/event-kind"
+import { eventPermissionSelect, eventPermissions } from "@/lib/rbac"
 import { claimedVenueEventsWhere, startsAfterClaim } from "@/lib/event-visibility"
 
 /**
@@ -260,18 +261,17 @@ export async function unlinkEventVenue(eventId: string, reason: string): Promise
     // would free its slot and split the room in two.
     where: { id: eventId, deleted_at: null, ...realEventsWhere },
     select: {
+      ...eventPermissionSelect,
       id: true,
       venue_id: true,
       venue_name: true,
-      organizer_org_id: true,
-      venue: { select: { name: true } },
+      venue: { select: { ...eventPermissionSelect.venue.select, name: true } },
     },
   })
   if (!event?.venue_id) throw new Refusal("This event is not linked to a venue.")
 
-  const isOrganiser =
-    event.organizer_org_id !== null && actor.orgIds.includes(event.organizer_org_id)
-  if (actor.role !== "app_admin" && !isOrganiser) throw new Refusal("Forbidden")
+  // Unlinking edits the event: whoever may edit it, not every member (SCRUM-1244).
+  if (!eventPermissions(actor, event).canEdit) throw new Refusal("Forbidden")
 
   await db.events.update({
     where: { id: eventId },

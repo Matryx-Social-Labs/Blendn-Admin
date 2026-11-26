@@ -151,7 +151,7 @@ describe("canJoinEvent", () => {
       venue: null,
     })
     mockDb.user.findUnique.mockResolvedValue({ role: "organizer" })
-    mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: "org_nightshift" }])
+    mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: "org_nightshift", role: "owner" }])
     mockDb.event_rsvps.findFirst.mockResolvedValue(null)
     await expect(canJoinEvent(USER, EVENT_ID)).resolves.toBe(true)
   })
@@ -165,7 +165,7 @@ describe("canJoinEvent", () => {
       venue: null,
     })
     mockDb.user.findUnique.mockResolvedValue({ role: "organizer" })
-    mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: "org_elsewhere" }])
+    mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: "org_elsewhere", role: "owner" }])
     mockDb.event_rsvps.findFirst.mockResolvedValue(null)
     await expect(canJoinEvent(USER, EVENT_ID)).resolves.toBe(false)
   })

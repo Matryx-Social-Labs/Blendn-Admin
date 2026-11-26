@@ -69,7 +69,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockDb.$transaction.mockImplementation((fn: (tx: unknown) => unknown) => fn(mockDb))
   mockAuth.mockResolvedValue({ user: { id: USER, role: "sponsor" } })
-  mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: ORG }])
+  mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: ORG, role: "owner" }])
   // The grant resolver: one org holds may_sponsor AND the approved placement.
   mockDb.organisations.findFirst.mockResolvedValue({ id: ORG })
   mockPresign.mockResolvedValue({ uploadUrl: "https://put.test/x", publicUrl: "", key: KEY })

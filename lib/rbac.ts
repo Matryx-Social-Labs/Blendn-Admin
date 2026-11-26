@@ -50,6 +50,14 @@ export interface PermissionActor {
    * which loads memberships. The compiler now catches what a test could not.
    */
   orgIds: string[]
+  /**
+   * The subset of `orgIds` where this actor is an `owner` or `admin`: whose
+   * events they may edit, publish and cancel, and whose roster they may read.
+   * A `staff` member is in `orgIds` only, so they operate the org's nights (the
+   * room, moderation, the door) and change none of them (SCRUM-1244). Required
+   * for the same reason as `orgIds`; `actorFor` fills both from one query.
+   */
+  editOrgIds: string[]
 }
 
 /**
@@ -101,6 +109,7 @@ export interface EventPermissions {
 
 const DENIED: EventPermissions = { canEdit: false, canOperate: false, canViewAttendees: false }
 const ALL: EventPermissions = { canEdit: true, canOperate: true, canViewAttendees: true }
+const STAFF: EventPermissions = { canEdit: false, canOperate: true, canViewAttendees: false }
 
 /**
  * Resolve what an actor may do with one event.
@@ -112,7 +121,8 @@ const ALL: EventPermissions = { canEdit: true, canOperate: true, canViewAttendee
  *
  *     | actor       | condition                          | edit | operate | attendees |
  *     | app_admin   | always                             | yes  | yes     | yes       |
- *     | host        | member of the organising org       | yes  | yes     | yes       |
+ *     | host        | owner/admin of the organising org  | yes  | yes     | yes       |
+ *     | host staff  | staff of the organising org        | no   | yes     | no        |
  *     | venue owner | member of the venue's owning org   | no   | yes     | yes       |
  *
  *   and on a venue day (`kind = 'venue_day'`), whatever `organizer_org_id` says:
@@ -159,8 +169,12 @@ export function eventPermissions(
     return ownsVenueAt(actor, orgs, event) ? { canEdit: false, canOperate: true, canViewAttendees: false } : DENIED
   }
 
-  // Whichever org runs it gets both, whatever host role its members hold.
-  if (event.organizer_org_id && orgs.has(event.organizer_org_id)) return ALL
+  // Whichever org runs it: its owners and admins get everything, its staff run
+  // the night and change none of it (SCRUM-1244). An edit right outside `orgs`
+  // is a hand-built actor, and grants nothing.
+  if (event.organizer_org_id && orgs.has(event.organizer_org_id)) {
+    return (actor.editOrgIds ?? []).includes(event.organizer_org_id) ? ALL : STAFF
+  }
 
   /*
    * A claim opens what happens at the venue from then on — never its past
