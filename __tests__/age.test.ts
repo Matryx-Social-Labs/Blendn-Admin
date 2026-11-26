@@ -11,10 +11,14 @@ import {
   mayDate,
   mayParticipate,
   minAgeRefusal,
+  FINISH_ONBOARDING,
+  participationDenial,
+  UNDER_18_ACCOUNT,
   parseDateOfBirth,
   stripDating,
 } from "@/lib/age"
 import { updateProfileSchema } from "@/lib/validations/profile"
+import { COMPANY } from "@/lib/company"
 
 /**
  * The age rules, and the one that JavaScript gets wrong for free.
@@ -307,25 +311,76 @@ describe("mayParticipate (SCRUM-331)", () => {
     return d
   }
 
-  it("lets an onboarded profile take part whatever its age says — including none", () => {
-    expect(mayParticipate({ onboarded: true, age: null, date_of_birth: null })).toBe(true)
-    expect(mayParticipate({ onboarded: true, age: 16, date_of_birth: null })).toBe(true)
+  const profile = (p: { onboarded: boolean; age?: number | null; date_of_birth?: Date | null; under_18_since?: Date | null }) => ({
+    age: null,
+    date_of_birth: null,
+    under_18_since: null,
+    ...p,
+  })
+
+  it("lets an onboarded profile with no age take part — from before age was asked", () => {
+    expect(mayParticipate(profile({ onboarded: true }))).toBe(true)
+    expect(mayParticipate(profile({ onboarded: true, age: 30 }))).toBe(true)
+  })
+
+  it("refuses a known age under 18, onboarded or not (SCRUM-1169)", () => {
+    expect(mayParticipate(profile({ onboarded: true, age: 16 }))).toBe(false)
+    expect(mayParticipate(profile({ onboarded: true, date_of_birth: years(17) }))).toBe(false)
+    expect(mayParticipate(profile({ onboarded: false, age: 17 }))).toBe(false)
+  })
+
+  it("refuses a stamped account whatever its age says (SCRUM-1169)", () => {
+    expect(mayParticipate(profile({ onboarded: true, under_18_since: new Date() }))).toBe(false)
+    expect(mayParticipate(profile({ onboarded: true, age: 30, under_18_since: new Date() }))).toBe(false)
   })
 
   it("lets a profile still in onboarding take part only with an adult age on file", () => {
-    expect(mayParticipate({ onboarded: false, age: 18, date_of_birth: null })).toBe(true)
-    expect(mayParticipate({ onboarded: false, age: 17, date_of_birth: null })).toBe(false)
-    expect(mayParticipate({ onboarded: false, age: null, date_of_birth: null })).toBe(false)
+    expect(mayParticipate(profile({ onboarded: false, age: 18 }))).toBe(true)
+    expect(mayParticipate(profile({ onboarded: false, age: 25 }))).toBe(true)
+    expect(mayParticipate(profile({ onboarded: false }))).toBe(false)
   })
 
   it("reads the age from the birth date first, as every age rule does", () => {
     // A stored 30 that the birth date contradicts is not an adult.
-    expect(mayParticipate({ onboarded: false, age: 30, date_of_birth: years(16) })).toBe(false)
-    expect(mayParticipate({ onboarded: false, age: null, date_of_birth: years(25) })).toBe(true)
+    expect(mayParticipate(profile({ onboarded: false, age: 30, date_of_birth: years(16) }))).toBe(false)
+    expect(mayParticipate(profile({ onboarded: false, date_of_birth: years(25) }))).toBe(true)
   })
 
   it("says no when there is no profile at all", () => {
     expect(mayParticipate(null)).toBe(false)
     expect(mayParticipate(undefined)).toBe(false)
+  })
+
+  describe("which refusal (SCRUM-1169): the one place the callers ask", () => {
+    const minor = { kind: "age", message: UNDER_18_ACCOUNT, unknownAge: false }
+    const unfinished = { kind: "unfinished", message: FINISH_ONBOARDING }
+
+    it("a known under-18 or a stamped account is told adults only, as a known age (AGE_RESTRICTED)", () => {
+      expect(participationDenial(profile({ onboarded: true, age: 16 }))).toEqual(minor)
+      expect(participationDenial(profile({ onboarded: false, date_of_birth: years(16) }))).toEqual(minor)
+      expect(participationDenial(profile({ onboarded: true, under_18_since: new Date() }))).toEqual(minor)
+      expect(participationDenial(profile({ onboarded: false, age: 25, under_18_since: new Date() }))).toEqual(minor)
+    })
+
+    it("an unfinished adult-or-unknown account is told to finish, exactly as before (PROFILE_INCOMPLETE)", () => {
+      expect(participationDenial(profile({ onboarded: false }))).toEqual(unfinished)
+      expect(participationDenial(null)).toEqual(unfinished)
+    })
+
+    it("nobody else is refused", () => {
+      expect(participationDenial(profile({ onboarded: true }))).toBeNull()
+      expect(participationDenial(profile({ onboarded: false, age: 25 }))).toBeNull()
+    })
+  })
+})
+
+describe("the sentence a blocked under-18 account reads (SCRUM-1169)", () => {
+  it("says adults only first, then where to write", () => {
+    expect(UNDER_18_ACCOUNT.startsWith(ADULTS_ONLY)).toBe(true)
+    expect(UNDER_18_ACCOUNT).toContain(COMPANY.grievance.email)
+  })
+
+  it("never reads as a fixable missing age to the installed app (/add your (age|date of birth)/i offers Add your age)", () => {
+    expect(UNDER_18_ACCOUNT).not.toMatch(/add your (age|date of birth)/i)
   })
 })
