@@ -54,7 +54,7 @@ function windowCount({ where }: { where: { status: string; created_at: { gt: Dat
 const sql = (strings: TemplateStringsArray) => strings.join("?")
 let severe = 0
 
-beforeEach(() => {
+beforeEach(async () => {
   jest.clearAllMocks()
   jest.resetModules()
   reports.length = 0
@@ -79,7 +79,7 @@ beforeEach(() => {
   fetchMock = jest.fn().mockResolvedValue({ ok: true, text: async () => "ok" })
   global.fetch = fetchMock as unknown as typeof fetch
   // Fresh module per test: the in-memory mark starts at boot, like a new process.
-  const mod = require("@/lib/staff-alert")
+  const mod = await import("@/lib/staff-alert")
   sweep = mod.runStaffAlertSweep
   notifyStaff = mod.notifyStaff
   DEGRADED = mod.DEGRADED_UNCHECKED_PER_HOUR
@@ -126,10 +126,10 @@ describe("the sweep", () => {
     expect(posted()[1]).toContain("1 new report")
   })
 
-  it("does not lose a row written just before a run: the window trails by a grace", async () => {
-    // Created 1 s before the run: a transaction may commit after the count.
-    reports.push({ id: "r1", created_at: at(-1) })
+  it("does not lose a row whose transaction commits after the count: the window trails by a grace", async () => {
     await sweep(at(0))
+    // created_at is the insert's clock, 1 s before that run; the commit landed after its count.
+    reports.push({ id: "r1", created_at: at(-1) })
     await sweep(at(60))
     expect(posted()).toHaveLength(1)
   })
