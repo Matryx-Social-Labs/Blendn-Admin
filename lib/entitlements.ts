@@ -1,5 +1,5 @@
-import "server-only"
-
+// No "server-only": the free-window mail reaches `liveEntitlement` from server.ts through lib/reminder-sweeper.ts
+// (SCRUM-1275), and plain Node cannot load that marker. `./db` (pg) is what keeps this out of a client bundle.
 import type {
   entitlement_product,
   entitlement_source,

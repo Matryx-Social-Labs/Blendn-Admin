@@ -9,7 +9,7 @@ import { FREE_WINDOW_DAYS } from "@/lib/analytics-access"
 import { MIN_ATTENDEES } from "@/lib/connection-metrics"
 import { getAuth } from "@/lib/auth"
 import { billingOrgFor, planPageData, type PlanDate, type PlanPageData } from "@/lib/billing"
-import { BILLING_PLANS, grossRupees, gstSplit, rupees } from "@/lib/billing-plans"
+import { BILLING_PLANS, grossRupees, gstSplit, planDay as day, rupees } from "@/lib/billing-plans"
 import { mayReachRoute } from "@/lib/dashboard-nav"
 import { routeMetadata } from "@/lib/dashboard-route-content"
 import { venuePlanPage } from "@/lib/venue-plan"
@@ -36,8 +36,6 @@ export const dynamic = "force-dynamic"
  * number the statement will show (the screen's one memorable detail).
  */
 
-const DAY = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })
-const day = (d: Date) => DAY.format(d)
 const dated = (d: PlanDate | null) => (d ? `${d.word} ${day(d.at)}` : null)
 
 const FREE = [
