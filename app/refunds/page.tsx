@@ -17,7 +17,7 @@ export default function RefundsPage() {
     <PolicyPage
       path="/refunds"
       title="Cancellation and refund policy"
-      updated="26 November 2026"
+      updated="26 October 2026"
       lede={`This policy covers payments made to ${COMPANY.legalName} through the Blend'n dashboard: plans for hosts and venues, and sponsor payment links. Payments are processed by Razorpay.`}
     >
       <h2>Cancelling a monthly or yearly plan</h2>
@@ -64,7 +64,7 @@ export default function RefundsPage() {
         <li>
           Email <a href={`mailto:${COMPANY.email}`}>{COMPANY.email}</a> or call{" "}
           <a href={COMPANY.phoneHref}>{COMPANY.phone}</a> within 30 days of the payment, with your
-          organisation&apos;s name and the payment reference shown on your Plan page.
+          organisation&apos;s name and the payment or invoice reference shown on your Plan page.
         </li>
         <li>We reply within two business days.</li>
         <li>

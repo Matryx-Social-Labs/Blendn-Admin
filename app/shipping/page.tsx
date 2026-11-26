@@ -16,7 +16,7 @@ export default function ShippingPage() {
     <PolicyPage
       path="/shipping"
       title="Shipping and delivery policy"
-      updated="26 November 2026"
+      updated="26 October 2026"
       lede="Everything sold on the Blend'n dashboard is a digital service. Nothing is shipped, and there are no shipping charges."
     >
       <h2>How a purchase is delivered</h2>
@@ -35,7 +35,7 @@ export default function ShippingPage() {
       </ul>
       <p>
         Delivery is to your account on the Blend&apos;n dashboard, where the Plan page shows what is on and until when,
-        with each payment&apos;s Razorpay payment reference. It is available wherever you can sign in.
+        with each payment&apos;s Razorpay invoice or payment reference. It is available wherever you can sign in.
       </p>
 
       <h2>If it has not arrived</h2>
