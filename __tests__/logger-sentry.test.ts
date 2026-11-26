@@ -4,6 +4,7 @@
  * console only and every handled error (a failed push, a sweep that throws,
  * a mail that did not send) lived in Railway's log window alone.
  */
+import type { BaseTransportOptions, ClientOptions } from "@sentry/core"
 import type { ErrorEvent } from "@sentry/nextjs"
 
 const captureException = jest.fn()
@@ -122,7 +123,10 @@ describe("a capture from a second copy of the SDK reaches the client the first c
     expect(second).not.toBe(first)
 
     const seen: ErrorEvent[] = []
-    class TestClient extends first.Client {
+    class TestClient extends first.Client<ClientOptions> {
+      constructor(options: ClientOptions) {
+        super(options)
+      }
       eventFromException(e: unknown) {
         return Promise.resolve({ exception: { values: [{ value: String(e) }] } })
       }
@@ -134,8 +138,8 @@ describe("a capture from a second copy of the SDK reaches the client the first c
       dsn: "https://public@o0.ingest.sentry.io/0",
       integrations: [],
       stackParser: () => [],
-      transport: (options) => first.createTransport(options, async () => ({})),
-      beforeSend: (event) => {
+      transport: (options: BaseTransportOptions) => first.createTransport(options, async () => ({})),
+      beforeSend: (event: ErrorEvent) => {
         seen.push(event)
         return null
       },
