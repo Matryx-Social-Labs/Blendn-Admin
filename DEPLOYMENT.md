@@ -256,16 +256,35 @@ was cleared after it was created — the build is rejected, and you find out day
 later rather than at deploy time. The script is idempotent, so running it when
 it is not needed costs nothing; forgetting it costs a review cycle.
 
-It also creates an event if none is upcoming. An empty Events tab reads as a
-broken app to a reviewer, which is a likelier rejection than anything about
-sign-in — and the event now gets its `event_occurrences` rows, without which
-**check-in refuses with "Event has already ended"** on an event starting
-tomorrow. `occurrence_id` is NOT NULL and `resolveOccurrence` treats "no
-occurrences" as over.
+It also makes the review event, every run: one row, slug `review-demo-event`,
+found again on a re-run rather than made twice. An empty Events tab reads as a
+broken app to a reviewer, and the reviewer is not in Bengaluru, so it is:
 
-After running it, sanity-check the reviewer's whole path once: sign in, open the
-event, check in. It takes a minute and it is the exact sequence a rejection
-would come from.
+- **Unlisted.** No feed or search shows it, nor the "you're here" list to
+  somebody standing at its pin, so real users never meet a fake "Rooftop
+  Sessions". The reviewer opens it from its share link, the same
+  `/event/<id>` address the app's Share button sends (`eventShareUrl`, on
+  `PUBLIC_SITE_ORIGIN`), which the script prints. Paste that link into the App
+  Review notes. Run the script with `PUBLIC_SITE_ORIGIN` as the target
+  environment has it (unset is `www`, production's).
+- **Open for a week.** From an hour before the run to a minute short of seven
+  days after that, in daily sessions that run into each other
+  (`syncOccurrences`), so check-in is open at any hour of a review that takes
+  days. **Run it again on submission day**: a re-run moves the window to start
+  then, on the same row, puts back anything changed on it (visibility, status,
+  a called-off day), and keeps any day somebody checked in to.
+- **Filed under the oldest active organizer or app_admin**, re-checked every
+  run: the event's public page is hidden while its host is suspended or
+  deleted. With no such account the script refuses.
+
+It refuses, writing nothing, when `review-demo-event` is an event it did not
+make (an organiser can title one "Review Demo Event") and when
+`APP_REVIEW_EMAIL` belongs to a staff account, whose password it would
+otherwise reset. Events from earlier runs (slugs `review-demo-event-<date>`)
+lose `review_demo`, so there is one review event. It prints the event id, the
+window and the share link. After running it,
+sanity-check the reviewer's whole path once: sign in, open the share link, check
+in. It takes a minute and it is the exact sequence a rejection would come from.
 
 Two constraints on the password, both enforced by the script rather than left to
 be discovered:
@@ -312,11 +331,9 @@ APP_REVIEW_EMAIL=... APP_REVIEW_PASSWORD=... npm run seed:review
 REVIEW_ACCOUNT_IDS=<user id from step 1>
 ```
 
-Only the event `seed:review` creates is ever `review_demo`, so the reviewer is
-never put in a real room with real people. It creates one only when nothing
-upcoming is published; on a database with real upcoming events there is no
-`review_demo` event, and the geofence half of the aid has nothing to apply to.
-Turn the aid off after approval by deleting the variable.
+Only the event `seed:review` makes is ever `review_demo`, so the reviewer is
+never put in a real room with real people. Turn the aid off after approval by
+deleting the variable.
 
 ### 8. Populate a room — staging only
 

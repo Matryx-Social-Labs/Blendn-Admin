@@ -145,7 +145,8 @@ export default async function EventDetailPage({
       <div className="flex flex-col gap-5">
         {header}
         <EventShare
-          url={eventShareUrl(event.id)}
+          doorUrl={eventShareUrl(event.id, "door")}
+          linkUrl={eventShareUrl(event.id, "link")}
           title={event.title}
           when={`${clock.dateTime(event.start_time)}${venueName ? ` · ${venueName}` : ""}`}
           androidOpensApp={EVENT_LINKS_OPEN_ANDROID_APP}

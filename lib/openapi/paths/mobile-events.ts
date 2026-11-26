@@ -222,6 +222,13 @@ registry.registerPath({
       lon: z.number().optional(),
       include: z.string().optional(),
       interestedLimit: z.number().optional(),
+      s: z
+        .string()
+        .optional()
+        .describe(
+          "Where the view came from: `door` (the door QR), `link` (the host's copied link), `invite`, `web` or `share` (SCRUM-1273). " +
+            "Recorded on the day's first view of this event by this person; a refused view is not recorded. Unknown values are ignored."
+        ),
     }),
   },
   responses: {

@@ -57,6 +57,23 @@ export const PAYWALL_TRIGGERS = ["go_live_expiry", "second_event", "first_match"
 export type ProductEventName = (typeof PRODUCT_EVENTS)[keyof typeof PRODUCT_EVENTS]
 
 /**
+ * Where somebody came from (SCRUM-1273): the door QR, the host's copied link, a friend's invite, the website,
+ * or a guest's own share. Sent by the app as `?s=` on an event view, and as `source` on an RSVP and on the
+ * profile save that finishes sign-up. The CHECKs on `event_rsvps.source` and `profiles.signup_source` list
+ * the same five (`acquisition-source.test.ts` holds them together).
+ */
+export const ACQUISITION_SOURCES = ["door", "link", "invite", "web", "share"] as const
+export type AcquisitionSource = (typeof ACQUISITION_SOURCES)[number]
+
+/**
+ * The source, or null for anything else. Never a refusal: an analytics tag must not cost an RSVP or a profile
+ * save, and a newer app sending a source this server does not know yet must keep working.
+ */
+export function acquisitionSource(value: unknown): AcquisitionSource | null {
+  return (ACQUISITION_SOURCES as readonly unknown[]).includes(value) ? (value as AcquisitionSource) : null
+}
+
+/**
  * A day key in UTC.
  *
  * UTC rather than the viewer's timezone, deliberately: DAU has to be one number
@@ -114,6 +131,7 @@ interface Pending {
   entity_id: string | null
   dedupe_key: string
   occurred_at: Date
+  props?: { source: AcquisitionSource }
 }
 
 let seenDay = ""
@@ -221,6 +239,8 @@ export function record(input: {
   entityKind?: string
   entityId?: string
   at?: Date
+  /** Written to `props`. Deduped like the rest, so the first source per person, entity and day is the one kept. */
+  props?: { source: AcquisitionSource }
 }): void {
   try {
     /*
@@ -267,6 +287,7 @@ export function record(input: {
         entity_id: input.entityId ?? null,
         dedupe_key: key,
         occurred_at: at,
+        ...(input.props && { props: input.props }),
       })
     }
 

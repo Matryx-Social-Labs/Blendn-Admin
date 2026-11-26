@@ -318,6 +318,9 @@ model profiles {
   goals         String[]
   looking_for   String[]
   onboarded     Boolean   @default(false)
+  /// Where the account came from (SCRUM-1273): `ACQUISITION_SOURCES` in lib/product-events.ts, written once by
+  /// `PUT /profiles/:id` (the first source wins). Analytics only: never in a response. CHECK in migration SQL.
+  signup_source String?
 
   /// What this person is generally open to. Overridable per event — people
   /// differ on a Tuesday and a Saturday — so this is the default, not the truth.
@@ -1780,6 +1783,9 @@ model event_rsvps {
   /// `not_going` rather than being deleted, so a late "can't make it" is not read as a no-show (`withdrawRsvp`,
   /// lib/waitlist.ts). NULL otherwise, including a `not_going` said before the doors.
   cancelled_at DateTime?   @db.Timestamptz(6)
+  /// Where the RSVP came from (SCRUM-1273): `ACQUISITION_SOURCES` in lib/product-events.ts, written on the row's
+  /// first insert only (`placeRsvp`); a later change of mind keeps it. CHECK in migration SQL.
+  source       String?
 
   event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
   user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)

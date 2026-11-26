@@ -204,6 +204,7 @@ and therefore in every deployed environment:
 | `cities_licensed_min_age_floor` | a city's licensed-venue age default is never under the 18+ floor |
 | `cities_whatsapp_channel_url_shape` | a city's WhatsApp Channel is NULL or an https `whatsapp.com/channel/` link (Notification settings' "Your city" row) |
 | `mobile_refresh_tokens_revoked_reason_known` | a refresh token's `revoked_reason` is NULL, `password_reset` or `signout_all` — the two `endPhoneSessions` reasons (`lib/session-end.ts`) the refresh turns into `PASSWORD_RESET` / `SESSION_REVOKED_ELSEWHERE` |
+| `event_rsvps_source_known` / `profiles_signup_source_known` | an RSVP's `source` and a profile's `signup_source` are NULL or one of `ACQUISITION_SOURCES` (`door`, `link`, `invite`, `web`, `share`; `lib/product-events.ts`, SCRUM-1273). NOT VALID: every row was NULL when they were added |
 | `markets_ticket_fee_slabs_shape` | a market's service-fee slabs: thresholds and rates the same length, at least one, the first from ticket 1, no NULLs |
 | `markets_ticket_fee_slabs_ascending` | slab thresholds strictly ascending, through the IMMUTABLE SQL function `ticket_fee_slabs_ascending` (also `parseFeeSchedule`'s, `lib/ticket-fees.ts`) |
 | `markets_ticket_fee_rates_range` | slab rates, tax on the fee and processing are 0–10000 bps; the minimum fee is never negative |

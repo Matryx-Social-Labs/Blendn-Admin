@@ -2615,10 +2615,10 @@
       "date": "2026-11-01"
     },
     "seed-review-account.itest.ts": {
-      "guards": "SCRUM-976: the App Review seed's demo event gets one set of occurrences (syncOccurrences only), so the seed runs to the end on a database with no upcoming event.",
-      "mutation": "M976a the hand-rolled event_occurrences.createMany after syncOccurrences put back (the pre-fix seed).",
-      "observed": "M976a: 1 of 1 failing (Unique constraint failed on event_occurrences_event_id_occurs_on_key). Removed; 1/1.",
-      "date": "2026-11-01"
+      "guards": "SCRUM-1196 / launch gate 6: seed:review, run as a script on a database with a real upcoming public event, makes exactly one unlisted review-demo-event, open at every hour for a week, that the review account checks in to from Cupertino and a passer-by at its pin is not offered; a re-run restores it on the same row, un-cancels its days and clears the bypass from earlier runs' events; it refuses a slug it did not make and a staff address. SCRUM-976 rides along: the seed runs to the end (exit 0).",
+      "mutation": "M1196a the pre-change script and places-inside (origin/dev). M1196b the window as first specified, now - 1 h to now + 7 d. M1196c review_demo: false removed from eventsInside. M1196d the slug guard removed. M1196e the un-cancel removed. M1196f the staff-address guard removed.",
+      "observed": "M1196a: 7 of 7 failing. M1196b: 'keeps the door open at every hour' failing, the door shut 156 of 167 hours. M1196c: 'is not offered to a passer-by' failing. M1196d and M1196f: 'refuses, writing nothing' failing. M1196e: 'on a second run, puts the same row back' failing. Restored; 7/7.",
+      "date": "2026-11-26"
     },
     "invite-accept-attendee.itest.ts": {
       "guards": "SCRUM-984: an attendee accepting an invite comes out as the role fixed at send, and every accept is refused when the sender lost their standing in the org.",
@@ -2768,6 +2768,18 @@
       "guards": "SCRUM-1320: a venue is chargeable VENUE_DATA_DAYS (90) after its first venue-day check-in: not on day 89 nor a millisecond before day 90, from day 90; the meter caps at 90. lib/venue-plan.ts, lib/billing-actions.ts, the venue Plan page and /pricing never say 'four weeks'; the venue Plan page never divides VENUE_DATA_DAYS (90 / 7 printed 12.857142857142858 weeks); the card, /pricing and both buy refusals say three months. Its companions: venue-plan-row.test.tsx (90 of 90 when chargeable; 40 of 90 with the no-charge date and no Buy), venue-plans.itest.ts (the refusal text with first check-in + 90 days, real Postgres) and e2e/venue-three-months.spec.ts (the drive with the read-back).",
       "mutation": "(C1) the two unit files run on dev abbe1844, before the change; (M1) VENUE_DATA_DAYS back to 28; (M2) chargeable `now > chargeableFrom`; (M3) the meter's Math.min cap removed; (M4) the card back to `{VENUE_DATA_DAYS / 7} weeks`; (M5) the dated refusal back to 'four weeks after people first went live here'.",
       "observed": "C1: venue-three-months 10 of 10 failing, venue-plan-row 7 of 8. M1: 11 of 18 failing. M2: 1 of 18 (day 90). M3: 1 of 18 (day 400 read 400). M4: 3 of 18. M5: 2 of 18. Restored each; 18 of 18.",
+      "date": "2026-11-26"
+    },
+    "acquisition-source.test.ts": {
+      "guards": "SCRUM-1273 (insights/02): acquisitionSource accepts exactly door, link, invite, web, share and reads anything else (DOOR, 'door ', 200 characters, non-strings) as null; record() writes { source } to props, no props key without one, and the first source of the day is the one kept; profileForSelfResponse drops signup_source; the CHECK in each of the two migrations (event_rsvps_source, profiles_signup_source) lists exactly ACQUISITION_SOURCES.",
+      "mutation": "(C1) run on dev 4f434e6f, before the change; (M1) 'share' removed from the profiles migration's IN list; (M2) the parser lower-cases its input.",
+      "observed": "C1: 25 of 26 failing (no export, no props, no migrations; only 'no props key without one' passed). M1: 'migration 1 names the same five values' fails, 1 of 26. M2: 'reads \"DOOR\" as no source' fails, 1 of 26. Restored each; 26 of 26.",
+      "date": "2026-11-26"
+    },
+    "integration/acquisition-source.itest.ts": {
+      "guards": "SCRUM-1273 (insights/02): GET /events/:id?s= records the source on event_viewed only after attendeeEventAccess (a refused view writes no row); POST /events/:id/rsvp { source } writes event_rsvps.source on the first insert and a later not_going keeps it; PUT /profiles/:id { source } writes signup_source only WHERE it IS NULL (door then link leaves door); an unknown source is 200 and NULL on all three; a request with no source answers exactly as one with a source, and neither the PUT response nor GET /profiles/:own reads signup_source back; a 401 view writes no row; a withdrawal before the doors starts the RSVP source again, after them keeps it; a NULL source stays NULL; a non-owner PUT writes nothing; Postgres refuses a sixth value. Companions: acquisition-source.test.ts and event-share.test.tsx (the QR decodes to ?s=door, the copy field is ?s=link).",
+      "mutation": "(C1) record() put back above attendeeEventAccess, as on dev 4f434e6f; (M2) placeRsvp also writes source on the upsert's update branch; (M3) the profile write's WHERE without signup_source: null; (M4) profileForSelfResponse no longer drops signup_source; (M5) the GET /profiles/:own destructure no longer drops signup_source.",
+      "observed": "Against blendn_t02 (db:migrate, pg17). C1: 'counts no view the person was refused' failing, the refused view wrote [{ props: null }]; 2 of 19 failing with the tagged-view test. M2: 1 of 19 failing (not_going overwrote door with link). M3: 1 of 19 failing (link replaced door). M4: 1 of 19 failing (signup_source in the self response). M5 (after review, with 7 more cases): 'never reads the source back on GET /profiles/:own' failing. Restored each; 26 of 26.",
       "date": "2026-11-26"
     },
     "quiet-hours.test.ts": {
