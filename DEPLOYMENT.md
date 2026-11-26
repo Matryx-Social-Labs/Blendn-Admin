@@ -260,19 +260,29 @@ It also makes the review event, every run: one row, slug `review-demo-event`,
 found again on a re-run rather than made twice. An empty Events tab reads as a
 broken app to a reviewer, and the reviewer is not in Bengaluru, so it is:
 
-- **Unlisted.** No feed or search shows it, so real users never meet a fake
-  "Rooftop Sessions". The reviewer opens it from its share link, the same
+- **Unlisted.** No feed or search shows it, nor the "you're here" list to
+  somebody standing at its pin, so real users never meet a fake "Rooftop
+  Sessions". The reviewer opens it from its share link, the same
   `/event/<id>` address the app's Share button sends (`eventShareUrl`, on
   `PUBLIC_SITE_ORIGIN`), which the script prints. Paste that link into the App
   Review notes. Run the script with `PUBLIC_SITE_ORIGIN` as the target
   environment has it (unset is `www`, production's).
-- **Open all week from the run.** It starts an hour before the run and ends a
-  minute short of seven days after, in daily sessions that run into each other
+- **Open for a week.** From an hour before the run to a minute short of seven
+  days after that, in daily sessions that run into each other
   (`syncOccurrences`), so check-in is open at any hour of a review that takes
   days. **Run it again on submission day**: a re-run moves the window to start
-  then, on the same row, and keeps any day somebody checked in to.
+  then, on the same row, puts back anything changed on it (visibility, status,
+  a called-off day), and keeps any day somebody checked in to.
+- **Filed under the oldest active organizer or app_admin**, re-checked every
+  run: the event's public page is hidden while its host is suspended or
+  deleted. With no such account the script refuses.
 
-It prints the event id, the window and the share link. After running it,
+It refuses, writing nothing, when `review-demo-event` is an event it did not
+make (an organiser can title one "Review Demo Event") and when
+`APP_REVIEW_EMAIL` belongs to a staff account, whose password it would
+otherwise reset. Events from earlier runs (slugs `review-demo-event-<date>`)
+lose `review_demo`, so there is one review event. It prints the event id, the
+window and the share link. After running it,
 sanity-check the reviewer's whole path once: sign in, open the share link, check
 in. It takes a minute and it is the exact sequence a rejection would come from.
 

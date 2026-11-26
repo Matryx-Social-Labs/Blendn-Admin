@@ -2597,9 +2597,9 @@
       "date": "2026-11-01"
     },
     "seed-review-account.itest.ts": {
-      "guards": "SCRUM-1196 / launch gate 6: seed:review, run as a script on a database with a real upcoming public event, makes exactly one unlisted review-demo-event, open at every hour for a week, openable by id from anywhere, and prints its share link. SCRUM-976 rides along: the seed must run to the end (exit 0) with one set of occurrences.",
-      "mutation": "M1196a the populated-database gate put back (the pre-change script: an event only when nothing upcoming is published). M1196b the window as first specified, now - 1 h to now + 7 d.",
-      "observed": "M1196a: 4 of 4 failing (no review-demo-event row). M1196b: 'keeps the door open at every hour' failing, the door shut 156 of 167 hours. Restored; 4/4.",
+      "guards": "SCRUM-1196 / launch gate 6: seed:review, run as a script on a database with a real upcoming public event, makes exactly one unlisted review-demo-event, open at every hour for a week, that the review account checks in to from Cupertino and a passer-by at its pin is not offered; a re-run restores it on the same row, un-cancels its days and clears the bypass from earlier runs' events; it refuses a slug it did not make and a staff address. SCRUM-976 rides along: the seed runs to the end (exit 0).",
+      "mutation": "M1196a the pre-change script and places-inside (origin/dev). M1196b the window as first specified, now - 1 h to now + 7 d. M1196c review_demo: false removed from eventsInside. M1196d the slug guard removed. M1196e the un-cancel removed. M1196f the staff-address guard removed.",
+      "observed": "M1196a: 7 of 7 failing. M1196b: 'keeps the door open at every hour' failing, the door shut 156 of 167 hours. M1196c: 'is not offered to a passer-by' failing. M1196d and M1196f: 'refuses, writing nothing' failing. M1196e: 'on a second run, puts the same row back' failing. Restored; 7/7.",
       "date": "2026-11-26"
     },
     "invite-accept-attendee.itest.ts": {

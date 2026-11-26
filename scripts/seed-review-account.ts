@@ -64,13 +64,18 @@ const CITY = {
   timezone: "Asia/Kolkata",
 }
 
+function refuse(message: string): never {
+  console.error(message)
+  process.exit(1)
+}
+
 async function main() {
   const email = process.env.APP_REVIEW_EMAIL?.trim().toLowerCase()
   const password = process.env.APP_REVIEW_PASSWORD
 
-  if (!email || !email.includes("@") || !password) {
-    console.error("usage: APP_REVIEW_EMAIL=... APP_REVIEW_PASSWORD=... npx tsx scripts/seed-review-account.ts")
-    process.exit(1)
+  // An unset DATABASE_URL would fall through to whatever PG* variables the shell has.
+  if (!email || !email.includes("@") || !password || !process.env.DATABASE_URL) {
+    refuse("usage: APP_REVIEW_EMAIL=... APP_REVIEW_PASSWORD=... DATABASE_URL=... npx tsx scripts/seed-review-account.ts")
   }
 
   /*
@@ -81,10 +86,27 @@ async function main() {
    * `blendn` and strips trailing digits, so `Blendn12345!` is refused.
    */
   const check = checkPassword(password, email)
-  if (!check.ok) {
-    console.error(`APP_REVIEW_PASSWORD rejected: ${check.message}`)
-    process.exit(1)
-  }
+  if (!check.ok) refuse(`APP_REVIEW_PASSWORD rejected: ${check.message}`)
+
+  // The upsert below resets the password of whoever has this address: never a staff account's.
+  const holder = await db.user.findUnique({ where: { email }, select: { role: true } })
+  if (holder && holder.role !== "attendee") refuse(`APP_REVIEW_EMAIL belongs to a ${holder.role} account: use a new address`)
+
+  /*
+   * Who the review event is filed under. Not the review account: it is an
+   * attendee, and an attendee owning an event is a state nothing else in the
+   * product produces. The oldest active organiser or admin, re-asserted on
+   * every run, because the event's public page is hidden while its host is
+   * suspended or deleted (`hostPersonActive`, lib/share-public.ts) and the
+   * printed link would open nothing. No account is invented for it: one with
+   * a password nobody holds, at a domain nobody checked, is a takeover.
+   */
+  const organizer = await db.user.findFirst({
+    where: { role: { in: ["organizer", "app_admin"] }, suspended_at: null, deletedAt: null },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  })
+  if (!organizer) refuse("No active organizer or app_admin account to file the review event under: create one first")
 
   const hashed = await bcrypt.hash(password, 12)
 
@@ -138,17 +160,6 @@ async function main() {
     })
   }
 
-  /*
-   * The organiser cannot be the review account: it is an attendee, and an
-   * attendee owning an event is a state nothing else in the product produces.
-   * Reuse a real organiser if one exists, otherwise make a dedicated one. Only
-   * a new row takes it: a re-run keeps the event's organiser.
-   */
-  const organizer =
-    (await db.user.findFirst({ where: { role: { not: "attendee" } }, orderBy: { createdAt: "asc" } })) ??
-    (await db.user.create({
-      data: { email: `demo-organiser@${email.split("@")[1]}`, name: "Blend'n Demo", role: "organizer" },
-    }))
   const { event, occurrences } = await upsertReviewDemoEvent(organizer.id)
 
   console.log("Review account ready.")
@@ -200,16 +211,27 @@ async function upsertReviewDemoEvent(organizerId: string) {
     status: "published" as const,
     visibility: "unlisted" as const,
     deleted_at: null,
-    // A REVIEW_ACCOUNT_IDS account may check in here from anywhere (lib/review-accounts.ts).
-    review_demo: true,
+    organizer_id: organizerId,
   }
-  const existing = await db.events.findUnique({ where: { slug: REVIEW_DEMO_SLUG }, select: { id: true } })
+  /*
+   * Only a row this script made is ever moved. `review_demo` has no other
+   * writer, and an organiser who titles an event "Review Demo Event" gets this
+   * slug: rewriting theirs would publish it, unlist it and hand it the bypass.
+   */
+  const existing = await db.events.findUnique({ where: { slug: REVIEW_DEMO_SLUG }, select: { id: true, review_demo: true } })
+  if (existing && !existing.review_demo) {
+    throw new Error(`the slug ${REVIEW_DEMO_SLUG} belongs to an event this script did not make (${existing.id}): nothing written`)
+  }
+  // One review event: the dated rows of earlier runs lose the bypass (old ones are public).
+  await db.events.updateMany({ where: { review_demo: true, slug: { not: REVIEW_DEMO_SLUG } }, data: { review_demo: false } })
   const event = existing
     ? await db.events.update({ where: { id: existing.id }, data: window })
     : await db.events.create({
         data: {
           ...window,
           slug: REVIEW_DEMO_SLUG,
+          // A REVIEW_ACCOUNT_IDS account may check in here from anywhere (lib/review-accounts.ts).
+          review_demo: true,
           title: "Rooftop Sessions: Live Set",
           description:
             "An evening of live music on a rooftop in the city centre. Doors at 7, first set at 8. " +
@@ -224,7 +246,6 @@ async function upsertReviewDemoEvent(organizerId: string) {
           country: CITY.country,
           timezone: CITY.timezone,
           max_capacity: 120,
-          organizer_id: organizerId,
           check_in_radius: 150,
         },
       })
@@ -240,6 +261,11 @@ async function upsertReviewDemoEvent(organizerId: string) {
    * @@unique(event_id, occurs_on) once (SCRUM-976).
    */
   await syncOccurrences(event.id, start, end, CITY.timezone)
+  // `syncOccurrences` keeps a day's row as it was, so a day somebody called off stays off: the week is all on.
+  await db.event_occurrences.updateMany({
+    where: { event_id: event.id, start_time: { gte: start }, cancelled_at: { not: null } },
+    data: { cancelled_at: null },
+  })
   const occurrences = await db.event_occurrences.count({ where: { event_id: event.id, cancelled_at: null } })
   return { event, occurrences }
 }
