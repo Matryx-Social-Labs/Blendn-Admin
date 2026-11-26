@@ -22,6 +22,8 @@ import { checkPassword } from "@/lib/password"
 import { normalizeLocationToCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
 import { screenUserText, textNotAllowedResponse } from "@/lib/moderation/user-text"
+import { accountRefusal } from "@/lib/account-refusal"
+import { isSuspendedIdentity } from "@/lib/suspended-identity"
 
 export async function POST(request: NextRequest) {
   // Apply rate limiting
@@ -70,6 +72,9 @@ export async function POST(request: NextRequest) {
     if (existingUser) {
       return conflictResponse("Email already registered")
     }
+
+    // The same inbox under a +tag or moved dots is the same person, and a suspended one gets the sign-in refusal.
+    if (await isSuspendedIdentity(email)) return accountRefusal("suspended")
 
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 12)
