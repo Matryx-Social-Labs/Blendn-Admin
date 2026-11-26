@@ -77,10 +77,10 @@ async function severeFlags(since: Date, until: Date): Promise<number> {
   // CASE, not AND: SQL does not promise to short-circuit, and jsonb_object_keys
   // raises on the sentiment sweeper's array-shaped categories.
   // A flag whose only key is `profanity` (the keyword list's swear-word hide,
-  // lib/moderation/keyword-filter.ts) is not severe by confidence; the same
-  // flags are left out of the auto-mute count (abuseHiddenCount in
+  // lib/moderation/keyword-filter.ts) is not severe by confidence; such flags
+  // are also left out of the auto-mute count (abuseHiddenCount in
   // lib/moderation/actions.ts). Any other key beside it keeps the flag severe.
-  // The equality never raises: `->` gives NULL on an array or a scalar.
+  // The comparison never raises: `->` gives NULL on an array or a scalar.
   const [row] = await db.$queryRaw<{ n: number }[]>`
     SELECT count(*)::int AS n
       FROM moderation_flags
