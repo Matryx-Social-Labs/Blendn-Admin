@@ -54,6 +54,7 @@ async function bandsAt(eventId: string, userIds: string[]): Promise<Map<string, 
     ), aged AS (
       SELECT r.user_id, COALESCE(CASE WHEN y.years BETWEEN 0 AND 149 THEN y.years END, p.age) AS age
         FROM room r
+        -- any-kind: only this room's own start time, to take ages at; a venue day's room bands its people the same way.
         JOIN events e ON e.id = ${eventId}::uuid
         LEFT JOIN profiles p ON p.id = r.user_id
         CROSS JOIN LATERAL (

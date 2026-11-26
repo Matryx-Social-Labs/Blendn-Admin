@@ -158,7 +158,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
        * No age or city for somebody this raw id does not name (D-030), and no band or chip: a raw id has no room to
        * count a band over (`personCardBody` on `/users/:id` answers the same). Keys kept, null, for installed builds.
        */
-      ...(identified ? { age: profileAge } : { age: null, ageBand: null, tenure: null }),
+      age: identified ? profileAge : null,
+      ...(!identified && { ageBand: null, tenure: null }),
       interests: p.interests,
       onboarded: p.onboarded,
       /*
