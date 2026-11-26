@@ -13,6 +13,7 @@ import {
   domainVerifyHtml,
   passwordResetHtml,
   applyAgainHtml,
+  resultsHtml,
   inviteHtml,
   onboardingVerifyHtml,
   ticketOrderHtml,
@@ -468,6 +469,102 @@ export function ticketOrderEmail(opts: { subject: string; heading: string; parag
     subject: opts.subject,
     text: [opts.heading, "", ...paragraphs.flatMap((p) => [p, ""]), link].join("\n"),
     html: ticketOrderHtml({ heading: opts.heading, paragraphs, link }),
+  }
+}
+
+/**
+ * The host's morning results mail (SCRUM-1282). Free figures only, each already through `lib/disclosure`'s floor by
+ * the caller: `checkedIn` null is under the floor, `averageRating` null is fewer than five raters. No names, no
+ * pseudonyms, no paid figure and no Plus (r-pricing "Do not"). No time either, so there is no zone to label.
+ */
+export interface NightResults {
+  title: string
+  checkedIn: number | null
+  averageRating: number | null
+  ratingCount: number
+  moodMessages: number
+  overviewUrl: string
+  nextUrl: string
+  unsubscribeUrl: string
+}
+
+const NEXT_LABEL = "List your next night"
+const footer = (unsubscribeUrl: string) => [
+  "—",
+  "You get this the morning after each night your organization runs on Blend’n. Invites and account mail still come.",
+  `Unsubscribe from these mails: ${unsubscribeUrl}`,
+]
+const count = (n: number) => n.toLocaleString("en-US")
+
+export function resultsEmail(r: NightResults) {
+  const lines = [
+    r.checkedIn === null ? "Fewer than 5 people checked in on Blend’n." : `${count(r.checkedIn)} people checked in on Blend’n.`,
+    r.averageRating === null
+      ? "Guests are asked to rate the night today. The average shows on the results page once 5 people have rated."
+      : `${r.averageRating.toFixed(1)} average rating from ${count(r.ratingCount)} people.`,
+    ...(r.moodMessages > 0 ? [`The room’s mood, from ${count(r.moodMessages)} chat message${r.moodMessages === 1 ? "" : "s"}, is on the results page.`] : []),
+  ]
+  const note = r.checkedIn === null ? "Counts under 5 show as “fewer than 5”, so nobody can be picked out." : null
+  const subject = `${r.title}: your night in numbers`
+  return {
+    subject,
+    text: [
+      `Here’s how ${r.title} went.`,
+      "",
+      ...lines,
+      "",
+      "Open the night’s results:",
+      r.overviewUrl,
+      "",
+      `${NEXT_LABEL}:`,
+      r.nextUrl,
+      ...(note ? ["", note] : []),
+      "",
+      ...footer(r.unsubscribeUrl),
+    ].join("\n"),
+    html: resultsHtml({
+      title: subject,
+      preheader: lines[0],
+      heading: "Your night in numbers",
+      lines: [`Here’s how ${r.title} went.`, ...lines],
+      button: { href: r.overviewUrl, label: "Open the night’s results" },
+      next: { href: r.nextUrl, label: NEXT_LABEL },
+      note,
+      unsubscribeUrl: r.unsubscribeUrl,
+    }),
+  }
+}
+
+/**
+ * Nobody checked in through the app (Fable advisor, 2026-11-26): sent for an organization's first mailed night only,
+ * and "on Blend’n" throughout, never "nobody came", which a full room with no QR at the door would make false. The
+ * one ask is the next night, so it is the button and there is no second link.
+ */
+export function noCheckInsEmail(r: { title: string; nextUrl: string; unsubscribeUrl: string }) {
+  const lines = [
+    `Nobody checked in on Blend’n at ${r.title}, so there are no figures to show you this morning.`,
+    "That usually means guests didn’t see your door QR. Put it up at the entrance next time, from your event’s “QR & link” tab, and your check-ins, ratings and the room’s mood will be here the morning after.",
+  ]
+  const subject = `${r.title}: no check-ins on Blend’n`
+  return {
+    subject,
+    text: [
+      ...lines.flatMap((l) => [l, ""]),
+      `${NEXT_LABEL}:`,
+      r.nextUrl,
+      "",
+      ...footer(r.unsubscribeUrl),
+    ].join("\n"),
+    html: resultsHtml({
+      title: subject,
+      preheader: "No figures this time. One thing to try at the door next time.",
+      heading: "No check-ins this time",
+      lines,
+      button: { href: r.nextUrl, label: NEXT_LABEL },
+      next: null,
+      note: null,
+      unsubscribeUrl: r.unsubscribeUrl,
+    }),
   }
 }
 

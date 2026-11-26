@@ -3,7 +3,7 @@
  *
  * Table layout and inline CSS throughout, because Outlook's rendering engine is
  * Word and supports neither flexbox nor grid. The one `<style>` block holds the
- * dark-mode media query, which Outlook ignores harmlessly.
+ * dark-mode and phone-width media queries, which Outlook ignores harmlessly.
  *
  * Two shells. The email confirmation and the password reset follow the Claude
  * Design templates (`designEmail`, below); the host emails still use `shell`.
@@ -65,6 +65,10 @@ const DARK_MODE_CSS = `
   .dm-muted{color:#8A8184 !important;}
   .dm-border{border-color:#3A3335 !important;}
   .dm-codebox{background-color:#241F20 !important;border-color:#4A4143 !important;}
+}
+@media only screen and (max-width:620px){
+  .wrap{width:100% !important;}
+  .pad{padding:28px 22px 24px !important;}
 }`.trim()
 
 /**
@@ -94,7 +98,7 @@ function para(text: string): string {
  * `preheader` is the grey line an inbox shows beside the subject. Left unset it
  * leaks the first words of the body, which for these is usually "Hi Asha,".
  */
-function shell(opts: { title: string; preheader: string; body: string }): string {
+function shell(opts: { title: string; preheader: string; body: string; footer?: string }): string {
   const address = process.env.EMAIL_FOOTER_ADDRESS?.trim()
 
   return `<!DOCTYPE html>
@@ -103,18 +107,18 @@ function shell(opts: { title: string; preheader: string; body: string }): string
 <body class="dm-body" style="margin:0;padding:0;background-color:${PAGE_BG};">
 <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">${esc(opts.preheader)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="padding:32px 16px;">
-<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:100%;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="wrap" style="width:600px;max-width:100%;">
 <tr><td style="padding:0 8px 18px;">
   <!-- Monogram as an image, wordmark as live text: with images blocked the
        brand still reads, which is the state a large share of recipients are in. -->
   <img src="${appUrl()}/brand/monogram-gradient.png" alt="" width="26" height="26" style="display:inline-block;width:26px;height:26px;border:0;vertical-align:middle;">
   <span class="dm-text" style="font-family:${FONT};font-size:17px;font-weight:bold;color:${INK};vertical-align:middle;padding-left:8px;">Blend&rsquo;n</span>
 </td></tr>
-<tr><td class="dm-card" bgcolor="#FFFFFF" style="background-color:#FFFFFF;border-radius:14px;padding:34px 36px 30px;">
+<tr><td class="dm-card pad" bgcolor="#FFFFFF" style="background-color:#FFFFFF;border-radius:14px;padding:34px 36px 30px;">
 ${opts.body}
 </td></tr>
 <tr><td style="padding:22px 8px 0;">
-${address ? `  <p class="dm-muted" style="margin:0 0 4px;font-family:${FONT};font-size:11.5px;line-height:17px;color:${MUTED};">${esc(address)}</p>\n` : ""}  <p class="dm-muted" style="margin:0;font-family:${FONT};font-size:11.5px;line-height:17px;color:${MUTED};">This is a transactional email about your Blend&rsquo;n account &mdash; it sends regardless of notification preferences.</p>
+${address ? `  <p class="dm-muted" style="margin:0 0 4px;font-family:${FONT};font-size:11.5px;line-height:17px;color:${MUTED};">${esc(address)}</p>\n` : ""}  <p class="dm-muted" style="margin:0;font-family:${FONT};font-size:11.5px;line-height:17px;color:${MUTED};">${opts.footer ?? "This is a transactional email about your Blend&rsquo;n account &mdash; it sends regardless of notification preferences."}</p>
 </td></tr>
 </table></td></tr></table></body></html>`
 }
@@ -481,6 +485,39 @@ export function ticketOrderHtml(opts: { heading: string; paragraphs: string[]; l
     button: { href: opts.link, label: "Open Blend’n" },
     note: "Questions about this order? Reply to this email with the order reference above.",
     about: "ticket order",
+  })
+}
+
+/**
+ * The host's morning results mail and its zero-check-in twin (SCRUM-1282). `lines` are plain text, written once in
+ * ./email.ts for both parts; escaped here. One button; "List your next night" is a plain link under it, never a
+ * second button (lane advisor, 2026-11-26). The footer replaces "transactional" with the unsubscribe, because this
+ * mail is not one.
+ */
+export function resultsHtml(opts: {
+  title: string
+  preheader: string
+  heading: string
+  lines: string[]
+  button: { href: string; label: string }
+  next: { href: string; label: string } | null
+  note: string | null
+  unsubscribeUrl: string
+}): string {
+  const link = (href: string, label: string) =>
+    `<a class="dm-text" href="${esc(href)}" target="_blank" style="color:${INK};font-weight:bold;text-decoration:underline;">${esc(label)}</a>`
+  return shell({
+    title: opts.title,
+    preheader: opts.preheader,
+    body: [
+      heading(opts.heading),
+      ...opts.lines.map((line) => para(esc(line))),
+      button(opts.button.href, opts.button.label),
+      fallbackLink(opts.button.href),
+      ...(opts.next ? [`<p style="margin:18px 0 0;font-family:${FONT};font-size:14px;line-height:22px;">${link(opts.next.href, opts.next.label)}</p>`] : []),
+      ...(opts.note ? [note(esc(opts.note))] : []),
+    ].join("\n"),
+    footer: `You get this the morning after each night your organization runs on Blend&rsquo;n. <a href="${esc(opts.unsubscribeUrl)}" target="_blank" style="color:${MUTED};text-decoration:underline;">Unsubscribe from these mails</a>. Invites and account mail still come.`,
   })
 }
 

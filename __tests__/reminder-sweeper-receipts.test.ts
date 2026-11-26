@@ -8,11 +8,13 @@ const info = jest.fn()
 const logError = jest.fn()
 const sendRatingRequests = jest.fn()
 const releaseHeldNotifications = jest.fn()
+const sendResultsMails = jest.fn()
 const sendFreeWindowEndingMail = jest.fn()
 const cleanupExpiredTokens = jest.fn()
 const warn = jest.fn()
 
 jest.mock("@/lib/services/event-notifications.service", () => ({ sendEventReminders: async () => 0, sendRatingRequests: () => sendRatingRequests() }))
+jest.mock("@/lib/results-mail", () => ({ sendResultsMails: () => sendResultsMails() }))
 jest.mock("@/lib/mobile-auth", () => ({ cleanupExpiredTokens: () => cleanupExpiredTokens() }))
 jest.mock("@/lib/free-window-mail", () => ({ sendFreeWindowEndingMail: () => sendFreeWindowEndingMail() }))
 jest.mock("@/lib/push-notifications", () => ({ checkPushReceipts: () => checkPushReceipts(), pruneIdlePushTokens: () => pruneIdlePushTokens(), releaseHeldNotifications: () => releaseHeldNotifications() }))
@@ -21,7 +23,8 @@ jest.mock("@/lib/logger", () => ({ logger: { info: (...a: unknown[]) => info(...
 import { startReminderSweeper, stopReminderSweeper } from "@/lib/reminder-sweeper"
 
 beforeEach(() => {
-  for (const m of [checkPushReceipts, pruneIdlePushTokens, info, warn, logError, sendRatingRequests, releaseHeldNotifications, sendFreeWindowEndingMail, cleanupExpiredTokens]) m.mockReset()
+  for (const m of [checkPushReceipts, pruneIdlePushTokens, info, warn, logError, sendRatingRequests, releaseHeldNotifications, sendResultsMails, sendFreeWindowEndingMail, cleanupExpiredTokens]) m.mockReset()
+  sendResultsMails.mockResolvedValue(0)
   sendFreeWindowEndingMail.mockResolvedValue(0)
   cleanupExpiredTokens.mockResolvedValue(0)
   sendRatingRequests.mockResolvedValue(0)
@@ -98,6 +101,20 @@ it("a release that throws stops neither the receipts nor the reminders, and says
   expect(checkPushReceipts).toHaveBeenCalledTimes(1)
   expect(sendRatingRequests).toHaveBeenCalledTimes(1)
   expect(logError).toHaveBeenCalledWith("Push upkeep failed", { step: "quiet-hours release", error: "db busy" })
+})
+
+it("sends the morning results mail on a pass, even when a reminder step throws (SCRUM-1282)", async () => {
+  jest.useFakeTimers()
+  sendRatingRequests.mockRejectedValue(new Error("db down"))
+  checkPushReceipts.mockResolvedValue({ checked: 0, removed: 0, expired: 0, pending: 0 })
+  pruneIdlePushTokens.mockResolvedValue(0)
+  sendResultsMails.mockResolvedValue(3)
+
+  startReminderSweeper()
+  await jest.advanceTimersByTimeAsync(5 * 60_000)
+
+  expect(sendResultsMails).toHaveBeenCalledTimes(1)
+  expect(info).toHaveBeenCalledWith("Results mails sent", { mailed: 3 })
 })
 
 it("a free-window mail that throws stops nothing else in the pass and is logged at warn (SCRUM-1275)", async () => {

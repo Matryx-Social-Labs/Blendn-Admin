@@ -5,6 +5,7 @@ import { sendFreeWindowEndingMail } from "./free-window-mail"
 import { logger } from "./logger"
 import { cleanupExpiredTokens } from "./mobile-auth"
 import { checkPushReceipts, pruneIdlePushTokens, releaseHeldNotifications } from "./push-notifications"
+import { sendResultsMails } from "./results-mail"
 import { sendEventReminders, sendRatingRequests } from "./services/event-notifications.service"
 
 /**
@@ -33,6 +34,11 @@ let running = false
 
 async function pass(): Promise<void> {
   await pushUpkeep()
+
+  // The host's morning results (SCRUM-1282), the night's figures to the organization's owners and admins. Second, and
+  // never throws, so a reminder step that does cannot cost a host their morning mail.
+  const mailed = await sendResultsMails()
+  if (mailed > 0) logger.info("Results mails sent", { mailed })
 
   // 60 minutes, matching the cron route's argument. The client schedules no local reminder: this is the only one.
   const notified = await sendEventReminders(60)
