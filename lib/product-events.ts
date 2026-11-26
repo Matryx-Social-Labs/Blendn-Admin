@@ -220,7 +220,8 @@ export async function flushProductEvents(): Promise<number> {
       for (const row of batch) seen.delete(row.dedupe_key)
       logger.warn("product events not flushed", {
         dropped: batch.length,
-        error: String(error),
+        // The last line, which names the cause: a Prisma message quotes the rows (user ids) above it.
+        error: String(error).trim().split("\n").pop()?.slice(0, 200),
       })
       return 0
     } finally {
@@ -283,9 +284,10 @@ export function record(input: {
       return
     }
     if (seen.size >= MAX_CACHED_KEYS) seen = new Set()
-    seen.add(key)
 
     if (buffer.length < MAX_BUFFERED) {
+      // Seen only once buffered: a dropped signal is recorded by the next request (SCRUM-1345).
+      seen.add(key)
       buffer.push({
         name: input.name,
         user_id: input.userId,

@@ -86,26 +86,35 @@ it("arms the timer for a signal that arrives while a flush is still writing", as
  * day was deduped and the signal was gone for the day.
  */
 describe("a failed flush", () => {
-  it("records the same person's signal again on their next request that day", async () => {
-    createMany.mockRejectedValueOnce(new Error("Can't reach database server"))
-    record({ name: PRODUCT_EVENTS.app_opened, userId: "u1" }) // flush starts and fails
+  const writtenBy = () => createMany.mock.calls.flatMap(([args]) => args.data as { user_id: string }[]).map((r) => r.user_id)
+
+  it("records the same person's signal again on their next request that day, and only theirs", async () => {
+    record({ name: PRODUCT_EVENTS.app_opened, userId: "kept" }) // written: the window starts
     await jest.advanceTimersByTimeAsync(0)
+    createMany.mockRejectedValueOnce(new Error("Can't reach database server"))
+    record({ name: PRODUCT_EVENTS.app_opened, userId: "u1" })
+    await jest.advanceTimersByTimeAsync(FLUSH_MS) // the window's flush fails
     createMany.mockClear()
 
     record({ name: PRODUCT_EVENTS.app_opened, userId: "u1" })
+    record({ name: PRODUCT_EVENTS.app_opened, userId: "kept" }) // written before the failure: still deduped
     await jest.advanceTimersByTimeAsync(FLUSH_MS)
-    expect(written()).toEqual(["app_opened"])
+    expect(writtenBy()).toEqual(["u1"])
   })
 
-  it("says so at warn, with how many rows it dropped", async () => {
-    createMany.mockRejectedValueOnce(new Error("Can't reach database server"))
+  it("says so at warn, with how many rows it dropped and the cause, never the rows", async () => {
+    record({ name: PRODUCT_EVENTS.app_opened, userId: "u0" }) // written: the window starts
+    await jest.advanceTimersByTimeAsync(0)
+    createMany.mockRejectedValueOnce(
+      new Error("Invalid `createMany()` invocation:\n{ data: [{ user_id: \"u1\" }] }\nDatabase error. Code: `55000`")
+    )
     record({ name: PRODUCT_EVENTS.app_opened, userId: "u1" })
     record({ name: PRODUCT_EVENTS.searched, userId: "u2" })
     await flushProductEvents()
-    expect(warn).toHaveBeenCalledWith(
-      "product events not flushed",
-      expect.objectContaining({ dropped: 1, error: expect.stringContaining("Can't reach") })
-    )
+    expect(warn).toHaveBeenCalledWith("product events not flushed", {
+      dropped: 2,
+      error: "Database error. Code: `55000`",
+    })
   })
 })
 
@@ -125,5 +134,18 @@ describe("a full buffer", () => {
     await jest.advanceTimersByTimeAsync(FLUSH_MS) // the window ends; its flush empties the buffer
     fill(10_000, MAX_BUFFERED + 2) // two more dropped in the next window
     expect(warn.mock.calls.filter(([m]) => m === "product events buffer full")).toHaveLength(2)
+  })
+
+  it("records a dropped person on their next request once the buffer has room", async () => {
+    record({ name: PRODUCT_EVENTS.app_opened, userId: "first" })
+    await jest.advanceTimersByTimeAsync(0)
+    fill(0, MAX_BUFFERED)
+    record({ name: PRODUCT_EVENTS.app_opened, userId: "late" }) // dropped: the buffer is full
+    await jest.advanceTimersByTimeAsync(FLUSH_MS) // the window's flush empties it
+    createMany.mockClear()
+
+    record({ name: PRODUCT_EVENTS.app_opened, userId: "late" })
+    await jest.advanceTimersByTimeAsync(FLUSH_MS)
+    expect(createMany.mock.calls.flatMap(([args]) => args.data as { user_id: string }[]).map((r) => r.user_id)).toEqual(["late"])
   })
 })
