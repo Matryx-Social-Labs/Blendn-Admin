@@ -308,3 +308,43 @@ describe("the Plan page", () => {
     expect(t).toMatch(/"enabled":true/)
   })
 })
+
+describe("review: the cases the first pass missed", () => {
+  it("a Toronto organisation past its free window: the launch line, no Event Insights picker", async () => {
+    const { owner, orgId } = await orgWithOwner("pm-ca-past")
+    const night = await eventIn(orgId, owner, "Toronto", { endedDaysAgo: 200 })
+    await db.organisations.update({ where: { id: orgId }, data: { analytics_free_until: new Date(Date.now() - DAY), first_free_event_id: night } })
+    as(owner, "organizer")
+    const t = await tree()
+    expect(t.split(LINE)).toHaveLength(3)
+    expect(t).not.toContain("Every event is open while Analytics is free.")
+    expect(t).not.toMatch(/"enabled":(true|false)/)
+    expect(t).not.toMatch(/₹/)
+  })
+
+  it("the payer of Venue Pro on a Toronto venue may still cancel it, and may not start a new one", async () => {
+    const { owner, orgId } = await orgWithOwner("pm-ca-vp-cancel", "venue_owner")
+    const v = await venueIn(orgId, "Toronto")
+    const sub = `sub_${randomUUID().slice(0, 10)}`
+    await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: sub, provider_plan_id: "plan_vp_month", org_id: orgId, venue_id: v, plan_key: "venue_pro_monthly", amount_minor: 353_900, status: "active", current_end: new Date(Date.now() + 20 * DAY) },
+    })
+    as(owner, "venue_owner")
+    await actions.cancelVenuePro(v)
+    expect(calls.some((c) => c.method === "POST" && c.url.endsWith(`/${sub}/cancel`))).toBe(true)
+    await expect(actions.startVenueProCheckout(v, "monthly")).rejects.toThrow(NOT_SOLD)
+  })
+
+  it("one person in an Indian and a Canadian venue organisation: the Toronto venue is refused, the rule is each venue's owner's", async () => {
+    const { owner, orgId: indianOrg } = await orgWithOwner("pm-two-in", "venue_owner")
+    const canadianOrg = (await db.organisations.create({ data: { kind: "company", display_name: testId("pm-two-ca"), status: "verified" } })).id
+    orgs.push(canadianOrg)
+    await db.organisation_members.create({ data: { org_id: canadianOrg, user_id: owner, role: "owner" } })
+    await venueIn(indianOrg, "Bengaluru")
+    const toronto = await venueIn(canadianOrg, "Toronto")
+    as(owner, "venue_owner")
+    await expect(actions.startVenueProCheckout(toronto, "monthly")).rejects.toThrow(NOT_SOLD)
+    expect(await market.mayBuyHere(indianOrg)).toBe(true)
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0)
+  })
+})

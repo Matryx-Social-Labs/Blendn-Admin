@@ -316,7 +316,7 @@ export default function ApplyPage() {
                 <Callout tone={proofGiven ? "success" : "warning"}>
                   {proofGiven
                     ? "Thanks — that's enough to submit from a personal address."
-                    : "That's a personal email address. Add a GSTIN or your website above and you can submit — a company address needs neither."}
+                    : "That's a personal email address. Add your website (or, in India, a GSTIN) above and you can submit — a company address needs neither."}
                 </Callout>
               ) : null}
             </div>

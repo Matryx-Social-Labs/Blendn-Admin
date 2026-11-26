@@ -139,9 +139,9 @@ async function requireVenueBuyer(venueId: string) {
 /**
  * Plans are sold only where their prices are (`mayBuyHere`, SCRUM-1151): the
  * server's gate, not the page's. Asked by each of the three starts (Analytics,
- * Event Insights, Venue Pro) right after it knows the buyer, before any other
- * refusal, lock or Razorpay call; never by a cancel, so an organisation that
- * already pays can always stop it.
+ * Event Insights, Venue Pro) once the buyer and payments are checked, before
+ * any of the start's own refusals, a lock, a row or a Razorpay call; never by
+ * a cancel, so an organisation that already pays can always stop it.
  */
 async function requireSoldHere(orgId: string): Promise<void> {
   if (!(await mayBuyHere(orgId))) throw new Refusal(NOT_SOLD_HERE)

@@ -113,7 +113,7 @@ export default async function PlanPage({
   const pending = params.status === "pending" && !(pendingFor === "analytics" && view.analytics)
   const soldHere = org.mayBuyHere
   const canBuy = view.paymentsOn && org.mayBuy && soldHere
-  const launching = <p className="text-[0.9375rem] font-medium">{FREE_WHILE_LAUNCHING}</p>
+  const launching = () => <p className="text-[0.9375rem] font-medium">{FREE_WHILE_LAUNCHING}</p>
 
   const cards = (
     <div className="grid grid-cols-1 gap-5 @3xl/main:grid-cols-3">
@@ -136,7 +136,7 @@ export default async function PlanPage({
         {view.analytics ? (
           <p className="text-[0.8125rem] text-muted-foreground">Analytics already covers every event.</p>
         ) : !soldHere ? (
-          launching
+          launching()
         ) : view.free.reason === "free_window" ? (
           <p className="text-[0.8125rem] text-muted-foreground">Every event is open while Analytics is free.</p>
         ) : (
@@ -154,7 +154,7 @@ export default async function PlanPage({
             {view.date ? `On, ${dated(view.date)}.` : "On."}
           </p>
         ) : !soldHere ? (
-          launching
+          launching()
         ) : (
           <AnalyticsBuy enabled={canBuy} pending={pending} />
         )}

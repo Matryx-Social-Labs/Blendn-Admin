@@ -2941,7 +2941,7 @@
     "plan-market.itest.ts": {
       "guards": "SCRUM-1151 on a db:migrate database (the catalogue's Bengaluru IN and Toronto CA rows): mayBuyHere reads an organisation's events' and venues' cities; Analytics, Event Insights and Venue Pro checkouts for an organisation outside India are refused before any lock, row or Razorpay call (no billing_checkouts, entitlements or payment_events); an Indian organisation still reaches Razorpay; a paying mixed organisation keeps its plan and its Cancel; the Plan page shows the launch line and no price or buy control outside India.",
       "mutation": "(RED) the suite on origin/dev 216c4e8b. (M1) requireSoldHere's body removed. (M2) the venues dropped from mayBuyHere. (M3) the Plan page's soldHere forced true.",
-      "observed": "RED: 7 of 22 failing. M1: 4 of 22 (the three checkouts and the mixed organisation's new purchase). M2: 2 of 22 (the Toronto venue owner's rule and its Venue Pro refusal). M3: 1 of 22 (the Toronto page). Restored each (cmp against copies); 22 of 22 on blendn_design_05.",
+      "observed": "RED: 7 of 22 failing. M1: 4 of 22 (the three checkouts and the mixed organisation's new purchase). M2: 2 of 22 (the Toronto venue owner's rule and its Venue Pro refusal). M3: 1 of 22 (the Toronto page). Restored each (cmp against copies); 22 of 22 on blendn_design_05. After review (code-reviewer, react-reviewer, pr-test-analyzer): three cases added (a Toronto organisation past its free window; cancelVenuePro for a Toronto venue payer; one person in an Indian and a Canadian venue organisation), 25 of 25.",
       "date": "2026-11-26"
     },
     "approval-set-password.itest.ts": {

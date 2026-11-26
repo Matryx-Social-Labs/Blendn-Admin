@@ -130,3 +130,13 @@ describe("SCRUM-1151: a venue whose organisation is outside India (Toronto)", ()
     expect(offersBuy(html)).toBe(true)
   })
 })
+
+it("SCRUM-1151 review: one person in an Indian and a Canadian organisation: the card keeps its price for the Indian venue's Buy, and the Toronto row says the line", () => {
+  const india = row({ venueId: "v-in" })
+  const canada = row({ venueId: "v-ca", name: "Bar Raval", city: "Toronto", orgName: "Raval Hospitality", mayBuyHere: false })
+  const html = renderToStaticMarkup(createElement(VenuePlan, { view: { paymentsOn: true, venues: [india, canada], payments: [] }, pending: false }))
+  expect(html).toContain("₹3,539")
+  expect(html.match(/type="radio"/g)).toHaveLength(2) // one Buy (monthly / yearly), the Indian venue's
+  expect(html.split("Free while we launch in your city.")).toHaveLength(2) // once, on the Toronto row
+  expect(html).not.toMatch(/Bar Raval[\s\S]*Venue Pro can be bought/)
+})

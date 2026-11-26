@@ -17,9 +17,11 @@ import { CancelAnalytics, CheckoutProvider, VenueProBuy } from "./checkout"
  * and the person may buy. The plan itself is read from the server's own rows;
  * `?status=pending` only holds Buy back while the webhook is awaited.
  *
- * Where plans are not sold (`mayBuyHere`, SCRUM-1151), the Venue Pro card says
- * "Free while we launch in your city." in its price's place, and no row offers
- * Buy or counts down to a charge.
+ * Where plans are not sold (`mayBuyHere`, SCRUM-1151), no row offers Buy or
+ * counts down to a charge, and "Free while we launch in your city." is said
+ * once: in the Venue Pro card's price place when no venue of theirs is sold
+ * here, or on each such row when another venue still is (one person in an
+ * Indian and a Canadian organisation).
  */
 
 const DAY = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })
@@ -51,7 +53,8 @@ export function VenuePlan({ view, pending }: { view: VenuePlanPage; pending: boo
   const monthly = BILLING_PLANS.venue_pro_monthly
   const yearly = BILLING_PLANS.venue_pro_yearly
   const anyBuyable = view.paymentsOn && view.venues.some((v) => v.mayBuy && v.readiness.chargeable && proBuyable(v))
-  const soldHere = view.venues.every((v) => !v.owned || v.mayBuyHere)
+  // The card keeps its price while any venue of theirs is sold here; then an unsold row says the line itself.
+  const soldHere = view.venues.every((v) => !v.owned) || view.venues.some((v) => v.owned && v.mayBuyHere)
 
   const cards = (
     <div className="grid grid-cols-1 gap-5 @3xl/main:grid-cols-2">
@@ -91,7 +94,7 @@ export function VenuePlan({ view, pending }: { view: VenuePlanPage; pending: boo
         ) : (
           <ul className="flex flex-col">
             {view.venues.map((v) => (
-              <VenueRow key={v.venueId} venue={v} paymentsOn={view.paymentsOn} pending={pending} />
+              <VenueRow key={v.venueId} venue={v} paymentsOn={view.paymentsOn} pending={pending} sayLine={soldHere} />
             ))}
           </ul>
         )}
@@ -142,7 +145,18 @@ export function VenuePlan({ view, pending }: { view: VenuePlanPage; pending: boo
 }
 
 /** One venue: its plan, how close it is to chargeable, and what may be done about it. */
-function VenueRow({ venue, paymentsOn, pending }: { venue: VenuePlanRow; paymentsOn: boolean; pending: boolean }) {
+function VenueRow({
+  venue,
+  paymentsOn,
+  pending,
+  sayLine,
+}: {
+  venue: VenuePlanRow
+  paymentsOn: boolean
+  pending: boolean
+  /** The card shows prices, so a venue not sold here says why on its own row. */
+  sayLine: boolean
+}) {
   const { readiness, pro } = venue
   const halted = venue.subscriptions.some((s) => s.status === "halted")
   const state = !venue.owned
@@ -166,6 +180,7 @@ function VenueRow({ venue, paymentsOn, pending }: { venue: VenuePlanRow; payment
           <span className="font-normal text-muted-foreground"> · {state}</span>
         </p>
         {venue.owned && venue.mayBuyHere ? <DataMeter venue={venue} /> : null}
+        {venue.owned && !venue.mayBuyHere && sayLine ? <p className="text-[0.75rem] text-faint-foreground">{FREE_WHILE_LAUNCHING}</p> : null}
         {venue.owned && venue.mayBuyHere && !venue.mayBuy ? (
           <p className="text-[0.75rem] text-faint-foreground">Only an owner or admin of {venue.orgName} can change this venue&apos;s plan.</p>
         ) : null}
