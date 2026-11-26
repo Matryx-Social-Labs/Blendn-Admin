@@ -363,9 +363,11 @@ export async function GET(request: NextRequest) {
       ;({ events, totalCount } = cached)
     } else {
       // Build orderBy
-      const orderBy: Prisma.eventsOrderByWithRelationInput = shouldSortByDistance
-        ? { start_time: "asc" }
-        : { [sortBy === "distance" ? "start_time" : sortBy]: sortOrder }
+      // `id` last: rows that tie (19:00 is everybody's) keep one order from page to page (SCRUM-1356).
+      const orderBy: Prisma.eventsOrderByWithRelationInput[] = [
+        shouldSortByDistance ? { start_time: "asc" } : { [sortBy === "distance" ? "start_time" : sortBy]: sortOrder },
+        { id: "asc" },
+      ]
       /*
        * The page in `orderBy`, and the count beside it. Both at once: `count`
        * needs only `where`, so awaiting the page first added a full sequential
@@ -449,7 +451,7 @@ export async function GET(request: NextRequest) {
         const lightweight = await db.events.findMany({
           where,
           select: { id: true, latitude: true, longitude: true },
-          orderBy: { start_time: "asc" },
+          orderBy: [{ start_time: "asc" }, { id: "asc" }],
           take: DISTANCE_SORT_CEILING,
         })
 

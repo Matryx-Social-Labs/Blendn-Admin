@@ -3009,6 +3009,12 @@
       "mutation": "(A3) the call site passes 'organizer' for every application. (A5) the approval's reviewed_at write removed.",
       "observed": "A3: 1 of 8 failing (the venue owner). A5: 2 of 8. Restored each; 8 of 8 on blendn_growth09a.",
       "date": "2026-11-26"
+    },
+    "paged-lists-tie-break.itest.ts": {
+      "guards": "SCRUM-1356 on a db:migrate database: every offset-paged mobile list ends its order with a unique key, so 25 rows that tie on the route's sort, paged by 10, come back each exactly once: GET /events (date page and the distance pre-read), /events/search (raw SQL), /chat/groups (25 rooms with no message, NULL last_message_at), /chat/groups/:id/participants, /events/:id/checkins, /events/:id/chat and /message-requests.",
+      "mutation": "(RED) the suite on origin/dev 028f391d, all eight lists without their tie-break. The same with ALTER DATABASE SET enable_indexscan, enable_indexonlyscan and enable_bitmapscan off, to force sort nodes.",
+      "observed": "RED 1 failing / 7 passing, three runs: participants (role, joined_at) served one person twice and dropped another. The other seven kept one order on this planner, with index scans on or off: for them the test is a guard only, not a reproduction. GREEN 8 of 8, three runs, on blendn_serving_09a.",
+      "date": "2026-11-27"
     }
   },
   "grandfathered": [

@@ -198,7 +198,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             },
           },
         },
-        orderBy: { check_in_time: "desc" },
+        orderBy: [{ check_in_time: "desc" }, { id: "desc" }],
         skip: paginationSkip(page, limit),
         take: limit,
       }),
