@@ -323,7 +323,7 @@ describe("room handles (SCRUM-371)", () => {
   })
 
   it("keys the ten-minute window on the real pair, so a new room is not a new window", async () => {
-    // A known residual, tracked privately in Jira (SCRUM-1385).
+    // Pins today's behaviour; the follow-up is tracked privately (SCRUM-1385).
     expect((await wave(inRoom(THEM), EVENT)).status).toBe(200)
     expect((await wave(inRoom(THEM, OTHER_EVENT), OTHER_EVENT)).status).toBe(429)
   })

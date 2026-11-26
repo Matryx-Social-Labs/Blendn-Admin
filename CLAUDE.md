@@ -151,7 +151,7 @@ Admin actions (role changes, moderation overrides, etc.) are recorded via `lib/a
 
 ### Security findings
 
-Security findings live in Jira (Epic SCRUM-1126), not in this public repo. A gap that is still open, and anything about who is watching or how fast anyone responds, stays out of repo files, code comments, commits and PR text until it is fixed; once fixed, the commit and its test explain it.
+Security findings live in Jira (Epic SCRUM-1126), not in this public repo. A gap that is still open, and anything about monitoring coverage or response times, stays out of repo files, code comments, commits and PR text until it is fixed; once fixed, the commit and its test explain it.
 
 ## Database
 
