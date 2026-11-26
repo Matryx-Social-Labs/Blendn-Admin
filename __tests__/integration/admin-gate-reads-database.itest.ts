@@ -113,9 +113,9 @@ describe("the same calls from an admin's row", () => {
 describe("the reads whose admin branch is the whole platform", () => {
   it("build the actor from the row: an organiser's role and orgs, a suspended admin nobody", async () => {
     // What callers pass is a session's user; the claim says app_admin.
-    expect(await actorFor({ id: demoted, role: "app_admin" })).toEqual({ id: demoted, role: "organizer", orgIds: [] })
-    expect(await actorFor({ id: suspended, role: "app_admin" })).toEqual({ id: suspended, role: "attendee", orgIds: [] })
-    expect(await actorFor({ id: admin, role: "organizer" })).toEqual({ id: admin, role: "app_admin", orgIds: [] })
+    expect(await actorFor({ id: demoted, role: "app_admin" })).toEqual({ id: demoted, role: "organizer", orgIds: [], editOrgIds: [] })
+    expect(await actorFor({ id: suspended, role: "app_admin" })).toEqual({ id: suspended, role: "attendee", orgIds: [], editOrgIds: [] })
+    expect(await actorFor({ id: admin, role: "organizer" })).toEqual({ id: admin, role: "app_admin", orgIds: [], editOrgIds: [] })
   })
 
   it("scope the audit log to the caller's organisations unless the row is an admin's", async () => {
