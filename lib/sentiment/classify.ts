@@ -272,12 +272,7 @@ export async function classifyMessages(
  * whatever the backlog behind it.
  */
 function batchesOf(escalate: MessageToClassify[], cued: Set<MessageToClassify>): MessageToClassify[][] {
-  const rooms = new Map<string | undefined, MessageToClassify[]>()
-  for (const message of escalate) {
-    const room = rooms.get(message.room) ?? []
-    room.push(message)
-    rooms.set(message.room, room)
-  }
+  const rooms = Map.groupBy(escalate, (m) => m.room)
   const batches: Array<{ batch: MessageToClassify[]; turn: number; hasCue: boolean }> = []
   for (const room of rooms.values()) {
     const ordered = [...room.filter((m) => cued.has(m)), ...room.filter((m) => !cued.has(m))]

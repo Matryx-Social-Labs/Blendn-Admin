@@ -109,11 +109,11 @@ const AMBIGUITY_MARKERS = [
  */
 const ASCII_TEXT = /^[\x00-\x7F‘’“”…–—]*$/
 const ENGLISH_FUNCTION_WORD =
-  /\b(the|and|of|it|it'?s|this|that|there|here|what|when|where|who|how|why|anyone|anybody|someone|everyone|we|you|your|our|they|i|i'?m|im|my|was|were|be|been|have|has|will|can|just|for|with|at|from|any|if|about)\b/i
+  /\b(the|and|of|it|it['’]?s|this|that|there|here|what|when|where|who|how|why|anyone|anybody|someone|everyone|we|you|your|our|they|i|i['’]?m|im|my|was|were|be|been|have|has|will|can|just|for|with|at|from|any|if|about)\b/i
 const ROMANISED_INDIC_WORD =
   /\b(hai|hain|tha|thi|raha|rahi|rahe|kar|mujhe|mera|meri|mere|nahi|nahin|kya|aur|bhi|yeh|woh|ko|ka|ki|ke|ne|se|hu|hoon|bahut|yaar|illa|beku|nange|avnu)\b/i
 const readsAsEnglish = (text: string) =>
-  ASCII_TEXT.test(text) && ENGLISH_FUNCTION_WORD.test(text.replace(/’/g, "'")) && !ROMANISED_INDIC_WORD.test(text)
+  ASCII_TEXT.test(text) && ENGLISH_FUNCTION_WORD.test(text) && !ROMANISED_INDIC_WORD.test(text)
 
 /** A safety cue, for the classifier to order by and to keep: the lexicon never settles one (see below). */
 export function hasSafetyCue(text: string): boolean {
