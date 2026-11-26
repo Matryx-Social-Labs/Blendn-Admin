@@ -46,6 +46,7 @@ import { checkPassword } from "../lib/password"
 import { closeDb } from "../lib/db"
 import { syncOccurrences } from "../lib/occurrences"
 import { eventShareUrl } from "../lib/event-share"
+import { realEventsWhere } from "../lib/event-kind"
 
 const db = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
@@ -223,7 +224,7 @@ async function upsertReviewDemoEvent(organizerId: string) {
     throw new Error(`the slug ${REVIEW_DEMO_SLUG} belongs to an event this script did not make (${existing.id}): nothing written`)
   }
   // One review event: the dated rows of earlier runs lose the bypass (old ones are public).
-  await db.events.updateMany({ where: { review_demo: true, slug: { not: REVIEW_DEMO_SLUG } }, data: { review_demo: false } })
+  await db.events.updateMany({ where: { ...realEventsWhere, review_demo: true, slug: { not: REVIEW_DEMO_SLUG } }, data: { review_demo: false } })
   const event = existing
     ? await db.events.update({ where: { id: existing.id }, data: window })
     : await db.events.create({
