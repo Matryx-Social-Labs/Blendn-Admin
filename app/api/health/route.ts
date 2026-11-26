@@ -1,8 +1,28 @@
+import { monitorEventLoopDelay } from "node:perf_hooks"
 import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
-import { db } from "@/lib/db"
+import { db, poolStats } from "@/lib/db"
 
 export const dynamic = "force-dynamic"
+
+/*
+ * How late the event loop ran since the previous read (SCRUM-1221). The one
+ * process saturating is what breaks first under a full room, and `SELECT 1`
+ * never shows it; ops/07 alerts on `p99 > 100` and on `pool.waiting`. Reset on
+ * every read, so a value covers the time since the last probe (or since this
+ * module loaded, for the first).
+ */
+const loopDelay = monitorEventLoopDelay()
+loopDelay.enable()
+
+const NS_PER_MS = 1e6
+const ms = (ns: number) => Math.round(ns / NS_PER_MS)
+
+function readLoopDelay(): { p50: number; p99: number; max: number } {
+  const read = { p50: ms(loopDelay.percentile(50)), p99: ms(loopDelay.percentile(99)), max: ms(loopDelay.max) }
+  loopDelay.reset()
+  return read
+}
 
 /**
  * Health check endpoint for Railway deployment
@@ -27,6 +47,11 @@ export const dynamic = "force-dynamic"
  * interest turns a count non-zero while the room stays unmatchable. What
  * matters is the share of people who actually turned up who have enough
  * structured interests to be ranked at all.
+ *
+ * ## Counts only
+ *
+ * `pool`, `eventLoopDelayMs` and `sockets` are numbers about this process,
+ * nothing about a person; they are what ops/07 alerts on.
  */
 export async function GET() {
   const health: Record<string, unknown> = {
@@ -35,6 +60,9 @@ export async function GET() {
     service: "blendn-admin",
     version: process.env.npm_package_version || "0.1.0",
     database: "unknown",
+    pool: null,
+    eventLoopDelayMs: readLoopDelay(),
+    sockets: globalThis.__blendnSocketIo?.engine.clientsCount ?? null,
   }
 
   try {
@@ -46,6 +74,9 @@ export async function GET() {
     health.database = "disconnected"
     logger.error("Health check - Database error", { error: error instanceof Error ? error.message : String(error) })
   }
+
+  // After the query, so the pool exists on a fresh process.
+  health.pool = poolStats()
 
   const statusCode = health.status === "ok" ? 200 : 503
 

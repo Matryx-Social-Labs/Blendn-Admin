@@ -24,6 +24,13 @@ console.log(`[${new Date().toISOString()}] > NODE_ENV: ${process.env.NODE_ENV}`)
 console.log(`[${new Date().toISOString()}] > PORT: ${port}`)
 console.log(`[${new Date().toISOString()}] > HOSTNAME: ${hostname}`)
 
+/*
+ * The server's statements are capped; scripts that import lib/db are not (SCRUM-1221). Set here, before anything
+ * connects: lib/db reads it when it builds the pool, on the first query. `0` turns the cap off.
+ */
+process.env.DATABASE_STATEMENT_TIMEOUT_MS ||= "8000"
+console.log(`[${new Date().toISOString()}] > DATABASE_STATEMENT_TIMEOUT_MS: ${process.env.DATABASE_STATEMENT_TIMEOUT_MS}`)
+
 // Validate critical environment variables in production (presence AND shape,
 // e.g. secrets must meet their minimum length - not just "is set")
 if (!dev) {

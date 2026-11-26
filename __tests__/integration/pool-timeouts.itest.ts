@@ -116,7 +116,8 @@ describe("statement timeout", () => {
   it("a value that is not a whole number of milliseconds is refused, not silently ignored", async () => {
     const { db, closeDb } = freshDb({ DATABASE_POOL_MAX: undefined, DATABASE_STATEMENT_TIMEOUT_MS: "8s" })
     try {
-      await expect(db.$queryRaw`SELECT 1`).rejects.toThrow(/DATABASE_STATEMENT_TIMEOUT_MS/)
+      // Thrown when the client is built, so every query fails and /api/health answers 503: a deploy with it stops.
+      expect(() => db.$queryRaw`SELECT 1`).toThrow(/DATABASE_STATEMENT_TIMEOUT_MS/)
     } finally {
       await closeDb()
     }

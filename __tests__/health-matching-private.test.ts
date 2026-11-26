@@ -55,6 +55,8 @@ it("says null, not zero, for a pool not built yet or a process without Socket.io
 
 it("the event-loop delay is per read: a stall shows once, then the next read starts afresh", async () => {
   await health()
+  // Node's histogram skips the first tick after a reset; a probe is seconds apart, so let the loop turn first.
+  await new Promise((r) => setTimeout(r, 30))
   const stallUntil = Date.now() + 150
   while (Date.now() < stallUntil) {
     // a 150 ms synchronous block: the event loop cannot turn
