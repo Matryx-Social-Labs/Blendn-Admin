@@ -50,9 +50,9 @@ beforeEach(() => {
   mockDb.user.update.mockResolvedValue({ id: "u1" })
   // The pre-write read the audit row is built from; `deletedAt: null` in
   // its where is what makes an erased row "not found" before any write.
-  mockDb.user.findUnique.mockImplementation(async (args: { select?: { suspended_at?: true } }) =>
+  mockDb.user.findUnique.mockImplementation(async (args: { select?: { sessions_revoked_at?: true } }) =>
     // requireAdmin's read of the caller's own row (lib/current-user.ts).
-    args.select?.suspended_at
+    args.select?.sessions_revoked_at
       ? { role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null }
       : { name: "Old", email: "old@x", role: "attendee", profile: null }
   )

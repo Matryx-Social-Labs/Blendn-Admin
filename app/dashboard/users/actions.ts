@@ -378,40 +378,82 @@ export async function updateUser(
   }
 }
 
-export async function updateUserRole(id: string, role: user_role) {
+/** How long a request to make someone an admin waits for a second admin (SCRUM-1240). Exactly 24 h old has lapsed. */
+const ADMIN_REQUEST_MS = 24 * 60 * 60 * 1000
+
+export async function updateUserRole(id: string, role: user_role): Promise<{ success: true; pending?: true }> {
   const admin = await requireAdmin()
-  const before = id === SYSTEM_USER_ID ? null : await db.user.findUnique({ where: { id, deletedAt: null }, select: { role: true, email: true, emailVerified: true } })
+  const before =
+    id === SYSTEM_USER_ID
+      ? null
+      : await db.user.findUnique({
+          where: { id, deletedAt: null },
+          select: { role: true, email: true, emailVerified: true, suspended_at: true, admin_requested_by: true, admin_requested_at: true },
+        })
   if (!before) throw new Refusal("User not found")
+  const promoting = role === "app_admin"
   // Admins are company staff only (launch gate 10, SCRUM-1235). Verified, because
   // app sign-up takes any address unproven (lib/mobile-auth.ts) and a company one
   // nobody has claimed yet would otherwise be promotable by whoever registered it.
-  if (role === "app_admin" && !(isStaffEmail(before.email) && before.emailVerified)) {
+  if (promoting && !(isStaffEmail(before.email) && before.emailVerified)) {
     throw new Refusal(
       `Only a verified @${COMPANY.staffEmailDomain} account can be an admin. Set up the person's company account and make that one an admin.`
     )
   }
-  await db.$transaction(async (tx) => {
-    if (before.role === "app_admin" && role !== "app_admin") {
-      // Locks every live, unsuspended admin row, so two admins demoting each other at once
-      // queue here and the second one sees who is left.
-      const admins = await tx.$queryRaw<{ id: string }[]>`
-        SELECT id FROM "User" WHERE role = 'app_admin' AND "deletedAt" IS NULL AND suspended_at IS NULL ORDER BY id FOR UPDATE`
-      if (!admins.some((a) => a.id !== id)) throw new Refusal("This is the last admin. Make someone else an admin first.")
+  if (promoting && before.suspended_at) throw new Refusal("A suspended account can't be made an admin.")
+
+  const pending = await db.$transaction(async (tx) => {
+    let approvedBy: string | null = null
+    if (promoting || before.role === "app_admin") {
+      // Locks every live, unsuspended admin row, so two admins demoting each other, or confirming
+      // one promotion, at once queue here and the second sees what the first did.
+      const admins = (
+        await tx.$queryRaw<{ id: string }[]>`
+          SELECT id FROM "User" WHERE role = 'app_admin' AND "deletedAt" IS NULL AND suspended_at IS NULL ORDER BY id FOR UPDATE`
+      ).map((a) => a.id)
+      if (!promoting && !admins.some((a) => a !== id)) throw new Refusal("This is the last admin. Make someone else an admin first.")
+      // Promotion needs two admins (launch gate 10, SCRUM-1240): a request from a different admin who is
+      // still a live one, made within the window, is confirmed by this one; anything else is a request.
+      if (promoting) {
+        if (!admins.includes(admin.id)) throw new Refusal("Forbidden")
+        const requester = before.admin_requested_by
+        const fresh = before.admin_requested_at !== null && Date.now() - before.admin_requested_at.getTime() < ADMIN_REQUEST_MS
+        if (fresh && requester !== null && requester !== admin.id && admins.includes(requester)) approvedBy = admin.id
+      }
     }
-    // The row as checked above, or nothing: a role or address changed since then fails closed (P2025).
-    await tx.user.update({ where: { id, deletedAt: null, role: before.role, email: before.email }, data: { role }, select: { id: true } })
+    const isRequest = promoting && approvedBy === null
+    // The row as checked above, or nothing: a role, address, suspension or request changed since then fails closed (P2025).
+    await tx.user.update({
+      where: {
+        id,
+        deletedAt: null,
+        role: before.role,
+        email: before.email,
+        ...(promoting && { suspended_at: null }),
+        admin_requested_by: before.admin_requested_by,
+        admin_requested_at: before.admin_requested_at,
+      },
+      // Any role write clears a request, so a stale one never rides along.
+      data: isRequest
+        ? { admin_requested_by: admin.id, admin_requested_at: new Date() }
+        : { role, admin_requested_by: null, admin_requested_at: null },
+      select: { id: true },
+    })
     // A role change is the canonical audited admin action (CLAUDE.md): its row
     // commits with it, so a failed audit write changes nothing (SCRUM-131, SCRUM-1235).
     await auditInTx(tx, {
       userId: admin.id,
-      action: "user.role_changed",
+      action: isRequest ? "user.admin_promotion_requested" : "user.role_changed",
       resource: "user",
       resourceId: id,
-      details: { from: before.role, to: role },
+      details: isRequest
+        ? { to: role }
+        : { from: before.role, to: role, ...(approvedBy && { requestedBy: before.admin_requested_by, approvedBy }) },
     })
+    return isRequest
   })
   revalidatePath("/dashboard/users")
-  return { success: true }
+  return pending ? { success: true, pending: true } : { success: true }
 }
 
 /*
