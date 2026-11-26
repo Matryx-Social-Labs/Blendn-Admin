@@ -214,7 +214,8 @@ export async function signupCohorts(weeks = 8, now: Date = new Date()): Promise<
       LEFT JOIN profiles p ON p.id = u.id
       WHERE u."deletedAt" IS NULL
         AND u.id <> ${SYSTEM_USER_ID}
-        AND u."createdAt" >= ((SELECT min(week) FROM weeks) AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC'
+        -- The first week spelled out, not read from the weeks CTE: the planner can size a constant, not an InitPlan.
+        AND u."createdAt" >= ((date_trunc('week', ${now}::timestamptz AT TIME ZONE 'Asia/Kolkata') - make_interval(weeks => ${weeks - 1}::int)) AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC'
         AND u."createdAt" <= ${now}::timestamptz AT TIME ZONE 'UTC'
     ),
     person AS (
