@@ -2742,8 +2742,8 @@
     },
     "reminder-sweeper-receipts.test.ts": {
       "guards": "SCRUM-1270: one reminder-sweeper pass calls checkPushReceipts and pruneIdlePushTokens and logs the receipt pass line every pass (the staging proof reads it from the Railway log); both run first and each is caught, so a reminder step that throws, or a receipt read that throws, does not stop the other. SCRUM-1276: the same pass releases held pushes, in its own catch, and logs 'Held pushes released'.",
-      "mutation": "(M6) the sweeper stops calling checkPushReceipts; (N4) the push upkeep moved after the reminder steps. (M8, SCRUM-1276) the sweeper stops calling releaseHeldNotifications.",
-      "observed": "M6: 1 of 1 failing. N4: 1 of 3 failing (the rating step throws, receipts never read). Restored; 3 of 3. M8: 2 of 5 failing (C1 on origin/dev: 2 of 5). Restored; 5 of 5.",
+      "mutation": "(M6) the sweeper stops calling checkPushReceipts; (N4) the push upkeep moved after the reminder steps. (M8, SCRUM-1276) the sweeper stops calling releaseHeldNotifications. (M15, SCRUM-1275) the free-window mail's .then(…, warn) catch removed; (M16) the mail called first in the pass, uncaught.",
+      "observed": "M6: 1 of 1 failing. N4: 1 of 3 failing (the rating step throws, receipts never read). Restored; 3 of 3. M8: 2 of 5 failing (C1 on origin/dev: 2 of 5). Restored; 5 of 5. M15: 1 of 7 failing (a rejected free-window mail must leave receipts, ratings and token cleanup running, logged at warn, never 'Reminder sweep failed'). M16: 1 of 7. Restored; 7 of 7.",
       "date": "2026-11-26"
     },
     "venue-three-months.test.ts": {
@@ -2768,6 +2768,12 @@
       "guards": "SCRUM-1276, launch gate 7 (fail-open on a failed bell write or staleness read): quiet hours 23:00-09:00 on the recipient's clock, held not dropped. The decision per kind for somebody at home, going, with a check-in row for the event, and with an open check-in anywhere (lane advisor 2026-11-26); the zone order (event, home city, Asia/Kolkata) in Asia/Kolkata and America/Toronto across the 2026-11-01 DST change; a match at 23:30 IST held to 09:00 IST with no push, and sent for an open check-in; a DM at 23:30 sent; the 22:59/23:00/08:59/09:00 boundaries; the bulk path in one check-in read; the 09:00 release as ONE push from the newest unread held row, none for a reader, through the same device gates, skipping a closed conversation and a started event.",
       "mutation": "(C1) the suite on origin/dev 4f434e6f before the change; (M1) the open check-in clause removed; (M2) private_message out of ALWAYS_RINGS; (M3) hour > 23 instead of >= 23; (M4) release keeps the oldest row; (M5) the event's zone ignored; (M6) the closed-conversation skip removed; (M7) the started-event skip removed; (M9) the bulk path pushes held people; (M10) the single path pushes a held row; (M11) hold for 8 h instead of to the next 09:00; (M12) the RSVP exemption reads maybe instead of going; (M13) the event's check-in row no longer exempts.",
       "observed": "C1: 53 of 129 failing. M1: 20 of 134 (with the sweeper file). M2: 4. M3: 3. M4: 1. M5: 1. M6: 1. M7: 1. M9: 2. M10: 38. M11: 4. M12: 10 of 129. M13: 10 of 129. Restored each; 129 of 129. Review fixes (code-reviewer, typescript-reviewer): four tests written first and RED on the reviewed code (4 of 133): a held push whose bell row failed is sent (single and bulk), a staleness read that throws after the claim still sends, a row with no kind is cleared unsent; GREEN after, 133 of 133.",
+      "date": "2026-11-26"
+    },
+    "free-window-ending-mail.itest.ts": {
+      "guards": "SCRUM-1275 on a db:migrate database: an organisation 13 days from the end of its free Analytics (Bengaluru) is mailed once, its owner and admin and not its staff, and analytics_free_ending_mailed_at is set; one 15 days out, one with a live grant, one past its end and one in Toronto get no mail and no mark; a second pass sends nothing; a send that fails after the claim keeps the claim and is never retried. RED on origin/dev 6f92c99e: no sender (lib/free-window-mail), the suite fails to run.",
+      "mutation": "(M1) the claim without its IS NULL guard; (M2) the live-entitlement skip removed; (M3) mayBuyIn always true; (M4) the window widened to 16 days.",
+      "observed": "M1: 2 of 6 failing (second pass, failed send). M2: 1 of 6 (the grant). M3: 1 of 6 here and 3 of 12 in free-window-mail.test.ts (the market matrix). M4: 1 of 6 (15 days out). Restored; 6 of 6 on blendn_t03 (db:migrate).",
       "date": "2026-11-26"
     },
     "quiet-hours.itest.ts": {

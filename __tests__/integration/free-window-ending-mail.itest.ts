@@ -80,7 +80,7 @@ beforeAll(async () => {
   granted = await orgEndingIn(13, "Bengaluru", "granted")
   ended = await orgEndingIn(-1, "Bengaluru", "ended")
   canada = await orgEndingIn(13, "Toronto", "canada")
-  await db.$transaction((tx) => grantEntitlement(tx, { subject: { kind: "org", id: granted.id }, product: "analytics", months: 6 }))
+  await db.$transaction((tx) => grantEntitlement(tx, { subject: { kind: "org", id: granted.id }, product: "analytics", months: 6, now }))
 })
 
 afterAll(async () => {
@@ -114,7 +114,8 @@ describe("the first pass", () => {
     expect(mail.text).toContain("₹589")
     expect(mail.text).toContain("₹2,359")
     expect(mail.text).toContain("/dashboard/plan")
-    expect(`${mail.subject}\n${mail.text}\n${mail.html}`).not.toMatch(/undefined|null|NaN|<[a-z_]+>/i)
+    expect(`${mail.subject}\n${mail.text}`).not.toMatch(/undefined|\bnull\b|NaN|<[a-z_]+>/i)
+    expect(mail.html).not.toMatch(/undefined|\bnull\b|NaN/)
   })
 
   it("mails nobody at an organisation 15 days out, one with a grant, one already past its end, or one in Canada", async () => {

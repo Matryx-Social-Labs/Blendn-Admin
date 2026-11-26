@@ -1,6 +1,7 @@
 // Relative imports: this is reached from `lib/background.ts`, which `server.ts`
 // requires, and `build:server` compiles with plain tsc — which emits the `@/`
 // alias verbatim into the require() and fails at boot.
+import { sendFreeWindowEndingMail } from "./free-window-mail"
 import { logger } from "./logger"
 import { cleanupExpiredTokens } from "./mobile-auth"
 import { checkPushReceipts, pruneIdlePushTokens, releaseHeldNotifications } from "./push-notifications"
@@ -48,6 +49,15 @@ async function pass(): Promise<void> {
 
   const pruned = await cleanupExpiredTokens()
   if (pruned > 0) logger.info("Expired refresh tokens pruned", { pruned })
+
+  // Last, and caught here (SCRUM-1275): a failing mail never stops or delays the pilot's reminders and ratings above.
+  await sendFreeWindowEndingMail().then(
+    (orgs) => {
+      if (orgs > 0) logger.info("Free-window ending mails sent", { orgs })
+    },
+    (error: unknown) =>
+      logger.warn("Free-window ending mail failed", { error: error instanceof Error ? error.message : String(error) })
+  )
 }
 
 /**
