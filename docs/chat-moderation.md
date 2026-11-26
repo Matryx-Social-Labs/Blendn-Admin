@@ -17,20 +17,23 @@ User sends message
   │
   ├─ Message saved to DB
   │
-  ├─ [PRE-EMIT] OpenAI text moderation (1s timeout via Promise.race)
-  │     If flagged → hide before emit, return moderation_hidden=true
-  │     If timeout → emit anyway, fall back to async pipeline
+  ├─ [PRE-EMIT] OpenAI text moderation (1s race; the call itself allows 8s)
+  │     If hide → hide before emit, return moderation_hidden=true
+  │     No answer within 1s, small room (200 or fewer people inside, or not an event room):
+  │       emit anyway; the async check below still runs
+  │     No answer within 1s, event room with more than 200 people inside:
+  │       hold the message until the answer arrives; no answer → refuse (503), never emitted
   │
   ├─ Socket.io emit (only if moderation passed)
   │
-  └─ [ASYNC fallback - only if OpenAI timed out]
-       ├─ OpenAI text moderation (retry)
-       └─ OpenAI image moderation (500-1500ms, images/gifs only)
-            │
-            └─ Action: hide (via socket delete event) / flag / mark clean
+  └─ [ASYNC fallback - only if the pre-emit check gave no answer]
+       ├─ OpenAI text moderation (the call already in flight; retried after an error)
+       └─ Action: hide (via socket delete event) / flag / mark clean
 ```
 
 If any layer returns `hide`, the pipeline **stops early** — no further checks run.
+
+Room messages are text only. The room routes accept only `text` with no `metadata` (`lib/validations/chat.ts:23-26`), so no image check runs on room chat. The 200 threshold is `BIG_ROOM_HERE_COUNT` in `lib/moderation/degraded-room.ts:21`.
 
 ### Rooms of every kind (step 7)
 
@@ -165,7 +168,7 @@ confidence = 0.85 + (number_of_matched_keywords × 0.1)
 
 ## Layer 3: OpenAI Text Moderation
 
-**When:** Pre-emit — runs AFTER saving but BEFORE socket broadcast, with a **1-second timeout** via `Promise.race`. If the API takes longer, the message is emitted and moderation falls back to async (post-emit hide via socket event).
+**When:** Pre-emit — runs AFTER saving but BEFORE socket broadcast, with a **1-second race** via `Promise.race`. If the API has not answered by then, an event room with more than 200 people inside waits for the answer, up to the call's 8 s limit (`MODERATION_TIMEOUT_MS`), and refuses the message with a 503 if there is none (`lib/moderation/degraded-room.ts:65-86`). Any other room emits the message, and moderation falls back to async (post-emit hide via socket event).
 **Source file:** `lib/moderation/openai-moderation.ts`
 **Model:** `omni-moderation-latest`
 **Fails open:** If the API is down or key is missing, the message is treated as clean.
@@ -215,22 +218,20 @@ OpenAI returns a confidence score (0.0 to 1.0) for each category:
 
 ---
 
-## Layer 4: OpenAI Image Moderation
+## Layer 4: Image Checks (Photos)
 
-**When:** Asynchronous, on a room message that carries a `mediaUrl`, whatever its `type` (SCRUM-444). Since R9 (SCRUM-626) a client cannot send media into a room, and a DM photo is never sent to a model (TR5), so no room route passes media here today; the layer stays for SCRUM-387.
-**Source file:** `lib/moderation/openai-moderation.ts`
+**When:** Asynchronous, for profile, blurred profile and Lobby post photos. Room chat has no image check: the room routes accept only `text` with no `metadata` (`lib/validations/chat.ts:23-26`, R9, SCRUM-626). Direct messages get no model check (`lib/dm-moderation.ts:21`, TR5).
+**Source files:** `lib/photos.ts`, `lib/lobby-photo.ts`, `lib/moderation/openai-moderation.ts` (`checkImageContent`)
 **Model:** `omni-moderation-latest`
 
-Same categories and thresholds as text moderation, applied to the image content.
+The image check uses the same categories, thresholds and result mapping as text moderation. What a result does depends on the photo:
 
-| Image content | Likely category | Result |
+| Photo | Result | What happens |
 |---|---|---|
-| Explicit nudity | sexual ~0.95 | **Hidden** + flagged |
-| Suggestive/revealing clothing | sexual ~0.60 | **Flagged** (visible) |
-| Gore or graphic violence | violence/graphic ~0.90 | **Hidden** + flagged |
-| Hate symbols (swastika, etc.) | hate ~0.80 | **Flagged** (visible) |
-| Normal event photo | all < 0.1 | **Clean** |
-| Food photo | all < 0.1 | **Clean** |
+| Profile or blurred profile photo | hide (score 0.70 or more) | Pulled from the profile and the public bucket, kept privately for 180 days (`lib/photos.ts:195-201`) |
+| Profile or blurred profile photo | flag (below 0.70) | Nothing is removed; the check is recorded (`lib/photos.ts:203-221`) |
+| Lobby post photo | hide or flag | Marked `rejected` (`lib/lobby-photo.ts:49-52`) |
+| Check did not run | none | A profile photo stays in place and the photo sweep retries it (`lib/photo-sweeper.ts:52`). A Lobby photo stays `pending` and is retried after 2 minutes (`lib/lobby-photo.ts:83`) |
 
 ---
 
@@ -483,7 +484,7 @@ The system is designed for **safety**, not sentiment. These will pass through as
 - Coded slang not in the wordlist
 - New or uncommon profanity variations
 
-For crowd mood tracking and issue detection, see the planned [Sentiment Analysis](../plans/sentiment-analysis.md) feature.
+For crowd mood tracking and issue detection, see [live event insights](LIVE-EVENT-INSIGHTS.md).
 
 ---
 
@@ -529,7 +530,7 @@ For crowd mood tracking and issue detection, see the planned [Sentiment Analysis
                               │         │         │
                           [hide]    [timeout]   [clean/flag]
                               │         │         │
-                          Hide msg   Emit msg   Emit msg
+                          Hide msg   Emit msg*  Emit msg
                           Return     via Socket  via Socket
                           hidden=    ┌─────┐     Mark clean
                           true       │ASYNC│
@@ -538,8 +539,8 @@ For crowd mood tracking and issue detection, see the planned [Sentiment Analysis
                                      └──┬──┘
                                         │
                               ┌─────────┴─────────┐
-                              │  OpenAI retry +    │
-                              │  Image moderation  │
+                              │  OpenAI retry      │
+                              │  text only (rooms) │
                               └─────────┬─────────┘
                                         │
                                    [if hidden]
@@ -555,3 +556,5 @@ For crowd mood tracking and issue detection, see the planned [Sentiment Analysis
                             │  hidden)          │
                             └──────────────────┘
 ```
+
+\* On timeout, only a small room emits without a verdict. An event room with more than 200 people inside holds the message until its verdict arrives, and refuses it (503) if there is none. See Layer 3.
