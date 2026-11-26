@@ -121,7 +121,7 @@ export const SPONSORSHIP = {
    *
    * Suppression is not per-cell. Hiding one option while publishing the total
    * leaks it by subtraction, and hiding all but one leaves the survivor
-   * recoverable — see `lib/room-audience.ts` for the full rule.
+   * recoverable — see `lib/disclosure.ts` for the full rule.
    */
   MIN_REPORTABLE: 5,
   /** A room people joined to talk to strangers is not an ad break. */

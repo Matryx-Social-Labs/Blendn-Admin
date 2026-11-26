@@ -57,7 +57,7 @@ export async function quietHolds(userIds: readonly string[], data: NotificationD
 
 /**
  * The event's zone when the push names one, else the home city's, else `FALLBACK_ZONE`.
- * ponytail: a device time zone sent with the push token would be better (client BACKLOG); the home city is the
+ * ponytail: a device time zone sent with the push token would be better; the home city is the
  * nearest thing the server holds today.
  */
 async function zonesOf(userIds: readonly string[], eventId?: string): Promise<(userId: string) => string> {

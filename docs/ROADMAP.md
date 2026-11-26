@@ -435,7 +435,7 @@ testing is complete; branded to the product; developer docs later and private.
 
 ### 4. Designed features still in scope
 
-In the Figma, in neither repo. **Profile strength was
+These are designed in the Figma and built in neither repo. **Profile strength was
 cut** — see *Validated — not doing*. None of these three is a wedge; do them when
 they are cheap, not before the three items above.
 
