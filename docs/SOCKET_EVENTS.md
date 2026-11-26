@@ -124,6 +124,15 @@ the door. An event's room is unchanged: its door is the join.
 one let through for that room or conversation is silently dropped, and a stop is
 relayed only when it ends a start that was. Send one start per burst of typing.
 
+**Above 50 sockets in a room, typing has no names** (SCRUM-1309): when more than
+50 sockets are in `chat:{chatGroupId}`, a start reads nothing and the room gets
+one `typing:several` (`{ chatGroupId }`: no name, no count, no ids) at most once
+every 5 seconds, whoever is typing. No stop is sent: show "Several people are
+typing" for a few seconds and let it expire. A stop in such a room is dropped. At
+50 or fewer, `chat:typing` is unchanged. Both are sent volatile: a client that
+cannot take one at that moment loses it rather than receiving it late. An app
+that does not know `typing:several` ignores it.
+
 `chat:startTyping`/`chat:stopTyping` are silently dropped for members who are
 `muted` or `banned`, so a member banned mid-session stops broadcasting typing
 state without being disconnected. They also never reach anyone the typist has
@@ -171,6 +180,7 @@ carry real ids.
 |-------|---------|-------------|
 | `chat:message` | `{ chatGroupId, message: { id, content, type, kind?, pollId?, userId, userName, userImage?, createdAt, parentId?, metadata? } }` | New message in chat; the message is nested under `message`, not flat. `message.kind: "sponsored"` marks a sponsored send (its `type` stays the media kind); `message.pollId` is on a `type: "poll"` message. `message.userImage` only in a crew's room. `message.metadata` on a crew chat's `type: "system"` line only, as the history has it (`crew_waved`, `crew_here`, `crew_plan`, `crew_like`, `crew_wave`; SCRUM-1110). A `crew_waved` from a crew is not sent to a member who hid that crew. |
 | `chat:typing` | `{ chatGroupId, userId, userName, isTyping }` | Typing state changed. `userName` is the name the room uses: the sender's pseudonym in an event's room and a Blend's, their first name in a crew's. |
+| `typing:several` | `{ chatGroupId }` | Somebody is typing in a room of more than 50 sockets; at most one per 5 s per room, never a stop. See "Above 50 sockets" above. |
 | `chat:reaction` | `{ chatGroupId, messageId, tally: [{ emoji, count }] }` | Reactions changed on a message. **Counts only — never who reacted**, which the room must not disclose. The whole tally rather than a delta, so two reactions in the same tick cannot race and a dropped packet self-corrects. `mine` is per-viewer and absent by design: a client knows its own reaction from its own request. |
 | `chat:messageDeleted` | `{ chatGroupId, messageId, moderation?, userId? }` | Message deleted. When `moderation: true`, it was auto-hidden by moderation — `userId` identifies the sender (their real id to them, a handle to everyone else) so the sender's client can show a placeholder instead of removing. |
 | `chat:memberBanned` | `{ chatGroupId, userId, banned }` | Member ban status changed. Also sent to the member's own `user:{id}` room, so an unban reaches somebody a ban took out of the room. The member receives it under their own id; on a ban their sockets then leave the room. |

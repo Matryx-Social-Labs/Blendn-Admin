@@ -2,7 +2,7 @@ process.env.MOBILE_JWT_SECRET ??= "itest-mobile-secret-0123456789abcdefghij"
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
 import { conversationPair } from "@/lib/conversations"
-import { emitChatTyping, emitPrivateRead, emitPrivateTyping, type AuthenticatedSocket } from "@/lib/socket-server"
+import { emitChatTyping, emitPrivateRead, emitPrivateTyping, TYPING_ROOM_CAP, type AuthenticatedSocket } from "@/lib/socket-server"
 
 import { arrive, cleanupCrewWorld, liveEvent, person, type Person } from "./crew-world"
 import { db } from "./helpers"
@@ -20,16 +20,21 @@ afterAll(async () => {
 })
 
 /** A socket as the emitters touch it: what it sends, to whom, and which rooms it is in. */
-function fakeSocket(me: Person, rooms: string[] = []) {
+function fakeSocket(me: Person, rooms: string[] = [], roomSize = 2) {
   const sent: { to: string; event: string; payload: unknown }[] = []
   const peer = { id: "sock-peer", data: { userId: "peer" }, emit: (event: string, payload: unknown) => sent.push({ to: "peer", event, payload }) }
   const chatRoom = { except: () => chatRoom, fetchSockets: async () => [peer] }
-  const target = (to: string) => ({ emit: (event: string, payload: unknown) => sent.push({ to, event, payload }) })
+  const target = (to: string) => {
+    const operator = { emit: (event: string, payload: unknown) => sent.push({ to, event, payload }), volatile: {} as { emit: unknown } }
+    operator.volatile = operator
+    return operator
+  }
   const socket = {
     id: "sock-me",
     data: { userId: me.id, email: `${me.id}@itest.invalid`, principal: "mobile" },
     rooms: new Set(rooms),
-    nsp: { in: () => chatRoom, to: target },
+    // The rooms as the adapter holds them: `roomSize` sockets each (`TYPING_ROOM_CAP`).
+    nsp: { in: () => chatRoom, to: target, adapter: { rooms: new Map(rooms.map((r) => [r, new Set(Array.from({ length: roomSize }, (_, i) => `sock-${i}`))])) } },
     to: target,
   }
   return { socket: socket as unknown as AuthenticatedSocket, sent }
@@ -105,5 +110,14 @@ describe("a room's typing", () => {
     await db.chat_group_members.update({ where: { chat_group_id_user_id: { chat_group_id: groupId, user_id: typist.id } }, data: { status: "muted" } })
     await emitChatTyping(socket, groupId, true)
     expect(sent.map((s) => (s.payload as { userName: string }).userName)).toEqual(["Otter Typist"])
+  })
+
+  it("above TYPING_ROOM_CAP sockets, a start runs no statement and says typing:several (SCRUM-1309)", async () => {
+    const { typist, groupId } = await room()
+    const { socket, sent } = fakeSocket(typist, [`chat:${groupId}`], TYPING_ROOM_CAP + 1)
+    const reads = async (run: () => Promise<void>) =>
+      (await counter.during(async () => (await globalThis.prisma!.$queryRaw`SELECT 1`, run()))).sql.length - 1
+    expect(await reads(() => emitChatTyping(socket, groupId, true))).toBe(0)
+    expect(sent).toEqual([{ to: `chat:${groupId}`, event: "typing:several", payload: { chatGroupId: groupId } }])
   })
 })
