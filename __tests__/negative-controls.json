@@ -2685,6 +2685,12 @@
       "mutation": "(C1) main.mjs reads process.env.DATABASE_URL; (C2) CMD back to npm run start; (C3) handler.ts dropped from COPY; (C4) -f mov to -f hls; (C5) lookup refuses only when every address is private; (C6) literal IPs not checked; (C7) 169.254/16 and 2002::/16 dropped; (C8) the byte cap off; (C9) jobs not queued; (C10) the secret not checked; (C11) URLs logged.",
       "observed": "Each made at least 1 of 100 tests fail: 1 failing, C6 6 failing (C2 and C3: the Dockerfile test; C1: the env test). Restored; 100 of 100 across media-worker, media-clip and check-clip.",
       "date": "2026-11-25"
+    },
+    "host-payload.itest.ts": {
+      "guards": "SCRUM-1146: the app's `organizer` on GET /users/:id/favorites, GET /events (the route, and transformEvents) and GET /events/:id is the org (its id) or null, never the creating user's id, name or image; a curated event is Blendn with no id; an org with a blank name falls to person with nothing of the creator.",
+      "mutation": "(C1) the suite run on dev 9bcf8f44, before hostPayload; (C2) favorites put back to `organizer: event.organizer` on the fixed tree; (C3) hostPayload sends `name: host.name` for a person.",
+      "observed": "C1: 3 of 3 failing (the suite then had 3 cases): favorites sent the curated event's creating user's id, name and image; the list and the detail sent the creating user's id and image on the org event. C2: 1 of 3 failing (/users/:id/favorites). C3: 4 of 4 failing (every route). Restored; 4 of 4.",
+      "date": "2026-11-26"
     }
   },
   "grandfathered": [
