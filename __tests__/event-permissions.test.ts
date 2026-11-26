@@ -21,7 +21,8 @@ import { eventPermissions, type PermissionActor, type PermissionEvent } from "@/
 
 const ADMIN = "usr_admin"
 const ALICE = "usr_alice" // owner of ORG_HOST
-const BOB = "usr_bob" // staff at ORG_HOST
+const BOB = "usr_bob" // admin at ORG_HOST
+const DEV = "usr_dev" // staff at ORG_HOST: the door volunteer
 const CARA = "usr_cara" // owner of ORG_VENUE
 const STRANGER = "usr_stranger" // member of nothing relevant
 
@@ -29,12 +30,18 @@ const ORG_HOST = "org_host"
 const ORG_VENUE = "org_venue"
 const ORG_OTHER = "org_other"
 
-/** An actor carries the orgs they belong to — the resolver stays pure. */
+/**
+ * An actor carries the orgs they belong to — the resolver stays pure. Owner or
+ * admin of each unless `editOrgIds` says fewer; `staff` gives the rest.
+ */
 const actor = (
   id: string,
   role: PermissionActor["role"],
-  orgIds: string[] = []
-): PermissionActor => ({ id, role, orgIds })
+  orgIds: string[] = [],
+  editOrgIds: string[] = orgIds
+): PermissionActor => ({ id, role, orgIds, editOrgIds })
+/** A `staff` member of these orgs: a member, owner or admin of none. */
+const staff = (id: string, role: PermissionActor["role"], orgIds: string[]) => actor(id, role, orgIds, [])
 
 const DAY = 86_400_000
 /** Claimed a year ago; the event is next week — a claim older than the event. */
@@ -73,6 +80,38 @@ describe("eventPermissions — the matrix", () => {
     const p = eventPermissions(actor(BOB, "organizer", [ORG_HOST]), event(ORG_HOST))
     expect(p.canEdit).toBe(true)
     expect(p.canOperate).toBe(true)
+  })
+
+  it("gives an org's staff member the room and the door, never edit or the roster (SCRUM-1244)", () => {
+    // A door volunteer invited as staff cancelled nothing before this only by luck.
+    const p = eventPermissions(staff(DEV, "organizer", [ORG_HOST]), event(ORG_HOST))
+    expect(p).toEqual({ canEdit: false, canOperate: true, canViewAttendees: false })
+  })
+
+  it("keeps everything for the org's owner and admin", () => {
+    expect(eventPermissions(actor(ALICE, "organizer", [ORG_HOST]), event(ORG_HOST))).toEqual({ canEdit: true, canOperate: true, canViewAttendees: true })
+    expect(eventPermissions(actor(BOB, "organizer", [ORG_HOST]), event(ORG_HOST, ORG_VENUE))).toEqual({ canEdit: true, canOperate: true, canViewAttendees: true })
+  })
+
+  it("gives staff at one org and owner at another each org's own answer", () => {
+    const both = actor(DEV, "organizer", [ORG_HOST, ORG_OTHER], [ORG_OTHER])
+    expect(eventPermissions(both, event(ORG_HOST)).canEdit).toBe(false)
+    expect(eventPermissions(both, event(ORG_OTHER)).canEdit).toBe(true)
+  })
+
+  it("reads an edit right only through membership: an editOrgIds entry outside orgIds grants nothing", () => {
+    // `actorFor` builds both from one query, so this is a hand-built actor; it must fail closed.
+    expect(eventPermissions(actor(DEV, "organizer", [ORG_OTHER], [ORG_HOST]), event(ORG_HOST))).toEqual({ canEdit: false, canOperate: false, canViewAttendees: false })
+  })
+
+  it("does not let a staff member's membership reach a venue day as the host", () => {
+    expect(eventPermissions(staff(DEV, "organizer", [ORG_VENUE]), event(ORG_VENUE, ORG_VENUE, { kind: "venue_day" })).canOperate).toBe(false)
+  })
+
+  it("lets the host org's rule win for someone who is its staff and also owns the venue's org", () => {
+    // Narrower than the venue branch alone (no held-back count); task 09 revisits `ownsVenueAt`.
+    const twoHats = actor(DEV, "venue_owner", [ORG_HOST, ORG_VENUE], [ORG_VENUE])
+    expect(eventPermissions(twoHats, event(ORG_HOST, ORG_VENUE))).toEqual({ canEdit: false, canOperate: true, canViewAttendees: false })
   })
 
   it("gives a member of a different org nothing", () => {

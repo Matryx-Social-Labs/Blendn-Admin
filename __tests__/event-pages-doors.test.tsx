@@ -22,7 +22,7 @@ type MockEvent = {
 let mockEvent: MockEvent = null
 jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(mockSession) }))
 jest.mock("@/lib/org-membership", () => ({
-  actorFor: (user: { id: string; role: string }) => Promise.resolve({ ...user, orgIds: ["org-a"] }),
+  actorFor: (user: { id: string; role: string }) => Promise.resolve({ ...user, orgIds: ["org-a"], editOrgIds: ["org-a"] }),
   resolveSponsorGrant: () => Promise.resolve(null),
 }))
 jest.mock("@/lib/db", () => ({

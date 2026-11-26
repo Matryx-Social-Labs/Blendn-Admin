@@ -46,7 +46,7 @@ describe("visibleEventsWhere", () => {
   })
 
   it("scopes an organiser to their organisations, plus what they created", async () => {
-    mockActorFor.mockResolvedValue({ id: "user-1", role: "organizer", orgIds: ["org-1", "org-2"] })
+    mockActorFor.mockResolvedValue({ id: "user-1", role: "organizer", orgIds: ["org-1", "org-2"], editOrgIds: ["org-1", "org-2"] })
 
     const where = await visibleEventsWhere({ id: "user-1", role: "organizer" })
 
@@ -68,7 +68,7 @@ describe("visibleEventsWhere", () => {
      * that hides those rows contradicts the authorization layer rather than
      * merely being thin.
      */
-    mockActorFor.mockResolvedValue({ id: "owner-1", role: "venue_owner", orgIds: ["org-9"] })
+    mockActorFor.mockResolvedValue({ id: "owner-1", role: "venue_owner", orgIds: ["org-9"], editOrgIds: ["org-9"] })
     const claimedAt = new Date("2026-09-01T00:00:00Z")
     // The second has no claim date: bad data, and it opens nothing (SCRUM-500).
     mockVenues.mockResolvedValue([
@@ -91,7 +91,7 @@ describe("visibleEventsWhere", () => {
   it("does not give an organiser the venue clause", async () => {
     // The mirror of the case above, and the one that would silently widen
     // access rather than narrow it.
-    mockActorFor.mockResolvedValue({ id: "user-1", role: "organizer", orgIds: ["org-9"] })
+    mockActorFor.mockResolvedValue({ id: "user-1", role: "organizer", orgIds: ["org-9"], editOrgIds: ["org-9"] })
     mockVenues.mockResolvedValue([{ id: "venue-1", claimed_at: new Date() }])
     const where = await visibleEventsWhere({ id: "user-1", role: "organizer" })
 
@@ -107,7 +107,7 @@ describe("visibleEventsWhere", () => {
      * than seeing a row you cannot open, and is why the fallback is here and
      * deliberately NOT in `eventPermissions`.
      */
-    mockActorFor.mockResolvedValue({ id: "lonely-1", role: "organizer", orgIds: [] })
+    mockActorFor.mockResolvedValue({ id: "lonely-1", role: "organizer", orgIds: [], editOrgIds: [] })
 
     const where = await visibleEventsWhere({ id: "lonely-1", role: "organizer" })
 
@@ -129,7 +129,7 @@ describe("visibleEventsWhere", () => {
      * The nav hides Events from sponsors. A nav filter is not an authorization
      * check.
      */
-    mockActorFor.mockResolvedValue({ id: "sponsor-1", role: "sponsor", orgIds: ["org-1"] })
+    mockActorFor.mockResolvedValue({ id: "sponsor-1", role: "sponsor", orgIds: ["org-1"], editOrgIds: ["org-1"] })
 
     const where = await visibleEventsWhere({ id: "sponsor-1", role: "sponsor" })
 
@@ -140,7 +140,7 @@ describe("visibleEventsWhere", () => {
   })
 
   it("never drops the deleted_at filter, whatever the role", async () => {
-    mockActorFor.mockResolvedValue({ id: "u", role: "organizer", orgIds: ["o"] })
+    mockActorFor.mockResolvedValue({ id: "u", role: "organizer", orgIds: ["o"], editOrgIds: ["o"] })
 
     for (const role of ["app_admin", "organizer", "venue_owner", "sponsor"] as const) {
       const where = await visibleEventsWhere({ id: "u", role })

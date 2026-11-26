@@ -1,4 +1,4 @@
-import type { user_role } from "@prisma/client"
+import type { org_role, user_role } from "@prisma/client"
 
 // Relative: reachable from server.ts via socket-ops-auth. See v0.12.1.
 import { db } from "./db"
@@ -55,13 +55,13 @@ export async function suspendedOrgsFor(
  */
 export async function activeOrgsFor(
   userId: string
-): Promise<{ id: string; display_name: string }[]> {
+): Promise<{ id: string; display_name: string; role: org_role }[]> {
   const rows = await db.organisation_members.findMany({
     where: { user_id: userId, ...activeMembership },
-    select: { org: { select: { id: true, display_name: true } } },
+    select: { role: true, org: { select: { id: true, display_name: true } } },
     orderBy: HOME_ORG_ORDER,
   })
-  return rows.map((r) => r.org)
+  return rows.map((r) => ({ ...r.org, role: r.role }))
 }
 
 /**
@@ -90,15 +90,21 @@ export async function actorFor(user: {
     where: { id: user.id },
     select: { role: true, suspended_at: true, deletedAt: true },
   })
-  if (!row || row.deletedAt || row.suspended_at) return { id: user.id, role: "attendee", orgIds: [] }
-  if (row.role === "app_admin") return { id: user.id, role: row.role, orgIds: [] }
+  if (!row || row.deletedAt || row.suspended_at) return { id: user.id, role: "attendee", orgIds: [], editOrgIds: [] }
+  if (row.role === "app_admin") return { id: user.id, role: row.role, orgIds: [], editOrgIds: [] }
 
   const memberships = await db.organisation_members.findMany({
     where: { user_id: user.id, ...activeMembership },
-    select: { org_id: true },
+    select: { org_id: true, role: true },
   })
 
-  return { id: user.id, role: row.role, orgIds: memberships.map((m) => m.org_id) }
+  return {
+    id: user.id,
+    role: row.role,
+    orgIds: memberships.map((m) => m.org_id),
+    // Owner and admin edit; `staff` operates only (SCRUM-1244, `orgPermissions` already gives staff nothing).
+    editOrgIds: memberships.filter((m) => m.role === "owner" || m.role === "admin").map((m) => m.org_id),
+  }
 }
 
 /**
