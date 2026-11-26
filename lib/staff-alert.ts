@@ -32,8 +32,13 @@ import { readMark, writeMark } from "./rate-limit-store"
  * if crashes with long gaps matter. One replica at launch: two would each announce.
  */
 const STAFF_ALERT_INTERVAL_MS = 60_000
-/** The window trails now by this much: a row whose transaction commits after the count is in the next window, not lost. */
-const COMMIT_GRACE_MS = 5_000
+/**
+ * The window trails now by this much: a row's created_at is its transaction's
+ * start, so one that commits after the count is in the next window, not lost.
+ * Two writers create reports inside a transaction, and Prisma ends an
+ * interactive one at 5 s; 10 s is that with room.
+ */
+const COMMIT_GRACE_MS = 10_000
 /** Room lines delivered unchecked in the last hour above which the message says moderation is degraded (the breaker stuck open). */
 export const DEGRADED_UNCHECKED_PER_HOUR = 20
 /** A pending flag this confident is severe whatever its category (the dashboard's high-confidence line). */
@@ -50,9 +55,11 @@ export type StaffNotice = "sent" | "unconfigured" | "failed"
 export async function notifyStaff(text: string): Promise<StaffNotice> {
   const channels = channelsFrom("STAFF_ALERT_SLACK_WEBHOOK_URL", "STAFF_ALERT_EMAIL")
   if (!channels) {
-    logger.info("Staff alert not sent, no channel configured", {
+    // Quiet where no channel is the plan (staging, local); in production nobody being told is an error.
+    const log = process.env.RAILWAY_ENVIRONMENT_NAME === "production" ? logger.error : logger.info
+    log("Staff alert not sent, no channel configured", {
       text,
-      hint: "set STAFF_ALERT_SLACK_WEBHOOK_URL or STAFF_ALERT_EMAIL",
+      hint: "set STAFF_ALERT_SLACK_WEBHOOK_URL, or STAFF_ALERT_EMAIL with RESEND_API_KEY and EMAIL_FROM",
     })
     return "unconfigured"
   }
@@ -147,7 +154,9 @@ export async function runStaffAlertSweep(now: Date = new Date()): Promise<void> 
     memoryMark = until
     await writeMark(MARK_KEY, until.toISOString())
   } catch (error) {
-    logger.error("Staff alert sweep failed", { error: error instanceof Error ? error.message : String(error) })
+    logger.error("Staff alert sweep failed", {
+      error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+    })
   }
 }
 

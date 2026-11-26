@@ -194,6 +194,13 @@ describe("no channel configured", () => {
     expect(mockLogger.error).not.toHaveBeenCalled()
   })
 
+  it("is an error, not an info line, in production", async () => {
+    process.env.RAILWAY_ENVIRONMENT_NAME = "production"
+    await notifyStaff("x")
+    expect(mockLogger.error).toHaveBeenCalledTimes(1)
+    expect(mockLogger.info).not.toHaveBeenCalled()
+  })
+
   it("notifyStaff says so rather than throwing", async () => {
     await expect(notifyStaff("x")).resolves.toBe("unconfigured")
   })
