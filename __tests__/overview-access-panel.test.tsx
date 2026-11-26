@@ -69,7 +69,7 @@ function eventRow(fields: Record<string, unknown> = {}) {
     curated_at: null,
     claimed_at: null,
     organizer_org_id: HOST,
-    organizer_org: { name: ORG_NAME },
+    organizer_org: { display_name: ORG_NAME },
     venue: { name: VENUE_NAME, owner_org_id: VENUE, claimed_at: new Date("2026-01-01T00:00:00Z") },
     ...running,
     ...fields,

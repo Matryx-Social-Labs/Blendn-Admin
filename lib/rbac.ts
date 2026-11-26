@@ -213,6 +213,19 @@ function ownsVenueAt(orgs: Set<string>, event: PermissionEvent): boolean {
 }
 
 /**
+ * Whether the actor operates this event through the venue it is held at: the
+ * resolver answered from the venue's row, not the organising org's. True for a
+ * venue member (and staff who are also in the venue's org, whose first
+ * matching row is the venue's) and on a venue day; false for whoever may edit,
+ * for org staff, and for anyone who may not operate it. The Overview's access
+ * panel says which relationship it is (SCRUM-1446).
+ */
+export function operatesThroughVenue(actor: PermissionActor, event: PermissionEvent): boolean {
+  const p = eventPermissions(actor, event)
+  return p.canOperate && !p.canEdit && ownsVenueAt(new Set((actor.orgIds ?? []).filter(Boolean)), event)
+}
+
+/**
  * `select` fragment for loading an event with everything the resolver needs.
  * Exported so call sites cannot drift into fetching a shape it silently reads
  * as "no organiser, no venue".

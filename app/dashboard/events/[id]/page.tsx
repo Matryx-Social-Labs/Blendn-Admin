@@ -13,7 +13,7 @@ import { alertsForVenue } from "@/lib/live-metrics"
 import { getEventAttendance } from "@/lib/attendance"
 import { eventInsights } from "@/lib/event-insights"
 import { buildFeedbackDigest } from "@/lib/feedback-digest"
-import { canBroadcast } from "@/lib/rbac"
+import { canBroadcast, operatesThroughVenue } from "@/lib/rbac"
 import { resolveSponsorGrant } from "@/lib/org-membership"
 import { getEventOverview } from "@/lib/event-overview"
 import { discloseHeadcount } from "@/lib/disclosure"
@@ -303,7 +303,11 @@ export default async function EventDetailPage({
         overview={overview}
         eventId={event.id}
         canEdit={permissions.canEdit}
+        canViewAttendees={permissions.canViewAttendees}
+        throughVenue={operatesThroughVenue(actor, event)}
+        venueDay={event.kind === "venue_day"}
         venueName={venueName}
+        orgName={event.organizer_org?.display_name ?? null}
         attendance={attendance}
         insights={insights}
         mood={mood}
