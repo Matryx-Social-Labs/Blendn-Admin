@@ -611,7 +611,7 @@ export function nextNightEmail(r: { title: string; checkedIn: number | null; nex
 export function liveAlertEmail(a: { eventTitle: string; alertTitle: string; body: string; openedAt: string; liveUrl: string }) {
   const subject = `${a.eventTitle}: ${a.alertTitle}`
   const lines = [a.body, `${a.eventTitle}, opened at ${a.openedAt}.`]
-  const why = "You get this as an owner or admin of the organization running this night, once when a critical alert opens."
+  const why = "You get this as an owner or admin of the organization running this night, when a critical alert opens on it."
   return {
     subject,
     text: [...lines.flatMap((l) => [l, ""]), "Open the Live tab:", a.liveUrl, "", "—", why].join("\n"),
