@@ -35,6 +35,8 @@ const CATEGORY_CUES: Array<{ category: IssueCategory; patterns: RegExp[] }> = [
       // category exists to prevent. Match the verb plus any object pronoun
       // rather than one fixed phrase.
       /\bfollow(ing|ed)\b[^.!?]{0,20}\b(me|us|her|him|them|my friend)\b/i,
+      // "grabbed my arm" (SCRUM-1439), but not "grabbed a beer": with a person, as above.
+      /\bgrabbed\b[^.!?]{0,20}\b(me|us|her|him|them|my)\b/i,
       /\b(passed out|fainted|collaps(ed|ing)|ambulance|overdose|seizure|needs help|not ok(ay)?)\b/i,
     ],
   },
@@ -89,6 +91,26 @@ const AMBIGUITY_MARKERS = [
   /\bsure\b|\byeah right\b|\bapparently\b|\bsupposedly\b/i,
   /\bbut\b/i,
 ]
+
+/**
+ * Settling "neutral" with no cue is safe only for English: a help request in Hindi, Kannada, romanised Hinglish or
+ * French carries no English cue, so the rule below filed it as chatter and the model never read it (SCRUM-1069). So:
+ * plain ASCII (typographic quotes and dashes allowed), an English function word, and no romanised Indic one, which
+ * also catches Hinglish "the" (= "were"). Words that are also Hindi or French ("is", "in", "to", "me", "he", "on",
+ * "a") are left out of the English list.
+ */
+const ASCII_TEXT = /^[\x00-\x7F‘’“”…–—]*$/
+const ENGLISH_FUNCTION_WORD =
+  /\b(the|and|of|it|it'?s|this|that|there|here|what|when|where|who|how|why|anyone|anybody|someone|everyone|we|you|your|our|they|i|i'?m|im|my|was|were|be|been|have|has|will|can|just|for|with|at|from|any|if|about)\b/i
+const ROMANISED_INDIC_WORD =
+  /\b(hai|hain|tha|thi|raha|rahi|rahe|kar|mujhe|mera|meri|mere|nahi|nahin|kya|aur|bhi|yeh|woh|ko|ka|ki|ke|ne|se|hu|hoon|bahut|yaar|illa|beku|nange|avnu)\b/i
+const readsAsEnglish = (text: string) =>
+  ASCII_TEXT.test(text) && ENGLISH_FUNCTION_WORD.test(text.replace(/’/g, "'")) && !ROMANISED_INDIC_WORD.test(text)
+
+/** A safety cue, for the classifier to order by and to keep: the lexicon never settles one (see below). */
+export function hasSafetyCue(text: string): boolean {
+  return detectCategory(text.trim()) === "safety_conduct"
+}
 
 function detectCategory(text: string): IssueCategory | null {
   for (const { category, patterns } of CATEGORY_CUES) {
@@ -145,8 +167,9 @@ export function classifyWithLexicon(text: string): Classification | null {
   else if (negative) sentiment = "negative"
 
   // No polarity signal AND no category cue is the case this tier exists for:
-  // plain logistics chatter, confidently neutral, no LLM needed.
+  // plain English logistics chatter, confidently neutral, no LLM needed.
   if (!sentiment && !category) {
+    if (!readsAsEnglish(trimmed)) return null
     return { sentiment: "neutral", category: "other", topic: null, confidence: 0.8, source: "lexicon" }
   }
 

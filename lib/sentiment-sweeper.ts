@@ -129,7 +129,7 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
   if (batch.length === 0) return { classified: 0, hasMore: false }
 
   const rowOf = new Map(batch.map((m) => [m.id, m]))
-  const results = await classifyMessages(batch.map((m) => ({ id: m.id, text: m.content })))
+  const results = await classifyMessages(batch.map((m) => ({ id: m.id, text: m.content, room: m.chat_group_id })))
 
   let written: { message_id: string }[]
   try {
@@ -164,7 +164,8 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
     }
   }
 
-  return { classified: written.length, hasMore }
+  // A message the classifier did not reach this pass (its call cap) has no row yet: the next pass comes at once.
+  return { classified: written.length, hasMore: hasMore || results.length < batch.length }
 }
 
 /** How far back the pass looks for messages to classify. */
