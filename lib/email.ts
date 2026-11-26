@@ -1,5 +1,7 @@
 import { randomUUID } from "crypto"
 
+import type { user_role } from "@prisma/client"
+
 import { db } from "./db"
 import { logger } from "./logger"
 import { BILLING_PLANS, grossRupees, gstSplit, planDay, rupees } from "./billing-plans"
@@ -330,12 +332,31 @@ export function inviteEmail(
 }
 
 /**
+ * The account's one next step, after the password (SCRUM-1342): an organizer's first event, a venue owner's venue (added
+ * or claimed: `/dashboard/venues`, where their first step is). Anyone else (a sponsor creates no events and holds no
+ * venue) keeps the Members line.
+ */
+function approvedNextStep(role: user_role) {
+  if (role === "organizer") return { line: "Next, create your first event:", href: `${dashboardUrl()}/dashboard/events/new`, label: "Create your first event" }
+  if (role === "venue_owner")
+    return { line: "Next, add your venue, or claim it if it’s already listed:", href: `${dashboardUrl()}/dashboard/venues`, label: "Add or claim your venue" }
+  return null
+}
+
+/**
  * `setPasswordLink` is null for an account that already existed and keeps its
  * password. Never a password: see SCRUM-134.
  */
-export function approvedEmail(name: string, orgName: string, email: string, setPasswordLink: string | null) {
+export function approvedEmail(
+  name: string,
+  orgName: string,
+  email: string,
+  setPasswordLink: string | null,
+  role: user_role
+) {
+  const next = approvedNextStep(role)
   return {
-    html: approvedHtml(name, orgName, email, setPasswordLink),
+    html: approvedHtml(name, orgName, email, setPasswordLink, next),
     subject: "Your Blend’n host account is ready",
     text: [
       `Hi ${name},`,
@@ -354,7 +375,7 @@ export function approvedEmail(name: string, orgName: string, email: string, setP
           ]
         : ["", "Sign in with your existing password."]),
       "",
-      "You can invite colleagues from Organisation → Members.",
+      ...(next ? [next.line, next.href] : ["You can invite colleagues from Organisation → Members."]),
     ].join("\n"),
   }
 }
@@ -597,6 +618,35 @@ export function nextNightEmail(r: { title: string; checkedIn: number | null; nex
       next: null,
       note: null,
       why: NEXT_NIGHT_WHY,
+      unsubscribeUrl: r.unsubscribeUrl,
+    }),
+  }
+}
+
+/**
+ * The first-night nudge (SCRUM-1342): three days after an organizer was approved, with nothing listed. One button to
+ * a new event, and one line on what the morning results mail shows, only what it really sends (04b).
+ */
+export function firstNightEmail(r: { orgName: string; nextUrl: string; unsubscribeUrl: string }) {
+  const lines = [
+    `${r.orgName} is set up on Blend’n, and nothing is listed yet.`,
+    "The morning after each night, you’ll get an email with how it went: how many people checked in, the average rating once 5 people have rated, and, once people have chatted, the room’s mood on the results page.",
+  ]
+  const label = "Create your first event"
+  const why = "You get this once, three days after your organization was approved, if nothing is listed yet."
+  const subject = "List your first night on Blend’n"
+  return {
+    subject,
+    text: [...lines.flatMap((l) => [l, ""]), `${label}:`, r.nextUrl, "", ...footer(why, r.unsubscribeUrl)].join("\n"),
+    html: resultsHtml({
+      title: subject,
+      preheader: lines[0],
+      heading: "List your first night",
+      lines,
+      button: { href: r.nextUrl, label },
+      next: null,
+      note: null,
+      why,
       unsubscribeUrl: r.unsubscribeUrl,
     }),
   }

@@ -363,7 +363,7 @@ export async function approveOnboardingRequest(
   if (emailConfigured()) {
     const result = await sendEmail({
       to: request.contact_email,
-      ...approvedEmail(request.contact_name, request.display_name, request.contact_email, setPasswordLink || null),
+      ...approvedEmail(request.contact_name, request.display_name, request.contact_email, setPasswordLink || null, request.requested_role),
     })
     emailSent = result.sent
     if (!result.sent && result.reason !== "suppressed") {

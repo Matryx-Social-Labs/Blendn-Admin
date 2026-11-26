@@ -3,7 +3,7 @@ const mockDb = {
   audit_logs: { findFirst: async () => null },
   organisations: { findUniqueOrThrow: jest.fn() },
   organisation_members: { findFirst: jest.fn() },
-  organisation_invites: { findFirst: jest.fn(), create: jest.fn() },
+  organisation_invites: { findFirst: jest.fn(), create: jest.fn(), count: async () => 0 },
 }
 const mockAuth = jest.fn()
 const mockSend = jest.fn()

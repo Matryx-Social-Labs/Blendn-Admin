@@ -162,6 +162,18 @@ export async function unreadAfterMarkers(rooms: { chat_group_id: string; last_re
   return new Map(counts.map((r) => [r.chat_group_id, r.unread]))
 }
 
+/**
+ * Reading a room's newest page moves the reader's marker to `messageId`, and writes only when it moves (SCRUM-1225):
+ * a busy room re-read on every socket event made each message one row write per reader. The `null` arm is a first
+ * read; a bare Prisma `not` excludes NULL, so without it the marker would never be written.
+ */
+export function markRoomRead(chatGroupId: string, userId: string, messageId: string) {
+  return db.chat_group_members.updateMany({
+    where: { chat_group_id: chatGroupId, user_id: userId, OR: [{ last_read_message_id: null }, { last_read_message_id: { not: messageId } }] },
+    data: { last_read_message_id: messageId, updated_at: new Date() },
+  })
+}
+
 /** Unread for a member who has read nothing, capped at `UNREAD_ROOM_CAP`. Pass only the rooms with no read marker. */
 export async function unreadTotalsOf(chatGroupIds: string[], notUnread: string[], hiddenLineIds: string[]): Promise<Map<string, number>> {
   if (chatGroupIds.length === 0) return new Map()

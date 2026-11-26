@@ -152,11 +152,50 @@ export interface CohortRow {
   back30: CohortStage
 }
 
+/**
+ * The app's onboarding steps, in its order (SCRUM-1283). Mirrors `ONBOARDING_STEPS` and `STEP_FIELDS` in the client's
+ * `lib/onboarding.ts` (blendn origin/dev f16c3125), less `ready`, which writes nothing but `onboarded`. There are no
+ * per-step routes: each step PUTs its own fields to the one profile route, so how far somebody got is what they filled.
+ */
+export const ONBOARDING_STEPS = ["basics", "preferences", "details", "media", "location"] as const
+type OnboardingStep = (typeof ONBOARDING_STEPS)[number]
+
+/**
+ * What each step leaves behind, read from the profile `p` of the person `u`. Only a filled field is evidence:
+ *
+ * - basics: `name` is sign-up's (every sign-up route writes it), so it is the birth date the step requires, or gender.
+ * - preferences: `show_orientation` and `reveal_by_default` default to false, so only true says the step was answered.
+ * - details: the interest graph (`user_interests`, synced before the PUT) counts as much as the free-text names.
+ * - location: `share_location` defaults to true, so only a no is readable; a yes reads as the step before.
+ *
+ * A NULL (no profile row) is not true, so a person with none reads as nothing filled.
+ */
+const STEP_FILLED: Record<OnboardingStep, Prisma.Sql> = {
+  basics: Prisma.sql`p.date_of_birth IS NOT NULL OR p.gender IS NOT NULL`,
+  preferences: Prisma.sql`cardinality(p.intent_default) > 0 OR cardinality(p.orientations) > 0 OR p.show_orientation OR p.reveal_by_default`,
+  details: Prisma.sql`cardinality(p.interests) > 0 OR btrim(p.bio) <> '' OR EXISTS (SELECT 1 FROM user_interests ui WHERE ui.user_id = u.id)`,
+  media: Prisma.sql`cardinality(p.photos) > 0`,
+  location: Prisma.sql`p.share_location = false`,
+}
+
+/** Finished first, then the furthest step filled: a skipped step does not hold anybody back. */
+const FURTHEST_STEP = Prisma.sql`CASE WHEN p.onboarded THEN 'finished' ${Prisma.join(
+  [...ONBOARDING_STEPS].reverse().map((step) => Prisma.sql`WHEN ${STEP_FILLED[step]} THEN ${step}`),
+  " ",
+)} ELSE 'none' END`
+
+export type StepRow = { step: "none" | OnboardingStep | "finished"; people: number }
+
 export interface SignupCohorts {
   /** Newest first. `week` is the Monday of an ISO week in India's calendar, YYYY-MM-DD. */
   weeks: Array<CohortRow & { week: string }>
   /** Every source with anybody, in `ACQUISITION_SOURCES` order, then "unknown". */
   sources: Array<CohortRow & { source: AcquisitionSource | "unknown" }>
+  /**
+   * The same people by the furthest onboarding step they filled: nothing, each step in the app's order, then finished.
+   * Every row, zeros included; together they are the weeks' sign-ups.
+   */
+  steps: StepRow[]
 }
 
 const COUNT_KEYS = ["signed_up", "of7", "rsvp7", "of14", "checkin14", "of30", "back30"] as const
@@ -165,7 +204,8 @@ type CohortCounts = Record<(typeof COUNT_KEYS)[number], number>
 /**
  * Sign-ups by week (SCRUM-1281): of the people who signed up in each of the
  * last `weeks` ISO weeks, who RSVP'd within 7 days, checked in within 14, and
- * came to a second distinct event within 30; and the same by `signup_source`.
+ * came to a second distinct event within 30; the same by `signup_source`; and the same people by the
+ * furthest onboarding step they filled (SCRUM-1283, `STEP_FILLED`).
  *
  * `loopClosure` above cannot say any of this: it has no dates, and its "came
  * back" has no time bound.
@@ -192,7 +232,9 @@ type CohortCounts = Record<(typeof COUNT_KEYS)[number], number>
  * turned up.
  */
 export async function signupCohorts(weeks = 8, now: Date = new Date()): Promise<SignupCohorts> {
-  const rows = await db.$queryRaw<Array<{ week: string; source: string | null } & Record<(typeof COUNT_KEYS)[number], bigint>>>`
+  const rows = await db.$queryRaw<
+    Array<{ week: string; source: string | null; step: StepRow["step"] | null } & Record<(typeof COUNT_KEYS)[number], bigint>>
+  >`
     WITH weeks AS (
       SELECT generate_series(
         date_trunc('week', ${now}::timestamptz AT TIME ZONE 'Asia/Kolkata') - make_interval(weeks => ${weeks - 1}::int),
@@ -202,8 +244,10 @@ export async function signupCohorts(weeks = 8, now: Date = new Date()): Promise<
     ),
     cohort AS (
       -- "createdAt" is a timestamp without time zone, written in UTC.
-      SELECT u.id, u."createdAt" AT TIME ZONE 'UTC' AS joined, p.signup_source AS source
+      SELECT u.id, u."createdAt" AT TIME ZONE 'UTC' AS joined, p.signup_source AS source, ${FURTHEST_STEP} AS step
       FROM "User" u
+      -- ponytail: the planner hash-joins all of profiles (a seq scan, cheaper at 195k than 28k pk lookups); re-EXPLAIN at
+      -- ~1M profiles, where LEFT JOIN LATERAL (SELECT * FROM profiles x WHERE x.id = u.id OFFSET 0) pins the pk lookup.
       LEFT JOIN profiles p ON p.id = u.id
       WHERE u."deletedAt" IS NULL
         AND u.id <> ${SYSTEM_USER_ID}
@@ -215,6 +259,7 @@ export async function signupCohorts(weeks = 8, now: Date = new Date()): Promise<
       SELECT
         date_trunc('week', c.joined AT TIME ZONE 'Asia/Kolkata') AS week,
         c.source,
+        c.step,
         c.joined + interval '7 days'  <= ${now}::timestamptz AS known7,
         c.joined + interval '14 days' <= ${now}::timestamptz AS known14,
         c.joined + interval '30 days' <= ${now}::timestamptz AS known30,
@@ -240,6 +285,7 @@ export async function signupCohorts(weeks = 8, now: Date = new Date()): Promise<
     SELECT
       to_char(w.week, 'YYYY-MM-DD')                    AS week,
       p.source,
+      p.step,
       COUNT(p.week)                                     AS signed_up,
       COUNT(*) FILTER (WHERE p.known7)                  AS of7,
       COUNT(*) FILTER (WHERE p.known7 AND p.rsvp7)      AS rsvp7,
@@ -249,11 +295,12 @@ export async function signupCohorts(weeks = 8, now: Date = new Date()): Promise<
       COUNT(*) FILTER (WHERE p.known30 AND p.back30)    AS back30
     FROM weeks w
     LEFT JOIN person p ON p.week = w.week
-    GROUP BY w.week, p.source
+    GROUP BY w.week, p.source, p.step
   `
 
   const parts = rows.map((r) => ({
     week: r.week,
+    step: r.step,
     source: (ACQUISITION_SOURCES as readonly (string | null)[]).includes(r.source) ? (r.source as AcquisitionSource) : null,
     ...(Object.fromEntries(COUNT_KEYS.map((k) => [k, Number(r[k])])) as CohortCounts),
   }))
@@ -278,5 +325,9 @@ export async function signupCohorts(weeks = 8, now: Date = new Date()): Promise<
       .map((source) => ({ source: source ?? ("unknown" as const), counts: sum(parts.filter((p) => p.source === source)) }))
       .filter(({ counts }) => counts.signed_up > 0)
       .map(({ source, counts }) => ({ source, ...row(counts, false) })),
+    steps: (["none", ...ONBOARDING_STEPS, "finished"] as const).map((step) => ({
+      step,
+      people: sum(parts.filter((p) => p.step === step)).signed_up,
+    })),
   }
 }
