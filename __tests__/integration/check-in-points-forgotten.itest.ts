@@ -6,13 +6,20 @@ process.env.MOBILE_JWT_SECRET =
 // `jose` is pure ESM; nothing here signs in with Google (checkin.itest.ts).
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 // The venue-day pass can push; never to Expo from a test (go-live-sweeper.itest.ts).
-jest.mock("expo-server-sdk", () => ({
-  Expo: class {
-    static isExpoPushToken = () => false
-    chunkPushNotifications = (m: unknown[]) => [m]
-    sendPushNotificationsAsync = async () => []
-  },
-}))
+jest.mock("expo-server-sdk", () => {
+  class Expo {
+    static isExpoPushToken(): boolean {
+      return false
+    }
+    chunkPushNotifications(m: unknown[]): unknown[][] {
+      return [m]
+    }
+    async sendPushNotificationsAsync(): Promise<unknown[]> {
+      return []
+    }
+  }
+  return { Expo }
+})
 
 import { readFileSync } from "fs"
 import { join } from "path"
