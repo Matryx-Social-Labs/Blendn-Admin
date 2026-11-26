@@ -55,6 +55,8 @@ declare global {
 }
 const shared = globalThis as typeof globalThis & {
   __blendnSocketIo?: Server<ClientToServerEvents, ServerToClientEvents> | null
+  /** When each room above `TYPING_ROOM_CAP` was last told `typing:several`. */
+  __blendnTypingSeveralAt?: Map<string, number>
 }
 function currentIo(): Server<ClientToServerEvents, ServerToClientEvents> | null {
   return shared.__blendnSocketIo ?? null
@@ -213,6 +215,8 @@ export interface ServerToClientEvents {
     userName: string
     isTyping: boolean
   }) => void
+  /** A room above `TYPING_ROOM_CAP` sockets: somebody is typing. No names, no count, no stop. */
+  "typing:several": (data: { chatGroupId: string }) => void
   /*
    * The tally, never who reacted (CHAT.md:119). This still declared the old
    * `{ userId, emoji, action }` shape after the emitter moved to counts; it
@@ -596,11 +600,31 @@ async function readTypingMembership(userId: string, chatGroupId: string) {
   })
 }
 
+/** Above this many sockets in a room, typing is one nameless `typing:several` (SCRUM-1309). */
+export const TYPING_ROOM_CAP = 50
+/** At most one `typing:several` per room in this window. */
+const TYPING_SEVERAL_MS = 5_000
+
+// On `shared` (`globalThis`), like the server: Next bundles a second copy of this module.
+// ponytail: one entry per room that has ever been above the cap in this process, never pruned; prune when there are thousands of those.
+const severalSentAt = (shared.__blendnTypingSeveralAt ??= new Map<string, number>())
+
 /**
  * Broadcast a typing indicator to a chat room, under the sender's anonymous name.
  *
  * No-ops for muted or banned members. The join guard can't cover this on its
  * own: a member banned *after* joining stays in the room until they disconnect.
+ *
+ * The join is the door: a socket not in the room types to nobody and costs no
+ * read. The room is named in lower case, as every broadcast names it.
+ *
+ * Above `TYPING_ROOM_CAP` sockets a start costs no read: per-person typing in a
+ * room of thousands is reads and packets enough to take the room down before
+ * its messages do. The room hears one `typing:several` every 5 s at most; no
+ * names, so no block, mute or naming read is needed (a muted member counts too;
+ * a ban takes the socket out of the room), and no stop: the app lets it expire,
+ * as it forgets a named typer 3 s after the last `chat:typing`. The size is this
+ * process's adapter: right at one replica (DECISIONS 2026-11-25).
  */
 export async function emitChatTyping(
   socket: AuthenticatedSocket,
@@ -608,6 +632,18 @@ export async function emitChatTyping(
   isTyping: boolean
 ): Promise<void> {
   if (!mayEmitTyping(socket, "chat", chatGroupId, isTyping)) return
+  // `mayEmitTyping` let only a uuid through.
+  const chatRoom = `chat:${chatGroupId.toLowerCase()}`
+  if (!socket.rooms.has(chatRoom)) return
+  if ((socket.nsp.adapter.rooms.get(chatRoom)?.size ?? 0) > TYPING_ROOM_CAP) {
+    if (!isTyping) return
+    const now = Date.now()
+    if (now - (severalSentAt.get(chatRoom) ?? -Infinity) < TYPING_SEVERAL_MS) return
+    severalSentAt.set(chatRoom, now)
+    // Nameless, so the app cannot drop its own: the typist's other devices are left out here.
+    socket.to(chatRoom).except(`user:${socket.data.userId}`).volatile.emit("typing:several", { chatGroupId })
+    return
+  }
   try {
     const membership = await readTypingMembership(socket.data.userId, chatGroupId)
     if (!membership || membership.status !== "active") return
@@ -637,7 +673,7 @@ export async function emitChatTyping(
      * this module is running.
      */
     await emitAsSeenBy(
-      socket.nsp.in(`chat:${chatGroupId}`).except(hidden.map((id) => `user:${id}`)),
+      socket.nsp.in(chatRoom).except(hidden.map((id) => `user:${id}`)),
       roomScope(membership.chat_group),
       "chat:typing",
       (idFor) => ({
@@ -1279,7 +1315,10 @@ type Payload<E extends keyof ServerToClientEvents> = Parameters<ServerToClientEv
  * always was. A payload is built once per user and a handle once per person,
  * however many sockets they hold.
  *
- * `skipSocketId` is `socket.to()`'s "not back to the sender" for typing.
+ * `typingSocketId`, for a typing tick from that socket: never sent back to it
+ * (`socket.to()`'s "not back to the sender"), and sent volatile, so a client
+ * that cannot take it now loses it rather than having it queued. A socket on
+ * another instance (`RemoteSocket`) has no volatile flag and gets a plain emit.
  *
  * `about`, for a payload that names one person: each copy is also told whether
  * its recipient may recognise that person in this room (`recognisedInRoomBy`,
@@ -1331,7 +1370,7 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
   scope: RoomScope,
   event: E,
   build: (idFor: (userId: string) => string, recognises: boolean, viewer: string) => Payload<E>,
-  skipSocketId?: string,
+  typingSocketId?: string,
   about?: string
 ): Promise<void> {
   let sockets = await audience.fetchSockets()
@@ -1362,7 +1401,7 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
   }
   const copies = new Map<string, Payload<E>>()
   for (const recipient of sockets) {
-    if (recipient.id === skipSocketId) continue
+    if (recipient.id === typingSocketId) continue
     // No user on the socket means nobody is "own": every id goes out handled.
     const viewer = recipient.data?.userId ?? ""
     // A venue day's room: only the people live in it now.
@@ -1372,7 +1411,9 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
       const idFor = (userId: string) => (userId === viewer ? userId : handleOf(userId))
       copies.set(viewer, (copy = build(idFor, recognising.has(viewer), viewer)))
     }
-    ;(recipient.emit as (ev: E, payload: Payload<E>) => boolean)(event, copy)
+    // A local socket is the real `Socket`, which has `volatile`; a `RemoteSocket` does not.
+    const target = typingSocketId && "volatile" in recipient ? (recipient as unknown as Socket).volatile : recipient
+    ;(target.emit as (ev: E, payload: Payload<E>) => boolean)(event, copy)
   }
 }
 
