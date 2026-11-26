@@ -94,9 +94,9 @@ Every variable is documented in `.env.example`; `lib/env.ts` is the validated
 schema. Production fails to boot on a missing or malformed required value, so
 misconfiguration surfaces as a failed deploy rather than a broken runtime.
 
-Two that fail quietly and are worth checking in a new environment:
+Two worth checking in a new environment:
 
-- **`OPENAI_API_KEY`** unset — moderation degrades to keyword matching, with a boot warning (Railway `production` refuses to boot without it).
+- **`OPENAI_API_KEY`** unset — a boot warning (Railway `production` refuses to boot without it).
 - **`TIGRIS_*`** unset — uploads return 503.
 
 ## Testing

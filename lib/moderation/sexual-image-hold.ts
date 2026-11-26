@@ -12,20 +12,14 @@ export type ImagePath = "profile" | "blur" | "lobby"
 /**
  * One page per user per 10 minutes: one account uploading image after image
  * must not bury the next real case. Every pull still writes its audit row.
- *
- * ponytail: in this process only, so a restart or a second replica pages again
- * (one replica at launch). A cooldown in the database wants an audit_logs index
- * on (action, resource_id, created_at), which is a migration.
+ * The cooldown is kept in this process's memory.
  */
 const PAGE_COOLDOWN_MS = 10 * 60 * 1000
 const lastPaged = new Map<string, number>()
 
 /**
- * A sexual image that moderation pulled goes to a person (SCRUM-1163).
- *
- * The vendor does not score minors on images (`sexual/minors` is text-only on
- * omni-moderation), so every sexual image that is pulled goes to a person, who
- * looks for a minor or a non-consensual image.
+ * A sexual image that moderation pulled goes to a person, who looks for a minor
+ * or a non-consensual image (SCRUM-1163).
  *
  * Called by each image path AFTER its own pull (profile and blur photos are
  * withdrawn to the private bucket, a Lobby photo is rejected and stays in it):
