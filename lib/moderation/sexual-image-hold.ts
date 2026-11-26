@@ -10,6 +10,17 @@ import type { ModerationCheck } from "./openai-moderation"
 export type ImagePath = "profile" | "blur" | "lobby"
 
 /**
+ * One page per user per 10 minutes: one account uploading image after image
+ * must not bury the next real case. Every pull still writes its audit row.
+ *
+ * ponytail: in this process only, so a restart or a second replica pages again
+ * (one replica at launch). A cooldown in the database wants an audit_logs index
+ * on (action, resource_id, created_at), which is a migration.
+ */
+const PAGE_COOLDOWN_MS = 10 * 60 * 1000
+const lastPaged = new Map<string, number>()
+
+/**
  * A sexual image that moderation pulled goes to a person (SCRUM-1163).
  *
  * The vendor does not score minors on images (`sexual/minors` is text-only on
@@ -18,7 +29,8 @@ export type ImagePath = "profile" | "blur" | "lobby"
  *
  * Called by each image path AFTER its own pull (profile and blur photos are
  * withdrawn to the private bucket, a Lobby photo is rejected and stays in it):
- * one audit row, `moderation.sexual_image_hold`, and one page. The page leaves
+ * one audit row, `moderation.sexual_image_hold`, and one page (at most one
+ * per user per 10 minutes). The page leaves
  * the platform, so it carries the storage key and the user id: no URL (a signed
  * one is a bearer link to the image), no image, no name. Never throws: nothing
  * here may stop, or undo, the pull.
@@ -34,9 +46,15 @@ export async function holdSexualImage(check: ModerationCheck, path: ImagePath, o
     await db
       .$transaction((tx) => auditInTx(tx, { action: "moderation.sexual_image_hold", resource: "user", resourceId: userId, details: { objectKey, path, category } }))
       .catch((error: unknown) => logger.error("Sexual image hold: audit row not written", { ...context, error: error instanceof Error ? error.message : String(error) }))
+    const now = Date.now()
+    for (const [id, at] of lastPaged) if (now - at >= PAGE_COOLDOWN_MS) lastPaged.delete(id)
+    if (lastPaged.has(userId)) return
     const result = await notifyStaff(
-      `Sexual image pulled (${path}). A person must check it for a minor or a non-consensual image. key ${objectKey} user ${userId}\n${dashboardUrl()}/dashboard/moderation`
+      `Sexual image pulled (${path}). A person must check it for a minor or a non-consensual image. key ${objectKey} user ${userId}\n` +
+        `More from this user in the next 10 minutes go to the audit log only.\n${dashboardUrl()}/dashboard/moderation`
     )
+    // A failed page starts no cooldown: the next pull tries again.
+    if (result !== "failed") lastPaged.set(userId, now)
     if (result !== "sent") logger.error("Sexual image hold: staff were not paged", { ...context, result })
   } catch (error) {
     logger.error("Sexual image hold failed", { ...context, error: error instanceof Error ? error.message : String(error) })

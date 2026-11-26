@@ -137,8 +137,14 @@ const PATHS: ImagePath[] = [
   },
 ]
 
+// The page cooldown is per user in this process: each test starts an hour after the last.
+let clock = Date.UTC(2026, 10, 26)
+const PAGE_COOLDOWN_MS = 10 * 60 * 1000
+
 beforeEach(() => {
   jest.clearAllMocks()
+  clock += 60 * 60 * 1000
+  jest.spyOn(Date, "now").mockImplementation(() => clock)
   ;(ownedPhotoKey as jest.Mock).mockImplementation((url: string) => (url === PROFILE_URL ? PROFILE_KEY : url === BLUR_URL ? BLUR_KEY : null))
   ;(sealedChatKey as jest.Mock).mockImplementation((url: string) => (url === LOBBY_URL ? LOBBY_KEY : null))
   ;(db.$queryRaw as unknown as jest.Mock).mockResolvedValue([{ photos: [], cleared_blur: null, was_main: true }])
@@ -149,7 +155,7 @@ beforeEach(() => {
 })
 
 const message = (path: string, key: string) =>
-  `Sexual image pulled (${path}). A person must check it for a minor or a non-consensual image. key ${key} user ${USER}\nhttps://dash.test/dashboard/moderation`
+  `Sexual image pulled (${path}). A person must check it for a minor or a non-consensual image. key ${key} user ${USER}\nMore from this user in the next 10 minutes go to the audit log only.\nhttps://dash.test/dashboard/moderation`
 const auditEntry = (path: string, key: string, category = "sexual") => ({
   action: "moderation.sexual_image_hold",
   resource: "user",
@@ -235,7 +241,7 @@ describe("holdSexualImage, the edges", () => {
 
   it("another category's hide that also names sexual pages, and sexual/minors is the category it records", async () => {
     await holdSexualImage(hide({ violence: 0.9, sexual: 0.45 }), "profile", PROFILE_KEY, USER)
-    await holdSexualImage(hide({ sexual: 0.9, "sexual/minors": 0.5 }), "blur", BLUR_KEY, USER)
+    await holdSexualImage(hide({ sexual: 0.9, "sexual/minors": 0.5 }), "blur", BLUR_KEY, "another-user")
     expect(page).toHaveBeenCalledTimes(2)
     expect(audit.mock.calls.map(([, entry]) => entry.details.category)).toEqual(["sexual", "sexual/minors"])
   })
@@ -267,6 +273,34 @@ describe("holdSexualImage, the edges", () => {
         org_id: null,
       },
     })
+  })
+})
+
+describe("one page per user per 10 minutes", () => {
+  it("a second pull from the same user writes its row and pages nobody", async () => {
+    await holdSexualImage(SEXUAL_HIDE, "profile", PROFILE_KEY, USER)
+    clock += PAGE_COOLDOWN_MS - 1
+    await holdSexualImage(SEXUAL_HIDE, "blur", BLUR_KEY, USER)
+
+    expect(audit).toHaveBeenCalledTimes(2)
+    expect(page).toHaveBeenCalledTimes(1)
+  })
+
+  it("pages again once the 10 minutes are up, and for another user at once", async () => {
+    await holdSexualImage(SEXUAL_HIDE, "profile", PROFILE_KEY, USER)
+    await holdSexualImage(SEXUAL_HIDE, "lobby", LOBBY_KEY, "another-user")
+    clock += PAGE_COOLDOWN_MS
+    await holdSexualImage(SEXUAL_HIDE, "blur", BLUR_KEY, USER)
+
+    expect(page).toHaveBeenCalledTimes(3)
+  })
+
+  it("a page that failed does not start the cooldown", async () => {
+    page.mockResolvedValueOnce("failed")
+    await holdSexualImage(SEXUAL_HIDE, "profile", PROFILE_KEY, USER)
+    await holdSexualImage(SEXUAL_HIDE, "blur", BLUR_KEY, USER)
+
+    expect(page).toHaveBeenCalledTimes(2)
   })
 })
 
