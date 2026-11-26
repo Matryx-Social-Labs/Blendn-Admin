@@ -89,7 +89,7 @@ describe("bulk push", () => {
   it("is sent without badges when the count fails", async () => {
     tokens.mockResolvedValue(devices(["a"]))
     countBadges.mockRejectedValue(new Error("pool busy"))
-    await expect(sendBulkPushNotifications({ userIds: ["a"], title: "t", body: "b", data })).resolves.toEqual({ sent: 1, failed: 0 })
+    await expect(sendBulkPushNotifications({ userIds: ["a"], title: "t", body: "b", data })).resolves.toEqual({ sent: 1, failed: 0, noDevice: 0 })
     expect(sent[0].badge).toBeUndefined()
   })
 
