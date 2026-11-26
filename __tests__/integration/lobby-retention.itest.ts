@@ -1,7 +1,7 @@
 /*
  * What closed Lobbies and rooms held, 180 days on (SCRUM-1026, owner decision
- * 6): a dry run that counts and deletes nothing, then the real purge, against
- * real rows. Removed and reported content is held 180 days from its removal;
+ * 6), against real rows. The purge deletes: there is no dry run and no switch
+ * (SCRUM-1227, D-029), so every pass here is the one production runs. Removed and reported content is held 180 days from its removal;
  * anything younger than the window is not touched at all. Storage is the one
  * fake: the purge's deletes are recorded, not sent.
  */
@@ -14,7 +14,7 @@ jest.mock("@/lib/tigris", () => ({
 
 import { randomUUID } from "crypto"
 
-import { purgeClosedLobbies, purgeModeFromEnv } from "@/lib/lobby-retention"
+import { purgeClosedLobbies } from "@/lib/lobby-retention"
 import { loopClosure } from "@/lib/loop-closure"
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, testId } from "./helpers"
 
@@ -51,6 +51,8 @@ const ago = (days: number) => new Date(Date.now() - days * DAY)
 
 let old: { id: string; room: string }
 let recent: { id: string; room: string }
+/** A closed room of five messages, one of them under an open report (the drive's shape). */
+let reportedRoom: { id: string; room: string }
 let host = ""
 let author = ""
 let reporter = ""
@@ -85,6 +87,10 @@ beforeAll(async () => {
   ids.reportedDismissed = await msg(old.room)
   await db.message_reports.create({ data: { reporter_id: reporter, message_id: ids.reportedDismissed, message_type: "group", reason: "spam", status: "reviewed", reviewed_at: ago(5) } })
   ids.recentMessage = await msg(recent.room)
+  reportedRoom = await endedEvent(182, host)
+  for (let i = 0; i < 4; i++) await msg(reportedRoom.room)
+  ids.underOpenReport = await msg(reportedRoom.room)
+  await db.message_reports.create({ data: { reporter_id: reporter, message_id: ids.underOpenReport, message_type: "group", reason: "harassment" } })
 
   const post = async (event: string, extra: object = {}) =>
     (await db.board_posts.create({ data: { event_id: event, author_id: author, kind: "offer", body: "Car", spaces_left: 2, ...extra }, select: { id: true } })).id
@@ -144,39 +150,12 @@ const exists = {
   post: async (id: string) => (await db.board_posts.count({ where: { id } })) === 1,
 }
 
-describe("the mode", () => {
-  it("is a dry run unless LOBBY_PURGE says delete", () => {
-    expect(purgeModeFromEnv(undefined)).toBe("log")
-    expect(purgeModeFromEnv("yes")).toBe("log")
-    expect(purgeModeFromEnv(" DELETE ")).toBe("delete")
-    expect(purgeModeFromEnv("off")).toBe("off")
-  })
-})
-
-describe("a dry run", () => {
-  it("counts what it would delete and deletes nothing", async () => {
-    const pass = await purgeClosedLobbies(new Date(), "log")
-    // At least ours: other suites share this database.
-    expect(pass.messages).toBeGreaterThanOrEqual(5)
-    expect(pass.posts).toBeGreaterThanOrEqual(2)
-    expect(pass.hostPosts).toBeGreaterThanOrEqual(1)
-    expect(mockDeleteFile).not.toHaveBeenCalled()
-    for (const id of [ids.plain, ids.removedLongAgo, ids.postRoomMessage]) expect(await exists.message(id)).toBe(true)
-    for (const id of [ids.postWithPhoto, ids.postRemovedLongAgo]) expect(await exists.post(id)).toBe(true)
-    expect(pass.pseudonyms).toBeGreaterThanOrEqual(2)
-    expect(await nameOf("oldReader")).toBe(handles["oldReader:name"])
-  })
-
-  it("does nothing at all when off", async () => {
-    expect(await purgeClosedLobbies(new Date(), "off")).toMatchObject({ messages: 0, posts: 0, hostPosts: 0 })
-  })
-})
-
 describe("the purge", () => {
   beforeAll(async () => {
-    await purgeClosedLobbies(new Date(), "delete")
+    // The pass as the sweeper calls it: no mode, nothing in the environment.
+    await purgeClosedLobbies()
     // A post whose room still had messages goes on the pass after them.
-    await purgeClosedLobbies(new Date(), "delete")
+    await purgeClosedLobbies()
   })
 
   it("hard-deletes the room's messages past their time: plain, the author's own deletes, and removals older than 180 days", async () => {
@@ -185,6 +164,12 @@ describe("the purge", () => {
 
   it("holds removed and reported messages 180 days from their removal, or until a pending report is decided", async () => {
     for (const id of [ids.removedRecently, ids.hiddenByPipeline, ids.reportedPending]) expect(await exists.message(id)).toBe(true)
+  })
+
+  it("keeps only the message under an open report in a closed room, and the room with it", async () => {
+    const left = await db.chat_messages.findMany({ where: { chat_group_id: reportedRoom.room }, select: { id: true } })
+    expect(left).toEqual([{ id: ids.underOpenReport }])
+    expect(await db.chat_groups.count({ where: { id: reportedRoom.room } })).toBe(1)
   })
 
   it("hard-deletes posts with their asks and their photo in storage, and a post's room once it is empty", async () => {
@@ -234,10 +219,10 @@ describe("the purge", () => {
     const stuck = sealed()
     const id = (await db.board_posts.create({ data: { event_id: old.id, author_id: author, kind: "chat", body: "x", photo_url: stuck.url, photo_status: "approved", photo_checked_at: ago(183) }, select: { id: true } })).id
     mockDeleteFile.mockRejectedValueOnce(new Error("storage down"))
-    const pass = await purgeClosedLobbies(new Date(), "delete")
+    const pass = await purgeClosedLobbies()
     expect(pass.kept).toBeGreaterThanOrEqual(1)
     expect(await exists.post(id)).toBe(true)
-    await purgeClosedLobbies(new Date(), "delete")
+    await purgeClosedLobbies()
     expect(await exists.post(id)).toBe(false)
   })
 })

@@ -2,7 +2,7 @@
  * Tonight's question answers go 30 days after the event ends (owner,
  * 2026-11-10), against real rows: the answer is set NULL, the person's other
  * preferences and the row stay, and anything inside the window is untouched.
- * Not behind LOBBY_PURGE, and not held by a report: no report copies an answer.
+ * Not held by a report: no report copies an answer.
  */
 import { purgeTonightAnswers, TONIGHT_ANSWER_DAYS } from "@/lib/lobby-retention"
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
@@ -12,8 +12,6 @@ const users: string[] = []
 const events: string[] = []
 
 afterAll(async () => {
-  if (previousMode === undefined) delete process.env.LOBBY_PURGE
-  else process.env.LOBBY_PURGE = previousMode
   await db.user_reports.deleteMany({ where: { reporter_id: { in: users } } })
   await cleanup(users, events)
   await closeDb()
@@ -36,7 +34,6 @@ const answer = async (event_id: string, user_id: string) =>
     select: { tonight_answer: true, work_intent: true, intent: true, revealed: true },
   })
 
-let previousMode: string | undefined
 let host = ""
 let person = ""
 let reporter = ""
@@ -65,9 +62,6 @@ beforeAll(async () => {
   await db.event_match_preferences.create({ data: { event_id: old, user_id: reporter, work_intent: "learn" } })
   // A pending report on the person: it quotes no answer, so it holds none.
   await db.user_reports.create({ data: { reporter_id: reporter, reported_id: person, reason: "harassment" } })
-
-  previousMode = process.env.LOBBY_PURGE
-  process.env.LOBBY_PURGE = "off"
 })
 
 describe("the answer purge", () => {
@@ -77,7 +71,7 @@ describe("the answer purge", () => {
     pass = await purgeTonightAnswers()
   })
 
-  it("clears the answer of an event that ended more than 30 days ago, whatever LOBBY_PURGE says and with a report open", async () => {
+  it("clears the answer of an event that ended more than 30 days ago, with a report open", async () => {
     expect(await answer(old, person)).toEqual({ tonight_answer: null, work_intent: null, intent: ["friendship"], revealed: true })
     expect((await answer(old, reporter))?.work_intent).toBeNull()
     expect(pass.answers).toBeGreaterThanOrEqual(1)
