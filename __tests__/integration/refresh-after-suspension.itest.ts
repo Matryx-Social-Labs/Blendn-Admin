@@ -57,7 +57,7 @@ it("tells a suspended person why, with the token the suspension revoked", async 
   const res = await refresh(token)
   expect(res.status).toBe(403)
   // The token is the account's own, so its holder is told why and where to appeal (SCRUM-1174).
-  expect(res.body.error).toBe(suspendedMessageFor("community_guidelines"))
+  expect(res.body.error).toBe(suspendedMessageFor("guidelines"))
   expect(res.body.errorCode).toBe("FORBIDDEN")
   expect(res.body.reasonCode).toBe("ACCOUNT_SUSPENDED")
   expect(res.body.data).toBeUndefined()

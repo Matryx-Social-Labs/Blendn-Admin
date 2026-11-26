@@ -25,9 +25,9 @@ describe("suspensionCategory: a report's reason, as one of a fixed list", () => 
   })
 
   it.each(["other", "they were rude to me at the bar", "", null, undefined, "__proto__", "toString"])(
-    "%j is community_guidelines",
+    "%j is guidelines",
     (reason) => {
-      expect(suspensionCategory(reason)).toBe("community_guidelines")
+      expect(suspensionCategory(reason)).toBe("guidelines")
     }
   )
 })

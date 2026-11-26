@@ -112,7 +112,7 @@ it("a report in the reporter's own words suspends as community guidelines, and t
 
   await resolveReport("user", report.id, "suspend")
   const row = await db.user.findUniqueOrThrow({ where: { id: reported }, select: { suspension_reason: true } })
-  expect(row.suspension_reason).toBe("community_guidelines")
+  expect(row.suspension_reason).toBe("guidelines")
 
   const refresh = await call(refreshRoute.POST(post("/api/mobile/auth/refresh", { refreshToken: token })))
   expect(refresh.status).toBe(403)

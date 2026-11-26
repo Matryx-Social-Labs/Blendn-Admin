@@ -88,7 +88,7 @@ type Tx = Prisma.TransactionClient
  * Why an account was suspended, as the person is told it (`suspendedMessageFor`,
  * lib/account-refusal.ts): the report reasons the app offers, as fixed phrases.
  * `suspension_reason` holds a key of this list, never a moderator's note or a
- * reporter's words; anything else reads as `community_guidelines`.
+ * reporter's words; anything else reads as `guidelines`.
  */
 export const SUSPENSION_CATEGORIES = {
   harassment: "harassment",
@@ -98,7 +98,7 @@ export const SUSPENSION_CATEGORIES = {
   inappropriate_messages: "inappropriate messages",
   inappropriate_photos: "inappropriate photos",
   inappropriate_content: "inappropriate content",
-  community_guidelines: "breaking our community guidelines",
+  guidelines: "breaking our community guidelines",
 } as const
 
 type SuspensionCategory = keyof typeof SUSPENSION_CATEGORIES
@@ -106,7 +106,7 @@ type SuspensionCategory = keyof typeof SUSPENSION_CATEGORIES
 /** A report's reason (free text on most report tables) as one of the categories. */
 export function suspensionCategory(reason: string | null | undefined): SuspensionCategory {
   const key = reason?.trim().toLowerCase() ?? ""
-  return Object.hasOwn(SUSPENSION_CATEGORIES, key) ? (key as SuspensionCategory) : "community_guidelines"
+  return Object.hasOwn(SUSPENSION_CATEGORIES, key) ? (key as SuspensionCategory) : "guidelines"
 }
 
 /**
@@ -120,7 +120,7 @@ export async function applySuspension(
   tx: Tx,
   userId: string,
   suspendedBy: string,
-  category: SuspensionCategory = "community_guidelines"
+  category: SuspensionCategory = "guidelines"
 ): Promise<void> {
   await tx.user.update({
     where: { id: userId },

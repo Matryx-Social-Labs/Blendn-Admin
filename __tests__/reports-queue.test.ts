@@ -402,7 +402,7 @@ describe("resolveReport", () => {
   it.each([
     ["user", "harassment", "harassment"],
     ["message", "spam", "spam"],
-    ["user", "he was rude to me at the bar", "community_guidelines"],
+    ["user", "he was rude to me at the bar", "guidelines"],
   ] as const)("a %s report for %j suspends with the category %j", async (kind, reason, category) => {
     if (kind === "user") mockDb.user_reports.findUnique.mockResolvedValue({ ...pendingUserReport, reason })
     else {
