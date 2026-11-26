@@ -460,14 +460,14 @@ describe("an event takes the venue over (PL-I10, D-x3)", () => {
   })
 })
 
-describe("coordinates are kept a few days", () => {
+describe("a check-in's coordinates are kept a few days; a session's are not", () => {
   it("drops where somebody stood three days after the window ended, and not before", async () => {
     const { dayId, ids } = await crowd(2, { expiresInMin: 30, createdMinAgo: 10 })
     await db.event_check_ins.updateMany({ where: { event_id: dayId }, data: { latitude: LAT, longitude: LNG } })
     await db.presence_sessions.updateMany({ where: { event_id: dayId }, data: { last_lat: LAT, last_lng: LNG } })
     await db.event_check_ins.updateMany({ where: { event_id: dayId, user_id: ids[0] }, data: { expires_at: new Date(Date.now() - 4 * 86_400_000), status: "checked_out" } })
     await db.event_check_ins.updateMany({ where: { event_id: dayId, user_id: ids[1] }, data: { expires_at: new Date(Date.now() - 2 * 86_400_000), status: "checked_out" } })
-    await forgetCheckInPoints()
+    for (let pass = 0; pass < 50 && (await forgetCheckInPoints()) > 0; pass++);
     expect(await checkInOf(dayId, ids[0])).toMatchObject({ latitude: null, longitude: null })
     expect((await sessionOf(dayId, ids[0])).last_lat).toBeNull()
     expect(await checkInOf(dayId, ids[1])).toMatchObject({ latitude: LAT, longitude: LNG })

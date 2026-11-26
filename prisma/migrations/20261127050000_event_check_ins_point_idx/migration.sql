@@ -10,5 +10,6 @@
 -- the failed build can leave an INVALID "event_check_ins_point_idx" that IF NOT EXISTS would skip on a retry. Recovery
 -- is an ops step, not a new migration: `DROP INDEX CONCURRENTLY IF EXISTS "event_check_ins_point_idx";`, then
 -- `prisma migrate resolve --rolled-back` for this folder, then redeploy. Afterwards
--- `SELECT indisvalid FROM pg_index WHERE indexrelid = '"event_check_ins_point_idx"'::regclass` reads true.
+-- `SELECT indisvalid FROM pg_index WHERE indexrelid = '"event_check_ins_point_idx"'::regclass` reads true. A build that hangs is waiting on an older snapshot: look for `idle in transaction` in
+-- pg_stat_activity first.
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "event_check_ins_point_idx" ON "event_check_ins" ("created_at") WHERE "latitude" IS NOT NULL OR "longitude" IS NOT NULL;

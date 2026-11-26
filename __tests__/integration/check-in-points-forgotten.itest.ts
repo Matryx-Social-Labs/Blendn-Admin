@@ -5,17 +5,28 @@ process.env.MOBILE_JWT_SECRET =
 
 // `jose` is pure ESM; nothing here signs in with Google (checkin.itest.ts).
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
+// The venue-day pass can push; never to Expo from a test (go-live-sweeper.itest.ts).
+jest.mock("expo-server-sdk", () => ({
+  Expo: class {
+    static isExpoPushToken = () => false
+    chunkPushNotifications = (m: unknown[]) => [m]
+    sendPushNotificationsAsync = async () => []
+  },
+}))
+
+import { readFileSync } from "fs"
+import { join } from "path"
 
 import { getEventOverview } from "@/lib/event-overview"
 import { signAccessToken } from "@/lib/mobile-auth"
-import { forgetCheckInPoints } from "@/lib/presence-sweeper"
+import { CHECK_IN_POINT_DAYS, forgetCheckInPoints, sweepVenueDays } from "@/lib/presence-sweeper"
 
 import { closeDb, db, makeUser, onboard, testId } from "./helpers"
 
 /**
  * Where somebody stood at a check-in, and what phone they held, is kept three
  * days after the night and then forgotten, for every check-in, door or Go Live
- * (D-029, SCRUM-1230). The row stays: it is the attendance record, kept a year.
+ * (D-029, SCRUM-1230). The row stays: it is the attendance record.
  * Go Live's own case is go-live-sweeper.itest.ts.
  */
 
@@ -42,12 +53,12 @@ afterAll(async () => {
   await closeDb()
 })
 
-/** An event whose one occurrence ended `endedDaysAgo` days ago (negative: still on). */
-async function night(endedDaysAgo: number) {
+/** An event whose one occurrence ended `endedDaysAgo` days ago (negative: still on), `hours` long. */
+async function night(endedDaysAgo: number, hours = 3) {
   const owner = await makeUser("cp_own", "organizer")
   users.push(owner)
   const end = new Date(Date.now() - endedDaysAgo * DAY)
-  const start = new Date(end.getTime() - 3 * 3_600_000)
+  const start = new Date(end.getTime() - hours * 3_600_000)
   const event = await db.events.create({
     data: {
       slug: testId("cp"),
@@ -74,11 +85,11 @@ async function night(endedDaysAgo: number) {
 /** One door check-in at `n`, with its presence session, both holding the point. */
 async function doorRow(
   n: { eventId: string; occurrenceId: string; start: Date },
-  opts: { outDaysAgo?: number; deviceInfo?: object | null } = {}
+  opts: { outDaysAgo?: number; outAt?: Date; deviceInfo?: object | null; noPoint?: boolean } = {}
 ) {
   const user = await makeUser("cp")
   users.push(user)
-  const out = opts.outDaysAgo === undefined ? null : new Date(Date.now() - opts.outDaysAgo * DAY)
+  const out = opts.outAt ?? (opts.outDaysAgo === undefined ? null : new Date(Date.now() - opts.outDaysAgo * DAY))
   const row = await db.event_check_ins.create({
     data: {
       event_id: n.eventId,
@@ -87,8 +98,7 @@ async function doorRow(
       status: out ? "checked_out" : "checked_in",
       check_in_time: n.start,
       check_out_time: out,
-      latitude: LAT,
-      longitude: LNG,
+      ...(!opts.noPoint && { latitude: LAT, longitude: LNG }),
       ...(opts.deviceInfo !== null && { device_info: opts.deviceInfo ?? PHONE }),
     },
   })
@@ -118,9 +128,10 @@ const sessionOf = (r: { user: string; occurrenceId: string }) =>
     select: { last_lat: true, last_lng: true, last_accuracy: true },
   })
 
-/** Passes until nothing is left, as the five-minute loop would. */
-async function drain() {
-  while ((await forgetCheckInPoints()) > 0);
+/** Passes until nothing is left, as the five-minute loop would; a pass that clears nothing it counts fails here. */
+async function drain(now: Date = new Date(), limit?: number) {
+  for (let pass = 0; pass < 50; pass++) if ((await forgetCheckInPoints(now, limit)) === 0) return
+  throw new Error("forgetCheckInPoints did not drain in 50 passes")
 }
 
 describe("a door check-in forgets where it was three days after the night", () => {
@@ -169,13 +180,63 @@ describe("a door check-in forgets where it was three days after the night", () =
     const pointsLeft = async () => (await Promise.all(rows.map((r) => rowOf(r.id)))).filter((r) => r.latitude !== null).length
     await forgetCheckInPoints(new Date(), 2)
     expect(await pointsLeft()).toBeGreaterThanOrEqual(1)
-    while ((await forgetCheckInPoints(new Date(), 2)) > 0);
+    await drain(new Date(), 2)
     expect(await pointsLeft()).toBe(0)
   })
 })
 
+describe("the three days are counted from the night", () => {
+  it("forgets a minute past three days after the check-out and keeps a minute before", async () => {
+    const now = new Date()
+    const line = now.getTime() - CHECK_IN_POINT_DAYS * DAY
+    const n = await night(5)
+    const past = await doorRow(n, { outAt: new Date(line - 60_000) })
+    const before = await doorRow(n, { outAt: new Date(line + 60_000) })
+
+    await drain(now)
+
+    expect(await rowOf(past.id)).toMatchObject({ latitude: null, longitude: null })
+    expect(await rowOf(before.id)).toMatchObject({ latitude: LAT, longitude: LNG })
+  })
+
+  it("counts from the check-out before the occurrence's end, both ways", async () => {
+    // A night that runs on (its occurrence ends tomorrow), left four days ago: forgotten.
+    const leftEarly = await doorRow(await night(-1, 6 * 24), { outDaysAgo: 4 })
+    // A night that ended five days ago, its check-out stamped two days ago: kept.
+    const stampedLate = await doorRow(await night(5), { outDaysAgo: 2 })
+
+    await drain()
+
+    expect(await rowOf(leftEarly.id)).toMatchObject({ latitude: null, longitude: null })
+    expect(await rowOf(stampedLate.id)).toMatchObject({ latitude: LAT, longitude: LNG })
+  })
+
+  it("is reached by the five-minute loop, through the venue-day pass", async () => {
+    const r = await doorRow(await night(5), { outDaysAgo: 4 })
+    for (let pass = 0; pass < 20 && (await rowOf(r.id)).latitude !== null; pass++) await sweepVenueDays()
+    expect(await rowOf(r.id)).toMatchObject({ latitude: null, longitude: null, device_info: { platform: "ios", gpsAccuracy: 8 } })
+  })
+})
+
+describe("check-ins whose point was already gone (the old Go Live sweep)", () => {
+  it("have their phone details cut once by the migration, and a row still holding a point is left to the sweep", async () => {
+    const sql = readFileSync(
+      join(__dirname, "../../prisma/migrations/20261127050200_trim_device_info_without_point/migration.sql"),
+      "utf8"
+    )
+    const n = await night(10)
+    const cleared = await doorRow(n, { outDaysAgo: 9, noPoint: true })
+    const holding = await doorRow(await night(-2 / 24))
+
+    await db.$executeRawUnsafe(sql)
+
+    expect((await rowOf(cleared.id)).device_info).toEqual({ platform: "ios", gpsAccuracy: 8 })
+    expect(await rowOf(holding.id)).toMatchObject({ latitude: LAT, longitude: LNG, device_info: PHONE })
+  })
+})
+
 describe("device_info keeps exactly the allowed keys it had", () => {
-  it.each([
+  it.each<[string, object | null, object | null]>([
     ["the app's fields and an unknown key", PHONE, { platform: "ios", gpsAccuracy: 8 }],
     ["seed markers", { platform: "android", source: "seed-blr-scenarios", device: "Pixel" }, { platform: "android", source: "seed-blr-scenarios" }],
     ["a scale-seed tag alone", { qaScale: true }, { qaScale: true }],
@@ -222,10 +283,11 @@ describe("a presence session stores no point (nothing reads one)", () => {
 
     // The session is written beside the check-in, not awaited (openSeatSession).
     let session = null
-    for (let i = 0; i < 50 && !session; i++) {
+    for (let i = 0; i < 100 && !session; i++) {
       session = await db.presence_sessions.findFirst({ where: { user_id: id, occurrence_id: occurrenceId } })
       if (!session) await new Promise((resolve) => setTimeout(resolve, 50))
     }
+    expect(session).not.toBeNull()
     expect(session).toMatchObject({ last_lat: null, last_lng: null, last_accuracy: null })
   })
 })

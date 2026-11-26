@@ -315,10 +315,13 @@ export interface VenueDaySweepResult {
  * `sweepRooms`.
  */
 export async function sweepVenueDays(now: Date = new Date()): Promise<VenueDaySweepResult> {
+  // First, and its own catch: it keeps D-029 for every check-in, so a venue-day step that throws must not skip it.
+  await forgetCheckInPoints(now).catch((error) =>
+    logger.error("Forgetting check-in points failed", { error: error instanceof Error ? error.message : String(error) })
+  )
   const expired = await expireWindows(now)
   const started = await closeForStartingEvents(now)
   const rooms = await sweepRooms(venueDaysWhere, MAX_VENUE_DAYS_PER_SWEEP, now)
-  await forgetCheckInPoints(now)
   const result = { expired, ...started, rooms }
   if (expired > 0 || started.closedForEvents > 0 || rooms.checkedOut > 0 || rooms.guarded.length > 0) {
     logger.info("Venue-day sweep", {
@@ -463,7 +466,7 @@ export const CHECK_IN_POINT_BATCH = 1000
  *   --remove` finds its rows by `qaScale`; the geofence measurement leaves
  *   seeded rows out by both.
  */
-export const KEPT_DEVICE_INFO_KEYS = ["gpsAccuracy", "platform", "source", "qaScale"]
+export const KEPT_DEVICE_INFO_KEYS = ["gpsAccuracy", "platform", "source", "qaScale"] as const
 
 /**
  * Where somebody stood at a check-in, door or Go Live, and the phone's
@@ -474,7 +477,13 @@ export const KEPT_DEVICE_INFO_KEYS = ["gpsAccuracy", "platform", "source", "qaSc
  * A check-in still holding its point is one this owes: the app always sends
  * one (`checkinSchema`), so the partial index `event_check_ins_point_idx`
  * (migration SQL) holds only the last few nights and a backlog, and a pass
- * never walks the rows it has already cleared.
+ * never walks the rows it has already cleared. Rows that lost their point
+ * before this (Go Live, under the old sweep) had their device details cut once
+ * by migration `20261127050200_trim_device_info_without_point`.
+ *
+ * Locked `SKIP LOCKED`: a row a check-in is writing is left for the next pass,
+ * and one re-written under the lock is re-checked, so a fresh point is never
+ * wiped; nothing here waits on, or deadlocks with, the door or account deletion.
  *
  * Presence sessions store no point any more (nothing read one, SCRUM-1230);
  * the ones written before are nulled here whatever their age, through
@@ -483,6 +492,8 @@ export const KEPT_DEVICE_INFO_KEYS = ["gpsAccuracy", "platform", "source", "qaSc
  */
 export async function forgetCheckInPoints(now: Date = new Date(), limit: number = CHECK_IN_POINT_BATCH): Promise<number> {
   const before = new Date(now.getTime() - CHECK_IN_POINT_DAYS * 24 * 3_600_000)
+  // ponytail: a pass with nothing due walks every row still inside its three days (3,000 rows: 9 ms, EXPLAIN in
+  // SCRUM-1230). If nights reach tens of thousands, add `c.created_at < before` so the index seeks past them.
   const forgotten = await db.$executeRaw`
     WITH old AS (
       SELECT c.id FROM event_check_ins c
@@ -491,6 +502,7 @@ export async function forgetCheckInPoints(now: Date = new Date(), limit: number 
          AND COALESCE(c.check_out_time, c.expires_at, o.end_time) < ${before}
        ORDER BY c.created_at
        LIMIT ${limit}
+       FOR NO KEY UPDATE OF c SKIP LOCKED
     )
     UPDATE event_check_ins c
        SET latitude = NULL, longitude = NULL,
@@ -505,6 +517,7 @@ export async function forgetCheckInPoints(now: Date = new Date(), limit: number 
        SELECT id FROM presence_sessions
         WHERE last_lat IS NOT NULL OR last_lng IS NOT NULL OR last_accuracy IS NOT NULL
         LIMIT ${limit}
+        FOR NO KEY UPDATE SKIP LOCKED
      ))
   `
   if (forgotten === limit || sessions === limit) {
