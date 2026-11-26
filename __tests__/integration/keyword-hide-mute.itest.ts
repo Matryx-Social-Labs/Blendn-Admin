@@ -194,6 +194,17 @@ describe.each(ROUTES)("the %s", (_name, send) => {
     expect(flags.map((f) => Object.keys(f.categories as object).sort().join())).toEqual(Array(AUTO_MUTE_HIDDEN_COUNT).fill("profanity,unjudged"))
   })
 
+  it("does not count lines the model could not judge toward a mute a later line checks", async () => {
+    const r = await liveRoom()
+    await sendHidden(r, send, "1 [down] chutiya", 1)
+    await sendHidden(r, send, "2 [down] chutiya", 2)
+    // Each: the keyword's hide (not counted) and the model's (counted): two counted in all.
+    await sendHidden(r, send, "3 [abuse] chutiya I know where you live", 4)
+    await sendHidden(r, send, "4 [abuse] chutiya I know where you live", 6)
+    await settle()
+    expect((await stateOf(r, () => true)).status).toBe("active")
+  })
+
   it("records a threat the model flagged below its hide line as its own flag, keeps the line hidden, and does not mute", async () => {
     const r = await liveRoom()
     for (let i = 1; i <= AUTO_MUTE_HIDDEN_COUNT; i++) await sendHidden(r, send, `${i} [threat] chutiya`, i)

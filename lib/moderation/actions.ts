@@ -1,7 +1,7 @@
 import { logger } from "../logger"
 import { db } from "../db"
 import { emitChatMessageHidden, emitChatMemberMuted } from "../socket-server"
-import { AUTO_MUTE_HIDDEN_COUNT, AUTO_MUTE_WINDOW_MS } from "./config"
+import { AUTO_MUTE_HIDDEN_COUNT, AUTO_MUTE_WINDOW_MS, UNJUDGED_KEY } from "./config"
 import type { ModerationResult } from "./types"
 
 /**
@@ -39,34 +39,36 @@ export async function hideMessage(
 }
 
 /**
- * Create a moderation flag record for human review
+ * Create a moderation flag record for human review. `messageStatus: false`
+ * records the flag only, for a line already hidden whose status must stay
+ * `hidden` (`recordHide`).
  */
 export async function flagForReview(
   messageId: string,
   chatGroupId: string,
   userId: string,
-  result: ModerationResult
+  result: ModerationResult,
+  { messageStatus = true }: { messageStatus?: boolean } = {}
 ): Promise<void> {
   try {
-    await db.$transaction([
-      db.moderation_flags.create({
-        data: {
-          message_id: messageId,
-          chat_group_id: chatGroupId,
-          user_id: userId,
-          source: mapSource(result.source),
-          categories: result.categories,
-          confidence: result.confidence,
-          auto_action: result.action === "hide" ? "hidden" : "none",
-        },
-      }),
-      db.chat_messages.update({
-        where: { id: messageId },
-        data: {
-          moderation_status: result.action === "hide" ? "hidden" : "flagged",
-        },
-      }),
-    ])
+    const flag = db.moderation_flags.create({
+      data: {
+        message_id: messageId,
+        chat_group_id: chatGroupId,
+        user_id: userId,
+        source: mapSource(result.source),
+        categories: result.categories,
+        confidence: result.confidence,
+        auto_action: result.action === "hide" ? "hidden" : "none",
+      },
+    })
+    const status = db.chat_messages.update({
+      where: { id: messageId },
+      data: {
+        moderation_status: result.action === "hide" ? "hidden" : "flagged",
+      },
+    })
+    await db.$transaction(messageStatus ? [flag, status] : [flag])
 
     logger.info("Message flagged for review", {
       messageId,
@@ -80,10 +82,28 @@ export async function flagForReview(
 }
 
 /**
+ * The model has judged a hidden line: its flag loses `UNJUDGED_KEY`
+ * (`recordHide`). A failure leaves the key, so the line stays with the lines
+ * the staff alert names as not judged. Never throws.
+ */
+export async function markJudged(messageId: string): Promise<void> {
+  try {
+    await db.$executeRaw`
+      UPDATE moderation_flags
+         SET categories = categories - ${UNJUDGED_KEY}::text
+       WHERE message_id = ${messageId}::uuid
+         AND jsonb_typeof(categories) = 'object'
+         AND categories ? ${UNJUDGED_KEY}::text`
+  } catch (error) {
+    logger.error("Failed to mark a hidden line judged", { messageId, error: String(error) })
+  }
+}
+
+/**
  * Hidden messages in the mute window that count toward a mute: abuse, not
  * contact details (SCRUM-485), and not a swear word the keyword list hid
  * (D-052a): a flag whose only category is `profanity` (`checkKeywords`; a slur
- * is `slur`) is left out the same way. The model's own `hide` on such a line is
+ * is `slur`) is left out the same way, and so is `UNJUDGED_KEY` beside it. The model's own `hide` on such a line is
  * a flag of its own and counts (`recordHide` in `index.ts`).
  *
  * `preSaveCheck` says sharing your own number is not a reason to silence
@@ -105,7 +125,8 @@ async function abuseHiddenCount(userId: string, chatGroupId: string, since: Date
        AND f.created_at >= ${since}
        AND NOT COALESCE(
          CASE WHEN jsonb_typeof(f.categories) = 'object' AND f.categories <> '{}'::jsonb
-           THEN NOT EXISTS (SELECT 1 FROM jsonb_object_keys(f.categories) k WHERE left(k, 8) <> 'contact_' AND k <> 'profanity')
+           THEN NOT EXISTS (SELECT 1 FROM jsonb_object_keys(f.categories) k
+                             WHERE left(k, 8) <> 'contact_' AND k <> 'profanity' AND k <> ${UNJUDGED_KEY})
          END,
          false
        )`

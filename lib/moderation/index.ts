@@ -1,7 +1,8 @@
 import { logger } from "@/lib/logger"
 import { checkKeywords } from "./keyword-filter"
 import { checkTextContent, checkImageContent, type ModerationCheck } from "./openai-moderation"
-import { hideMessage, flagForReview, checkAndAutoMute, recordExamined } from "./actions"
+import { hideMessage, flagForReview, checkAndAutoMute, recordExamined, markJudged } from "./actions"
+import { SEVERE_CATEGORY_PREFIXES, UNJUDGED_KEY } from "./config"
 import { checkContactInfo } from "./contact-info"
 import { forcedHide, textCheckFor } from "./staging-override"
 import { readableUrl } from "@/lib/tigris"
@@ -46,9 +47,12 @@ function hideBeforeSave(content: string, keyword: ModerationResult | null): PreS
 /**
  * Records a line the deterministic checks hid, off the response path: its flag,
  * then the mute count. A hide that does not count by itself (a swear word, a
- * contact detail) is put to the model, and the model's `hide` is recorded as
- * its own flag and counts. A model that cannot answer leaves the line uncounted.
- * The line is already hidden; nothing here is emitted. Never throws.
+ * contact detail) is put to the model. Its flag carries `UNJUDGED_KEY` until the
+ * model answers (`markJudged`), so a line the model never judged stays named
+ * as such in the queue and the staff alert. The model's `hide` is recorded as
+ * its own flag and counts; its `flag` with a severe category is recorded as its
+ * own flag and does not count. The line is already hidden; nothing here is
+ * emitted. Never throws.
  */
 export async function recordHide(
   messageId: string,
@@ -60,23 +64,35 @@ export async function recordHide(
 ): Promise<void> {
   try {
     // The flag before the count: the count reads flags (SCRUM-483).
-    await flagForReview(messageId, chatGroupId, userId, hide.result)
-    if (!hide.autoMute) {
-      let text = await (textCheck ?? textCheckFor(userId, content))
-      // A call that failed outright is asked once more, as `moderateMessage` does; a timeout or no key is not.
-      if (!text.checked && text.reason === "error") text = await textCheckFor(userId, content)
-      if (!text.checked) {
-        logger.warn("Hidden line not judged by the model; it does not count toward a mute", { messageId, reason: text.reason })
-        return
-      }
-      if (text.result?.action !== "hide") return
-      await flagForReview(messageId, chatGroupId, userId, text.result)
+    if (hide.autoMute) {
+      await flagForReview(messageId, chatGroupId, userId, hide.result)
+      await checkAndAutoMute(userId, chatGroupId)
+      return
     }
-    await checkAndAutoMute(userId, chatGroupId)
+    const categories = { ...hide.result.categories, [UNJUDGED_KEY]: hide.result.confidence }
+    await flagForReview(messageId, chatGroupId, userId, { ...hide.result, categories })
+    let text = await (textCheck ?? textCheckFor(userId, content))
+    // A call that failed outright is asked once more, as `moderateMessage` does; a timeout or no key is not.
+    if (!text.checked && text.reason === "error") text = await textCheckFor(userId, content)
+    if (!text.checked) {
+      logger.warn("Hidden line not judged by the model; it does not count toward a mute", { messageId, reason: text.reason })
+      return
+    }
+    await markJudged(messageId)
+    const verdict = text.result
+    if (verdict?.action === "hide") {
+      await flagForReview(messageId, chatGroupId, userId, verdict)
+      await checkAndAutoMute(userId, chatGroupId)
+    } else if (verdict?.action === "flag" && hasSevereCategory(verdict)) {
+      await flagForReview(messageId, chatGroupId, userId, verdict, { messageStatus: false })
+    }
   } catch (error) {
     logger.error("Failed to record a hidden line", { messageId, error: String(error) })
   }
 }
+
+const hasSevereCategory = (result: ModerationResult) =>
+  Object.keys(result.categories).some((key) => SEVERE_CATEGORY_PREFIXES.some((prefix) => key.startsWith(prefix)))
 
 /**
  * What a send route records for review when its inline check examined a line

@@ -118,10 +118,10 @@ async function flagsWhen(r: Room, done: (flags: { source: string; categories: ob
 const memberStatus = async (r: Room) =>
   (await db.chat_group_members.findUniqueOrThrow({ where: { chat_group_id_user_id: { chat_group_id: r.groupId, user_id: r.memberId } } })).status
 
-/** Closes the window through now: the sweep reads 10 s behind the time it is given. */
+/** Closes the window at now: the sweep reads 10 s behind the time it is given. */
 async function sweep(): Promise<string | null> {
   fetchMock.mockClear()
-  await runStaffAlertSweep(new Date(Date.now() + 11_000))
+  await runStaffAlertSweep(new Date(Date.now() + 10_000))
   return fetchMock.mock.calls.length ? (JSON.parse(fetchMock.mock.calls[0][1].body).text as string) : null
 }
 
