@@ -61,6 +61,12 @@ const envSchema = z.object({
   /// URL is a bearer secret and is never logged.
   STAFF_ALERT_SLACK_WEBHOOK_URL: z.string().url().optional(),
   STAFF_ALERT_EMAIL: z.string().email().optional(),
+  /// Where a reply to Blend'n mail goes (`reply_to`, lib/email.ts). Unset: no Reply-To, and a reply goes to
+  /// `EMAIL_FROM`'s mailbox.
+  EMAIL_REPLY_TO: z.string().email().optional(),
+  /// The Resend webhook's signing secret (`whsec_…`, Svix). Unset: /api/webhooks/resend refuses everything, and
+  /// bounces and complaints are not recorded (SCRUM-1280).
+  RESEND_WEBHOOK_SECRET: z.string().optional(),
 
   // Two names for one deployment: the dashboard is served on one host and the
   // mobile API on the other. Both optional, and the rule only applies when
@@ -542,6 +548,22 @@ export function revenuecatSecretKey(): string | null {
 export function revenuecatWebhookSecret(): string | null {
   const secret = process.env.REVENUECAT_WEBHOOK_SECRET?.trim()
   return secret && secret.length >= 32 ? secret : null
+}
+
+/** Where replies to Blend'n mail go, or null for no Reply-To. */
+export function emailReplyTo(): string | null {
+  return process.env.EMAIL_REPLY_TO?.trim() || null
+}
+
+/**
+ * The Resend webhook's signing key: the bytes after `whsec_`, base64-decoded (Svix), or null when the webhook is off
+ * (unset, not a `whsec_` secret, or under 24 bytes, which no Svix secret is).
+ */
+export function resendWebhookKey(): Buffer | null {
+  const secret = process.env.RESEND_WEBHOOK_SECRET?.trim()
+  if (!secret?.startsWith("whsec_")) return null
+  const key = Buffer.from(secret.slice("whsec_".length), "base64")
+  return key.length >= 24 ? key : null
 }
 
 /** The Sign in with Apple client id: the app's bundle id. Also the identity token's audience. */
