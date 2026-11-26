@@ -19,12 +19,14 @@ jest.mock("@/lib/mobile-auth", () => ({ verifyAccessToken: jest.fn() }))
 import { startSponsoredScheduler, stopSponsoredScheduler } from "@/lib/sponsored-scheduler"
 import {
   guardJoin,
+  JOIN_RETRY_MESSAGE,
   emitChatTyping,
   emitPrivateTyping,
   emitPrivateRead,
 } from "@/lib/socket-server"
 import type { AuthenticatedSocket } from "@/lib/socket-server"
 import { roomHandle } from "@/lib/room-handle"
+import { logger } from "@/lib/logger"
 
 const USER = "user_self"
 const CHAT_ID = "11111111-1111-1111-1111-111111111111"
@@ -108,24 +110,32 @@ describe("guardJoin", () => {
     })
   })
 
-  it("denies instead of crashing when the check throws", async () => {
-    // This is the fail-closed path. Socket.io does not await its listeners, so
-    // before this guard a rejection here escaped as an unhandledRejection and
-    // terminated the process — any authenticated client could trigger it with
-    // a malformed room ID.
+  /*
+   * A check that threw is not a refusal (SCRUM-1402). Since #1061 a read that
+   * waits for a pool connection fails after 5 s and a statement is cancelled at
+   * 8 s, so under the doors-open burst a checked-in guest's join throws -- and
+   * was told FORBIDDEN. A malformed id never gets this far (the uuid check
+   * below), so a throw here is the database failing to answer: "try again".
+   */
+  it.each([
+    ["a pool acquire timeout", new Error("timeout exceeded when trying to connect")],
+    ["a cancelled statement (57014)", Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" })],
+  ])("answers try-again, not FORBIDDEN, when the check throws %s", async (_, failure) => {
     const { socket, raw } = makeSocket()
+    const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined)
 
+    // Socket.io does not await listeners: an escaping rejection would take the process down.
     await expect(
       guardJoin(socket, `chat:${CHAT_ID}`, "Not authorized to join this chat", async () => {
-        throw new Error("Inconsistent column data: Error creating UUID")
+        throw failure
       })
     ).resolves.toBeUndefined()
 
     expect(raw.join).not.toHaveBeenCalled()
-    expect(raw.emit).toHaveBeenCalledWith("error", {
-      message: "Not authorized to join this chat",
-      code: "FORBIDDEN",
-    })
+    expect(raw.emit).toHaveBeenCalledTimes(1)
+    expect(raw.emit).toHaveBeenCalledWith("error", { message: JOIN_RETRY_MESSAGE, code: "SERVER_ERROR" })
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
   })
 
   it("denies a room whose id is not a uuid, without asking the check (SCRUM-940)", async () => {
@@ -142,16 +152,14 @@ describe("guardJoin", () => {
     expect(check).not.toHaveBeenCalled()
   })
 
-  it("does not leak whether the room exists — same denial either way", async () => {
-    const missing = makeSocket()
-    await guardJoin(missing.socket, `chat:${CHAT_ID}`, "Not authorized to join this chat", async () => false)
+  it("does not leak whether the room exists: a malformed id and a refusal answer alike", async () => {
+    const malformed = makeSocket()
+    await guardJoin(malformed.socket, "chat:abc", "Not authorized to join this chat", async () => true)
 
-    const throwing = makeSocket()
-    await guardJoin(throwing.socket, `chat:${CHAT_ID}`, "Not authorized to join this chat", async () => {
-      throw new Error("boom")
-    })
+    const refused = makeSocket()
+    await guardJoin(refused.socket, `chat:${CHAT_ID}`, "Not authorized to join this chat", async () => false)
 
-    expect(missing.raw.emit.mock.calls).toEqual(throwing.raw.emit.mock.calls)
+    expect(malformed.raw.emit.mock.calls).toEqual(refused.raw.emit.mock.calls)
   })
 })
 

@@ -136,6 +136,18 @@ describe("useOpsSnapshot after the first snapshot", () => {
     expect(socket.disconnect).not.toHaveBeenCalled()
   })
 
+  it("treats a join the server could not answer as stale, and asks again after four ticks (SCRUM-1402)", () => {
+    // The database did not answer the access check (a saturated pool): not a refusal.
+    socket.fire("error", { message: "Could not join right now. Try again.", code: "SERVER_ERROR" })
+    expect(mockStatus()).toBe("error")
+    jest.advanceTimersByTime(4 * OPS_INTERVAL_MS)
+    // Dropped and opened again, so the connect handler re-emits `join:eventOps`.
+    expect(socket.disconnect).toHaveBeenCalledTimes(1)
+    expect(socket.connect).toHaveBeenCalledTimes(1)
+    socket.fire("ops:snapshot", snapshot)
+    expect(mockStatus()).toBe("live")
+  })
+
   it("is not cleared by another event's snapshot", () => {
     socket.fire("connect_error", new Error("timeout"))
     socket.fire("ops:snapshot", { ...snapshot, eventId: "e2" })
