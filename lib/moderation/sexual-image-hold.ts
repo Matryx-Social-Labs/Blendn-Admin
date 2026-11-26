@@ -29,11 +29,10 @@ const lastPaged = new Map<string, number>()
  *
  * Called by each image path AFTER its own pull (profile and blur photos are
  * withdrawn to the private bucket, a Lobby photo is rejected and stays in it):
- * one audit row, `moderation.sexual_image_hold`, and one page (at most one
- * per user per 10 minutes). The page leaves
- * the platform, so it carries the storage key and the user id: no URL (a signed
- * one is a bearer link to the image), no image, no name. Never throws: nothing
- * here may stop, or undo, the pull.
+ * one audit row, `moderation.sexual_image_hold`, and one page (at most one per
+ * user per 10 minutes). The page leaves the platform, so it carries the storage
+ * key and the user id: no URL (a signed one is a bearer link to the image), no
+ * image, no name. Never throws: nothing here may stop, or undo, the pull.
  */
 export async function holdSexualImage(check: ModerationCheck, path: ImagePath, objectKey: string | null, userId: string): Promise<void> {
   const context = { userId, objectKey }
