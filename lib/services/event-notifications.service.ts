@@ -14,6 +14,7 @@ import { notifyEventChanged, notifyEventUpdate, reasonOf, sendBulkPushNotificati
 import type { rsvp_status } from "@prisma/client"
 import { realEventsWhere } from "../event-kind"
 import { ENDED_FRIENDSHIP_HOURS } from "../room-people"
+import { nextLocalTime } from "../event-wall-clock"
 
 /**
  * Who hears about a change to an event.
@@ -32,21 +33,19 @@ import { ENDED_FRIENDSHIP_HOURS } from "../room-people"
  *
  * Union rather than either alone, deduped, because the two tables answer
  * different questions and a person in both should not get two pushes.
+ *
+ * The reminder is narrower: going and maybe only (SCRUM-1274). Somebody
+ * waitlisted has no seat to leave the house for, and a save is one tap.
  */
 const COMMITTED: rsvp_status[] = ["going", "maybe", "waitlisted"]
 
-async function interestedUserIds(eventId: string): Promise<string[]> {
-  const { going, others } = await interestedAudience(eventId)
-  return [...going, ...others]
-}
-
 /**
- * The same audience, split: the people who said they are going, and everyone
- * else who asked to hear (maybe, waitlisted, saved it). The first are told with
- * `event_changed` (Flow 3 · 3.1 — "changed while you're going"); the rest keep
- * the `event_update` they always got.
+ * The same audience, split: the people who said they are going, maybe, and
+ * everyone else who asked to hear (waitlisted, saved it). Going are told changes
+ * with `event_changed` (Flow 3 · 3.1 — "changed while you're going"); maybe and
+ * the rest keep the `event_update` they always got.
  */
-async function interestedAudience(eventId: string): Promise<{ going: string[]; others: string[] }> {
+async function interestedAudience(eventId: string): Promise<{ going: string[]; maybe: string[]; others: string[] }> {
   const [rsvps, favourites] = await Promise.all([
     db.event_rsvps.findMany({
       where: { event_id: eventId, status: { in: COMMITTED } },
@@ -59,8 +58,9 @@ async function interestedAudience(eventId: string): Promise<{ going: string[]; o
   ])
 
   const going = new Set(rsvps.filter((r) => r.status === "going").map((r) => r.user_id))
-  const others = new Set([...rsvps, ...favourites].map((r) => r.user_id).filter((id) => !going.has(id)))
-  return { going: [...going], others: [...others] }
+  const maybe = new Set(rsvps.filter((r) => r.status === "maybe").map((r) => r.user_id))
+  const others = new Set([...rsvps, ...favourites].map((r) => r.user_id).filter((id) => !going.has(id) && !maybe.has(id)))
+  return { going: [...going], maybe: [...maybe], others: [...others] }
 }
 
 /**
@@ -79,7 +79,7 @@ async function tellInterested(
 ): Promise<number> {
   const audience = await interestedAudience(eventId)
   const going = audience.going.filter((id) => !skip.has(id))
-  const others = audience.others.filter((id) => !skip.has(id))
+  const others = [...audience.maybe, ...audience.others].filter((id) => !skip.has(id))
   await Promise.all([
     going.length > 0 ? notifyEventChanged(going, eventTitle, message, eventId, changed, move) : null,
     others.length > 0 ? notifyEventUpdate(others, eventTitle, message, eventId, reasonOf(changed.split(",")), changed) : null,
@@ -176,8 +176,9 @@ export function eventMoveOf(
 }
 
 /**
- * Send reminder notifications for events starting soon.
- * Call this from a cron job (e.g., every 15 minutes).
+ * "Starting in about an hour", to the people going and maybe. Run every five
+ * minutes by the reminder sweeper (`lib/reminder-sweeper.ts`); the app
+ * schedules no local reminder, so this is the only one.
  */
 export async function sendEventReminders(minutesBefore: number = 60): Promise<number> {
   const now = new Date()
@@ -231,11 +232,13 @@ export async function sendEventReminders(minutesBefore: number = 60): Promise<nu
       })
       if (claimed === 0) continue
 
-      const userIds = await interestedUserIds(event.id)
+      const { going, maybe } = await interestedAudience(event.id)
+      const userIds = [...going, ...maybe]
       if (userIds.length === 0) continue
 
+      // "About": the window is 15 minutes wide, so it is sent 60–75 minutes ahead.
       const venuePart = event.venue_name ? ` at ${event.venue_name}` : ""
-      const message = `Starting in ~${minutesBefore} minutes${venuePart}`
+      const message = `Starting in about an hour${venuePart}`
 
       await notifyEventUpdate(userIds, event.title, message, event.id)
       totalNotified += userIds.length
@@ -270,15 +273,18 @@ export async function notifyEventCancelled(
 }
 
 /**
- * How far back an ended event is still worth asking about.
- *
- * The sweep runs every five minutes, so a live server asks within five minutes
- * of the end. The window exists for the day this ships — every past event has
- * `rating_requested_at` null, and without a bound the first pass would ask
- * about every night the platform has ever held — and for a server that was down
- * at the end: six hours late is "last night", a week late is spam.
+ * The hour, on the event's own clock, the morning after: a 01:00 close no
+ * longer wakes the room at 01:00 (launch gate 7, SCRUM-1274).
  */
-export const RATING_REQUEST_LOOKBACK_MS = 6 * 60 * 60 * 1000
+const RATING_REQUEST_HOUR = 10
+
+/**
+ * Which ended events the sweep still looks at: up to 24 h from an end to the
+ * next 10:00, plus 10 h for a server that was down at 10:00. Bounded so the
+ * first pass after a deploy, or after an outage, never asks about every night
+ * the platform has held: a day late is "last night", a week late is spam.
+ */
+export const RATING_REQUEST_ENDED_WITHIN_MS = 34 * 60 * 60 * 1000
 
 /** At most this many events per pass; the next pass picks up the rest. */
 const RATING_REQUEST_BATCH = 50
@@ -292,7 +298,9 @@ export const RATING_REQUEST_COPY = {
 
 /**
  * "The event ended — rate who you met." Once per event, to the people who were
- * there.
+ * there, at 10:00 on the event's clock the morning after it ends (the first
+ * 10:00 strictly after `end_time`: a night ending at 01:00 is asked at 10:00
+ * that day, one ending at 18:00 at 10:00 the next).
  *
  * ## Once, across passes and replicas
  *
@@ -332,15 +340,18 @@ export async function sendRatingRequests(now: Date = new Date()): Promise<number
         // Rating who you met is for a night. A venue day ends at 06:00 (PL-I16).
         ...realEventsWhere,
         rating_requested_at: null,
-        end_time: { lte: now, gt: new Date(now.getTime() - RATING_REQUEST_LOOKBACK_MS) },
+        end_time: { lte: now, gt: new Date(now.getTime() - RATING_REQUEST_ENDED_WITHIN_MS) },
       },
-      select: { id: true, title: true },
+      select: { id: true, title: true, end_time: true, timezone: true },
       orderBy: { end_time: "asc" },
+      // ponytail: the batch is taken before the 10:00 filter, so 50 ended-but-not-yet-due
+      // events could hold back due ones for a pass; raise the batch if that is ever seen.
       take: RATING_REQUEST_BATCH,
     })
 
     let totalNotified = 0
     for (const event of events) {
+      if (nextLocalTime(event.end_time, event.timezone, RATING_REQUEST_HOUR) > now) continue
       const { count: claimed } = await db.events.updateMany({
         where: { id: event.id, rating_requested_at: null },
         data: { rating_requested_at: now },
