@@ -2741,9 +2741,9 @@
       "date": "2026-11-26"
     },
     "reminder-sweeper-receipts.test.ts": {
-      "guards": "SCRUM-1270: one reminder-sweeper pass calls checkPushReceipts and pruneIdlePushTokens and logs the receipt pass line every pass (the staging proof reads it from the Railway log); both run first and each is caught, so a reminder step that throws, or a receipt read that throws, does not stop the other.",
-      "mutation": "(M6) the sweeper stops calling checkPushReceipts; (N4) the push upkeep moved after the reminder steps.",
-      "observed": "M6: 1 of 1 failing. N4: 1 of 3 failing (the rating step throws, receipts never read). Restored; 3 of 3.",
+      "guards": "SCRUM-1270: one reminder-sweeper pass calls checkPushReceipts and pruneIdlePushTokens and logs the receipt pass line every pass (the staging proof reads it from the Railway log); both run first and each is caught, so a reminder step that throws, or a receipt read that throws, does not stop the other. SCRUM-1276: the same pass releases held pushes, in its own catch, and logs 'Held pushes released'.",
+      "mutation": "(M6) the sweeper stops calling checkPushReceipts; (N4) the push upkeep moved after the reminder steps. (M8, SCRUM-1276) the sweeper stops calling releaseHeldNotifications.",
+      "observed": "M6: 1 of 1 failing. N4: 1 of 3 failing (the rating step throws, receipts never read). Restored; 3 of 3. M8: 2 of 5 failing (C1 on origin/dev: 2 of 5). Restored; 5 of 5.",
       "date": "2026-11-26"
     },
     "venue-three-months.test.ts": {
@@ -2762,6 +2762,18 @@
       "guards": "SCRUM-1273 (insights/02): GET /events/:id?s= records the source on event_viewed only after attendeeEventAccess (a refused view writes no row); POST /events/:id/rsvp { source } writes event_rsvps.source on the first insert and a later not_going keeps it; PUT /profiles/:id { source } writes signup_source only WHERE it IS NULL (door then link leaves door); an unknown source is 200 and NULL on all three; a request with no source answers exactly as one with a source, and neither the PUT response nor GET /profiles/:own reads signup_source back; a 401 view writes no row; a withdrawal before the doors starts the RSVP source again, after them keeps it; a NULL source stays NULL; a non-owner PUT writes nothing; Postgres refuses a sixth value. Companions: acquisition-source.test.ts and event-share.test.tsx (the QR decodes to ?s=door, the copy field is ?s=link).",
       "mutation": "(C1) record() put back above attendeeEventAccess, as on dev 4f434e6f; (M2) placeRsvp also writes source on the upsert's update branch; (M3) the profile write's WHERE without signup_source: null; (M4) profileForSelfResponse no longer drops signup_source; (M5) the GET /profiles/:own destructure no longer drops signup_source.",
       "observed": "Against blendn_t02 (db:migrate, pg17). C1: 'counts no view the person was refused' failing, the refused view wrote [{ props: null }]; 2 of 19 failing with the tagged-view test. M2: 1 of 19 failing (not_going overwrote door with link). M3: 1 of 19 failing (link replaced door). M4: 1 of 19 failing (signup_source in the self response). M5 (after review, with 7 more cases): 'never reads the source back on GET /profiles/:own' failing. Restored each; 26 of 26.",
+      "date": "2026-11-26"
+    },
+    "quiet-hours.test.ts": {
+      "guards": "SCRUM-1276, launch gate 7 (fail-open on a failed bell write or staleness read): quiet hours 23:00-09:00 on the recipient's clock, held not dropped. The decision per kind for somebody at home, going, with a check-in row for the event, and with an open check-in anywhere (lane advisor 2026-11-26); the zone order (event, home city, Asia/Kolkata) in Asia/Kolkata and America/Toronto across the 2026-11-01 DST change; a match at 23:30 IST held to 09:00 IST with no push, and sent for an open check-in; a DM at 23:30 sent; the 22:59/23:00/08:59/09:00 boundaries; the bulk path in one check-in read; the 09:00 release as ONE push from the newest unread held row, none for a reader, through the same device gates, skipping a closed conversation and a started event.",
+      "mutation": "(C1) the suite on origin/dev 4f434e6f before the change; (M1) the open check-in clause removed; (M2) private_message out of ALWAYS_RINGS; (M3) hour > 23 instead of >= 23; (M4) release keeps the oldest row; (M5) the event's zone ignored; (M6) the closed-conversation skip removed; (M7) the started-event skip removed; (M9) the bulk path pushes held people; (M10) the single path pushes a held row; (M11) hold for 8 h instead of to the next 09:00; (M12) the RSVP exemption reads maybe instead of going; (M13) the event's check-in row no longer exempts.",
+      "observed": "C1: 53 of 129 failing. M1: 20 of 134 (with the sweeper file). M2: 4. M3: 3. M4: 1. M5: 1. M6: 1. M7: 1. M9: 2. M10: 38. M11: 4. M12: 10 of 129. M13: 10 of 129. Restored each; 129 of 129. Review fixes (code-reviewer, typescript-reviewer): four tests written first and RED on the reviewed code (4 of 133): a held push whose bell row failed is sent (single and bulk), a staleness read that throws after the claim still sends, a row with no kind is cleared unsent; GREEN after, 133 of 133.",
+      "date": "2026-11-26"
+    },
+    "quiet-hours.itest.ts": {
+      "guards": "SCRUM-1276 on a db:migrate database: notifications.held_until is a nullable timestamptz with its partial index (held_until IS NOT NULL); a friend request at 23:30 IST to somebody at home is a row held to 09:00 IST and no push; a match rings for an open check-in (the real partial-index read) and a DM rings for anybody; an event change rings for the going guest not yet there and is held for somebody not going, on the event's clock over a Toronto home city; a Toronto home city at 23:30 IST rings; the release sends one push from the newest of three held rows, none for a reader, clears every hold, and a second pass sends nothing.",
+      "mutation": "(M10) the single path pushes a held row; (M1) the open check-in clause removed; (M14) the release claims held_until > now.",
+      "observed": "M10: 2 of 6 failing. M1: 2 of 6. M14: 1 of 6. Restored; 6 of 6 on blendn_growth04 (db:migrate).",
       "date": "2026-11-26"
     }
   },

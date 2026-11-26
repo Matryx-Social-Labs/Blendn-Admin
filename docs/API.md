@@ -5033,6 +5033,22 @@ them any more. Rows written before that are hidden, and retention removes them.
 A room you muted (`POST /chat/groups/:id/mute`) sends you neither the reply push
 nor announcements.
 
+**Quiet hours, 23:00–09:00 on the recipient's clock (SCRUM-1276).** The clock is
+the event's zone when the push names an event, else the home city's, else
+Asia/Kolkata. In those hours a push is **held, not dropped**: its bell row is
+written as above, with `held_until` (not served) set to the next 09:00, and no push
+goes out. At 09:00 (within the reminder loop's 5 minutes) a person with held rows
+still unread gets **one** push, the newest of them as itself (its kind, title, body
+and `data.notificationId`); somebody who read them overnight gets none. A held row
+about a conversation that has since closed (an unmatch or a block) or an event that
+has already started is passed over. The Lobby's opt-in alerts (`board_match`,
+`board_host_post`) have no bell row, so in quiet hours they are dropped; the Lobby
+shows them. **Always sent, at any hour:** a DM, a reply to your room message, a
+message request and its answer, a crew's "We're here" and "Going together", a
+report's outcome, a Lobby post taken down; anything about an event you are going
+to or have a check-in row at; and **everything**, any kind, while you have an open
+check-in anywhere, so a night out is never muted.
+
 Every push carries an Android `channelId` the app creates — `messages`,
 `rooms`, `events` or `offers` ("Offers from venues", a venue's offer only) —
 so each can be silenced in system settings, and an iOS
