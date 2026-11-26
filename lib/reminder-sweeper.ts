@@ -3,6 +3,7 @@
 // alias verbatim into the require() and fails at boot.
 import { logger } from "./logger"
 import { cleanupExpiredTokens } from "./mobile-auth"
+import { checkPushReceipts, pruneIdlePushTokens } from "./push-notifications"
 import { sendEventReminders, sendRatingRequests } from "./services/event-notifications.service"
 
 /**
@@ -30,12 +31,7 @@ let timer: NodeJS.Timeout | null = null
 let running = false
 
 async function pass(): Promise<void> {
-  /*
-   * 60 minutes, matching the cron route's argument. The client also schedules a
-   * local T-1h notification, so this is the server's half of a promise the app
-   * already makes — and the server's half is the one that can be corrected
-   * when an event moves.
-   */
+  // 60 minutes, matching the cron route's argument. The client schedules no local reminder: this is the only one.
   const notified = await sendEventReminders(60)
   if (notified > 0) logger.info("Event reminders sent", { notified })
 
@@ -49,6 +45,13 @@ async function pass(): Promise<void> {
 
   const pruned = await cleanupExpiredTokens()
   if (pruned > 0) logger.info("Expired refresh tokens pruned", { pruned })
+
+  // Expo push receipts (SCRUM-1270): every pass logs, so a quiet log means the pass did not run.
+  const receipts = await checkPushReceipts()
+  logger.info("Push receipts read", receipts)
+
+  const idle = await pruneIdlePushTokens()
+  if (idle > 0) logger.info("Idle push tokens pruned", { idle })
 }
 
 /**

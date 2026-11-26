@@ -4,7 +4,8 @@ import { logger } from "./logger"
  * https://docs.expo.dev/push-notifications/sending-notifications/
  */
 
-import { Expo, ExpoPushMessage, ExpoPushTicket } from "expo-server-sdk"
+import { captureMessage } from "@sentry/nextjs"
+import { Expo, ExpoPushMessage } from "expo-server-sdk"
 import { db } from "./db"
 import { hit } from "./rate-limit-store"
 import { isRoomMuted } from "./room-mute"
@@ -359,17 +360,19 @@ export const pushGates = (data?: NotificationData) => ({ AND: [consentFor(data),
 interface PushTarget {
   token: string
   channelSet: number | null
+  /** `ios` or `android`: a receipt error says which provider's credentials are wrong. */
+  platform: string
 }
 
 async function getUserPushTokens(userId: string, data?: NotificationData): Promise<PushTarget[]> {
   const tokens = await db.push_tokens.findMany({
     where: { user_id: userId, ...NOT_OPTED_OUT, ...pushGates(data) },
-    select: { token: true, channel_set: true },
+    select: { token: true, channel_set: true, platform: true },
     orderBy: { updated_at: "desc" },
     take: 5, // Limit to 5 most recent tokens per user
   })
 
-  return tokens.map((t) => ({ token: t.token, channelSet: t.channel_set }))
+  return tokens.map((t) => ({ token: t.token, channelSet: t.channel_set, platform: t.platform }))
 }
 
 /**
@@ -385,7 +388,7 @@ async function getBulkUserPushTokens(userIds: string[], data?: NotificationData)
       ...NOT_OPTED_OUT,
       ...pushGates(data),
     },
-    select: { user_id: true, token: true, channel_set: true },
+    select: { user_id: true, token: true, channel_set: true, platform: true },
     orderBy: { updated_at: "desc" },
   })
 
@@ -394,7 +397,7 @@ async function getBulkUserPushTokens(userIds: string[], data?: NotificationData)
     const existing = tokenMap.get(token.user_id) || []
     if (existing.length < 5) {
       // Limit to 5 tokens per user
-      existing.push({ token: token.token, channelSet: token.channel_set })
+      existing.push({ token: token.token, channelSet: token.channel_set, platform: token.platform })
       tokenMap.set(token.user_id, existing)
     }
   }
@@ -602,36 +605,9 @@ export async function sendPushNotification(options: SendNotificationOptions): Pr
       return false
     }
 
-    const chunks = expo.chunkPushNotifications(messages)
-    const tickets: ExpoPushTicket[] = []
-
-    for (const chunk of chunks) {
-      const ticketChunk = await expo.sendPushNotificationsAsync(chunk)
-      tickets.push(...ticketChunk)
-    }
-
-    // Check for errors
-    let hasSuccess = false
-    for (let i = 0; i < tickets.length; i++) {
-      const ticket = tickets[i]
-      if (ticket.status === "error") {
-        logger.warn("Push notification rejected", { reason: ticket.message })
-        if (ticket.details?.error === "DeviceNotRegistered") {
-          // Remove invalid token from database
-          const invalidToken = messages[i]?.to as string
-          if (invalidToken) {
-            await removeInvalidPushToken(invalidToken)
-          }
-        }
-      } else {
-        hasSuccess = true
-      }
-    }
-
-    if (hasSuccess) {
-      logger.debug("Push notification sent", { userId })
-    }
-    return hasSuccess
+    const { sent } = await sendChunks(messages, new Map(pushTokens.map((t) => [t.token, t.platform])))
+    if (sent > 0) logger.debug("Push notification sent", { userId })
+    return sent > 0
   } catch (error) {
     logger.error("Failed to send push notification", { error: error instanceof Error ? error.message : String(error) })
     return false
@@ -686,12 +662,19 @@ async function recordBulk(
   return rowIds
 }
 
+/** Messages Expo accepted and refused, and recipients with no device the gates let through (none, or push off). */
+export interface BulkPushResult {
+  sent: number
+  failed: number
+  noDevice: number
+}
+
 /**
  * Send push notifications to multiple users
  */
 export async function sendBulkPushNotifications(
   options: SendBulkNotificationOptions
-): Promise<{ sent: number; failed: number }> {
+): Promise<BulkPushResult> {
   const { userIds, title, subtitle, body, data, sound = "default" } = options
 
   /*
@@ -738,41 +721,143 @@ export async function sendBulkPushNotifications(
     }
   }
 
+  // People, not devices: nobody with a token the gates let through (none, or push off).
+  const noDevice = new Set(userIds).size - tokenMap.size
   if (messages.length === 0) {
-    return { sent: 0, failed: userIds.length }
+    return { sent: 0, failed: 0, noDevice }
   }
 
-  const chunks = expo.chunkPushNotifications(messages)
+  const platformOf = new Map([...tokenMap.values()].flat().map((t) => [t.token, t.platform]))
+  const { sent, failed } = await sendChunks(messages, platformOf)
+  logger.info("Bulk push notifications complete", { sent, failed, noDevice })
+  return { sent, failed, noDevice }
+}
+
+/**
+ * Send in Expo's chunks of 100. A chunk that throws (a 5xx, a dropped socket)
+ * is counted failed and the next chunk still goes: the single-user path once
+ * let one throw drop every chunk after it. No retry here: expo-server-sdk
+ * already retries a 429 twice. Every ok ticket is kept for its receipt.
+ */
+async function sendChunks(messages: ExpoPushMessage[], platformOf: ReadonlyMap<string, string>): Promise<Omit<BulkPushResult, "noDevice">> {
   let sent = 0
   let failed = 0
-
-  for (const chunk of chunks) {
+  for (const chunk of expo.chunkPushNotifications(messages)) {
     try {
       const tickets = await expo.sendPushNotificationsAsync(chunk)
-
-      for (let i = 0; i < tickets.length; i++) {
-        const ticket = tickets[i]
+      for (const [i, ticket] of tickets.entries()) {
+        const token = chunk[i]?.to as string
         if (ticket.status === "ok") {
           sent++
-        } else {
-          failed++
-          logger.warn("Push notification rejected", { reason: ticket.message })
-          if (ticket.details?.error === "DeviceNotRegistered") {
-            const invalidToken = chunk[i]?.to as string
-            if (invalidToken) {
-              await removeInvalidPushToken(invalidToken)
-            }
-          }
+          rememberTicket(ticket.id, token, platformOf.get(token) ?? "unknown")
+          continue
         }
+        failed++
+        logger.warn("Push notification rejected", { reason: ticket.message, error: ticket.details?.error })
+        if (ticket.details?.error === "DeviceNotRegistered" && token) await removeInvalidPushToken(token)
       }
     } catch (error) {
       logger.error("Failed to send push notification chunk", { error: error instanceof Error ? error.message : String(error) })
       failed += chunk.length
     }
   }
-
-  logger.info("Bulk push notifications complete", { sent, failed })
   return { sent, failed }
+}
+
+/** Expo says to wait about 15 minutes before asking for a ticket's receipt. */
+export const PUSH_RECEIPT_DELAY_MS = 15 * 60_000
+/** Expo keeps a receipt for a day; a ticket never answered by then is dropped. */
+const RECEIPT_KEPT_MS = 24 * 60 * 60_000
+const MAX_TICKETS = 50_000
+
+interface SentTicket {
+  token: string
+  platform: string
+  at: number
+}
+
+/**
+ * Tickets waiting for their receipt, on `globalThis`: Next bundles its own copy
+ * of `lib/`, so a module-level map would be one map for route handlers and
+ * another for the loop that reads it (the note atop `lib/socket-server.ts`).
+ * Insertion order is age, so the cap drops the oldest.
+ * ponytail: in memory, lost on deploy (those receipts go unread); a table if that ever matters.
+ */
+const pendingTickets = (): Map<string, SentTicket> => {
+  const g = globalThis as { __blendnPushTickets?: Map<string, SentTicket> }
+  return (g.__blendnPushTickets ??= new Map())
+}
+
+function rememberTicket(id: string, token: string, platform: string): void {
+  const pending = pendingTickets()
+  if (pending.size >= MAX_TICKETS) pending.delete(pending.keys().next().value as string)
+  pending.set(id, { token, platform, at: Date.now() })
+}
+
+/**
+ * Read the receipts of tickets at least `PUSH_RECEIPT_DELAY_MS` old. The ticket
+ * only says Expo took the message; the receipt says whether Apple or Google
+ * did. `DeviceNotRegistered` deletes the token. Anything else (wrong FCM or
+ * APNs credentials, which show up nowhere else, `MessageTooBig`) is one error
+ * per code and platform per pass, to the log and to Sentry. A receipt not ready
+ * yet, or a request that throws, leaves its tickets for the next pass.
+ */
+export async function checkPushReceipts(now = Date.now()): Promise<{ checked: number; removed: number }> {
+  const pending = pendingTickets()
+  const due: string[] = []
+  for (const [id, t] of pending) {
+    if (now - t.at > RECEIPT_KEPT_MS) pending.delete(id)
+    else if (now - t.at >= PUSH_RECEIPT_DELAY_MS) due.push(id)
+  }
+
+  let checked = 0
+  let removed = 0
+  const errors = new Map<string, { error: string; platform: string; count: number }>()
+  for (const ids of expo.chunkPushNotificationReceiptIds(due)) {
+    let receipts: Awaited<ReturnType<typeof expo.getPushNotificationReceiptsAsync>>
+    try {
+      receipts = await expo.getPushNotificationReceiptsAsync(ids)
+    } catch (error) {
+      logger.error("Push receipt request failed", { tickets: ids.length, error: error instanceof Error ? error.message : String(error) })
+      continue
+    }
+    for (const [id, receipt] of Object.entries(receipts)) {
+      const ticket = pending.get(id)
+      pending.delete(id)
+      if (!ticket) continue
+      checked++
+      if (receipt.status === "ok") continue
+      const error = receipt.details?.error ?? "unknown"
+      if (error === "DeviceNotRegistered") {
+        await removeInvalidPushToken(ticket.token)
+        removed++
+        continue
+      }
+      const key = `${error}:${ticket.platform}`
+      errors.set(key, { error, platform: ticket.platform, count: (errors.get(key)?.count ?? 0) + 1 })
+    }
+  }
+
+  for (const { error, platform, count } of errors.values()) {
+    logger.error("Push receipt errors", { error, platform, count })
+    captureMessage(`Push receipt errors: ${error} (${platform})`, {
+      level: "error",
+      tags: { push_error: error, platform },
+      fingerprint: ["push-receipt", error, platform],
+      extra: { count },
+    })
+  }
+  return { checked, removed }
+}
+
+/** The app re-registers its token on every launch (`lib/push-token.ts`), so one untouched this long is a phone gone quiet. */
+export const PUSH_TOKEN_IDLE_DAYS = 90
+
+/** ponytail: no index on `updated_at`, a scan of `push_tokens` per pass; add one if the table grows large. */
+export async function pruneIdlePushTokens(now = new Date()): Promise<number> {
+  const before = new Date(now.getTime() - PUSH_TOKEN_IDLE_DAYS * 24 * 60 * 60_000)
+  const { count } = await db.push_tokens.deleteMany({ where: { updated_at: { lt: before } } })
+  return count
 }
 
 /**
@@ -943,11 +1028,11 @@ export async function notifyLobbyMatch(
   event: { id: string; title: string },
   postId: string,
   subKind: keyof typeof MATCH_WORDS
-): Promise<{ sent: number; failed: number }> {
+): Promise<BulkPushResult> {
   // At most one per person per event per window: an offerer posting ten offers is one push, not ten (security review).
   const first = await Promise.all(recipientIds.map((id) => firstInWindow(`lobby-match:${event.id}:${id}`, LOBBY_MATCH_PUSH_WINDOW_MS)))
   const userIds = recipientIds.filter((_, i) => first[i])
-  if (userIds.length === 0) return { sent: 0, failed: 0 }
+  if (userIds.length === 0) return { sent: 0, failed: 0, noDevice: 0 }
   return sendBulkPushNotifications({
     userIds,
     title: "Lobby",
@@ -966,8 +1051,8 @@ export async function notifyLobbyHostPost(
   event: { id: string; title: string },
   hostPostId: string,
   body: string
-): Promise<{ sent: number; failed: number }> {
-  if (recipientIds.length === 0) return { sent: 0, failed: 0 }
+): Promise<BulkPushResult> {
+  if (recipientIds.length === 0) return { sent: 0, failed: 0, noDevice: 0 }
   return sendBulkPushNotifications({
     userIds: recipientIds,
     title: "Lobby",
@@ -1088,7 +1173,7 @@ export async function notifyAnnouncement(
   announcementText: string,
   eventId: string,
   senderId: string
-): Promise<{ sent: number; failed: number }> {
+): Promise<BulkPushResult> {
   const members = await db.chat_group_members.findMany({
     where: { chat_group_id: chatGroupId, status: "active" },
     select: { user_id: true, notification_preferences: true },
@@ -1101,7 +1186,7 @@ export async function notifyAnnouncement(
     .map((m) => m.user_id)
     .filter((id) => id !== senderId)
 
-  if (userIds.length === 0) return { sent: 0, failed: 0 }
+  if (userIds.length === 0) return { sent: 0, failed: 0, noDevice: 0 }
 
   const preview = clip(announcementText, 100)
 
@@ -1124,7 +1209,7 @@ export async function notifyEventUpdate(
   /** What the update is about, for the bell row's tile (`data.reason`): omitted for a reminder. */
   reason?: EventUpdateReason,
   changed?: string
-): Promise<{ sent: number; failed: number }> {
+): Promise<BulkPushResult> {
   return sendBulkPushNotifications({
     userIds: recipientIds,
     title: eventName,
@@ -1176,7 +1261,7 @@ export async function notifyEventChanged(
   changedFields: string,
   /** What it was and is, so the row can say "New time: 9:30 PM, was 8:00 PM" (Flow 9 A). */
   move?: EventMove
-): Promise<{ sent: number; failed: number }> {
+): Promise<BulkPushResult> {
   const reason = reasonOf(changedFields.split(","))
   return sendBulkPushNotifications({
     userIds: recipientIds,

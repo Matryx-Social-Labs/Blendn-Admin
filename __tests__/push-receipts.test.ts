@@ -36,7 +36,7 @@ jest.mock("expo-server-sdk", () => ({
       return sendChunk(chunk)
     }
     chunkPushNotificationReceiptIds(ids: string[]) {
-      return [ids]
+      return ids.length > 0 ? [ids] : [] // as the SDK: no ids, no chunk
     }
     getPushNotificationReceiptsAsync(ids: string[]) {
       return getReceipts(ids)

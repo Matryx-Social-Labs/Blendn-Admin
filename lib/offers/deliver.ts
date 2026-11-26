@@ -35,13 +35,13 @@ export async function deliverOffer(offerId: string): Promise<void> {
     const sends = await db.venue_offer_sends.findMany({ where: { offer_id: offerId, user_id: { not: null } }, select: { user_id: true } })
     const userIds = sends.flatMap((s) => (s.user_id ? [s.user_id] : []))
     if (userIds.length === 0) return
-    const { sent, failed } = await sendBulkPushNotifications({
+    const { sent, failed, noDevice } = await sendBulkPushNotifications({
       userIds,
       title: OFFER_PUSH_TITLE,
       body: OFFER_PUSH_BODY,
       data: { type: "venue_offer", offerId },
     })
-    logger.info("Offer delivered", { offerId, recipients: userIds.length, sent, failed })
+    logger.info("Offer delivered", { offerId, recipients: userIds.length, sent, failed, noDevice })
   } catch (error) {
     logger.error("Offer delivery failed", { offerId, error: error instanceof Error ? error.message : String(error) })
   }
