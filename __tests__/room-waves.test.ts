@@ -257,18 +257,17 @@ it("W1: one wave per pair per room, never again: a second tap is the first answe
   expect(waves.size).toBe(1)
 })
 
-it("W2: a new wave at the same person in another room within ten minutes is 429 WAVE_TOO_SOON", async () => {
+it("no window across rooms (SCRUM-1385): a new wave at the same person in another room is a first wave there, stored and pinged", async () => {
   const OTHER = "44444444-4444-4444-8444-444444444444"
   expect((await wave(inRoom(THEM), EVENT)).status).toBe(200)
   const res = await wave(inRoom(THEM, OTHER), OTHER)
-  expect(res.status).toBe(429)
-  const body = await res.json()
-  expect(body.errorCode).toBe("WAVE_TOO_SOON")
-  expect(body.retryAfter).toBeGreaterThan(9 * 60)
-  expect(mockEmitWave).toHaveBeenCalledTimes(1)
+  expect(res.status).toBe(200)
+  expect(await res.json()).toEqual({ success: true, data: { sent: true, mutual: false } })
+  expect(waves.has(`${OTHER}|${ME}|${THEM}`)).toBe(true)
+  expect(mockEmitWave).toHaveBeenCalledTimes(2)
 })
 
-it("keeps the window per pair: waving at someone else is fine", async () => {
+it("waving at someone else is fine", async () => {
   inside(ME, THEM, "other")
   expect((await wave()).status).toBe(200)
   expect((await wave(inRoom("other"))).status).toBe(200)
@@ -322,10 +321,20 @@ describe("room handles (SCRUM-371)", () => {
     expect((await wave(inRoom(THEM))).status).toBe(200)
   })
 
-  it("keys the ten-minute window on the real pair, so a new room is not a new window", async () => {
-    // Pins today's behaviour (SCRUM-1385).
+  it("a handle you waved at in another room is answered exactly as a stranger's there: status, body, headers and the ping (SCRUM-1385)", async () => {
+    const send = async (ref: string) => {
+      const res = await wave(ref, OTHER_EVENT)
+      return { status: res.status, headers: Object.fromEntries(res.headers), body: await res.json() }
+    }
+    inside(ME, THEM, "stranger")
     expect((await wave(inRoom(THEM), EVENT)).status).toBe(200)
-    expect((await wave(inRoom(THEM, OTHER_EVENT), OTHER_EVENT)).status).toBe(429)
+    mockEmitWave.mockClear()
+    const same = await send(inRoom(THEM, OTHER_EVENT))
+    const pingedSame = mockEmitWave.mock.calls.length
+    const stranger = await send(inRoom("stranger", OTHER_EVENT))
+    expect(same).toEqual(stranger)
+    expect(pingedSame).toBe(1)
+    expect(mockEmitWave).toHaveBeenCalledTimes(2)
   })
 
   it("refuses your own id, and your own handle, as waving at yourself", async () => {

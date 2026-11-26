@@ -151,18 +151,57 @@ describe("one wave per pair per room, recorded", () => {
     for (const [ana, ben] of pairs) expect(await rowsBetween(ana, ben)).toBe(1)
   })
 
-  it("the pair window (W2) is counted under the lock: a duplicate never counts, a new wave elsewhere is held, an answer is not", async () => {
-    const ana = await person("rw-w2-a")
-    const ben = await person("rw-w2-b")
+  it("no window across rooms (SCRUM-1385): a wave at the same person in a second room is recorded like any first wave there", async () => {
+    const ana = await person("rw-x-a")
+    const ben = await person("rw-x-b")
     const other = await makeEvent(users[0])
     events.push(other)
     expect(await recordWave(eventId, ana.id, ben.id, { answering: false })).toEqual({ recorded: true })
+    // W1 is per room: the same pair here again is the duplicate, and stores nothing.
     expect(await recordWave(eventId, ana.id, ben.id, { answering: false })).toEqual({ recorded: false, capped: null })
-    expect(await recordWave(other, ana.id, ben.id, { answering: false })).toEqual({
-      recorded: false,
-      capped: { cap: "pair", retryAfter: expect.any(Number) },
-    })
-    expect(await recordWave(other, ana.id, ben.id, { answering: true })).toEqual({ recorded: true })
+    expect(await recordWave(other, ana.id, ben.id, { answering: false })).toEqual({ recorded: true })
+  })
+
+  it("a handle waved at in another room minutes ago is answered byte for byte as a stranger's, and is delivered (SCRUM-1385)", async () => {
+    const ana = await person("rw-link-a")
+    const ben = await person("rw-link-b")
+    const cara = await person("rw-link-c")
+    expect((await wave(ana, ben)).status).toBe(200)
+
+    // All three move to a second room inside the ten minutes (one open check-in each, as the door does it).
+    const roomB = await makeEvent(users[0])
+    events.push(roomB)
+    const occB = await occurrenceOf(roomB)
+    for (const p of [ana, ben, cara]) await putInRoom({ eventId: roomB, occurrenceId: occB, userId: p.id })
+
+    const raw = async (to: Person) => {
+      const res = await (wavesRoute.POST as unknown as Handler)(
+        new NextRequest(`http://localhost/api/mobile/events/${roomB}/waves`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${ana.token}`, "content-type": "application/json" },
+          body: JSON.stringify({ toUserId: roomHandle(roomB, to.id) }),
+        }),
+        { params: Promise.resolve({ eventId: roomB }) as Promise<never> }
+      )
+      return { status: res.status, headers: Object.fromEntries(res.headers), body: await res.json() }
+    }
+    const same = await raw(ben)
+    const stranger = await raw(cara)
+    expect(same).toEqual(stranger)
+    expect(same.status).toBe(200)
+
+    // Read back: one row per room for the same person, and the stranger's.
+    const rows = await db.$queryRaw<{ event_id: string; from_id: string; to_id: string }[]>`
+      SELECT event_id::text, from_id, to_id FROM event_waves WHERE from_id = ${ana.id}`
+    expect(rows).toHaveLength(3)
+    expect(rows).toEqual(expect.arrayContaining([
+      { event_id: eventId, from_id: ana.id, to_id: ben.id },
+      { event_id: roomB, from_id: ana.id, to_id: ben.id },
+      { event_id: roomB, from_id: ana.id, to_id: cara.id },
+    ]))
+    // Delivered: Ben's list in the second room has it, by that room's handle.
+    const listB = await call(wavesRoute.GET, `/api/mobile/events/${roomB}/waves`, ben, { params: { eventId: roomB } })
+    expect(listB.body.data.waves.map((w: { userId: string }) => w.userId)).toEqual([roomHandle(roomB, ana.id)])
   })
 
   it("the database refuses a duplicate and a self-wave whoever writes", async () => {
