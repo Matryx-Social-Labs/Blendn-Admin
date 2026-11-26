@@ -4,7 +4,7 @@
  * wait behind a backlog, be settled as chatter for not being English, or be relabelled by somebody else's message.
  */
 import { classifyMessages, type MessageToClassify } from "@/lib/sentiment/classify"
-import { classifyWithLexicon } from "@/lib/sentiment/lexicon"
+import { classifyWithLexicon, hasSafetyCue } from "@/lib/sentiment/lexicon"
 
 const SAFETY = "he grabbed my arm"
 // A category cue with no opinion: the lexicon declines it under the old rule and the new, so it goes to the model.
@@ -157,5 +157,43 @@ describe("the lexicon settles neutral only for English it can read (SCRUM-1069)"
   it("reads a grab with a person as its object as a safety cue (SCRUM-1439)", () => {
     // Negative control: "grabbed" matched nothing, so the report was settled neutral 0.8.
     expect(classifyWithLexicon("the guy in the red jacket grabbed my friend's arm")).toBeNull()
+  })
+})
+
+describe("the cues that stick are narrow: a word match queues a person's report, never a night out", () => {
+  // Measured on staging: 6 of 74 model-read lines had a "grabbing" or "fight" cue where the model said not-safety.
+  const modelSays = (sentiment: string, category: string) =>
+    fetchMock.mockResolvedValueOnce(reply([{ id: "x", sentiment, category, topic: null, confidence: 0.9 } as Label]))
+
+  it.each([
+    "he grabbed my arm",
+    "some guy keeps grabbing people near the stage",
+    "a man grabbed at me by the gate",
+    "grabbed the girl by her wrist",
+    "there's a fight near the bar",
+    "fight broke out by the gate",
+    "that guy is fighting with security",
+    "someone started fighting a guy outside",
+  ])("keeps safety_conduct for %s whatever the model says", async (text) => {
+    // Negative control: a model answer of neutral / other stood.
+    modelSays("neutral", "other")
+    const [out] = await classifyMessages([{ id: "x", text }])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(out.category).toBe("safety_conduct")
+  })
+
+  it.each([
+    "grabbing drinks before the set",
+    "grabbing a table near the stage",
+    "fight club screening was ace",
+    "the fight club screening starts at 9",
+    "a food fight lol",
+  ])("has no safety cue in %s, so nothing overrules the model or the lexicon", async (text) => {
+    // Negative control: on the wide "grabbing|fight" cue this was a safety cue, and the model's answer was overruled
+    // into a moderation flag.
+    expect(hasSafetyCue(text)).toBe(false)
+    modelSays("positive", "other")
+    const [out] = await classifyMessages([{ id: "x", text }])
+    expect(out.category).not.toBe("safety_conduct")
   })
 })
