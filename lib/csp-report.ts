@@ -49,7 +49,7 @@ export const RAZORPAY_SCRIPT_CDN = "https://cdn.razorpay.com"
  * `TIGRIS_BUCKET`. These were the only CSP reports Sentry ever received
  * (staging, 2026-11-25).
  */
-export const TIGRIS_MEDIA_ORIGIN = "https://*.fly.storage.tigris.dev"
+const TIGRIS_MEDIA_ORIGIN = "https://*.fly.storage.tigris.dev"
 
 /**
  * The policy itself, as a header value. Here rather than inline in
