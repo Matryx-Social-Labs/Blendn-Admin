@@ -3,7 +3,7 @@
 // alias verbatim into the require() and fails at boot.
 import { logger } from "./logger"
 import { cleanupExpiredTokens } from "./mobile-auth"
-import { checkPushReceipts, pruneIdlePushTokens } from "./push-notifications"
+import { checkPushReceipts, pruneIdlePushTokens, releaseHeldNotifications } from "./push-notifications"
 import { sendEventReminders, sendRatingRequests } from "./services/event-notifications.service"
 
 /**
@@ -51,7 +51,7 @@ async function pass(): Promise<void> {
 }
 
 /**
- * Expo push receipts and idle tokens (SCRUM-1270). First, and each step caught:
+ * Expo push receipts, idle tokens (SCRUM-1270) and the 09:00 release of held pushes (SCRUM-1276). First, and each step caught:
  * a reminder query that throws must not stop the receipt read, which is the only
  * place wrong FCM or APNs credentials show up. Logs every pass, so a quiet log
  * means the pass did not run.
@@ -63,6 +63,10 @@ async function pushUpkeep(): Promise<void> {
   await pruneIdlePushTokens().then((idle) => {
     if (idle > 0) logger.info("Idle push tokens pruned", { idle })
   }, failed("prune"))
+  // Quiet hours (SCRUM-1276): what was held overnight rings once, at 09:00 on the recipient's clock.
+  await releaseHeldNotifications().then((held) => {
+    if (held.released > 0) logger.info("Held pushes released", { ...held })
+  }, failed("quiet-hours release"))
 }
 
 /**
