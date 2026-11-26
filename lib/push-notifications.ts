@@ -575,7 +575,8 @@ export async function sendPushNotification(options: SendNotificationOptions): Pr
   // First, and outside the try: the centre records what was *sent*, not what
   // was successfully delivered. See `recordNotification`.
   const notificationId = await recordNotification(userId, title, body, data, heldUntil)
-  if (heldUntil) return false
+  // Held only with its row in the bell: a row that could not be written is a push now, never a notification lost.
+  if (heldUntil && notificationId) return false
   return pushToDevices(options, notificationId)
 }
 
@@ -717,8 +718,10 @@ export async function sendBulkPushNotifications(
       ? await recordBulk(userIds, title, body, data, holds)
       : new Map<string, string>()
 
-  const ringing = userIds.filter((id) => !holds.has(id))
-  const tokenMap = await getBulkUserPushTokens(ringing, data)
+  // Held only with a row in the bell (a failed chunk rings now, as `sendPushNotification`); a Lobby alert held is dropped.
+  const inBell = !!data?.type && !NOT_IN_THE_BELL.includes(data.type)
+  const ringing = userIds.filter((id) => !holds.has(id) || (inBell && !rowIds.has(id)))
+  const tokenMap = ringing.length > 0 ? await getBulkUserPushTokens(ringing, data) : new Map<string, PushTarget[]>()
   // One count for everybody with a device, after their rows are in; never a query per person.
   const badges = options.badge === undefined && tokenMap.size > 0 ? await badgesFor([...tokenMap.keys()]) : new Map<string, number>()
   const messages: ExpoPushMessage[] = []
@@ -767,7 +770,11 @@ export async function sendBulkPushNotifications(
  * (an unmatch, or a block, which closes it), so a blocked person's pseudonym never reaches the lock screen at 09:00;
  * and a row about an event that has already started, so a reminder never says "in about an hour" after the doors.
  *
- * ponytail: one send per person, in turn; fine for a launch cluster. Batch by kind if a night's audience grows large.
+ * At most once: the claim comes first, so a send that fails after it (Expo down, the process stopping) is not retried;
+ * the row stays in the bell. A rule that cannot decide what is stale sends rather than drop.
+ *
+ * ponytail: one send per person, in turn, holding the loop's other steps behind it; fine for a launch cluster. Batch
+ * by kind, or send in parallel, if a night's audience grows large.
  */
 export async function releaseHeldNotifications(now = new Date()): Promise<{ released: number; pushed: number }> {
   const rows = await db.notifications.updateManyAndReturn({
@@ -775,7 +782,8 @@ export async function releaseHeldNotifications(now = new Date()): Promise<{ rele
     data: { held_until: null },
     select: { id: true, user_id: true, title: true, body: true, data: true, read_at: true, created_at: true },
   })
-  const unread = rows.filter((r) => r.read_at === null)
+  // A row with no kind is nothing a build can open: cleared, never sent.
+  const unread = rows.filter((r) => r.read_at === null && !!(r.data as NotificationData | null)?.type)
   const stale = await staleRows(unread.map((r) => r.data as NotificationData | null), now)
   const newest = new Map<string, (typeof rows)[number]>()
   for (const row of unread) {
@@ -798,12 +806,17 @@ export async function releaseHeldNotifications(now = new Date()): Promise<{ rele
 async function staleRows(data: Array<NotificationData | null>, now: Date): Promise<{ conversations: Set<string>; events: Set<string> }> {
   const conversationIds = [...new Set(data.flatMap((d) => (d?.conversationId ? [d.conversationId] : [])))]
   const eventIds = [...new Set(data.flatMap((d) => (d?.eventId ? [d.eventId] : [])))]
-  const [closed, started] = await Promise.all([
+  const found = await Promise.all([
     conversationIds.length > 0
       ? db.private_conversations.findMany({ where: { id: { in: conversationIds }, closed_at: { not: null } }, select: { id: true } })
       : [],
     eventIds.length > 0 ? db.events.findMany({ where: { id: { in: eventIds }, start_time: { lte: now } }, select: { id: true } }) : [],
-  ])
+  ]).catch((error: unknown) => {
+    logger.warn("Held pushes: staleness unread; sending", { error: error instanceof Error ? error.message : String(error) })
+    return null
+  })
+  if (!found) return { conversations: new Set(), events: new Set() }
+  const [closed, started] = found
   return { conversations: new Set(closed.map((c) => c.id)), events: new Set(started.map((e) => e.id)) }
 }
 

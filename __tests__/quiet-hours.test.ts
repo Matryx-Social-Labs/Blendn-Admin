@@ -116,6 +116,10 @@ beforeEach(() => {
 })
 
 afterEach(() => jest.useRealTimers())
+// Back to what jest.config.ts sets for every suite.
+afterAll(() => {
+  process.env.PUSH_QUIET_HOURS = "off"
+})
 
 /** Every kind, at 01:00 IST, for somebody at home, somebody going to the event and somebody checked in elsewhere. */
 const KINDS: Array<[NotificationData["type"], { eventId?: boolean }, "rings" | "held" | "dropped", "rings" | "held" | "dropped"]> = [
@@ -318,6 +322,20 @@ describe("never in the way of a send", () => {
     expect(sent).toHaveLength(1)
   })
 
+  it("a held push whose bell row could not be written is sent now, never lost", async () => {
+    at(ONE_AM_IST)
+    mockDb.notifications.create.mockRejectedValueOnce(new Error("db busy"))
+    await sendPushNotification({ userId: "u1", title: "t", body: "b", data: { type: "match", conversationId: "c1" } })
+    expect(sent).toHaveLength(1)
+  })
+
+  it("the same on the bulk path: a held recipient whose chunk failed is sent now", async () => {
+    at(ONE_AM_IST)
+    mockDb.notifications.createManyAndReturn.mockRejectedValueOnce(new Error("db busy"))
+    await sendBulkPushNotifications({ userIds: ["home"], title: "t", body: "b", data: { type: "blend", blendId: "b1" } })
+    expect(sent.map((m) => m.to)).toEqual([tokenOf("home")])
+  })
+
   it("a hold that cannot be decided is a push sent", async () => {
     at(ONE_AM_IST)
     mockDb.profiles.findMany.mockRejectedValueOnce(new Error("db busy"))
@@ -390,6 +408,19 @@ describe("the 09:00 release", () => {
     ])
     await releaseHeldNotifications()
     expect(sent.map((m) => m.data.notificationId)).toEqual(["r1"])
+  })
+
+  it("a stale check that throws after the claim still sends: the claim has already cleared the holds", async () => {
+    mockDb.private_conversations.findMany.mockRejectedValueOnce(new Error("db busy"))
+    mockDb.notifications.updateManyAndReturn.mockResolvedValue([held("r1", "a", "match", 1, { conversationId: "c1" })])
+    await releaseHeldNotifications()
+    expect(sent.map((m) => m.data.notificationId)).toEqual(["r1"])
+  })
+
+  it("a row with no kind in its data is cleared and not sent", async () => {
+    mockDb.notifications.updateManyAndReturn.mockResolvedValue([{ ...held("r1", "a", "match", 1), data: null }])
+    await expect(releaseHeldNotifications()).resolves.toEqual({ released: 1, pushed: 0 })
+    expect(sent).toHaveLength(0)
   })
 
   it("skips a row about an event that has already started: a reminder would be false by now", async () => {

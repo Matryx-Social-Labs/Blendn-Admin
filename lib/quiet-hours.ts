@@ -17,7 +17,7 @@ const FALLBACK_ZONE = "Asia/Kolkata"
  * arriving (one push per crew a night, owner 2026-11-14), and safety notices. Nightlife happens at night, and holding
  * a conversation breaks it.
  */
-const ALWAYS_RINGS: ReadonlySet<NotificationData["type"]> = new Set<NotificationData["type"]>([
+const ALWAYS_RINGS: ReadonlySet<NotificationData["type"]> = new Set([
   "private_message",
   "group_message",
   "message_request",
@@ -69,14 +69,14 @@ async function zonesOf(userIds: readonly string[], eventId?: string): Promise<(u
 }
 
 /** One read each, whatever the audience: an open check-in (the partial index `event_check_ins_one_open_per_user`) or a row for this event, and a `going` RSVP to it. */
-async function outTonight(userIds: string[], eventId?: string): Promise<Set<string>> {
+async function outTonight(userIds: readonly string[], eventId?: string): Promise<Set<string>> {
   const [checkIns, going] = await Promise.all([
     db.event_check_ins.findMany({
-      where: { user_id: { in: userIds }, OR: [{ status: "checked_in" }, ...(eventId ? [{ event_id: eventId }] : [])] },
+      where: { user_id: { in: [...userIds] }, OR: [{ status: "checked_in" }, ...(eventId ? [{ event_id: eventId }] : [])] },
       select: { user_id: true },
     }),
     eventId
-      ? db.event_rsvps.findMany({ where: { event_id: eventId, user_id: { in: userIds }, status: "going" }, select: { user_id: true } })
+      ? db.event_rsvps.findMany({ where: { event_id: eventId, user_id: { in: [...userIds] }, status: "going" }, select: { user_id: true } })
       : [],
   ])
   return new Set([...checkIns, ...going].map((r) => r.user_id))
