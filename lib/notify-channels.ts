@@ -48,7 +48,7 @@ export async function sendToChannels(
   let delivered = false
   for (const r of await Promise.allSettled(sends)) {
     if (r.status === "fulfilled") delivered = true
-    else logger.error("Notification channel failed", { ...context, error: (r.reason as Error).message })
+    else logger.error("Notification channel failed", { ...context, error: r.reason instanceof Error ? r.reason.message : String(r.reason) })
   }
   return delivered
 }

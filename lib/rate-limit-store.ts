@@ -324,10 +324,12 @@ export async function release(key: string): Promise<void> {
 const MARK_TIMEOUT_MS = 1_000
 
 function bounded<T>(command: Promise<T>): Promise<T> {
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error("Redis mark timed out")), MARK_TIMEOUT_MS).unref()
-  )
-  return Promise.race([command, timeout])
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("Redis mark timed out")), MARK_TIMEOUT_MS)
+    timer.unref()
+  })
+  return Promise.race([command, timeout]).finally(() => clearTimeout(timer))
 }
 
 export async function readMark(key: string): Promise<string | null> {

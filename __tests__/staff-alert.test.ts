@@ -149,6 +149,15 @@ describe("the sweep", () => {
     expect(mockWriteMark).toHaveBeenCalledWith(expect.any(String), expect.any(String))
   })
 
+  it("prefers the later mark when Redis kept an older one (a write that failed), never re-announcing", async () => {
+    reports.push({ id: "r1", created_at: at(-30) })
+    await sweep(at(0))
+    // Redis still answers the boot-time mark: its write failed with a warning.
+    mockReadMark.mockResolvedValue(at(-65).toISOString())
+    await sweep(at(60))
+    expect(posted()).toHaveLength(1)
+  })
+
   it("says nothing about a person: no ids, no names, no content", async () => {
     reports.push({ id: "report-id-123", created_at: at(-30) })
     await sweep(at(0))

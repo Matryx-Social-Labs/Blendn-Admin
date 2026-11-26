@@ -21,19 +21,25 @@ import { readMark, writeMark } from "./rate-limit-store"
  * "New" is a window: (the last run's upper bound, now - COMMIT_GRACE_MS]. The
  * mark advances only once the message went out (or there was nothing to say,
  * or no channel to say it on), so a failing channel repeats next minute and a
- * restart repeats at most one message; neither drops one. The mark is kept in
- * Redis when there is one, and in memory too; a process with neither starts one
- * interval before boot. One replica at launch: two would each announce.
+ * restart repeats at most one message. The mark is kept in Redis when there is
+ * one, and in memory too (the later of the two wins, so a Redis write that
+ * failed never re-announces an old window).
+ *
+ * ponytail: without a readable Redis mark, a new process's first window is one
+ * interval wide, ending COMMIT_GRACE_MS before boot, so a report written while
+ * no process was up for longer than that is not announced (it is still in the
+ * queue). Railway overlaps the old and new containers on a deploy; set REDIS_URL
+ * if crashes with long gaps matter. One replica at launch: two would each announce.
  */
-export const STAFF_ALERT_INTERVAL_MS = 60_000
+const STAFF_ALERT_INTERVAL_MS = 60_000
 /** The window trails now by this much: a row whose transaction commits after the count is in the next window, not lost. */
-export const COMMIT_GRACE_MS = 5_000
+const COMMIT_GRACE_MS = 5_000
 /** Room lines delivered unchecked in the last hour above which the message says moderation is degraded (the breaker stuck open). */
 export const DEGRADED_UNCHECKED_PER_HOUR = 20
 /** A pending flag this confident is severe whatever its category (the dashboard's high-confidence line). */
-export const SEVERE_CONFIDENCE = 0.9
+const SEVERE_CONFIDENCE = 0.9
 /** Category keys (OpenAI's, and their sub-keys) that make a pending flag severe at any confidence. */
-export const SEVERE_CATEGORY_PREFIXES = ["violence", "self-harm", "sexual/minors", "harassment/threatening"]
+const SEVERE_CATEGORY_PREFIXES = ["violence", "self-harm", "sexual/minors", "harassment/threatening"]
 
 const MARK_KEY = "staff-alert:mark"
 const HOUR_MS = 60 * 60 * 1000
@@ -60,7 +66,7 @@ let saidDegraded = false
 async function lastMark(now: Date): Promise<Date> {
   const stored = await readMark(MARK_KEY)
   const fromRedis = stored ? new Date(stored) : null
-  if (fromRedis && !Number.isNaN(fromRedis.getTime())) return fromRedis
+  if (fromRedis && !Number.isNaN(fromRedis.getTime()) && (!memoryMark || fromRedis > memoryMark)) return fromRedis
   // Pinned at the first run, not recomputed: a first post that fails must keep its window.
   memoryMark ??= new Date(now.getTime() - STAFF_ALERT_INTERVAL_MS - COMMIT_GRACE_MS)
   return memoryMark
@@ -146,11 +152,13 @@ export async function runStaffAlertSweep(now: Date = new Date()): Promise<void> 
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
+let running = false
 let stopped = false
 
 /** Self-scheduling, like the other sweepers: a slow pass must not overlap the next. */
 export function startStaffAlertSweeper(): void {
-  if (timer) return
+  if (running) return
+  running = true
   stopped = false
   const schedule = () => {
     if (stopped) return
@@ -165,6 +173,7 @@ export function startStaffAlertSweeper(): void {
 
 export function stopStaffAlertSweeper(): void {
   stopped = true
+  running = false
   if (timer) clearTimeout(timer)
   timer = null
 }
