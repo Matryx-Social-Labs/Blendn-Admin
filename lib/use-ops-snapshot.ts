@@ -42,6 +42,14 @@ export function useOpsSnapshot(eventId: string, enabled: boolean) {
     // serves the dashboard, so there is no separate host to configure.
     socket = io({ withCredentials: true, transports: ["websocket", "polling"] })
 
+    // Dropped and opened again, by the close listener below: so "reconnecting"
+    // is true, and does not wait the 85 s for Socket.io's ping to notice.
+    const armQuiet = () => {
+      quiet = setTimeout(() => {
+        if (!cancelled) socket?.disconnect()
+      }, QUIET_MS)
+    }
+
     socket.on("connect", () => {
       socket?.emit("join:eventOps", eventId)
     })
@@ -52,21 +60,23 @@ export function useOpsSnapshot(eventId: string, enabled: boolean) {
       setSnapshot(data)
       setStatus("live")
       clearTimeout(quiet)
-      // Dropped and opened again, by the close listener below: so "reconnecting"
-      // is true, and does not wait the 85 s for Socket.io's ping to notice.
-      quiet = setTimeout(() => {
-        if (!cancelled) socket?.disconnect()
-      }, QUIET_MS)
+      armQuiet()
     })
 
     socket.on("error", (payload: { message: string; code?: string }) => {
       if (cancelled) return
-      // The server answered, so the socket is not quiet; and a refusal must not be
-      // turned into "connection lost" twenty seconds later.
       clearTimeout(quiet)
       // Distinguished from a transport failure on purpose: "you may not watch
-      // this" and "the connection dropped" need different words on screen.
-      setStatus(payload.code === "OPS_FORBIDDEN" ? "denied" : "error")
+      // this" and "the connection dropped" need different words on screen. A
+      // refusal is final and must not be turned into "connection lost" twenty
+      // seconds later; any other answer (the server could not check, SCRUM-1402)
+      // is asked again on the quiet timer.
+      if (payload.code === "OPS_FORBIDDEN") {
+        setStatus("denied")
+        return
+      }
+      setStatus("error")
+      armQuiet()
     })
 
     // A dropped transport is retried by Socket.io about a second later, and a

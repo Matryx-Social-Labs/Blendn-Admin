@@ -335,12 +335,6 @@ export type AuthenticatedSocket = Socket<
  */
 
 
-/**
- * Join `room` only if `check` authorizes it, otherwise tell the client.
- *
- * Fails closed: a throwing check (malformed UUID from a hostile client, DB
- * blip) denies the join rather than leaking the room.
- */
 /*
  * Per-event snapshot broadcasting.
  *
@@ -475,6 +469,32 @@ export function stopAllOpsBroadcasts(): void {
   for (const eventId of Array.from(opsTimers.keys())) stopOpsBroadcast(eventId)
 }
 
+/** What a join whose access check could not be answered is told (SCRUM-1402). */
+export const JOIN_RETRY_MESSAGE = "Could not join right now. Try again."
+
+/**
+ * The access check threw: the database did not answer (a pool wait past 5 s, a
+ * statement cancelled at 8 s, #1061). That is not a refusal, so the client is
+ * told to try again -- never FORBIDDEN, which a valid, checked-in guest read as
+ * "not allowed" in the doors-open burst. No retry here: the client asks again.
+ */
+function joinCheckFailed(socket: AuthenticatedSocket, room: string, error: unknown): void {
+  logger.warn("Socket join check failed", {
+    room,
+    userId: socket.data.userId,
+    error: error instanceof Error ? error.message : String(error),
+  })
+  // `ErrorCode.SERVER_ERROR` (lib/api-response.ts), spelled out like FORBIDDEN here.
+  socket.emit("error", { message: JOIN_RETRY_MESSAGE, code: "SERVER_ERROR" })
+}
+
+/**
+ * Join `room` only if `check` authorizes it, otherwise tell the client.
+ *
+ * A malformed id is refused before any read. A check that says no is
+ * FORBIDDEN; a check that throws is `joinCheckFailed` (try again). Either way
+ * the socket stays out of the room.
+ */
 export async function guardJoin(
   socket: AuthenticatedSocket,
   room: string,
@@ -488,24 +508,20 @@ export async function guardJoin(
     socket.emit("error", { message: denyMessage, code: "FORBIDDEN" })
     return
   }
+  let allowed: boolean
   try {
-    if (await check()) {
-      socket.join(room)
-      logger.debug("Socket joined room", { room, userId: socket.data.userId })
-      return
-    }
+    allowed = await check()
   } catch (error) {
-    // Room IDs are `@db.Uuid`, so a malformed one from a hostile client makes
-    // Prisma throw. Socket.io does not await listeners, so an escaping rejection
-    // would take down the process — deny instead.
-    logger.warn("Socket join authorization check failed", {
-      room,
-      userId: socket.data.userId,
-      error: error instanceof Error ? error.message : String(error),
-    })
+    // Socket.io does not await listeners: an escaping rejection would take the process down.
+    joinCheckFailed(socket, room, error)
+    return
   }
-
-  socket.emit("error", { message: denyMessage, code: "FORBIDDEN" })
+  if (!allowed) {
+    socket.emit("error", { message: denyMessage, code: "FORBIDDEN" })
+    return
+  }
+  socket.join(room)
+  logger.debug("Socket joined room", { room, userId: socket.data.userId })
 }
 
 async function readTypingMembership(userId: string, chatGroupId: string) {
@@ -580,8 +596,8 @@ export async function emitChatTyping(
       socket.id
     )
   } catch (error) {
-    // Same fail-safe as guardJoin: chat_group_id is `@db.Uuid`, and an
-    // escaping rejection from this listener would take down the process.
+    // chat_group_id is `@db.Uuid`, and an escaping rejection from this
+    // listener would take down the process.
     logger.warn("Typing indicator lookup failed", {
       chatGroupId,
       userId: socket.data.userId,
@@ -1114,22 +1130,22 @@ export function initSocketServer(httpServer: HttpServer): Server {
       /*
        * Not `guardJoin`: which room is decided by who is asking. Whoever runs
        * the event and the venue it is held at are sent different copies of the
-       * snapshot, to different rooms (SCRUM-516). Fails closed the same way --
-       * a throw (a malformed id from a hostile client) denies -- and with the
-       * code the dashboard hook reads as "denied" rather than "connection lost".
+       * snapshot, to different rooms (SCRUM-516). A refusal carries the code
+       * the dashboard hook reads as "denied"; a check that threw is "try again"
+       * (`joinCheckFailed`), which the hook reads as "connection lost" and asks
+       * again.
        */
-      const view = await eventOpsView(principal, eventId).catch((error: unknown) => {
-        logger.warn("Socket join authorization check failed", {
-          room: `event:${eventId}:ops`,
-          userId: authSocket.data.userId,
-          error: error instanceof Error ? error.message : String(error),
-        })
-        return null
-      })
       // Out of both first: a socket asking again after its access changed keeps
-      // neither copy it had, whatever the answer is now.
+      // neither copy it had, whatever the answer is now -- or if there is none.
       authSocket.leave(opsRoom(eventId, "host"))
       authSocket.leave(opsRoom(eventId, "venue"))
+      let view: OpsView | null
+      try {
+        view = await eventOpsView(principal, eventId)
+      } catch (error) {
+        joinCheckFailed(authSocket, `event:${eventId}:ops`, error)
+        return
+      }
       if (!view) {
         authSocket.emit("error", { message: "Not authorized to watch this event", code: "OPS_FORBIDDEN" })
         return
