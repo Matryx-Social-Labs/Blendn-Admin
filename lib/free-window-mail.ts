@@ -38,20 +38,33 @@ export async function sendFreeWindowEndingMail(now: Date = new Date()): Promise<
 
   let mailed = 0
   for (const org of due) {
-    if (await liveEntitlement({ kind: "org", id: org.id }, "analytics", now)) continue
-    if (!(await mayBuyHere(org.id))) continue
-    const { count } = await db.organisations.updateMany({
-      where: { id: org.id, analytics_free_ending_mailed_at: null },
-      data: { analytics_free_ending_mailed_at: now },
-    })
-    if (count === 0) continue
-    mailed++
-    await mailOwnersAndAdmins(org.id, freeWindowEndingEmail({ orgName: org.display_name, endsAt: org.analytics_free_until! }))
+    // One organisation's failure never holds back the rest of the batch, and always names the organisation.
+    let claimed = false
+    try {
+      if (!org.analytics_free_until) continue
+      if (await liveEntitlement({ kind: "org", id: org.id }, "analytics", now)) continue
+      if (!(await mayBuyHere(org.id))) continue
+      const { count } = await db.organisations.updateMany({
+        where: { id: org.id, analytics_free_ending_mailed_at: null, status: { not: "suspended" } },
+        data: { analytics_free_ending_mailed_at: now },
+      })
+      if (count === 0) continue
+      claimed = true
+      const mail = freeWindowEndingEmail({ orgName: org.display_name, endsAt: org.analytics_free_until })
+      if (await mailOwnersAndAdmins(org.id, mail)) mailed++
+    } catch (error) {
+      // Claimed: lost for this window (never unclaimed: mailing twice is worse). Not claimed: asked again next pass.
+      logger.warn(claimed ? "Free-window ending mail lost for this window" : "Free-window ending mail skipped this pass", {
+        orgId: org.id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
   return mailed
 }
 
-async function mailOwnersAndAdmins(orgId: string, mail: { subject: string; text: string; html: string }): Promise<void> {
+/** Whether anybody was sent it. Every recipient it could not reach is logged at warn with the org id. */
+async function mailOwnersAndAdmins(orgId: string, mail: { subject: string; text: string; html: string }): Promise<boolean> {
   const members = await db.organisation_members.findMany({
     where: { org_id: orgId, role: { in: ["owner", "admin"] }, user: { deletedAt: null } },
     select: { user: { select: { email: true } } },
@@ -63,7 +76,8 @@ async function mailOwnersAndAdmins(orgId: string, mail: { subject: string; text:
       orgId,
       recipients: members.length,
       unsent: unsent.length,
-      reasons: [...new Set(unsent.map((r) => r.reason))],
+      reasons: [...new Set(unsent.map((r) => r.detail ?? r.reason))],
     })
   }
+  return unsent.length < members.length
 }

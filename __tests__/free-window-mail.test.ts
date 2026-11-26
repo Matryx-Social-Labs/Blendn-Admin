@@ -39,6 +39,7 @@ describe("freeWindowEndingEmail, with worst-case values", () => {
     }
     expect(mail.text).toContain("₹1,999")
     expect(mail.text).toContain("GST")
+    for (const part of ["₹589", "₹2,359", "₹1,999", "3 Jan 2027"]) expect(mail.html).toContain(part)
   })
 
   it("uses the product names, says the data is kept and links the Plan page", () => {

@@ -128,3 +128,15 @@ it("runs the free-window mail on every pass, and says how many organisations it 
 
   expect(info).toHaveBeenCalledWith("Free-window ending mails sent", { orgs: 2 })
 })
+
+it("says nothing about free-window mails on a pass that sent none", async () => {
+  jest.useFakeTimers()
+  checkPushReceipts.mockResolvedValue({ checked: 0 })
+  pruneIdlePushTokens.mockResolvedValue(0)
+
+  startReminderSweeper()
+  await jest.advanceTimersByTimeAsync(5 * 60_000)
+
+  expect(sendFreeWindowEndingMail).toHaveBeenCalledTimes(1)
+  expect(info).not.toHaveBeenCalledWith("Free-window ending mails sent", expect.anything())
+})
