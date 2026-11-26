@@ -130,7 +130,7 @@ test("the Plan page offers Event Insights only for the ended night of 5, and say
     offered = await picker.locator("option").evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value))
     expect(offered).toEqual([five])
     await expect(
-      page.getByText(`Nights with fewer than ${MIN_CELL} people checked in have nothing to show, so they can't be bought.`)
+      page.getByText(`Nights with fewer than ${MIN_CELL} people checked in have nothing to show, so they can't be bought.`).filter({ visible: true })
     ).toBeVisible()
     expect(await overflow(page), `overflow at ${width}`).toBeLessThanOrEqual(0)
     await ctx.close()

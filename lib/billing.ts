@@ -200,6 +200,8 @@ export async function planPageData(org: BillingOrg, now: Date = new Date()): Pro
       orderBy: { created_at: "desc" },
       select: { provider_ref: true, plan_key: true, amount_minor: true, status: true, current_end: true, cancel_at_cycle_end: true, created_at: true },
     }),
+    // ponytail: the 50 newest ended nights, floored after; an older night of 5 behind 50 smaller ones is
+    // left out of the picker (still buyable by id). Push the count into this query if an org ever gets there.
     db.events.findMany({
       where: { organizer_org_id: org.orgId, deleted_at: null, end_time: { lt: now }, ...realEventsWhere },
       orderBy: { start_time: "desc" },
