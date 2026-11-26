@@ -332,10 +332,6 @@ export function inviteEmail(
 }
 
 /**
- * `setPasswordLink` is null for an account that already existed and keeps its
- * password. Never a password: see SCRUM-134.
- */
-/**
  * The account's one next step, after the password (SCRUM-1342): an organizer's first event, a venue owner's venue (added
  * or claimed: `/dashboard/venues`, where their first step is). Anyone else (a sponsor creates no events and holds no
  * venue) keeps the Members line.
@@ -347,6 +343,10 @@ function approvedNextStep(role: user_role) {
   return null
 }
 
+/**
+ * `setPasswordLink` is null for an account that already existed and keeps its
+ * password. Never a password: see SCRUM-134.
+ */
 export function approvedEmail(
   name: string,
   orgName: string,
