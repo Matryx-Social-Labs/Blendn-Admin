@@ -4234,7 +4234,7 @@ Five consequences worth knowing about:
   `AGE_RESTRICTED` and “Blend’n is for people 18 and over. If your date of birth is wrong, write to grievance@blendn.app.” The
   stamp is set by `scripts/under-18-accounts.ts --apply`, which lists stamped
   accounts for deletion 14 days on; staff clear it with `--correct` on a
-  corrected birth date. Viewing events and editing the profile are unchanged.
+  corrected birth date. Viewing events is unchanged.
 - **Check-in filters rather than refuses.** A profile written before this rule
   can still carry `dating`; copying it onto a check-in row drops it silently,
   because nobody should be kept out of a room over a stale profile field.
