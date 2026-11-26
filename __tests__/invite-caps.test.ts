@@ -106,13 +106,18 @@ describe("pending invites per organisation", () => {
     expect((await invite()).ok).toBe(true)
   })
 
-  it("accepted, expired and other organisations' invites are not pending here", async () => {
-    table = [
-      ...pending(47),
-      { org_id: ORG, accepted_at: new Date(), revoked_at: null, expires_at: future() },
-      { org_id: ORG, accepted_at: null, revoked_at: null, expires_at: new Date(Date.now() - 1000) },
-      ...pending(10, OTHER_ORG),
-    ]
+  it("an accepted invite is not pending", async () => {
+    table = [...pending(49), { org_id: ORG, accepted_at: new Date(), revoked_at: null, expires_at: future() }]
+    expect((await invite()).ok).toBe(true)
+  })
+
+  it("an expired invite is not pending", async () => {
+    table = [...pending(49), { org_id: ORG, accepted_at: null, revoked_at: null, expires_at: new Date(Date.now() - 1000) }]
+    expect((await invite()).ok).toBe(true)
+  })
+
+  it("another organisation's invites are not pending here", async () => {
+    table = [...pending(49), ...pending(10, OTHER_ORG)]
     expect((await invite()).ok).toBe(true)
   })
 
@@ -136,6 +141,21 @@ describe("invites per sender", () => {
     expect(mockSend).not.toHaveBeenCalled()
   })
 
+  it("the window is the sender's, across organisations, and not anyone else's", async () => {
+    for (let i = 0; i < 20; i++) await invite()
+    expect((await inviteMember(OTHER_ORG, "elsewhere@blendn.app", "staff")).ok).toBe(false)
+    mockAuth.mockResolvedValue({ user: { id: "u2", name: "Meera", role: "organizer" } })
+    expect((await invite()).ok).toBe(true)
+  })
+
+  it("the hour window opens again after an hour", async () => {
+    jest.useFakeTimers({ now: new Date("2026-11-26T00:00:00Z"), doNotFake: ["nextTick", "setImmediate", "queueMicrotask"] })
+    for (let i = 0; i < 20; i++) await invite()
+    expect((await invite()).ok).toBe(false)
+    jest.setSystemTime(Date.now() + HOUR_MS + 1)
+    expect((await invite()).ok).toBe(true)
+  })
+
   it("an invite-then-revoke loop is stopped by the window with nothing pending", async () => {
     for (let i = 0; i < 20; i++) {
       expect((await invite()).ok).toBe(true)
@@ -157,6 +177,10 @@ describe("invites per sender", () => {
     const r = await invite()
     expect(r).toEqual({ ok: false, message: "That’s 50 invites today. Try again tomorrow." })
     expect(mockSend).toHaveBeenCalledTimes(50)
+    expect(mockDb.organisation_invites.create).toHaveBeenCalledTimes(50)
+    // And a day on, it opens again.
+    jest.setSystemTime(Date.now() + 24 * HOUR_MS)
+    expect((await invite()).ok).toBe(true)
   })
 
   it("an outside-domain invite costs one, not two: the needsReason round trip is free", async () => {
@@ -175,3 +199,28 @@ describe("invites per sender", () => {
   })
 })
 
+describe("invites per organisation per day", () => {
+  /** `n` invites by `userId`, 17 an hour so neither of the sender's windows is the one that bites. */
+  async function sendAs(userId: string, n: number) {
+    mockAuth.mockResolvedValue({ user: { id: userId, name: userId, role: "organizer" } })
+    const results: boolean[] = []
+    for (let i = 0; i < n; i++) {
+      if (i > 0 && i % 17 === 0) jest.setSystemTime(Date.now() + HOUR_MS + 1)
+      results.push((await invite()).ok)
+      table = [] // keep the pending cap out of it
+    }
+    return results
+  }
+
+  it("refuses the 101st from one organisation in a day, whoever sends it; a sender refused on their own window spends none of it", async () => {
+    jest.useFakeTimers({ now: new Date("2026-11-26T00:00:00Z"), doNotFake: ["nextTick", "setImmediate", "queueMicrotask"] })
+    expect(await sendAs("u1", 50)).toEqual(Array(50).fill(true))
+    // Past their own day: refused, and the organisation's count must not move.
+    expect(await sendAs("u1", 5)).toEqual(Array(5).fill(false))
+    expect(await sendAs("u2", 50)).toEqual(Array(50).fill(true))
+    mockAuth.mockResolvedValue({ user: { id: "u3", name: "u3", role: "organizer" } })
+    const r = await invite()
+    expect(r).toEqual({ ok: false, message: "Your team has sent 100 invites today. Try again tomorrow." })
+    expect(mockDb.organisation_invites.create).toHaveBeenCalledTimes(100)
+  })
+})

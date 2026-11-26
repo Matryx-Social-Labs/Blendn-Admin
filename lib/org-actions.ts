@@ -247,6 +247,8 @@ const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 /** Invites one person may create, per window, across every organisation (SCRUM-1245). */
 const INVITES_PER_HOUR = { max: 20, windowMs: 60 * 60 * 1000 }
 const INVITES_PER_DAY = { max: 50, windowMs: 24 * 60 * 60 * 1000 }
+/** And per organisation: its admins' windows add up, and an admin can make more admins. */
+const ORG_INVITES_PER_DAY = { max: 100, windowMs: 24 * 60 * 60 * 1000 }
 /** Unanswered invites one organisation may have out at once. */
 const MAX_PENDING_INVITES = 50
 
@@ -336,9 +338,10 @@ export async function inviteMember(
   })
   if (outstanding) return { ok: false, message: "They already have an invite outstanding." }
 
-  // ponytail: count then create, not atomic; concurrent sends can pass 50 by a
-  // few, bounded by the per-user window. A transaction with an org row lock if
-  // the cap ever has to be exact.
+  // ponytail: this count and the `outstanding` check above are read then create,
+  // not atomic: concurrent sends can pass 50 by a few, and parallel calls for one
+  // address can each create and mail. All bounded by the windows below. A
+  // transaction with an org row lock if either ever has to be exact.
   const pending = await db.organisation_invites.count({
     where: { org_id: orgId, accepted_at: null, revoked_at: null, expires_at: { gt: new Date() } },
   })
@@ -357,6 +360,11 @@ export async function inviteMember(
   }
   if ((await hit(`org-invite:day:${user.id}`, INVITES_PER_DAY.windowMs)).count > INVITES_PER_DAY.max) {
     return { ok: false, message: `That’s ${INVITES_PER_DAY.max} invites today. Try again tomorrow.` }
+  }
+  // Last, and only once the sender's own windows have passed: a sender already
+  // refused must not spend the rest of the team's day.
+  if ((await hit(`org-invite:org-day:${orgId}`, ORG_INVITES_PER_DAY.windowMs)).count > ORG_INVITES_PER_DAY.max) {
+    return { ok: false, message: `Your team has sent ${ORG_INVITES_PER_DAY.max} invites today. Try again tomorrow.` }
   }
 
   const token = newInviteToken()

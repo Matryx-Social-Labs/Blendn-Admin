@@ -90,9 +90,18 @@ test("the 51st pending invite is refused on the Team page, writes no row, and a 
 
   // Revoking one in the page frees its slot; the same address now goes through.
   const victim = address(1)
-  await panel.locator("div", { has: page.getByText(victim, { exact: true }) }).getByRole("button", { name: "Revoke" }).last().click()
+  // The row is the innermost div holding both the address and a Revoke button
+  // (its ancestors hold every row's button, and the list is newest first).
+  const row = panel
+    .locator("div")
+    .filter({ has: page.getByText(victim, { exact: true }) })
+    .filter({ has: page.getByRole("button", { name: "Revoke" }) })
+    .last()
+  await expect(row.getByRole("button", { name: "Revoke" })).toHaveCount(1)
+  await row.getByRole("button", { name: "Revoke" }).click()
   await expect(page.getByText("Invite revoked")).toBeVisible()
-  await expect.poll(() => pendingCount(orgId!)).toBe(CAP - 1)
+  await expect.poll(() => db.organisation_invites.count({ where: { org_id: orgId!, email: victim, revoked_at: null } })).toBe(0)
+  expect(await pendingCount(orgId)).toBe(CAP - 1)
 
   await send(address(3))
   await expect.poll(() => db.organisation_invites.count({ where: { org_id: orgId!, email: address(3), revoked_at: null } })).toBe(1)
