@@ -2,7 +2,7 @@ import "server-only"
 
 import type { org_role, user_role } from "@prisma/client"
 
-import { analyticsAccess, mayOpenEvent, type AccessReason } from "./analytics-access"
+import { analyticsAccess, mayOpenEvent, worthAPass, type AccessReason } from "./analytics-access"
 import { BILLING_PLANS, isBillingPlanKey, rupees } from "./billing-plans"
 import { db } from "./db"
 import { liveEntitlement, type LiveEntitlement } from "./entitlements"
@@ -200,11 +200,13 @@ export async function planPageData(org: BillingOrg, now: Date = new Date()): Pro
       orderBy: { created_at: "desc" },
       select: { provider_ref: true, plan_key: true, amount_minor: true, status: true, current_end: true, cancel_at_cycle_end: true, created_at: true },
     }),
+    // ponytail: the 50 newest ended nights, floored after; an older night of 5 behind 50 smaller ones is
+    // left out of the picker (still buyable by id). Push the count into this query if an org ever gets there.
     db.events.findMany({
-      where: { organizer_org_id: org.orgId, deleted_at: null, ...realEventsWhere },
+      where: { organizer_org_id: org.orgId, deleted_at: null, end_time: { lt: now }, ...realEventsWhere },
       orderBy: { start_time: "desc" },
       take: 50,
-      select: { id: true, title: true, start_time: true },
+      select: { id: true, title: true, start_time: true, end_time: true },
     }),
     db.billing_payments.findMany({
       // The organisation's own plan only: a venue's Venue Pro is on the venue's
@@ -225,6 +227,8 @@ export async function planPageData(org: BillingOrg, now: Date = new Date()): Pro
   ])
   const firstFree = access.firstFreeEventId ? events.find((e) => e.id === access.firstFreeEventId) : undefined
   const subscriptions = subscriptionRows.map(subscriptionState)
+  const locked = events.filter((e) => !mayOpenEvent(access, e.id))
+  const forSale = await worthAPass(locked, now)
 
   return {
     org,
@@ -233,9 +237,7 @@ export async function planPageData(org: BillingOrg, now: Date = new Date()): Pro
     date: planDate(analytics, subscriptionRows[0] ?? null),
     free: { reason: access.reason, until: access.freeUntil, firstEventTitle: firstFree?.title ?? null },
     subscriptions,
-    events: events
-      .filter((e) => !mayOpenEvent(access, e.id))
-      .map((e) => ({ id: e.id, title: e.title, startsAt: e.start_time })),
+    events: locked.filter((e) => forSale.has(e.id)).map((e) => ({ id: e.id, title: e.title, startsAt: e.start_time })),
     payments: paid.map((p) => ({
       id: p.id,
       at: p.captured_at,

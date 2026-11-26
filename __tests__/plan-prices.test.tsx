@@ -6,6 +6,7 @@ jest.mock("next/script", () => ({ __esModule: true, default: () => null }))
 jest.mock("@/lib/billing-actions", () => ({ cancelAnalytics: jest.fn(), startAnalyticsCheckout: jest.fn(), startEventPassCheckout: jest.fn() }))
 
 import { AnalyticsBuy, CheckoutProvider, EventPassBuy } from "@/app/dashboard/plan/checkout"
+import { MIN_CELL } from "@/lib/disclosure"
 
 /*
  * G11: what the Plan page's buy controls print is the price table and nothing
@@ -50,5 +51,23 @@ describe("while a payment is being confirmed", () => {
     const html = render(createElement(AnalyticsBuy, { enabled: true, pending: false }))
     expect(html.match(/type="radio"/g)).toHaveLength(2)
     expect(html).toContain("<legend")
+  })
+})
+
+describe("the Event Insights floor (SCRUM-1363)", () => {
+  const floor = `Nights with fewer than ${MIN_CELL} people checked in have nothing to show, so they can&#x27;t be bought.`
+
+  it("says the floor under the picker, from MIN_CELL, tied to the select", () => {
+    const html = render(createElement(EventPassBuy, { enabled: true, pending: false, events: [{ id: "e1", label: "Night · 3 Oct" }] }))
+    expect(html).toContain(floor)
+    expect(html).toContain('aria-describedby="event-pass-floor"')
+    expect(html).toContain('id="event-pass-floor"')
+  })
+
+  it("with no night to sell, says so and why, and offers no Buy", () => {
+    const html = render(createElement(EventPassBuy, { enabled: true, pending: false, events: [] }))
+    expect(html).toContain("No ended event to buy it for yet.")
+    expect(html).toContain(floor)
+    expect(html).not.toContain("<button")
   })
 })
