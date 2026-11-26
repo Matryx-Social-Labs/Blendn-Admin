@@ -109,8 +109,9 @@ async function payable(rateKey: string): Promise<string> {
 const NOT_YOUR_VENUE = "That venue isn’t one of your organisation’s."
 
 /**
- * The caller may change this venue's plan: a venue owner who is an owner or
- * admin of the organisation that owns it (`mayManageVenueBilling`), with
+ * The caller may change this venue's plan: an owner or admin of the
+ * organisation that owns it (`mayManageVenueBilling`), whatever their
+ * User.role (SCRUM-1246), with
  * payments on and under the rate. Anyone else's venue is "not yours", the
  * same answer as a venue that does not exist.
  */
@@ -127,7 +128,7 @@ async function requireVenueBuyer(venueId: string) {
     select: { role: true },
   })
   if (!member) throw new Refusal(NOT_YOUR_VENUE)
-  if (!mayManageVenueBilling(user.role, member.role)) {
+  if (!mayManageVenueBilling(member.role)) {
     throw new Refusal("Only an owner or admin of the venue’s organisation can change its plan.")
   }
   return { user, orgId: venue.owner_org_id, keyId: await payable(`venue:${venue.id}`) }
@@ -464,7 +465,7 @@ export async function cancelVenuePro(venueId: string): Promise<void> {
       select: { org_id: true, role: true },
     })
   )
-    .filter((m) => mayManageVenueBilling(user.role, m.role))
+    .filter((m) => mayManageVenueBilling(m.role))
     .map((m) => m.org_id)
   if (payers.length === 0) throw new Refusal("Only an owner or admin of the organisation that pays can cancel Venue Pro.")
   // Keyed on the caller: `venue:<id>` is the venue's own bucket (starting a plan spends it),

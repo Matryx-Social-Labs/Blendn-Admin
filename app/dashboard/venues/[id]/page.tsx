@@ -370,7 +370,7 @@ export default async function VenueDetailPage({
           venueId={venue.id}
           venueName={venue.name}
           offers={offers}
-          mayCompose={!!ownerMember && maySendVenueOffers(session.user.role, ownerMember.role)}
+          mayCompose={!!ownerMember && maySendVenueOffers(ownerMember.role)}
         />
       ) : null}
 

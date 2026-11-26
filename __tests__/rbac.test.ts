@@ -5,7 +5,6 @@ import {
   mayManageBilling,
   mayManageVenueBilling,
   maySendVenueOffers,
-  mayRedeemAtVenue,
 } from "@/lib/rbac"
 
 /**
@@ -45,11 +44,11 @@ describe("admin-only capabilities", () => {
 })
 
 /*
- * Billing, offers and the door read the organisation's facts, never the
+ * Billing and offers read the organisation's facts, never the
  * person's User.role (SCRUM-1246): the caller already holds the membership in
  * the org that pays or owns the venue, and passes its role.
  */
-describe("billing, offers and the door: the member's org role decides", () => {
+describe("billing and offers: the member's org role decides", () => {
   it("lets an owner or admin buy the org's plan and the venue's Venue Pro, and send its offers", () => {
     for (const may of [mayManageBilling, mayManageVenueBilling, maySendVenueOffers]) {
       expect(may("owner")).toBe(true)
@@ -61,9 +60,5 @@ describe("billing, offers and the door: the member's org role decides", () => {
     for (const may of [mayManageBilling, mayManageVenueBilling, maySendVenueOffers]) {
       expect(may("staff")).toBe(false)
     }
-  })
-
-  it("lets any member of the venue's owning org redeem at the door", () => {
-    expect(mayRedeemAtVenue()).toBe(true)
   })
 })

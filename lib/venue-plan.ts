@@ -177,8 +177,8 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
         name: v.name,
         city: v.city,
         owned,
-        mayBuy: memberRole ? mayManageVenueBilling(user.role, memberRole) : false,
-        mayCancel: payerRoles.some((r) => r !== undefined && mayManageVenueBilling(user.role, r)),
+        mayBuy: memberRole ? mayManageVenueBilling(memberRole) : false,
+        mayCancel: payerRoles.some((r) => r !== undefined && mayManageVenueBilling(r)),
         // A venue this organisation no longer owns shows only its own
         // mandate: not who owns it now, nor that owner's plan or data.
         orgName: owned ? (v.owner_org?.display_name ?? "") : "",

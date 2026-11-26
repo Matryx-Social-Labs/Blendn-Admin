@@ -45,7 +45,7 @@ export async function billingOrgFor(user: { id: string; role: user_role }): Prom
     orgId: membership.org.id,
     orgName: membership.org.display_name,
     memberRole: membership.role,
-    mayBuy: mayManageBilling(user.role, membership.role),
+    mayBuy: mayManageBilling(membership.role),
   }
 }
 

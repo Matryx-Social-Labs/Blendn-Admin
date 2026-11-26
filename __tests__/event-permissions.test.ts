@@ -104,8 +104,9 @@ describe("eventPermissions — the matrix", () => {
     expect(eventPermissions(actor(DEV, "organizer", [ORG_OTHER], [ORG_HOST]), event(ORG_HOST))).toEqual({ canEdit: false, canOperate: false, canViewAttendees: false })
   })
 
-  it("does not let a staff member's membership reach a venue day as the host", () => {
-    expect(eventPermissions(staff(DEV, "organizer", [ORG_VENUE]), event(ORG_VENUE, ORG_VENUE, { kind: "venue_day" })).canOperate).toBe(false)
+  it("does not let a staff member's membership reach a venue day as the host: the venue's answer, never edit or the roster", () => {
+    // Venue-org staff moderate the building's room like its owner (SCRUM-1246); the host branch never answers a venue day.
+    expect(eventPermissions(staff(DEV, "organizer", [ORG_VENUE]), event(ORG_VENUE, ORG_VENUE, { kind: "venue_day" }))).toEqual({ canEdit: false, canOperate: true, canViewAttendees: false })
   })
 
   it("gives someone who is the host org's staff and owns the venue's org the union: operate and the count, never edit (SCRUM-1246)", () => {

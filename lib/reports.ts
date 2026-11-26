@@ -8,7 +8,7 @@ import { discloseGuests, discloseVenueCounts, MIN_CELL } from "./disclosure"
 import { stillArriving } from "./occurrences"
 import { hostNotSuspended } from "./event-access"
 import { realEventsWhere } from "./event-kind"
-import { claimedVenueEventsWhere, hostsEvent } from "./event-visibility"
+import { claimedVenueEventsWhere, reachedThroughBuilding } from "./event-visibility"
 import { activeMembership } from "./org-membership"
 
 /**
@@ -218,7 +218,8 @@ export async function reportScope(role: user_role, userId: string): Promise<Repo
     // The creator arm, for events with no organisation only: one that has an org is its members' (SCRUM-942).
     { organizer_id: userId, organizer_org_id: null, ...hostNotSuspended },
   ]
-  const venueArms = role === "venue_owner" ? await claimedVenueEventsWhere(orgIds) : []
+  // Any member of a venue's org, whatever their User.role (SCRUM-1246), as `eventPermissions` grants.
+  const venueArms = await claimedVenueEventsWhere(orgIds)
 
   return {
     all: { deleted_at: null, ...realEventsWhere, OR: [...hostedArms, ...venueArms] },
@@ -366,9 +367,10 @@ export async function buildReport(
        */
       const attended = await distinctAttendeeCounts(rows.map((r) => r.id))
       /*
-       * A venue owner's row for another host's event is counts held back under
-       * the floor, as on every surface they see it (SCRUM-501). Their own
-       * events, and everybody else's exports, are exact.
+       * A row for another host's event, reached through the building, is counts
+       * held back under the floor, as on every surface they see it (SCRUM-501),
+       * whatever the person's User.role (SCRUM-1246). Events they run, and an
+       * admin's exports, are exact.
        */
       const counts = (r: (typeof rows)[number]) => {
         const exact = {
@@ -378,7 +380,7 @@ export async function buildReport(
           // with no cap is not an event that failed to fill.
           fillPct: r.max_capacity ? Math.round((r._count.rsvps / r.max_capacity) * 100) : null,
         }
-        return role === "venue_owner" && !hostsEvent(scopes.actor, r)
+        return reachedThroughBuilding(role, scopes.actor, r)
           ? discloseVenueCounts({ ...exact, capacity: r.max_capacity, arriving: stillArriving(r) })
           : exact
       }
