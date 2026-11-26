@@ -159,15 +159,8 @@ export interface SignupCohorts {
   sources: Array<CohortRow & { source: AcquisitionSource | "unknown" }>
 }
 
-type CohortCounts = {
-  signed_up: number
-  of7: number
-  rsvp7: number
-  of14: number
-  checkin14: number
-  of30: number
-  back30: number
-}
+const COUNT_KEYS = ["signed_up", "of7", "rsvp7", "of14", "checkin14", "of30", "back30"] as const
+type CohortCounts = Record<(typeof COUNT_KEYS)[number], number>
 
 /**
  * Sign-ups by week (SCRUM-1281): of the people who signed up in each of the
@@ -199,7 +192,7 @@ type CohortCounts = {
  * turned up.
  */
 export async function signupCohorts(weeks = 8, now: Date = new Date()): Promise<SignupCohorts> {
-  const rows = await db.$queryRaw<Array<{ week: string; source: string | null } & Record<keyof CohortCounts, bigint>>>`
+  const rows = await db.$queryRaw<Array<{ week: string; source: string | null } & Record<(typeof COUNT_KEYS)[number], bigint>>>`
     WITH weeks AS (
       SELECT generate_series(
         date_trunc('week', ${now}::timestamptz AT TIME ZONE 'Asia/Kolkata') - make_interval(weeks => ${weeks - 1}::int),
@@ -262,18 +255,10 @@ export async function signupCohorts(weeks = 8, now: Date = new Date()): Promise<
   const parts = rows.map((r) => ({
     week: r.week,
     source: (ACQUISITION_SOURCES as readonly (string | null)[]).includes(r.source) ? (r.source as AcquisitionSource) : null,
-    signed_up: Number(r.signed_up),
-    of7: Number(r.of7),
-    rsvp7: Number(r.rsvp7),
-    of14: Number(r.of14),
-    checkin14: Number(r.checkin14),
-    of30: Number(r.of30),
-    back30: Number(r.back30),
+    ...(Object.fromEntries(COUNT_KEYS.map((k) => [k, Number(r[k])])) as CohortCounts),
   }))
-  const sum = (group: CohortCounts[]): CohortCounts => {
-    const keys = ["signed_up", "of7", "rsvp7", "of14", "checkin14", "of30", "back30"] as const
-    return Object.fromEntries(keys.map((k) => [k, group.reduce((n, g) => n + g[k], 0)])) as CohortCounts
-  }
+  const sum = (group: CohortCounts[]) =>
+    Object.fromEntries(COUNT_KEYS.map((k) => [k, group.reduce((n, g) => n + g[k], 0)])) as CohortCounts
   const row = (c: CohortCounts, whole: boolean): CohortRow => {
     // A week is shown only when everybody in it has had the window; a source as soon as anybody has.
     const stage = (count: number, of: number): CohortStage => (of === 0 || (whole && of < c.signed_up) ? null : { count, of })
@@ -290,7 +275,7 @@ export async function signupCohorts(weeks = 8, now: Date = new Date()): Promise<
   return {
     weeks: weekKeys.map((week) => ({ week, ...row(sum(parts.filter((p) => p.week === week)), true) })),
     sources: sourceKeys
-      .map((source) => ({ source: source ?? ("unknown" as const), counts: sum(parts.filter((p) => p.source === source && p.signed_up > 0)) }))
+      .map((source) => ({ source: source ?? ("unknown" as const), counts: sum(parts.filter((p) => p.source === source)) }))
       .filter(({ counts }) => counts.signed_up > 0)
       .map(({ source, counts }) => ({ source, ...row(counts, false) })),
   }

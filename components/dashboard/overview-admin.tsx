@@ -19,7 +19,8 @@ import { fewCount } from "@/lib/disclosure"
 import type { CohortRow, CohortStage, SignupCohorts } from "@/lib/loop-closure"
 
 /**
- * Admin overview — five panels, derived from what an admin needs answered.
+ * Admin overview — five panels, derived from what an admin needs answered,
+ * and a sixth under the loop since SCRUM-1281: sign-ups by week and by source.
  * On the kit since step 18 (`admin-decisions.jsx` AdminOverview): bordered
  * Panels for the loop, turn-up, supply and cities, in this order. The kit's
  * 7d/30d/90d tabs are not here — the top bar's range control already drives
@@ -429,7 +430,15 @@ function Cohorts({ cohorts, now }: { cohorts: SignupCohorts; now: Date }) {
     ...stageColumns(false),
   ]
   return (
-    <Panel title="Sign-ups by week" hint="last 8 weeks · each stage a share of the week’s sign-ups · — not yet known">
+    <Panel
+      title="Sign-ups by week"
+      hint={
+        <>
+          last 8 weeks · each stage a share of the week’s sign-ups · <span aria-hidden="true">—</span>
+          <span className="sr-only">a dash means</span> not yet known
+        </>
+      }
+    >
       <DataTable
         label="Sign-ups by week"
         columns={weekColumns}
@@ -442,13 +451,11 @@ function Cohorts({ cohorts, now }: { cohorts: SignupCohorts; now: Date }) {
         columns={sourceColumns}
         rows={cohorts.sources.map((s) => ({ ...s, id: s.source }))}
         emptyState={<EmptyState icon={<IconMapPin />} title="Nobody signed up in the last 8 weeks" description="Sources appear as people sign up." />}
-        footer={
-          <span>
-            RSVP’d within 7 days of signing up · checked in within 14 · came back for a second event within 30. A
-            source’s stage counts only people whose window has closed, so the 30-day column rests on the oldest weeks.
-          </span>
-        }
       />
+      <p className="text-[0.75rem] text-faint-foreground">
+        RSVP’d within 7 days of signing up · checked in within 14 · came back for a second event within 30. A
+        source’s stage counts only people whose window has closed, so the 30-day column rests on the oldest weeks.
+      </p>
     </Panel>
   )
 }
@@ -517,12 +524,15 @@ export function StageCell({ stage, withBase }: { stage: CohortStage; withBase: b
   }
   const count = fewCount(stage.count)
   const shown = count !== "few" && fewCount(stage.of) !== "few"
+  // Never 100% for a part, nor 0% for somebody.
+  const pct = Math.round((stage.count / stage.of) * 100)
+  const share = stage.count < stage.of ? Math.min(pct, 99) : pct
   return (
     <>
       {countLabel(count)}
       {shown ? (
         <span className="block text-[0.6875rem] text-faint-foreground">
-          {Math.round((stage.count / stage.of) * 100)}%{withBase ? ` of ${formatNumber(stage.of)}` : ""}
+          {stage.count > 0 ? Math.max(share, 1) : 0}%{withBase ? ` of ${formatNumber(stage.of)}` : ""}
         </span>
       ) : null}
     </>

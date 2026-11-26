@@ -35,3 +35,13 @@ it("names the base in a source's cell", () => {
   expect(cell({ count: 3105, of: 7512 }, true)).toBe("3,105|41% of 7,512|")
   expect(cell({ count: 12480, of: 12480 })).toBe("12,480|100%|")
 })
+
+it("is exact from 5, and hides the share over a base of 4", () => {
+  expect(cell({ count: 5, of: 5 })).toBe("5|100%|")
+  expect(cell({ count: 5, of: 4 })).toBe("5")
+})
+
+it("never rounds a part to all or a few to none", () => {
+  expect(cell({ count: 996, of: 1000 })).toBe("996|99%|")
+  expect(cell({ count: 5, of: 2000 })).toBe("5|1%|")
+})

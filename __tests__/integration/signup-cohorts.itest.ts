@@ -152,6 +152,34 @@ describe("signupCohorts", () => {
   })
 })
 
+describe("signupCohorts at its edges", () => {
+  // Monday 20 Jul 2020, 12:00 IST; two weeks: 13 Jul and 20 Jul.
+  const NOW2 = new Date("2020-07-20T12:00:00+05:30")
+
+  it("counts a window up to its last instant and no further, orders sources as the constant, and keeps the bounds", async () => {
+    const first = await night()
+    // Exactly 7 days old: the 7-day stage is known, and an RSVP at the 7-day instant is outside it.
+    const exact = await person("sc-e1", ist("2020-07-13T12:00"), "invite")
+    await rsvp(first.eventId, exact, ist("2020-07-20T12:00"))
+    const early = await person("sc-e2", ist("2020-07-13T10:00"), "link")
+    await rsvp(first.eventId, early, ist("2020-07-14T10:00"))
+    // No profile row at all: unknown.
+    const bare = await makeUser(testId("sc-e3"))
+    users.push(bare)
+    await db.user.update({ where: { id: bare }, data: { createdAt: ist("2020-07-13T09:00") } })
+    // 23:00 IST on Sunday 12 Jul is the week before; 13:00 IST on 20 Jul is after now.
+    await person("sc-e4", ist("2020-07-12T23:00"), "door")
+    await person("sc-e5", ist("2020-07-20T13:00"), "door")
+
+    const edges = await signupCohorts(2, NOW2)
+    expect(edges.weeks).toEqual([
+      { week: "2020-07-20", signedUp: 0, rsvp7: null, checkIn14: null, back30: null },
+      { week: "2020-07-13", signedUp: 3, rsvp7: { count: 1, of: 3 }, checkIn14: null, back30: null },
+    ])
+    expect(edges.sources.map((s) => [s.source, s.signedUp])).toEqual([["link", 1], ["invite", 1], ["unknown", 1]])
+  })
+})
+
 describe("who receives it", () => {
   it("is sent to platform staff only, never to an organizer or a venue owner", async () => {
     const admin = await makeUser(testId("sc-admin"), "app_admin")
