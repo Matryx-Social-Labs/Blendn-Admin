@@ -2672,7 +2672,7 @@ does not offer Delist.
 - **Replies.** `POST` takes `replyToId`, which must be a message in the same conversation, otherwise `400`. Every message carries `replyTo: { id, senderName, text, mediaType, unavailable }`. `senderName` resolves through the reveal rules (a pseudonym until revealed). A quote of a hidden message is `unavailable: true` with no text.
 - **Retries.** `POST` takes `clientId` (a uuid the app makes per message). A repeat with the same `clientId` returns the first write instead of writing a second; a `clientId` already used in another conversation gets `409`. Both room write paths accept `clientId` the same way.
 - **Rate limit.** 30 sends a minute per person → `429 RATE_LIMITED`, counted before the conversation is looked up, so sends refused with `404`/`403`/`400` count too (SCRUM-451). A retry of a send that landed is answered over the limit and does not count.
-- **Words only (SCRUM-1165).** `{ "text": "…", "replyToId?": "uuid", "clientId?": "uuid" }`; `text` is required, 1–5000 characters. A send carrying `mediaUrl` (any value, with or without `text`) is `403 FORBIDDEN` "Photos can’t be sent in messages yet.", a sentence the app shows as it is, and nothing is stored. Photos sent before are still returned in `mediaUrl` and `mediaType` on `GET`, signed (SCRUM-427).
+- **Words only (SCRUM-1165).** `{ "text": "…", "replyToId?": "uuid", "clientId?": "uuid" }`; `text` is required, 1–5000 characters. A send carrying `mediaUrl` (any value, with or without `text`, a `clientId` retry included) is `403 FORBIDDEN` "Photos can’t be sent in messages yet.", a sentence the app shows as it is, and nothing is stored. Photos sent before are still returned in `mediaUrl` and `mediaType` on `GET`, signed (SCRUM-427).
 
 `POST /conversations` does not create a channel out of nothing. It requires an
 accepted message request between the two people, or a conversation that already
@@ -4426,8 +4426,9 @@ never says where it was taken; the app also re-encodes before uploading.
 
 **Chat media is private (SCRUM-427).** `folder: "chat"` uploads go to the
 private bucket; `publicUrl` is the stored reference, which answers an
-anonymous GET with `403`. Wherever a message's media comes back (the send
-response, history, the `private:message` socket event), `mediaUrl` is a signed
+anonymous GET with `403`. A chat upload is a Lobby post's photo; a room
+message and a DM take none. Wherever stored media comes back (a Lobby post, an
+older message in history or a quote), its URL is a signed
 URL valid for **15 minutes**. Load it when you draw the message, not later;
 refetch the history for a fresh one. Profile photos, event media and sponsored
 creatives stay public.

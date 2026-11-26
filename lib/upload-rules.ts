@@ -15,8 +15,9 @@ export function validateContentType(contentType: string, folder: UploadFolder): 
   const allowedTypes: Record<UploadFolder, string[]> = {
     /*
      * Photos, and only what `stripImageMetadata` can take a location out of
-     * (SCRUM-626). Chat lost GIF, video and audio with R9: photos go in a DM,
-     * nothing goes in a room, and a GIF is a loop nobody asked for.
+     * (SCRUM-626). Chat lost GIF, video and audio with R9, and a GIF is a loop
+     * nobody asked for. A chat upload is a Lobby post's photo: a room and a DM
+     * take words only (SCRUM-1165).
      */
     profile: PHOTO_TYPES,
     chat: PHOTO_TYPES,
