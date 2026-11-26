@@ -124,7 +124,7 @@ export const checkinSchema = z.object({
     })
     .optional(),
   /** The host's door code, typed by a guest GPS could not place (gate 13). Normalised by the server. */
-  doorCode: z.string().max(12).optional(),
+  doorCode: z.string().min(1).max(12).optional(),
   /** "With {crew}": one of your crews to tell at this check-in (S1). Silently ignored if it is not yours. */
   withCrewId: z.string().uuid().optional(),
 })

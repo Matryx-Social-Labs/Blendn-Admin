@@ -75,7 +75,8 @@ export async function entryCodeGate(a: EntryCodeAttempt): Promise<Refusal | null
 
     const match = matchEntryCode(a.event.id, a.occurrence.id, a.typed, a.now)
     if (match === "match") {
-      await Promise.all([giveBack(), hit(rightKey(a.occurrence.id), WINDOW_MS, CLOSED)])
+      // The right count only keeps an honest door from pausing: never a reason to turn away someone with the right code.
+      await Promise.all([giveBack(), countRight(a)])
       return null
     }
     if (match === "changed") {
@@ -83,8 +84,8 @@ export async function entryCodeGate(a: EntryCodeAttempt): Promise<Refusal | null
       return errorResponse(ENTRY_CODE_SAYS.changed, 400, "DOOR_CODE_CHANGED")
     }
 
-    if (normaliseCode(a.typed)) await countEventWrong(a)
     record("door_code_wrong")
+    if (normaliseCode(a.typed)) await countEventWrong(a)
     return errorResponse(ENTRY_CODE_SAYS.wrong, 400, "DOOR_CODE_WRONG")
   } catch (error) {
     if (!(error instanceof StoreUnavailable)) throw error
@@ -116,6 +117,20 @@ async function reserveAttempt(a: EntryCodeAttempt): Promise<{ locked: string | n
   return { locked: null, giveBack }
 }
 
+/**
+ * A right code counts once per person per occurrence, so resubmitting a valid
+ * code cannot hold off the pause a guessing farm should trip. Only there to keep
+ * an honest door from pausing: never a reason to turn away someone with the code.
+ */
+async function countRight(a: EntryCodeAttempt): Promise<void> {
+  try {
+    const mine = await hit(`entry-right-by:${a.occurrence.id}:${a.userId}`, WINDOW_MS, CLOSED)
+    if (mine.count === 1) await hit(rightKey(a.occurrence.id), WINDOW_MS, CLOSED)
+  } catch (error) {
+    logger.warn("Door code right count not kept", { eventId: a.event.id, error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
 /** Metres short of the fence, or null when the fix cannot place the person at all (no accuracy, too vague, mocked, no fence). */
 function shortfallOf(a: EntryCodeAttempt): number | null {
   if (a.mocked || a.gpsAccuracy === undefined || a.gpsAccuracy > ACCURACY_CEILING_M || !a.fence) return null
@@ -130,7 +145,11 @@ function shortfallOf(a: EntryCodeAttempt): number | null {
 async function countEventWrong(a: EntryCodeAttempt): Promise<void> {
   const occurrenceId = a.occurrence.id
   const [wrong, right] = await Promise.all([hit(wrongKey(occurrenceId), WINDOW_MS, CLOSED), peek(rightKey(occurrenceId), CLOSED)])
-  if (tripsEntryPause(wrong.count, right)) await setEntryPause(a.event.id, a.occurrence, null, a.now, { wrong: wrong.count, correct: right })
+  if (!tripsEntryPause(wrong.count, right)) return
+  // The guess is answered either way; a pause that could not be written is logged, never a 500 to the guest.
+  await setEntryPause(a.event.id, a.occurrence, null, a.now, { wrong: wrong.count, correct: right }).catch((error: unknown) =>
+    logger.error("Door code auto-pause not written", { eventId: a.event.id, error: error instanceof Error ? error.message : String(error) })
+  )
 }
 
 /**
@@ -162,8 +181,9 @@ export async function setEntryPause(
 
 /** Resume: the pause is lifted and the event's counters start again, so the next typo does not re-pause it. */
 export async function clearEntryPause(eventId: string, occurrenceId: string, by: string): Promise<void> {
+  // Counters first, fail-closed: a resume that could not reset them would re-pause on the next typo. Throws StoreUnavailable.
+  await Promise.all([forget(wrongKey(occurrenceId), CLOSED), forget(rightKey(occurrenceId), CLOSED)])
   await db.events.update({ where: { id: eventId }, data: { door_code_paused_at: null } })
-  await Promise.all([forget(wrongKey(occurrenceId)), forget(rightKey(occurrenceId))])
   auditLog({ userId: by, action: "event.door_code_resumed", resource: "event", resourceId: eventId, details: { eventId, occurrenceId } })
 }
 

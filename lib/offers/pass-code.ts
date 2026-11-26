@@ -1,4 +1,4 @@
-import { CODE_LENGTH, CODE_STEP_MS, codeStep, normaliseCode, rotatingCode } from "@/lib/rotating-code"
+import { CODE_STEP_MS, codeStep, normaliseCode, rotatingCode } from "@/lib/rotating-code"
 
 /**
  * The door pass's code (step 12): six characters that change every 30
@@ -15,7 +15,6 @@ import { CODE_LENGTH, CODE_STEP_MS, codeStep, normaliseCode, rotatingCode } from
  */
 
 export const PASS_STEP_MS = CODE_STEP_MS
-export const PASS_CODE_LENGTH = CODE_LENGTH
 export const passStep = codeStep
 export { normaliseCode }
 

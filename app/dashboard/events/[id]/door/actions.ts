@@ -1,5 +1,6 @@
 "use server"
 
+import { isUuid } from "@/lib/api-input"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { currentEntryCode, entryPauseInForce } from "@/lib/entry-code"
@@ -51,18 +52,26 @@ export type DoorView =
       code: { value: string; rotatesAt: string } | null
       /** In force now; `wrong` is the event's wrong codes in the last 10 minutes, null when the store cannot say. */
       paused: { wrong: number | null } | null
+      /** The counters cannot be read, so every guest's code is refused (503): no code is shown and the tab says so. */
+      unavailable: boolean
       byCode: number
       byGps: number
       /** Newest first. */
       arrivals: DoorArrival[]
+      /** Code arrivals in the last two minutes: the full screen's count-only echo. */
+      justIn: number
+      /** The server's clock when this was read: the screen times the turn by it, not by the tablet's clock. */
+      serverNow: string
     }
 
 const ARRIVALS_SHOWN = 10
+/** How long an arrival keeps the full screen's echo lit. */
+const JUST_IN_MS = 2 * 60_000
 
 /** The event and occurrence the caller may operate, now. Re-checked on every call (each 30 s re-ask). */
 async function operatedDoor(eventId: string) {
   const session = await getAuth()
-  if (!session?.user || typeof eventId !== "string") return null
+  if (!session?.user || !isUuid(eventId)) return null
   const event = await db.events.findFirst({
     where: { id: eventId, deleted_at: null },
     select: { ...eventPermissionSelect, id: true, status: true, door_code_paused_at: true, chat_group: { select: { id: true } } },
@@ -79,7 +88,7 @@ async function viewOf(door: NonNullable<Awaited<ReturnType<typeof operatedDoor>>
   const occurrence: OccurrenceSlot = door.occurrence
   const paused = entryPauseInForce(event.door_code_paused_at, occurrence, now)
   const guests = { occurrence_id: occurrence.id, kind: "attendee" as const }
-  const [byMethod, latest, wrong] = await Promise.all([
+  const [byMethod, latest, justIn, wrong] = await Promise.all([
     db.event_check_ins.groupBy({ by: ["method"], where: guests, _count: { _all: true } }),
     db.event_check_ins.findMany({
       where: { ...guests, method: "door_code" },
@@ -87,8 +96,11 @@ async function viewOf(door: NonNullable<Awaited<ReturnType<typeof operatedDoor>>
       take: ARRIVALS_SHOWN,
       select: { user_id: true, check_in_time: true },
     }),
-    paused ? recentWrongCodes(occurrence.id) : Promise.resolve(null),
+    db.event_check_ins.count({ where: { ...guests, method: "door_code", check_in_time: { gte: new Date(now.getTime() - JUST_IN_MS) } } }),
+    // Read every time: it is also the probe that the code path can answer at all.
+    recentWrongCodes(occurrence.id),
   ])
+  const unavailable = wrong === null
   const names = event.chat_group
     ? await db.chat_group_members.findMany({
         where: { chat_group_id: event.chat_group.id, user_id: { in: latest.map((r) => r.user_id) } },
@@ -97,11 +109,12 @@ async function viewOf(door: NonNullable<Awaited<ReturnType<typeof operatedDoor>>
     : []
   const nameOf = new Map(names.map((n) => [n.user_id, n.anonymous_name]))
   const count = (method: "gps" | "door_code") => byMethod.find((m) => m.method === method)?._count._all ?? 0
-  const live = withCode && !paused ? currentEntryCode(event.id, occurrence.id, now) : null
+  const live = withCode && !paused && !unavailable ? currentEntryCode(event.id, occurrence.id, now) : null
   return {
     kind: "open",
     code: live && { value: live.code, rotatesAt: live.rotatesAt },
     paused: paused ? { wrong } : null,
+    unavailable,
     byCode: count("door_code"),
     byGps: count("gps"),
     arrivals: latest.map((r) => ({
@@ -109,6 +122,8 @@ async function viewOf(door: NonNullable<Awaited<ReturnType<typeof operatedDoor>>
       at: (r.check_in_time ?? now).toISOString(),
       ref: roomHandle(event.id, r.user_id),
     })),
+    justIn,
+    serverNow: now.toISOString(),
   }
 }
 

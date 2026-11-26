@@ -102,6 +102,7 @@ export const CheckinRequestSchema = z
 export const EventCheckinRequestSchema = CheckinRequestSchema.extend({
   doorCode: z
     .string()
+    .min(1)
     .max(12)
     .optional()
     .describe(

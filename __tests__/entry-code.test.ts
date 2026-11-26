@@ -19,7 +19,8 @@ import {
   matchEntryCode,
   tripsEntryPause,
 } from "@/lib/entry-code"
-import { passCode, passStep } from "@/lib/offers/pass-code"
+import { passCode } from "@/lib/offers/pass-code"
+import { codeStep } from "@/lib/rotating-code"
 
 const EVENT = "7d1c0b6e-0000-4000-8000-000000000001"
 const OTHER_EVENT = "7d1c0b6e-0000-4000-8000-000000000002"
@@ -40,7 +41,7 @@ describe("the event's door code", () => {
     const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     expect(code).toBe([...mac.subarray(0, 6)].map((b) => alphabet[b & 31]).join(""))
     expect(code).not.toBe(passCode(`${EVENT}:${DAY1}`, step))
-    expect(passStep(now)).toBe(step)
+    expect(codeStep(now)).toBe(step)
   })
 
   it("matches the current step and the two before it", () => {

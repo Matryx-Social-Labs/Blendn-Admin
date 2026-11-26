@@ -15,72 +15,94 @@ import { DoorCodeScreen, ECHO_MS, pausedSentence, useNow } from "./door-code-scr
 
 /** A fallback re-ask when the ops push is not arriving. */
 const FALLBACK_MS = 30_000
-/** After a failed re-ask, how soon to try again while the code is up. */
+/** After a failed re-ask, or a turn that has not landed yet, how soon to ask again while the code is up. */
 const RETRY_MS = 2_000
 
 /**
  * The Door tab (host B, design/02a SPEC §5): never draws the code. Counts by
  * code and by GPS, who came in with the code (room pseudonyms only), and the
  * one button that puts the code full screen. Re-asked on each ops push, at
- * each turn of the code while it is up, and every 30 s as a fallback.
+ * each turn of the code while it is up (timed on the server's clock), and
+ * every 30 s as a fallback.
  */
 export function DoorTab({ eventId, title, timezone, initial }: { eventId: string; title: string; timezone: string; initial: DoorView }) {
   const [view, setView] = useState(initial)
-  const [failed, setFailed] = useState(false)
+  const [failures, setFailures] = useState(0)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+  // Server clock minus this tablet's, from the last answer: the turn and staleness are timed by the server.
+  const [skew, setSkew] = useState(0)
   const show = useRef<HTMLButtonElement>(null)
+  const resumeHere = useRef<HTMLButtonElement>(null)
+  const openNow = useRef(false)
   const wasOpen = useRef(false)
-  const asked = useRef(0)
+  const sent = useRef(0)
+  const applied = useRef(0)
   const { snapshot } = useOpsSnapshot(eventId, view.kind === "open")
   const now = useNow(15_000)
 
-  const refresh = useCallback(
-    async (withCode: boolean) => {
-      const n = ++asked.current
-      try {
-        const next = await readDoor(eventId, withCode)
-        if (n === asked.current) {
-          setView(next)
-          setFailed(false)
-        }
-      } catch {
-        if (n === asked.current) setFailed(true)
-      }
-    },
-    [eventId]
-  )
+  /** Ask again; the newest answer wins, and one asked before the view opened never blanks its code. */
+  const refresh = useCallback(async () => {
+    const n = ++sent.current
+    const withCode = openNow.current
+    try {
+      const next = await readDoor(eventId, withCode)
+      if (n <= applied.current || (openNow.current && !withCode)) return
+      applied.current = n
+      setView(next)
+      setFailures(0)
+      if (next.kind === "open") setSkew(Date.parse(next.serverNow) - Date.now())
+      else setOpen(false)
+    } catch {
+      if (n > applied.current) setFailures((f) => f + 1)
+    }
+  }, [eventId])
 
   useEffect(() => {
-    if (snapshot || open) void refresh(open)
-  }, [snapshot, open, refresh])
+    openNow.current = open
+  }, [open])
 
   useEffect(() => {
-    const id = setInterval(() => void refresh(open), FALLBACK_MS)
+    if (snapshot) void refresh()
+  }, [snapshot, refresh])
+
+  useEffect(() => {
+    const id = setInterval(() => void refresh(), FALLBACK_MS)
     return () => clearInterval(id)
-  }, [open, refresh])
+  }, [refresh])
 
-  // While the code is up: ask again as it turns, or soon after a failure.
-  const rotatesAt = view.kind === "open" ? view.code?.rotatesAt : undefined
+  // While the code is up: ask as it turns (re-armed after every answer), or soon after a failure.
   useEffect(() => {
-    if (!open || (!rotatesAt && !failed)) return
-    const wait = failed || !rotatesAt ? RETRY_MS : Math.max(Date.parse(rotatesAt) - Date.now() + 250, 0)
-    const id = setTimeout(() => void refresh(true), wait)
+    if (!open) return
+    const rotatesAt = view.kind === "open" ? view.code?.rotatesAt : undefined
+    const untilTurn = rotatesAt ? Date.parse(rotatesAt) - (Date.now() + skew) + 250 : RETRY_MS
+    const id = setTimeout(() => void refresh(), failures > 0 || untilTurn <= 0 ? RETRY_MS : untilTurn)
     return () => clearTimeout(id)
-  }, [open, rotatesAt, failed, refresh])
+  }, [open, view, failures, skew, refresh])
 
-  // Focus goes back to "Show the door code" when the view closes.
+  // Focus goes back to whatever opened the view (Resume, when the code was paused meanwhile).
   useEffect(() => {
-    if (wasOpen.current && !open) show.current?.focus()
+    if (wasOpen.current && !open) (show.current ?? resumeHere.current)?.focus()
     wasOpen.current = open
   }, [open])
 
-  async function act(action: (id: string) => Promise<DoorView>, failure: string) {
+  function openScreen() {
+    openNow.current = true
+    setOpen(true)
+    void refresh()
+  }
+
+  async function act(action: (id: string) => Promise<DoorView>, failure: string, then: "show" | "resume") {
     setBusy(true)
+    setActionError(null)
     try {
-      setView(await action(eventId))
-      await refresh(open)
+      await action(eventId)
+      await refresh()
+      // The button that was pressed is gone: focus the one that replaced it.
+      requestAnimationFrame(() => (then === "show" ? show.current : resumeHere.current)?.focus())
     } catch {
+      setActionError(failure)
       toast.error(failure)
     } finally {
       setBusy(false)
@@ -95,43 +117,48 @@ export function DoorTab({ eventId, title, timezone, initial }: { eventId: string
       body: JSON.stringify({ action: "ban" }),
     }).catch(() => null)
     if (res?.ok) toast.success(`${arrival.pseudonym} was removed from the room`)
-    else toast.error("Could not remove them. Try again.")
-    await refresh(open)
+    else toast.error(res ? `Could not remove them (${res.status}). Try again.` : "Could not reach the server. Try again.")
+    await refresh()
   }
 
   if (view.kind !== "open") {
     return (
       <Panel title="Door code">
         <p className="text-[0.875rem] text-muted-foreground">
-          {view.kind === "closed" ? "The door code appears 90 minutes before the start, and goes at the end." : "You can't see this event's door."}
+          {view.kind === "closed" ? "The door code is off until the next doors, 90 minutes before the start." : "You can't see this event's door."}
         </p>
       </Panel>
     )
   }
 
   const paused = view.paused
-  const chip = paused ? { label: "Paused", tone: "border-warning/50 text-warning" } : failed ? { label: "Offline", tone: "border-warning/50 text-warning" } : { label: "On", tone: "border-success/50 text-success" }
+  const offline = failures > 0 || view.unavailable
+  const chip = paused ? { label: "Paused", tone: "border-warning" } : offline ? { label: "Offline", tone: "border-warning" } : { label: "On", tone: "border-success" }
+  const resume = () => void act(resumeEntryCode, "Could not resume the code. Try again.", "show")
 
   return (
     <div className="grid gap-5 @3xl/main:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-      <Panel title="Door code" action={<span className={cn("rounded-full border px-2.5 py-0.5 text-[0.8125rem] font-medium", chip.tone)}>{chip.label}</span>}>
+      <Panel title="Door code" action={<span className={cn("rounded-full border px-2.5 py-0.5 text-[0.8125rem] font-medium text-foreground", chip.tone)}>{chip.label}</span>}>
         <p className="text-[0.875rem] leading-[22px] text-muted-foreground">
           For guests whose GPS can&rsquo;t place them. Show it full screen at the entrance; it changes every 30 seconds.
         </p>
+        {view.unavailable && !paused ? (
+          <Callout role="status" title="The door code isn't working right now">Guests can still check in with GPS. It comes back by itself.</Callout>
+        ) : null}
         {paused ? (
           <>
-            <Callout role="alert" title={pausedSentence(paused.wrong)} />
-            <Button disabled={busy} onClick={() => void act(resumeEntryCode, "Could not resume the code. Try again.")} className="w-fit pointer-coarse:h-11">
+            <Callout role="alert" title={pausedSentence(paused.wrong)}>It comes back by itself 10 minutes after the pause.</Callout>
+            <Button ref={resumeHere} disabled={busy} onClick={resume} className="w-fit pointer-coarse:h-11">
               Resume the code
             </Button>
           </>
         ) : (
           <div className="flex flex-wrap gap-2">
-            <Button ref={show} aria-haspopup="dialog" onClick={() => setOpen(true)} className="h-11 px-5 text-[0.9375rem]">
+            <Button ref={show} aria-haspopup="dialog" onClick={openScreen} className="h-11 px-5 text-[0.9375rem]">
               <IconMaximize aria-hidden className="size-4" />
               Show the door code
             </Button>
-            <Button variant="outline" disabled={busy} onClick={() => void act(pauseEntryCode, "Could not pause the code. Try again.")} className="h-11">
+            <Button variant="outline" disabled={busy} onClick={() => void act(pauseEntryCode, "Could not pause the code. Try again.", "resume")} className="h-11">
               Pause the code
             </Button>
           </div>
@@ -161,13 +188,7 @@ export function DoorTab({ eventId, title, timezone, initial }: { eventId: string
       </Panel>
 
       {open ? (
-        <DoorCodeScreen
-          title={title}
-          view={view}
-          failed={failed}
-          onClose={() => setOpen(false)}
-          onResume={() => void act(resumeEntryCode, "Could not resume the code. Try again.")}
-        />
+        <DoorCodeScreen title={title} view={view} failed={failures > 0} skew={skew} error={actionError} onClose={() => setOpen(false)} onResume={resume} />
       ) : null}
     </div>
   )
@@ -188,7 +209,7 @@ function ArrivalRow({ arrival, timezone, fresh, onRemove }: { arrival: DoorArriv
       </span>
       <span className="min-w-0 flex-1 text-[0.9375rem] [overflow-wrap:anywhere]">
         {arrival.pseudonym}
-        {fresh ? <span className="text-[0.8125rem] text-success"> · just now</span> : null}
+        {fresh ? <span className="text-[0.8125rem] font-medium text-foreground dark:text-success"> · just now</span> : null}
       </span>
       <time dateTime={arrival.at} className="shrink-0 text-[0.9375rem] tabular-nums text-muted-foreground">
         {new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: timezone }).format(at)}

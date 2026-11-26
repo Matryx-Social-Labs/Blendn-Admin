@@ -8,7 +8,7 @@ jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(mockSession) }))
 
 import * as store from "@/lib/rate-limit-store"
 import { entryCode } from "@/lib/entry-code"
-import { passStep } from "@/lib/offers/pass-code"
+import { codeStep } from "@/lib/rotating-code"
 import { pauseEntryCode, readDoor, resumeEntryCode } from "@/app/dashboard/events/[id]/door/actions"
 
 import { closeDb, db, makeUser, testId } from "./helpers"
@@ -51,7 +51,16 @@ afterAll(async () => {
 }, 60_000)
 
 beforeEach(() => store.resetMemoryStore())
-afterEach(() => jest.restoreAllMocks())
+afterEach(() => {
+  jest.restoreAllMocks()
+  mockSession = null
+})
+
+/** Codes from two or three steps back are computed before the request: never in the last 5 s of a step, or the step turns mid-test. */
+async function midStep() {
+  const into = Date.now() % 30_000
+  if (into > 25_000) await new Promise((r) => setTimeout(r, 30_000 - into + 200))
+}
 
 /** A live published event at the fixture fence, run by a new organisation; its days from `days` (hours from now). */
 async function event(opts: { days?: ReadonlyArray<{ startsIn: number; endsIn: number }>; reviewDemo?: boolean } = {}) {
@@ -94,7 +103,7 @@ async function event(opts: { days?: ReadonlyArray<{ startsIn: number; endsIn: nu
   return { id: row.id, occurrence: occurrences[occurrences.length - 1], occurrences, host, org: org.id }
 }
 
-const code = (e: { id: string; occurrence: string }, back = 0) => entryCode(e.id, e.occurrence, passStep(new Date()) - back)
+const code = (e: { id: string; occurrence: string }, back = 0) => entryCode(e.id, e.occurrence, codeStep(new Date()) - back)
 const wrongFor = (e: { id: string; occurrence: string }) => {
   const valid = new Set([0, 1, 2, 3].map((b) => code(e, b)))
   return ["ABCDEF", "GHJKLM", "NPQRTU", "VWXY34"].find((c) => !valid.has(c))!
@@ -125,6 +134,7 @@ describe("a door code at the check-in door", () => {
   it("admits the code from two steps back, lower case and spaced", async () => {
     const e = await event()
     const p = await person("entry")
+    await midStep()
     const c = code(e, 2)
     const res = await checkIn(p.token, e.id, { ...fix(NEAR, 30), doorCode: ` ${c.slice(0, 3).toLowerCase()} ${c.slice(3)}` })
     expect(res.status).toBe(200)
@@ -146,6 +156,7 @@ describe("a door code at the check-in door", () => {
   it("answers 'just changed' to step −3 and counts no guess", async () => {
     const e = await event()
     const p = await person("entry")
+    await midStep()
     const res = await checkIn(p.token, e.id, { ...fix(NEAR, 30), doorCode: code(e, 3) })
     expect(res.status).toBe(400)
     expect(await res.json()).toMatchObject({ errorCode: "DOOR_CODE_CHANGED", error: "That code just changed. Read the new one on the host's screen." })
@@ -156,7 +167,7 @@ describe("a door code at the check-in door", () => {
   it("refuses another occurrence's code", async () => {
     const e = await event({ days: [{ startsIn: -26, endsIn: -22 }, { startsIn: -1, endsIn: 2 }] })
     const p = await person("entry")
-    const yesterdays = entryCode(e.id, e.occurrences[0], passStep(new Date()))
+    const yesterdays = entryCode(e.id, e.occurrences[0], codeStep(new Date()))
     const res = await checkIn(p.token, e.id, { ...fix(NEAR, 30), doorCode: yesterdays })
     expect((await res.json()).errorCode).toBe("DOOR_CODE_WRONG")
   })
@@ -173,6 +184,30 @@ describe("a door code at the check-in door", () => {
     expect(res.status).toBe(400)
     expect(await res.json()).toMatchObject({ errorCode: "DOOR_CODE_FAR", error: "You need to be at the venue to use the door code." })
     expect((await refusals(e.id, p.id)).map((r) => r.reason)).toEqual(["door_code_far"])
+  })
+
+  it("answers far before comparing: a wrong code from 2 km is far, and counts nothing", async () => {
+    const e = await event()
+    const p = await person("entry")
+    const res = await checkIn(p.token, e.id, { ...fix(FAR, 30), doorCode: wrongFor(e) })
+    expect((await res.json()).errorCode).toBe("DOOR_CODE_FAR")
+    expect(await store.peek(`entry-fail:${e.occurrence}:${p.id}`)).toBe(0)
+    expect(await store.peek(`entry-wrong:${e.occurrence}`)).toBe(0)
+  })
+
+  it("never locks someone for trying from too far: five far tries, then the code at the door works", async () => {
+    const e = await event()
+    const p = await person("entry")
+    for (let i = 0; i < 5; i++) expect((await (await checkIn(p.token, e.id, { ...fix(FAR, 30), doorCode: code(e) })).json()).errorCode).toBe("DOOR_CODE_FAR")
+    expect((await checkIn(p.token, e.id, { ...fix(NEAR, 30), doorCode: code(e) })).status).toBe(200)
+  })
+
+  it("counts a right code once per person, so resubmitting it cannot hold off a pause", async () => {
+    const e = await event()
+    const p = await person("entry")
+    expect((await checkIn(p.token, e.id, { ...fix(NEAR, 30), doorCode: code(e) })).status).toBe(200)
+    expect((await checkIn(p.token, e.id, { ...fix(NEAR, 30), doorCode: code(e) })).status).toBe(200)
+    expect(await store.peek(`entry-right:${e.occurrence}`)).toBe(1)
   })
 
   it("locks a person after 5 wrong codes in 10 minutes: 429 with the time on the event's clock", async () => {
@@ -243,6 +278,16 @@ describe("a door code at the check-in door", () => {
     expect(audit[0].user_id).toBeNull()
   })
 
+  it("auto-pauses over another night's pause still on the row", async () => {
+    const e = await event()
+    await db.events.update({ where: { id: e.id }, data: { door_code_paused_at: new Date(Date.now() - 3 * HOUR) } })
+    for (let i = 0; i < 29; i++) await store.hit(`entry-wrong:${e.occurrence}`, 10 * MIN)
+    const p = await person("entry")
+    await checkIn(p.token, e.id, { ...fix(NEAR, 30), doorCode: wrongFor(e) })
+    const row = await db.events.findUniqueOrThrow({ where: { id: e.id }, select: { door_code_paused_at: true } })
+    expect(Date.now() - row.door_code_paused_at!.getTime()).toBeLessThan(MIN)
+  })
+
   it("does not auto-pause a busy honest door (wrong ≤ correct)", async () => {
     const e = await event()
     for (let i = 0; i < 40; i++) await store.hit(`entry-right:${e.occurrence}`, 10 * MIN)
@@ -273,6 +318,9 @@ describe("a door code at the check-in door", () => {
     const res = await checkIn(p.token, e.id, { ...fix(NEAR, 30), doorCode: code(e) })
     expect(res.status).toBe(503)
     expect(await res.json()).toMatchObject({ errorCode: "DOOR_CODE_UNAVAILABLE", error: "The door code isn't available right now. Try GPS." })
+    // SPEC §3's refusal reasons have none for an outage: nothing is recorded, by design.
+    await new Promise((r) => setTimeout(r, 300))
+    expect(await db.check_in_refusals.count({ where: { event_id: e.id, user_id: p.id } })).toBe(0)
     jest.restoreAllMocks()
     expect((await checkIn(p.token, e.id, fix(INSIDE, 10))).status).toBe(200)
   })
@@ -288,7 +336,8 @@ describe("a door code at the check-in door", () => {
       expect(await checkInRow(e.id, reviewer.id)).toEqual({ method: "review", status: "checked_in" })
       expect(await store.peek(`entry-fail:${e.occurrence}:${reviewer.id}`)).toBe(0)
     } finally {
-      process.env.REVIEW_ACCOUNT_IDS = before
+      if (before === undefined) delete process.env.REVIEW_ACCOUNT_IDS
+      else process.env.REVIEW_ACCOUNT_IDS = before
     }
   })
 
@@ -403,6 +452,29 @@ describe("the host's Door", () => {
     expect(await readDoor(e.id, true)).toEqual({ kind: "not_authorized" })
     expect(await pauseEntryCode(e.id)).toEqual({ kind: "not_authorized" })
     expect((await db.events.findUniqueOrThrow({ where: { id: e.id }, select: { door_code_paused_at: true } })).door_code_paused_at).toBeNull()
+
+    // Nor resume someone else's pause, nor reset its counters.
+    const pausedAt = new Date()
+    await db.events.update({ where: { id: e.id }, data: { door_code_paused_at: pausedAt } })
+    await store.hit(`entry-wrong:${e.occurrence}`, 10 * MIN)
+    expect(await resumeEntryCode(e.id)).toEqual({ kind: "not_authorized" })
+    expect((await db.events.findUniqueOrThrow({ where: { id: e.id }, select: { door_code_paused_at: true } })).door_code_paused_at).toEqual(pausedAt)
+    expect(await store.peek(`entry-wrong:${e.occurrence}`)).toBe(1)
+    expect(await readDoor("not-a-uuid", true)).toEqual({ kind: "not_authorized" })
+  })
+
+  it("says the code is unavailable, and shows none, when the counters cannot be read; a resume then fails rather than half-resetting", async () => {
+    const e = await event()
+    await db.events.update({ where: { id: e.id }, data: { door_code_paused_at: new Date() } })
+    signIn(e.host)
+    const down = () => Promise.reject(new store.StoreUnavailable("down"))
+    jest.spyOn(store, "peek").mockImplementation(down)
+    jest.spyOn(store, "forget").mockImplementation(down)
+    const view = await readDoor(e.id, true)
+    expect(view.kind === "open" && view.unavailable).toBe(true)
+    expect(view.kind === "open" && view.code).toBeNull()
+    await expect(resumeEntryCode(e.id)).rejects.toBeInstanceOf(store.StoreUnavailable)
+    expect((await db.events.findUniqueOrThrow({ where: { id: e.id }, select: { door_code_paused_at: true } })).door_code_paused_at).not.toBeNull()
   })
 
   it("pauses and resumes by hand, audited, and a resume resets the event's counter", async () => {
