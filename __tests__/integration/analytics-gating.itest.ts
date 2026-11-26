@@ -3,7 +3,7 @@
  * first-event-free rule; the floors on every new figure).
  *
  * The fixture is an organisation past its free window: its first event that
- * cleared the floor ended 60 days ago. Its newest event carries distinctive
+ * had 8 people checked in ended 120 days ago, past its 90 free days. Its newest event carries distinctive
  * figures — seven people who each stayed exactly 173 minutes (median stay
  * "2h 53m"), eleven people who viewed it in the app — so a test can say
  * whether those figures reached the page:
@@ -99,10 +99,10 @@ beforeAll(async () => {
   for (let i = 0; i < 9; i++) people.push(await makeUser(testId(`an-p${i}`)))
   users.push(...people)
 
-  // The first event to clear the floor: six people, 60 days ago.
-  const first = await event("first", new Date(now.getTime() - 60 * DAY))
+  // The first event with 8 people checked in, 120 days ago: its 90 free days are over.
+  const first = await event("first", new Date(now.getTime() - 120 * DAY))
   firstEventId = first.id
-  await attend(first, people.slice(0, 6), 95)
+  await attend(first, people.slice(0, 8), 95)
 
   // A small event: four people, under every floor.
   const small = await event("small", new Date(now.getTime() - 20 * DAY))
@@ -155,7 +155,7 @@ async function renderedTree(params: Record<string, string> = {}): Promise<string
 const CANARY = ['"p50Min":173', '"medianStayMin":173', '"viewers":10']
 
 describe("the paywall's clock", () => {
-  it("has started: the first event that cleared the floor ended 60 days ago", async () => {
+  it("has started and ended: the first event with 8 people ended 120 days ago", async () => {
     const access = await analyticsAccess(orgId, now)
     expect(access).toMatchObject({ org: false, reason: "free", firstFreeEventId: firstEventId, passEventIds: [] })
     expect(access.freeUntil!.getTime()).toBeLessThan(now.getTime())

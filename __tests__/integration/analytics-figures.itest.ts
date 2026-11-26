@@ -26,7 +26,7 @@ import { cleanup, closeDb, db, makeUser, testId } from "./helpers"
 const MIN = 60_000
 const DAY = 86_400_000
 /** Thirty days in milliseconds, written out. */
-const THIRTY_DAYS_MS = 2_592_000_000
+const NINETY_DAYS_MS = 7_776_000_000
 const NOW = new Date("2026-10-03T12:00:00Z")
 
 const users: string[] = []
@@ -180,24 +180,24 @@ describe("G3 scoping", () => {
 })
 
 describe("G6 the first event that clears the floor", () => {
-  it("skips one below the floor, another org's and one in progress; the window is the end + 30 days, written once", async () => {
+  it("skips one of 7, another org's and one in progress; the window is the end + 90 days, written once", async () => {
     const orgF = await org("af-first")
     const orgOther = await org("af-first-other")
-    const crowd = await people(6, "f")
+    const crowd = await people(9, "f")
     const small = await event(orgF, new Date("2026-06-01T10:00:00Z"))
-    await attend(small, crowd.slice(0, 4))
+    await attend(small, crowd.slice(0, 7))
     const others = await event(orgOther, new Date("2026-06-15T10:00:00Z"))
     await attend(others, crowd)
     const qualifying = await event(orgF, new Date("2026-07-01T10:00:00Z"), 3)
-    await attend(qualifying, crowd.slice(0, 5))
+    await attend(qualifying, crowd.slice(0, 8))
     const running = await event(orgF, new Date(NOW.getTime() - 60 * MIN), 4)
     await attend(running, crowd)
 
     const access = await analyticsAccess(orgF, NOW)
     expect(access.firstFreeEventId).toBe(qualifying.id)
-    expect(access.freeUntil?.getTime()).toBe(qualifying.end.getTime() + THIRTY_DAYS_MS)
+    expect(access.freeUntil?.getTime()).toBe(qualifying.end.getTime() + NINETY_DAYS_MS)
     const row = await db.organisations.findUniqueOrThrow({ where: { id: orgF }, select: { analytics_free_until: true, first_free_event_id: true } })
-    expect(row).toEqual({ analytics_free_until: new Date(qualifying.end.getTime() + THIRTY_DAYS_MS), first_free_event_id: qualifying.id })
+    expect(row).toEqual({ analytics_free_until: new Date(qualifying.end.getTime() + NINETY_DAYS_MS), first_free_event_id: qualifying.id })
 
     // Soft-deleting the event that started the clock does not restart it.
     await db.events.update({ where: { id: qualifying.id }, data: { deleted_at: NOW } })
@@ -205,15 +205,15 @@ describe("G6 the first event that clears the floor", () => {
     await attend(later, crowd)
     const again = await analyticsAccess(orgF, NOW)
     expect(again.firstFreeEventId).toBe(qualifying.id)
-    expect(again.freeUntil?.getTime()).toBe(qualifying.end.getTime() + THIRTY_DAYS_MS)
+    expect(again.freeUntil?.getTime()).toBe(qualifying.end.getTime() + NINETY_DAYS_MS)
   })
 
   it("is open at one millisecond before the window's end and locked at it", async () => {
     const orgB = await org("af-boundary")
-    const crowd = await people(5, "w")
+    const crowd = await people(8, "w")
     const e = await event(orgB, new Date("2026-08-01T10:00:00Z"), 2)
     await attend(e, crowd)
-    const end = e.end.getTime() + THIRTY_DAYS_MS
+    const end = e.end.getTime() + NINETY_DAYS_MS
     expect((await analyticsAccess(orgB, new Date(end - 1))).org).toBe(true)
     expect((await analyticsAccess(orgB, new Date(end))).org).toBe(false)
   })

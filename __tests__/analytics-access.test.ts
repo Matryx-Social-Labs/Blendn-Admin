@@ -1,8 +1,15 @@
-import { decideAccess, FREE_WINDOW_DAYS, mayOpenEvent, type AnalyticsAccess } from "@/lib/analytics-access"
+import { analyticsAccess, decideAccess, FREE_WINDOW_DAYS, mayOpenEvent, type AnalyticsAccess } from "@/lib/analytics-access"
 import { heldPart } from "@/lib/disclosure"
 import { held, mergeArrivals } from "@/lib/org-analytics"
 
-jest.mock("@/lib/db", () => ({ db: {} }))
+const mockDb = {
+  events: { findMany: jest.fn() },
+  organisations: { findUnique: jest.fn(), updateMany: jest.fn() },
+}
+const mockCounts = jest.fn()
+jest.mock("@/lib/db", () => ({ get db() { return mockDb } }))
+jest.mock("@/lib/attendee-counts", () => ({ distinctAttendeeCounts: (ids: string[]) => mockCounts(ids) }))
+jest.mock("@/lib/entitlements", () => ({ liveEntitlement: async () => null, eventPassesFor: async () => new Set<string>() }))
 
 /*
  * DK-U01: the plan gate, as a pure decision, with literal dates (never the
@@ -33,8 +40,39 @@ describe("decideAccess", () => {
     expect(decideAccess({ entitled: null, freeUntil: new Date(now.getTime() - DAY), now }).org).toBe(false)
   })
 
-  it("names a 30-day window", () => {
-    expect(FREE_WINDOW_DAYS).toBe(30)
+  it("names a 90-day window: three months free (DECISIONS 2026-11-25)", () => {
+    expect(FREE_WINDOW_DAYS).toBe(90)
+  })
+})
+
+describe("the first event that starts the clock (SCRUM-1269)", () => {
+  const seven = { id: "seven", end_time: new Date("2026-08-01T22:00:00Z") }
+  const eight = { id: "eight", end_time: new Date("2026-08-20T22:00:00Z") }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockDb.organisations.findUnique.mockResolvedValue({ analytics_free_until: null, first_free_event_id: null })
+    mockDb.organisations.updateMany.mockResolvedValue({ count: 1 })
+    mockDb.events.findMany.mockResolvedValueOnce([seven, eight]).mockResolvedValue([])
+    mockCounts.mockResolvedValue(new Map([["seven", 7], ["eight", 8]]))
+  })
+
+  it("is the first night with 8 people checked in; a night of 7 does not start it", async () => {
+    const access = await analyticsAccess("org", now)
+    expect(access.firstFreeEventId).toBe("eight")
+    // Literal: 20 Aug 22:00 + 90 days.
+    expect(access.freeUntil).toEqual(new Date("2026-11-18T22:00:00Z"))
+    expect(mockDb.organisations.updateMany).toHaveBeenCalledWith({
+      where: { id: "org", analytics_free_until: null },
+      data: { analytics_free_until: new Date("2026-11-18T22:00:00Z"), first_free_event_id: "eight" },
+    })
+  })
+
+  it("has not started while every night had fewer than 8", async () => {
+    mockCounts.mockResolvedValue(new Map([["seven", 7], ["eight", 7]]))
+    const access = await analyticsAccess("org", now)
+    expect(access).toMatchObject({ freeUntil: null, firstFreeEventId: null, org: true, reason: "free_window" })
+    expect(mockDb.organisations.updateMany).not.toHaveBeenCalled()
   })
 })
 
