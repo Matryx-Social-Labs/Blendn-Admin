@@ -320,6 +320,16 @@ describe("one page per user per 10 minutes", () => {
     expect(page).toHaveBeenCalledTimes(2)
   })
 
+  it("a send that throws gives the slot back, and a held-back page is logged with its key", async () => {
+    page.mockRejectedValueOnce(new Error("channel exploded"))
+    await holdSexualImage(SEXUAL_HIDE, "profile", PROFILE_KEY, USER)
+    await holdSexualImage(SEXUAL_HIDE, "blur", BLUR_KEY, USER)
+    await holdSexualImage(SEXUAL_HIDE, "lobby", LOBBY_KEY, USER)
+
+    expect(page).toHaveBeenCalledTimes(2)
+    expect(logger.info).toHaveBeenCalledWith("Sexual image page held back by the 10-minute cooldown", { userId: USER, objectKey: LOBBY_KEY, path: "lobby" })
+  })
+
   it("a page that failed does not start the cooldown", async () => {
     page.mockResolvedValueOnce("failed")
     await holdSexualImage(SEXUAL_HIDE, "profile", PROFILE_KEY, USER)

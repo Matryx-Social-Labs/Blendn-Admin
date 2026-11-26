@@ -3,7 +3,7 @@ import { auditInTx } from "../audit-log"
 import { db } from "../db"
 import { dashboardUrl } from "../email"
 import { logger } from "../logger"
-import { notifyStaff } from "../staff-alert"
+import { notifyStaff, type StaffNotice } from "../staff-alert"
 import type { ModerationCheck } from "./openai-moderation"
 
 /** Where the pulled image was. */
@@ -53,17 +53,22 @@ export async function holdSexualImage(check: ModerationCheck, path: ImagePath, o
     const now = Date.now()
     for (const [id, at] of lastPaged) if (now - at >= PAGE_COOLDOWN_MS) lastPaged.delete(id)
     // The cooldown leaves a pull to its audit row; one whose row was lost is paged regardless.
-    if (audited && lastPaged.has(userId)) return
+    if (audited && lastPaged.has(userId)) {
+      logger.info("Sexual image page held back by the 10-minute cooldown", { ...context, path })
+      return
+    }
     // Taken before the send, so a second pull arriving during it waits out the window too; given back unless a page went.
     lastPaged.set(userId, now)
-    const result = await notifyStaff(
-      `Sexual image pulled (${path}). A person must check it for a minor or a non-consensual image. key ${objectKey} user ${userId}\n` +
-        `More from this user in the next 10 minutes go to the audit log only.\n${dashboardUrl()}/dashboard/moderation`
-    )
-    if (result !== "sent") {
-      lastPaged.delete(userId)
-      logger.error("Sexual image hold: staff were not paged", { ...context, result })
+    let result: StaffNotice | undefined
+    try {
+      result = await notifyStaff(
+        `Sexual image pulled (${path}). A person must check it for a minor or a non-consensual image. key ${objectKey} user ${userId}\n` +
+          `More from this user in the next 10 minutes go to the audit log only.\n${dashboardUrl()}/dashboard/moderation`
+      )
+    } finally {
+      if (result !== "sent") lastPaged.delete(userId)
     }
+    if (result !== "sent") logger.error("Sexual image hold: staff were not paged", { ...context, result })
   } catch (error) {
     logger.error("Sexual image hold failed", { ...context, error: error instanceof Error ? error.message : String(error) })
   }
