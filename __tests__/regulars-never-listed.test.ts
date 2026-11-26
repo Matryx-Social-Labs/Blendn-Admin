@@ -187,6 +187,8 @@ describe("a venue never gets a list of its regulars (RG-G01)", () => {
       "lib/offers/person.ts",
       "lib/offers/venue.ts",
       "lib/regulars.ts",
+      // One person's own rows, for their own copy of their data (SCRUM-1249): never a venue's list.
+      "scripts/export-user.ts",
     ]
     const touching = files.filter((f) => TABLES.some((t) => touchesTable(f.code, t))).map((f) => f.rel)
     expect(touching.filter((rel) => !allowed.includes(rel))).toEqual([])
