@@ -72,12 +72,7 @@ function verified(raw: Uint8Array, headers: Headers, key: Buffer): boolean {
  */
 const eventSchema = z.object({
   type: z.string().nullish(),
-  data: z
-    .object({
-      to: z.array(z.string()).nullish(),
-      bounce: z.object({ type: z.string().nullish() }).nullish(),
-    })
-    .nullish(),
+  data: z.object({ to: z.array(z.string()).nullish(), bounce: z.object({ type: z.string().nullish() }).nullish() }).nullish(),
 })
 
 function reasonFor(event: z.infer<typeof eventSchema>): "bounce" | "complaint" | null {
