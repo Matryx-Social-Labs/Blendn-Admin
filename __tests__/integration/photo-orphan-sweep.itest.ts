@@ -5,22 +5,30 @@
  * (the real listing and delete are mocked); the references are real rows.
  */
 const bucket = new Map<string, Date>()
+/** The private bucket, where chat uploads live since SCRUM-427. */
+const chatBucket = new Map<string, Date>()
 const deleted: string[] = []
 let failOn: string | null = null
+let listFails = false
 jest.mock("@/lib/tigris", () => ({
   ...jest.requireActual("@/lib/tigris"),
-  listPublicObjects: jest.fn(async (prefix: string, token?: string) => {
-    const keys = [...bucket.keys()].filter((k) => k.startsWith(prefix)).sort()
+  listPublicObjects: jest.fn(async (prefix: string, token?: string, name?: string) => {
+    if (listFails) throw new Error("storage down")
+    const { bucketFor } = jest.requireActual("@/lib/tigris")
+    const store = name === undefined || name === bucketFor("profile") ? bucket : name === bucketFor("chat") ? chatBucket : null
+    if (!store) throw new Error(`no such bucket ${name}`)
+    const keys = [...store.keys()].filter((k) => k.startsWith(prefix)).sort()
     const start = token ? Number(token) : 0
     const page = keys.slice(start, start + 1000)
     return {
-      objects: page.map((key) => ({ key, lastModified: bucket.get(key)! })),
+      objects: page.map((key) => ({ key, lastModified: store.get(key)! })),
       next: start + 1000 < keys.length ? String(start + 1000) : undefined,
     }
   }),
   deleteFile: jest.fn(async (key: string) => {
     if (failOn === key) throw new Error("storage down")
     bucket.delete(key)
+    chatBucket.delete(key)
     deleted.push(key)
   }),
 }))
@@ -31,9 +39,14 @@ import {
   SANITY_FLOOR,
   orphanModeFromEnv,
   stopOrphanPhotoSweeper,
+  sweepAllOrphans,
+  sweepOrphanChatUploads,
   sweepOrphanPhotos,
 } from "@/lib/photo-orphans"
-import { db, closeDb, makeUser, onboard } from "./helpers"
+import { db as appDb } from "@/lib/db"
+import { logger } from "@/lib/logger"
+import { bucketFor } from "@/lib/tigris"
+import { db, cleanup, closeDb, makeEvent, makeUser, onboard } from "./helpers"
 
 const host = `https://${process.env.TIGRIS_BUCKET || "blendn-media"}.fly.storage.tigris.dev`
 const users: string[] = []
@@ -48,8 +61,10 @@ afterAll(async () => {
 })
 beforeEach(() => {
   bucket.clear()
+  chatBucket.clear()
   deleted.length = 0
   failOn = null
+  listFails = false
   stopOrphanPhotoSweeper()
 })
 
@@ -215,5 +230,259 @@ describe("the orphan photo sweep", () => {
     expect(second).toMatchObject({ listed: 200, complete: true })
     const third = await sweepOrphanPhotos({ now: NOW, mode: "log" })
     expect(third.listed).toBe(5000)
+  })
+})
+
+/*
+ * Raw chat uploads that were never sent (SCRUM-1387). Sending seals an upload:
+ * the message stores `chat/sealed/<uuid>` and the raw `chat/<uid>/<name>` is
+ * deleted. An upload nobody sends stays in the private bucket, original
+ * metadata and all, for ever. Only rows from before sealing name a raw key, so
+ * the sweep reads every place one can be named and keeps what any of them do.
+ */
+describe("the unsent chat upload sweep", () => {
+  const chatUsers: string[] = []
+  const chatEvents: string[] = []
+  const auditIds: string[] = []
+  const privateHost = `https://${bucketFor("chat")}.fly.storage.tigris.dev`
+  const putChat = (key: string, at: Date = OLD) => chatBucket.set(key, at)
+  const rawKey = (uid: string, name = "photo.jpg") => `chat/${uid}/1790641297767-cfg6ta-${name}`
+  const chatPass = (mode: "log" | "delete" = "delete") => sweepOrphanChatUploads({ now: NOW, mode })
+
+  async function sender() {
+    const id = await makeUser("chat")
+    chatUsers.push(id)
+    await onboard(id)
+    return id
+  }
+  async function dm(from: string, mediaUrl: string) {
+    const to = await sender()
+    const [user1_id, user2_id] = [from, to].sort()
+    const c = await db.private_conversations.create({ data: { user1_id, user2_id, user1_pseudonym: "A", user2_pseudonym: "B" }, select: { id: true } })
+    await db.private_messages.create({ data: { conversation_id: c.id, sender_id: from, message_text: "", media_url: mediaUrl, media_type: "image" } })
+  }
+  async function roomMessage(from: string, metadata: object) {
+    const eventId = await makeEvent(from)
+    chatEvents.push(eventId)
+    const room = await db.chat_groups.create({ data: { kind: "event", event_id: eventId, name: "Room" }, select: { id: true } })
+    await db.chat_messages.create({ data: { chat_group_id: room.id, user_id: from, content: "", metadata } })
+    return eventId
+  }
+  /** The task's read-back, corrected: a room message's media is in `metadata`, a DM's in `media_url`. */
+  async function rowsNaming(key: string) {
+    const [{ n }] = await db.$queryRaw<{ n: bigint }[]>`
+      SELECT (SELECT count(*) FROM private_messages WHERE media_url LIKE '%' || ${key} || '%')
+           + (SELECT count(*) FROM chat_messages WHERE metadata::text LIKE '%' || ${key} || '%') AS n`
+    return Number(n)
+  }
+
+  afterAll(async () => {
+    await db.retained_report_media.deleteMany({ where: { user_id: { in: chatUsers } } })
+    await db.audit_logs.deleteMany({ where: { id: { in: auditIds } } })
+    await cleanup(chatUsers, chatEvents)
+  })
+  afterEach(() => jest.restoreAllMocks())
+
+  it("deletes a 4-day-old upload no row names, from the chat bucket, and only counts it in log mode", async () => {
+    const uid = await sender()
+    const key = rawKey(uid)
+    putChat(key, new Date(NOW.getTime() - 4 * 24 * 60 * 60 * 1000))
+
+    const dry = await chatPass("log")
+    expect(dry).toMatchObject({ mode: "log", judged: 1, orphans: 1, deleted: 0, refused: false })
+    expect(chatBucket.has(key)).toBe(true)
+
+    const info = jest.spyOn(logger, "info")
+    const result = await chatPass("delete")
+    expect(result).toMatchObject({ judged: 1, orphans: 1, deleted: 1 })
+    expect(deleted).toEqual([key])
+    expect([...chatBucket.keys()].filter((k) => k.startsWith(`chat/${uid}/`))).toEqual([])
+    expect(await rowsNaming(key)).toBe(0)
+    // The log line says which sweep it was, so staging's dry run reads chat apart from profile.
+    expect(info).toHaveBeenCalledWith(expect.stringContaining("chat"), expect.objectContaining({ orphans: 1, deleted: 1 }))
+  })
+
+  it("lists the private bucket, where chat lives, not the public one", async () => {
+    const uid = await sender()
+    bucket.set(rawKey(uid), OLD)
+    expect(await chatPass()).toMatchObject({ listed: 0, deleted: 0 })
+    expect(bucket.has(rawKey(uid))).toBe(true)
+  })
+
+  it("keeps an upload a DM names, however the URL is spelled", async () => {
+    const uid = await sender()
+    const [virtual, query, pathStyle, oldPublic] = ["a.jpg", "b.jpg", "c.jpg", "d.jpg"].map((n) => rawKey(uid, n))
+    await dm(uid, `${privateHost}/${virtual}`)
+    await dm(uid, `${privateHost}/${query}?X-Amz-Signature=abc&X-Amz-Expires=900`)
+    await dm(uid, `https://fly.storage.tigris.dev/${bucketFor("chat")}/${pathStyle}`)
+    await dm(uid, `https://${bucketFor("profile")}.fly.storage.tigris.dev/${oldPublic}`)
+    const orphan = rawKey(uid, "orphan.jpg")
+    for (const k of [virtual, query, pathStyle, oldPublic, orphan]) putChat(k)
+    await chatPass()
+    expect(deleted).toEqual([orphan])
+    expect(await rowsNaming(virtual)).toBe(1)
+  })
+
+  it("keeps an upload somebody else's DM names: before SCRUM-426 a message could carry anyone's URL", async () => {
+    const owner = await sender()
+    const other = await sender()
+    const key = rawKey(owner, "shared.jpg")
+    await dm(other, `${privateHost}/${key}`)
+    putChat(key)
+    await chatPass()
+    expect(deleted).toEqual([])
+  })
+
+  it("keeps an upload a room message's metadata names, under mediaUrl or any other field", async () => {
+    const uid = await sender()
+    const [media, elsewhere] = [rawKey(uid, "room.jpg"), rawKey(uid, "nested.jpg")]
+    await roomMessage(uid, { mediaUrl: `${privateHost}/${media}` })
+    await roomMessage(uid, { attachment: { url: `${privateHost}/${elsewhere}` } })
+    putChat(media)
+    putChat(elsewhere)
+    await chatPass()
+    expect(deleted).toEqual([])
+  })
+
+  it("keeps an upload a Lobby post names", async () => {
+    const uid = await sender()
+    const key = rawKey(uid, "lobby.jpg")
+    const eventId = await makeEvent(uid)
+    chatEvents.push(eventId)
+    await db.board_posts.create({ data: { event_id: eventId, author_id: uid, kind: "chat", body: "Look", photo_url: `${privateHost}/${key}`, photo_status: "pending" } })
+    putChat(key)
+    await chatPass()
+    expect(deleted).toEqual([])
+  })
+
+  it("keeps an image a report holds past its author's account (a bare key in retained_report_media)", async () => {
+    const uid = await sender()
+    const key = rawKey(uid, "held.jpg")
+    await db.retained_report_media.create({
+      data: { user_id: uid, object_key: key, message_id: "00000000-0000-4000-8000-000000000001", message_type: "private", account_deleted_at: OLD, erase_by: new Date(NOW.getTime() + ORPHAN_GRACE_MS) },
+    })
+    putChat(key)
+    await chatPass()
+    expect(deleted).toEqual([])
+  })
+
+  it("keeps an image a sexual image hold names in its audit row", async () => {
+    const uid = await sender()
+    const key = rawKey(uid, "hold.jpg")
+    const row = await db.audit_logs.create({ data: { action: "moderation.sexual_image_hold", resource: "user", resource_id: uid, details: { objectKey: key, path: "lobby", category: "sexual" } }, select: { id: true } })
+    auditIds.push(row.id)
+    putChat(key)
+    await chatPass()
+    expect(deleted).toEqual([])
+  })
+
+  it("keeps an upload a reference names percent-encoded", async () => {
+    const uid = await sender()
+    const key = rawKey(uid, "encoded.jpg")
+    await dm(uid, `${privateHost}/${encodeURIComponent(key)}`)
+    putChat(key)
+    await chatPass()
+    expect(deleted).toEqual([])
+  })
+
+  it("keeps an upload younger than the grace window: a send can still come", async () => {
+    const uid = await sender()
+    const young = rawKey(uid, "young.jpg")
+    putChat(young, new Date(NOW.getTime() - 60 * 60 * 1000))
+    expect(await chatPass()).toMatchObject({ judged: 0, deleted: 0 })
+    expect(chatBucket.has(young)).toBe(true)
+  })
+
+  it("never touches a sealed copy, new or legacy: unsent ones are discardSealedChatMedia's", async () => {
+    const uid = await sender()
+    const sealed = "chat/sealed/0b4a7c9e-1d2f-4a3b-8c5d-6e7f8a9b0c1d"
+    const legacy = `chat/${uid}/1790641297767-cfg6ta-sealed`
+    putChat(sealed)
+    putChat(legacy)
+    expect(await chatPass()).toMatchObject({ judged: 0, deleted: 0 })
+    expect(deleted).toEqual([])
+  })
+
+  it("keeps a key whose owner is not a user of this database: the bucket may not be this database's", async () => {
+    const stranger = "cmnotauserhere00000000000"
+    putChat(rawKey(stranger))
+    const error = jest.spyOn(logger, "error")
+    const result = await chatPass()
+    expect(result).toMatchObject({ judged: 1, orphans: 0, deleted: 0 })
+    expect(chatBucket.has(rawKey(stranger))).toBe(true)
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("not a user"), expect.objectContaining({ unknown: 1 }))
+  })
+
+  it("keeps a key it cannot read exactly: a name outside the upload alphabet, a nested name, a loose file", async () => {
+    const uid = await sender()
+    for (const k of [`chat/${uid}/a b.jpg`, `chat/${uid}/x/y.jpg`, `chat/${uid}/caf%C3%A9.jpg`, "chat/loose.jpg", `chat/${uid}/`]) putChat(k)
+    expect(await chatPass()).toMatchObject({ judged: 0, deleted: 0 })
+  })
+
+  it("deletes a large backlog rather than refusing it: an old raw key is an orphan by construction", async () => {
+    const uid = await sender()
+    const keys = Array.from({ length: SANITY_FLOOR + 10 }, (_, i) => rawKey(uid, `b${i}.jpg`))
+    keys.forEach((k) => putChat(k))
+    const result = await chatPass()
+    expect(result).toMatchObject({ refused: false, orphans: SANITY_FLOOR + 10, deleted: SANITY_FLOOR + 10 })
+  })
+
+  it("fails closed when the bucket cannot be listed: nothing deleted, and the scheduler's caller hears it", async () => {
+    const uid = await sender()
+    putChat(rawKey(uid))
+    listFails = true
+    await expect(chatPass()).rejects.toThrow("storage down")
+    expect(deleted).toEqual([])
+  })
+
+  it("fails closed when the references cannot be read: nothing deleted", async () => {
+    const uid = await sender()
+    putChat(rawKey(uid))
+    jest.spyOn(appDb, "$queryRaw").mockRejectedValueOnce(new Error("db down"))
+    await expect(chatPass()).rejects.toThrow("db down")
+    expect(deleted).toEqual([])
+    expect(chatBucket.has(rawKey(uid))).toBe(true)
+  })
+
+  it("refuses the pass when a row names chat/ in a form it cannot read: that is a reference it would miss", async () => {
+    const uid = await sender()
+    const unreadable = `https://media.example/chat/${uid}`
+    await dm(uid, unreadable)
+    putChat(rawKey(uid))
+    const error = jest.spyOn(logger, "error")
+    try {
+      const result = await chatPass()
+      expect(result).toMatchObject({ refused: true, deleted: 0 })
+      expect(chatBucket.has(rawKey(uid))).toBe(true)
+      expect(error).toHaveBeenCalledWith(expect.stringContaining("refused"), expect.anything())
+    } finally {
+      await db.private_messages.deleteMany({ where: { media_url: unreadable } })
+    }
+  })
+
+  it("shares one delete budget with the profile sweep per pass", async () => {
+    const uid = await sender()
+    const owner = await person()
+    const refs = Array.from({ length: MAX_DELETES_PER_PASS * 3 }, (_, i) => `profile/${owner}/ref${i}-sealed`)
+    await db.profiles.update({ where: { id: owner }, data: { photos: refs.map(url) } })
+    refs.forEach((k) => put(k))
+    Array.from({ length: MAX_DELETES_PER_PASS }, (_, i) => put(`profile/${owner}/o${i}-sealed`))
+    const chatKeys = Array.from({ length: 5 }, (_, i) => rawKey(uid, `c${i}.jpg`))
+    chatKeys.forEach((k) => putChat(k))
+
+    const first = await sweepAllOrphans({ now: NOW, mode: "delete" })
+    expect(first.profile.deleted + first.chat.deleted).toBe(MAX_DELETES_PER_PASS)
+    expect(first.chat.deleted).toBe(0)
+    stopOrphanPhotoSweeper()
+    const second = await sweepAllOrphans({ now: NOW, mode: "delete" })
+    expect(second.chat.deleted).toBe(5)
+  })
+
+  it("keeps its own cursor: a profile pass part-way through its bucket does not move where chat reads", async () => {
+    const uid = await sender()
+    for (let i = 0; i < 5200; i++) put(`profile/young/${String(i).padStart(5, "0")}`, YOUNG)
+    expect(await sweepOrphanPhotos({ now: NOW, mode: "log" })).toMatchObject({ complete: false })
+    putChat(rawKey(uid))
+    expect(await chatPass("log")).toMatchObject({ listed: 1, complete: true })
   })
 })
