@@ -1,5 +1,4 @@
 import { reachedThroughBuilding, visibleEventsWhere } from "@/lib/event-visibility"
-import { hostNotSuspended } from "@/lib/event-access"
 import { actorFor } from "@/lib/org-membership"
 import { db } from "@/lib/db"
 
@@ -45,7 +44,7 @@ describe("visibleEventsWhere", () => {
     expect(mockActorFor).not.toHaveBeenCalled()
   })
 
-  it("scopes an organiser to their organisations, plus what they created", async () => {
+  it("scopes an organiser to their organisations, never to what they created (SCRUM-942)", async () => {
     mockActorFor.mockResolvedValue({ id: "user-1", role: "organizer", orgIds: ["org-1", "org-2"], editOrgIds: ["org-1", "org-2"] })
 
     const where = await visibleEventsWhere({ id: "user-1", role: "organizer" })
@@ -55,7 +54,6 @@ describe("visibleEventsWhere", () => {
       kind: "event",
       OR: [
         { organizer_org_id: { in: ["org-1", "org-2"] } },
-        { organizer_id: "user-1", organizer_org_id: null, ...hostNotSuspended },
       ],
     })
   })
@@ -84,7 +82,6 @@ describe("visibleEventsWhere", () => {
     expect(where.OR).toEqual([
       { organizer_org_id: { in: ["org-9"] } },
       { venue_id: "venue-1", start_time: { gte: claimedAt } },
-      { organizer_id: "owner-1", organizer_org_id: null, ...hostNotSuspended },
     ])
   })
 
@@ -98,7 +95,6 @@ describe("visibleEventsWhere", () => {
     expect(where.OR).toEqual([
       { organizer_org_id: { in: ["org-9"] } },
       { venue_id: "venue-1", start_time: { gte: claimedAt } },
-      { organizer_id: "user-1", organizer_org_id: null, ...hostNotSuspended },
     ])
   })
 
@@ -107,23 +103,23 @@ describe("visibleEventsWhere", () => {
     const where = await visibleEventsWhere({ id: "user-1", role: "organizer" })
     expect(where.OR).toEqual([
       { organizer_org_id: { in: ["org-1"] } },
-      { organizer_id: "user-1", organizer_org_id: null, ...hostNotSuspended },
     ])
   })
 
-  it("falls back to authorship when somebody belongs to no organisation", async () => {
+  it("shows nothing to somebody who belongs to no organisation, not even what they created (SCRUM-942)", async () => {
     /*
-     * A1: `organizer_org_id` went unwritten for a long time, so 64% of
-     * production events have none. Without this clause the person who created
-     * an event would open the list and not find it — which is a worse failure
-     * than seeing a row you cannot open, and is why the fallback is here and
-     * deliberately NOT in `eventPermissions`.
+     * The creator arm (`organizer_id = me AND organizer_org_id IS NULL`) was
+     * kept for events from before organisations. Production is rebuilt from
+     * migrations and every non-admin create writes an organisation, so it only
+     * ever re-opened a row `eventPermissions` refuses. Prisma reads `OR: []`
+     * as false: an empty list, never an unscoped one.
      */
     mockActorFor.mockResolvedValue({ id: "lonely-1", role: "organizer", orgIds: [], editOrgIds: [] })
 
     const where = await visibleEventsWhere({ id: "lonely-1", role: "organizer" })
 
-    expect(where.OR).toEqual([{ organizer_id: "lonely-1", organizer_org_id: null, ...hostNotSuspended }])
+    expect(where.OR).toEqual([])
+    expect(JSON.stringify(where)).not.toContain("organizer_id")
   })
 
   it("lists an org's events for any member, whatever User.role says, as the resolver now grants them (SCRUM-1246)", async () => {
@@ -132,7 +128,6 @@ describe("visibleEventsWhere", () => {
       const where = await visibleEventsWhere({ id: "m-1", role })
       expect(where.OR).toEqual([
         { organizer_org_id: { in: ["org-1"] } },
-        { organizer_id: "m-1", organizer_org_id: null, ...hostNotSuspended },
       ])
     }
   })
@@ -163,9 +158,13 @@ describe("reachedThroughBuilding", () => {
     }
   })
 
-  it("never for an event their org runs, or one they created", () => {
+  it("never for an event their org runs", () => {
     expect(reachedThroughBuilding("organizer", actor, ours)).toBe(false)
-    expect(reachedThroughBuilding("organizer", actor, { organizer_id: "u1", organizer_org_id: null })).toBe(false)
+  })
+
+  it("holds back one they created but their org does not run: creating a row is not running it (SCRUM-942)", () => {
+    expect(reachedThroughBuilding("organizer", actor, { organizer_id: "u1", organizer_org_id: null })).toBe(true)
+    expect(reachedThroughBuilding("organizer", actor, { organizer_id: "u1", organizer_org_id: "org-host" })).toBe(true)
   })
 
   it("never for the platform's admin", () => {
