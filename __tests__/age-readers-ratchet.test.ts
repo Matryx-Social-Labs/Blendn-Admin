@@ -35,6 +35,6 @@ const KNOWN = [
 ]
 
 it("no new file reads an age without deciding whether it is a gate or goes through roomPersonFacts", () => {
-  const found = execFileSync("git", ["grep", "-l", "ageFrom(", "--", "app", "lib"], { encoding: "utf8" }).trim().split("\n").sort()
+  const found = execFileSync("git", ["grep", "--untracked", "-l", "ageFrom(", "--", "app", "lib"], { encoding: "utf8" }).trim().split("\n").sort()
   expect(found).toEqual([...KNOWN].sort())
 })

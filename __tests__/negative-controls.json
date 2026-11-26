@@ -2985,6 +2985,18 @@
       "mutation": "(A3) the call site passes 'organizer' for every application. (A5) the approval's reviewed_at write removed.",
       "observed": "A3: 1 of 8 failing (the venue owner). A5: 2 of 8. Restored each; 8 of 8 on blendn_growth09a.",
       "date": "2026-11-26"
+    },
+    "age-readers-ratchet.test.ts": {
+      "guards": "D-030 (SCRUM-1384): the files that call ageFrom( under app/ and lib/ are a fixed list, so a new surface that reads a person's age decides whether it is a gate on the caller's own age or a room row that must send roomPersonFacts' ageBand instead.",
+      "mutation": "Add an untracked lib/zz-nc.ts calling ageFrom(null), run, delete it. The first attempt passed vacuously: git grep skips untracked files, so the guard now passes --untracked.",
+      "observed": "1 of 1 failing, naming lib/zz-nc.ts; 1 of 1 after deleting it.",
+      "date": "2026-11-27"
+    },
+    "room-person-facts.itest.ts": {
+      "guards": "D-030 (SCRUM-1384) through the real routes on a db:migrate database: before a reveal matches, people, checkins, users/:id, profiles/:id and me/preview send age and location null, the age band only once 3 attendees of the event share it, the new/regular chip, and no memberSince, stats or createdAt; a host gets age, band and chip null; a revealed person keeps the exact age. Reads tenure back against COUNT(DISTINCT event_id) in event_check_ins.",
+      "mutation": "(a) lib/matches.ts sends `age: m.age` again; (b) roomPersonFacts skips the operatesEvent check; (c) AGE_BAND_FLOOR 3 -> 2 (age-band.test.ts).",
+      "observed": "(a)+(b) together: 5 of 15 failing: the floor pair, the unrevealed matches row, and the host's rows and card. (c): 2 of 12 in age-band.test.ts. Restored from copies; 15 of 15 and 12 of 12 on blendn_security_20.",
+      "date": "2026-11-27"
     }
   },
   "grandfathered": [

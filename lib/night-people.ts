@@ -8,6 +8,7 @@ import { visibleInRoom } from "@/lib/identity"
 import { tierBBudget } from "@/lib/matching"
 import { displayTraitsOf, expandInterests, interestParents, iplTeamIds, type TraitProfile } from "@/lib/matches"
 import { NO_TRAITS, personCard, traitHolders, viewerTierB } from "@/lib/overlaps"
+import { roomPersonFacts, type RoomPersonFacts } from "@/lib/public-profile"
 import { idForViewer, roomMemberFromRef } from "@/lib/room-handle"
 import { eventRoomBan } from "@/lib/room-kind"
 import { notStrangersTo } from "@/lib/room-people"
@@ -64,7 +65,10 @@ export interface NightPerson {
   displayName: string
   /** Only where the room names them; null beside a pseudonym. */
   photo: string | null
+  /** Only where the room names them; null beside a pseudonym (D-030), where `ageBand` and `tenure` say what it may. */
   age: number | null
+  ageBand: RoomPersonFacts["ageBand"]
+  tenure: RoomPersonFacts["tenure"]
   /** Still checked in. False is "Was here". */
   insideNow: boolean
   /** Whether *you* liked them here. Never whether they liked you. */
@@ -209,7 +213,7 @@ async function cardsFor(
   if (page.length === 0) return []
   const ids = page.map((r) => r.user_id)
 
-  const [users, pseudonyms, visible, likes] = await Promise.all([
+  const [users, pseudonyms, visible, likes, facts] = await Promise.all([
     db.user.findMany({
       where: { id: { in: ids } },
       select: {
@@ -226,6 +230,8 @@ async function cardsFor(
     // The roster's rule: revealed here (friends never reach this page).
     visibleInRoom(viewerId, eventId, ids),
     db.event_likes.findMany({ where: { event_id: eventId, liker_id: viewerId, liked_id: { in: ids } }, select: { liked_id: true } }),
+    // What a row says before a reveal (D-030): the roster's band and chip, from the one helper.
+    roomPersonFacts(viewerId, eventId, ids),
   ])
   const userOf = new Map(users.map((u) => [u.id, u]))
   const pseudonymOf = new Map(pseudonyms.map((p) => [p.user_id, p.anonymous_name || "Attendee"]))
@@ -239,7 +245,9 @@ async function cardsFor(
       userId: idForViewer(viewerId, eventId, r.user_id),
       displayName: named ? u!.name! : pseudonymOf.get(r.user_id) ?? "Attendee",
       photo: named ? u?.profile?.photos?.[0] ?? null : null,
-      age: ageFrom(u?.profile),
+      age: named ? ageFrom(u?.profile) : null,
+      ageBand: facts.get(r.user_id)?.ageBand ?? null,
+      tenure: facts.get(r.user_id)?.tenure ?? null,
       insideNow: r.inside_now,
       youLiked: liked.has(r.user_id),
       overlap: overlapOf.get(r.user_id) ?? null,

@@ -19,6 +19,7 @@ import { roomHandle } from "@/lib/room-handle"
 import { waveStandings } from "@/lib/waves"
 import { notHostBannedFrom } from "@/lib/room-kind"
 import { visibleInRoom } from "@/lib/identity"
+import { roomPersonFacts, type RoomPersonFacts } from "@/lib/public-profile"
 import { IPL_PARENT_SLUG } from "@/lib/about-you"
 import {
   badgesFor,
@@ -72,15 +73,15 @@ export interface MatchCard {
    */
   sharedWorkField: boolean
   /**
-   * Whole years, derived. Never a birth date.
-   *
-   * Already public: `publicProfileFields` on `/profiles/[userId]` returns it to
-   * any authenticated caller, outside the identity gate. The roster simply did
-   * not carry it, so a card could not say what the profile one tap away said
-   * anyway -- and on a roster where most people share no interests, one more
-   * true fact is the difference between a card you can act on and a name.
+   * Whole years, derived. Never a birth date. Only for somebody the room names
+   * to you (`revealed`); null before a reveal (D-030, SCRUM-1384), when the
+   * card carries `ageBand` instead. The key stays for installed builds.
    */
   age: number | null
+  /** The wide band 3+ people at this event share, or null (`roomPersonFacts`). Null to a host. */
+  ageBand: RoomPersonFacts["ageBand"]
+  /** "new" / "regular": came back for 2+ events (`roomPersonFacts`). Null to a host, who sees totals only. */
+  tenure: RoomPersonFacts["tenure"]
   insideNow: boolean
   /** Whether *you* have liked them. Never whether they have liked you. Kept for installed builds (SCRUM-1042). */
   youLiked: boolean
@@ -600,7 +601,7 @@ export async function matchesForEvent(
   const pageIds = page.map((m) => m.userId)
   // A host is never a reader of the room's words, nor of who arrived when (`operatesEvent`).
   const operating = operatesEvent(viewerId, eventId)
-  const [recognised, pseudonyms, answers, operates, standings] = await Promise.all([
+  const [recognised, pseudonyms, answers, operates, standings, facts] = await Promise.all([
     visibleInRoom(viewerId, eventId, pageIds),
     pageIds.length
       ? db.chat_group_members.findMany({
@@ -615,6 +616,8 @@ export async function matchesForEvent(
     operating,
     // The page's waves, both ways (SCRUM-1042): Wave / Wave back / ✓ Waved / Say hi on the card. Waves only, never a like.
     waveStandings(eventId, viewerId, pageIds),
+    // What a row says before a reveal (D-030): the band and the chip, for the page only.
+    roomPersonFacts(viewerId, eventId, pageIds),
   ])
   const pseudonymOf = new Map(pseudonyms.map((p) => [p.user_id, p.anonymous_name || "Attendee"]))
   const onPage = new Set(pageIds)
@@ -695,7 +698,9 @@ export async function matchesForEvent(
       // decides whether the field shows at all (`personCard`, step 10 review M3).
       workField: card.showWorkField ? workFieldLabel(m.workField) : null,
       sharedWorkField: card.showWorkField && m.sharedWorkField,
-      age: m.age,
+      age: m.revealed ? m.age : null,
+      ageBand: facts.get(m.userId)?.ageBand ?? null,
+      tenure: facts.get(m.userId)?.tenure ?? null,
       insideNow: m.insideNow,
       // Already floored by `rankMatches` — this only carries it to the card.
       sharedEvents: m.sharedEvents,

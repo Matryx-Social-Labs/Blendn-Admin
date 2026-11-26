@@ -38,6 +38,11 @@ jest.mock("@/lib/anonymous-names", () => ({
   pseudonymsForEvent: jest.fn().mockResolvedValue(new Map([["u2", "Cosmic Panda"]])),
 }))
 
+// The band and chip are `roomPersonFacts`' (room-person-facts.itest.ts); here only that the row carries them.
+jest.mock("@/lib/public-profile", () => ({
+  roomPersonFacts: jest.fn(async (_v: string, _e: string, ids: string[]) => new Map(ids.map((id) => [id, { ageBand: "25-34", tenure: "new" }]))),
+}))
+
 jest.mock("@/lib/location", () => ({
   normalizeLocationToCity: jest.fn().mockImplementation(async (l: string | null) => l),
   geocodeBudget: jest.fn(() => ({ take: () => true })),
@@ -184,6 +189,8 @@ describe("GET /events/:id/checkins — what it discloses", () => {
     expect(a.name).toBe("Cosmic Panda")
     expect(a).not.toHaveProperty("image")
     expect(JSON.stringify(body)).not.toMatch(/photos|image|Ananya/)
+    // Before a reveal: the band and the chip, never the age or the city (D-030).
+    expect(a).toMatchObject({ age: null, location: null, ageBand: "25-34", tenure: "new" })
   })
 
   it("shows the real name and photo of someone who chose to, in this room only", async () => {
@@ -200,6 +207,7 @@ describe("GET /events/:id/checkins — what it discloses", () => {
     const [a] = body.data.attendees
     expect(a.name).toBe("Ananya")
     expect(a.image).toBe("https://cdn/a.jpg")
+    expect(a).toMatchObject({ age: 29, location: "Bengaluru" })
     const where = mockDb.event_match_preferences.findMany.mock.calls[0][0].where
     expect(where).toMatchObject({ event_id: EVENT, revealed: true })
   })

@@ -78,13 +78,6 @@ beforeAll(async () => {
       check_in_time: new Date(Date.now() - 50 * 3_600_000),
     },
   })
-  // C came on another day of THIS event as well: one event over two days, still new.
-  const otherDay = await db.event_occurrences.create({
-    data: { event_id: eventId, occurs_on: new Date(Date.now() - 86_400_000), start_time: new Date(Date.now() - 86_400_000), end_time: new Date(Date.now() - 80_000_000) },
-  })
-  await db.event_check_ins.create({
-    data: { event_id: eventId, occurrence_id: otherDay.id, user_id: c.id, kind: "attendee", status: "checked_out", check_in_time: new Date(Date.now() - 85_000_000) },
-  })
 
   for (const p of [viewer, a, b, d, host]) await arrive(eventId, occurrenceId, p)
   // B chose "show who I am" here.
@@ -110,6 +103,13 @@ describe("the band waits for a third person in it", () => {
   })
 
   it("shows 25-34 on every row in it once C checks in", async () => {
+    // C came on another day of THIS event as well: one event over two days, still new.
+    const otherDay = await db.event_occurrences.create({
+      data: { event_id: eventId, occurs_on: new Date(Date.now() - 86_400_000), start_time: new Date(Date.now() - 86_400_000), end_time: new Date(Date.now() - 80_000_000) },
+    })
+    await db.event_check_ins.create({
+      data: { event_id: eventId, occurrence_id: otherDay.id, user_id: c.id, kind: "attendee", status: "checked_out", check_in_time: new Date(Date.now() - 85_000_000) },
+    })
     await arrive(eventId, occurrenceId, c)
     const after = await rows(viewer)
     expect(after.get(h(a))).toMatchObject({ age: null, ageBand: "25-34" })

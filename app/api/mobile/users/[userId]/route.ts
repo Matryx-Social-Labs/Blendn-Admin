@@ -6,7 +6,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockedEitherWay, conversationPair } from "@/lib/conversations"
 import { mayShowRealName } from "@/lib/conversation-identity"
 import { roomPseudonymOrNull } from "@/lib/anonymous-names"
-import { anonymousCard, personCardBody, publicUserSelect } from "@/lib/public-profile"
+import { anonymousCard, personCardBody, publicUserSelect, roomPersonFacts } from "@/lib/public-profile"
 import { friendOfferFor } from "@/lib/friend-offer"
 import { identityForRef, nonEventRoomCard } from "@/lib/identity"
 import { operatesEvent, tonightFor } from "@/lib/tonight"
@@ -116,8 +116,10 @@ export async function GET(
     if (card || (room && !identified)) {
       const pseudonym = card ? (card.pseudonym ? card.name : null) : await roomPseudonymOrNull(room!, userId)
       const name = card ? card.name : (pseudonym ?? "Attendee")
+      // A crew's, Blend's or post's card has no event: a chip, never a band (`roomPersonFacts`).
+      const facts = (await roomPersonFacts(authUser.userId, room, [userId])).get(userId)!
       return successResponse({
-        ...(await anonymousCard(user, ref, { name, pseudonym: pseudonym !== null })),
+        ...anonymousCard(ref, { name, pseudonym: pseudonym !== null }, facts),
         ...(tonight && { tonight }),
         ...(wave && { wave }),
       })
