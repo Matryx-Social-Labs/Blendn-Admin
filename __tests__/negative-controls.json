@@ -455,6 +455,12 @@
       "observed": "M1169g: 1 of 10 failing ('allows staging and production only when --environment names the same Railway environment'). M1169h: 1 of 10 ('refuses a correction with no staff address, or one off the company domain'). Each reverted; 10 of 10.",
       "date": "2026-11-27"
     },
+    "self-profile.test.ts": {
+      "guards": "profileForSelfResponse withholds profiles.under_18_since from the owner's own profile (SCRUM-1169), as it withholds the birth date",
+      "mutation": "M1169s (2026-11-27): the destructure without under_18_since.",
+      "observed": "M1169s: 1 of 11 failing ('removes the under-18 stamp …'). Reverted; 11 of 11. The e2e mobile contract (GET /profiles/:me) caught the same leak on CI before this test existed.",
+      "date": "2026-11-27"
+    },
     "venues-route.test.ts": {
       "guards": "GET /venues tells no live count to a viewer the venue page would refuse: unknown age, under 18, stamped under 18 with an adult age (SCRUM-1169), not onboarded; and never reads the count for them",
       "mutation": "M1169n (2026-11-27): mayCountLive = isAdult(viewerAge), without mayParticipate.",

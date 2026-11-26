@@ -25,13 +25,21 @@ import { normalizeLocationToCity } from "@/lib/location"
  * it is one name long.
  */
 export function profileForSelfResponse<
-  T extends { date_of_birth?: Date | null; age?: number | null; tier_b_changes?: Date[]; home_city_id?: string | null; signup_source?: string | null },
+  T extends {
+    date_of_birth?: Date | null
+    age?: number | null
+    tier_b_changes?: Date[]
+    home_city_id?: string | null
+    signup_source?: string | null
+    under_18_since?: Date | null
+  },
 >(profile: T | null | undefined) {
   if (!profile) return null
   // `tier_b_changes` is the cooldown's own ledger (lib/tier-b.ts), not the person's data to read back.
   // `home_city_id` is the catalogue's key; the client's word for it is `homeCitySlug`.
   // `signup_source` is analytics (SCRUM-1273): the response keeps the shape installed builds parse.
-  const { date_of_birth: _dob, tier_b_changes: _ledger, home_city_id: _homeCity, signup_source: _source, ...rest } = profile
+  // `under_18_since` is the staff-side stamp (SCRUM-1169); the refusals carry what the person reads.
+  const { date_of_birth: _dob, tier_b_changes: _ledger, home_city_id: _homeCity, signup_source: _source, under_18_since: _stamp, ...rest } = profile
   // Derived, so the number is true today rather than on the day they signed up.
   // A stale `age` here would disagree with every other route in the API.
   // The sign is the editor's prefill — derived for the owner only, stored only

@@ -243,8 +243,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * is one name long.
      */
     // `tier_b_changes` is the cooldown's ledger (lib/tier-b.ts), withheld with the birth date; `signup_source` is
-    // analytics (SCRUM-1273), withheld so installed builds read the shape they always did.
-    const { date_of_birth: _dob, tier_b_changes: _ledger, home_city_id: homeCityId, signup_source: _source, ...selfProfileFields } = {
+    // analytics (SCRUM-1273), withheld so installed builds read the shape they always did; `under_18_since` is the
+    // staff-side stamp (SCRUM-1169), withheld the same way.
+    const { date_of_birth: _dob, tier_b_changes: _ledger, home_city_id: homeCityId, signup_source: _source, under_18_since: _stamp, ...selfProfileFields } = {
       ...p,
       age: profileAge,
       // The editor's prefill, never stored until they pick it (lib/about-you.ts).
