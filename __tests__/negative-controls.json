@@ -35,6 +35,12 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "domain-email-gate.test.ts": {
+      "guards": "SCRUM-1280: domain verification to a suppressed address says to use another address or the DNS record, never 'try again', and never says whether it bounced or complained.",
+      "mutation": "lib/org-actions.ts: the suppressed branch disabled (`if (false)`).",
+      "observed": "1 of 7 failing. Restored; 7/7.",
+      "date": "2026-11-26"
+    },
     "email-send.test.ts": {
       "guards": "SCRUM-1280: sendEmail retries a 429, a 5xx or a network throw once (about 1 s with jitter, one Idempotency-Key), never a 4xx; sends reply_to only with EMAIL_REPLY_TO; makes every header value one line; skips a suppressed address by the scope table (bounce blocks all, complaint all but the reset, unsubscribe only lifecycle); sends and warns when the lookup throws.",
       "mutation": "lib/email.ts: M1 one attempt only; M2 a complaint blocks the reset; M3 an unsubscribe blocks every stream; M4 a throwing lookup suppresses; M5 headers passed raw; M6 a 4xx retried.",

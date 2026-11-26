@@ -663,6 +663,11 @@ export async function sendDomainVerifyEmail(
 
   const link = `${appUrl()}/verify-domain?token=${token}`
   const result = await sendEmail({ to: address.trim().toLowerCase(), ...domainVerifyEmail(row.domain, link) })
+  // A suppressed address bounced or complained (SCRUM-1280): trying again never works, and which it was is not the
+  // typist's business.
+  if (result.reason === "suppressed") {
+    return { ok: false, message: "We can’t send mail to that address. Use another address at the domain, or the DNS record." }
+  }
   if (!result.sent) {
     logger.error("Domain verify email failed", { domainId, reason: result.reason })
     return { ok: false, message: "Could not send just now. Try again, or use the DNS record." }

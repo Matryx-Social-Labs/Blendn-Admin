@@ -41,8 +41,6 @@ const MAX_BODY_BYTES = 64 * 1024
 const BAD_SIGNATURES = { max: 30, windowMs: 60_000 }
 /** Svix's own libraries' tolerance. */
 const TOLERANCE_SECONDS = 5 * 60
-/** RFC 5321's longest path; anything longer is not an address. */
-const MAX_ADDRESS = 320
 
 let reportedUnset = false
 
@@ -67,12 +65,10 @@ function verified(raw: Uint8Array, headers: Headers, key: Buffer): boolean {
 
 const eventSchema = z.object({
   type: z.string(),
-  data: z
-    .object({
-      to: z.union([z.string(), z.array(z.string())]).optional(),
-      bounce: z.object({ type: z.string().optional() }).passthrough().optional(),
-    })
-    .passthrough(),
+  data: z.object({
+    to: z.array(z.string()).default([]),
+    bounce: z.object({ type: z.string().optional() }).optional(),
+  }),
 })
 
 function reasonFor(event: z.infer<typeof eventSchema>): "bounce" | "complaint" | null {
@@ -116,10 +112,7 @@ export async function POST(req: NextRequest) {
   const reason = reasonFor(event.data)
   if (!reason) return NextResponse.json({ ok: true, recorded: 0 })
 
-  const to = event.data.data.to
-  const emails = [...new Set((Array.isArray(to) ? to : [to ?? ""]).map(canonicalEmail))].filter(
-    (e) => e.includes("@") && e.length <= MAX_ADDRESS
-  )
+  const emails = [...new Set(event.data.data.to.map(canonicalEmail))].filter((e) => e.includes("@"))
   for (const email of emails) {
     // Insert, or raise the reason: an unsubscribe gives way to anything, a complaint to a bounce.
     await db.$executeRaw`
