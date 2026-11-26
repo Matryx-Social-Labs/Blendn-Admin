@@ -525,6 +525,30 @@ export function resultsHtml(opts: {
 }
 
 /**
+ * A critical live alert (SCRUM-1286): the alert's own words, one button to the Live tab. Transactional, so the shell's
+ * own footer; nothing here can be unsubscribed from. `lines` are plain text from `liveAlertEmail`, escaped here.
+ */
+export function liveAlertHtml(opts: {
+  title: string
+  heading: string
+  lines: string[]
+  button: { href: string; label: string }
+  note: string
+}): string {
+  return shell({
+    title: opts.title,
+    preheader: opts.lines[0] ?? opts.heading,
+    body: [
+      heading(opts.heading),
+      ...opts.lines.map((line) => para(esc(line))),
+      button(opts.button.href, opts.button.label),
+      fallbackLink(opts.button.href),
+      note(esc(opts.note)),
+    ].join("\n"),
+  })
+}
+
+/**
  * 14 days before an organisation's free Analytics ends (SCRUM-1275). The
  * paragraphs come from `freeWindowEndingEmail` (lib/email.ts) as plain text,
  * so the text and HTML parts say the same thing; each is escaped here.
