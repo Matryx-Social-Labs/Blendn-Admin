@@ -134,11 +134,10 @@ describe("one wave per pair per room, recorded", () => {
     expect((await received(ana)).body.data.total).toBe(0)
   })
 
-  it("W1: a second wave is the same 200 and no second row, and there is no 'wave again' after ten minutes", async () => {
+  it("W1: a second wave is the same 200 and no second row", async () => {
     const ana = await person("rw-w1a")
     const ben = await person("rw-w1b")
     const first = await wave(ana, ben)
-    resetMemoryStore() // the 10-minute live window gone: still one per room
     expect(await wave(ana, ben)).toEqual(first)
     expect(await rowsBetween(ana, ben)).toBe(1)
   })
@@ -168,7 +167,7 @@ describe("one wave per pair per room, recorded", () => {
     const cara = await person("rw-link-c")
     expect((await wave(ana, ben)).status).toBe(200)
 
-    // All three move to a second room inside the ten minutes (one open check-in each, as the door does it).
+    // All three move to a second room minutes later (one open check-in each, as the door does it).
     const roomB = await makeEvent(users[0])
     events.push(roomB)
     const occB = await occurrenceOf(roomB)

@@ -410,7 +410,7 @@ describe("a wave back may be sent until the room closes, even if either has left
     expect((await wave()).status).toBe(200)
   })
 
-  it("is never held by the ten-minute window from another room", async () => {
+  it("a new wave in one room, then a wave back in another: both go", async () => {
     const OTHER = "55555555-5555-4555-8555-555555555555"
     waves.add(`${OTHER}|${THEM}|${ME}`)
     expect((await wave(inRoom(THEM), EVENT)).status).toBe(200)
