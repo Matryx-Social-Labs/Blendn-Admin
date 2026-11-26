@@ -1,0 +1,14 @@
+-- The check-in point sweep (SCRUM-1230, D-029, `forgetCheckInPoints` in lib/presence-sweeper.ts): every five minutes it
+-- asks for check-ins that still hold a point and whose night ended three days ago. A row loses its point in that pass
+-- and leaves this index, so the index holds only the last few nights (and, once, the backlog), and a pass that finds
+-- nothing reads a few index pages, not every check-in kept for a year. Ordered by "created_at", as the sweep drains
+-- oldest first. Partial, so it lives here and not in schema.prisma (CLAUDE.md, db push).
+--
+-- CONCURRENTLY, alone in its file and not wrapped: it cannot run inside a transaction, and a plain CREATE INDEX would
+-- hold every check-in write for the length of a scan of the whole table (__tests__/migration-tx.test.ts).
+-- If it fails, Prisma records the migration as failed and every later deploy stops (P3009) until it is resolved, and
+-- the failed build can leave an INVALID "event_check_ins_point_idx" that IF NOT EXISTS would skip on a retry. Recovery
+-- is an ops step, not a new migration: `DROP INDEX CONCURRENTLY IF EXISTS "event_check_ins_point_idx";`, then
+-- `prisma migrate resolve --rolled-back` for this folder, then redeploy. Afterwards
+-- `SELECT indisvalid FROM pg_index WHERE indexrelid = '"event_check_ins_point_idx"'::regclass` reads true.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "event_check_ins_point_idx" ON "event_check_ins" ("created_at") WHERE "latitude" IS NOT NULL OR "longitude" IS NOT NULL;

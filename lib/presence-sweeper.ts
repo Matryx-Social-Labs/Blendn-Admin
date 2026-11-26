@@ -318,7 +318,7 @@ export async function sweepVenueDays(now: Date = new Date()): Promise<VenueDaySw
   const expired = await expireWindows(now)
   const started = await closeForStartingEvents(now)
   const rooms = await sweepRooms(venueDaysWhere, MAX_VENUE_DAYS_PER_SWEEP, now)
-  await forgetGoLiveCoordinates(now)
+  await forgetCheckInPoints(now)
   const result = { expired, ...started, rooms }
   if (expired > 0 || started.closedForEvents > 0 || rooms.checkedOut > 0 || rooms.guarded.length > 0) {
     logger.info("Venue-day sweep", {
@@ -446,34 +446,71 @@ export const TAKEOVER_PUSH_WINDOW_MS = 6 * 60 * 60_000
 /** How many people one pass closes at one venue when an event starts there. */
 export const MAX_CLOSED_PER_VENUE = 500
 
-/** How long after a window ends its coordinates are kept. */
-export const GO_LIVE_COORDINATES_DAYS = 3
+/** How long after the night a check-in keeps where it was and the phone's details (D-029). */
+export const CHECK_IN_POINT_DAYS = 3
+
+/** Check-ins one pass forgets; a backlog drains over the five-minute passes. */
+export const CHECK_IN_POINT_BATCH = 1000
 
 /**
- * Where somebody stood when they went live is kept a few days — long enough
- * to look into a report or a fence that turned people away — then dropped
- * (step 4 review). Go Live rows only: `expires_at` is set on nothing else.
- * Bounded per pass, and only over the last month's windows, so the scan
- * never walks the whole history of rows already cleared.
+ * The `device_info` keys a check-in keeps after three days. None places or
+ * identifies a person; everything else (the phone model, the app version,
+ * anything a script added) goes.
+ * - `gpsAccuracy`, `platform`: the geofence measurement (design lane, task 03)
+ *   reads the accuracy per platform.
+ * - `source`, `qaScale`: our own test-data markers, written only by the seed
+ *   scripts (the request schema strips them from a phone's). `seed:qa-scale
+ *   --remove` finds its rows by `qaScale`; the geofence measurement leaves
+ *   seeded rows out by both.
  */
-export async function forgetGoLiveCoordinates(now: Date = new Date()): Promise<number> {
-  const before = new Date(now.getTime() - GO_LIVE_COORDINATES_DAYS * 24 * 3_600_000)
-  const since = new Date(before.getTime() - 30 * 24 * 3_600_000)
-  return db.$executeRaw`
+export const KEPT_DEVICE_INFO_KEYS = ["gpsAccuracy", "platform", "source", "qaScale"]
+
+/**
+ * Where somebody stood at a check-in, door or Go Live, and the phone's
+ * details are kept three days after the night (check-out, else the window's
+ * end, else the occurrence's end), then dropped (D-029). The row stays: it is
+ * the attendance record.
+ *
+ * A check-in still holding its point is one this owes: the app always sends
+ * one (`checkinSchema`), so the partial index `event_check_ins_point_idx`
+ * (migration SQL) holds only the last few nights and a backlog, and a pass
+ * never walks the rows it has already cleared.
+ *
+ * Presence sessions store no point any more (nothing read one, SCRUM-1230);
+ * the ones written before are nulled here whatever their age, through
+ * `presence_sessions_point_idx`, which empties once and stays empty until the
+ * columns are dropped. Returns the check-ins and sessions cleared.
+ */
+export async function forgetCheckInPoints(now: Date = new Date(), limit: number = CHECK_IN_POINT_BATCH): Promise<number> {
+  const before = new Date(now.getTime() - CHECK_IN_POINT_DAYS * 24 * 3_600_000)
+  const forgotten = await db.$executeRaw`
     WITH old AS (
-      SELECT id, occurrence_id, user_id FROM event_check_ins
-       WHERE expires_at > ${since} AND expires_at < ${before}
-         AND (latitude IS NOT NULL OR longitude IS NOT NULL)
-       ORDER BY expires_at
-       LIMIT 1000
-    ), sessions AS (
-      UPDATE presence_sessions ps
-         SET last_lat = NULL, last_lng = NULL, last_accuracy = NULL
-        FROM old
-       WHERE ps.occurrence_id = old.occurrence_id AND ps.user_id = old.user_id
+      SELECT c.id FROM event_check_ins c
+        JOIN event_occurrences o ON o.id = c.occurrence_id
+       WHERE (c.latitude IS NOT NULL OR c.longitude IS NOT NULL)
+         AND COALESCE(c.check_out_time, c.expires_at, o.end_time) < ${before}
+       ORDER BY c.created_at
+       LIMIT ${limit}
     )
-    UPDATE event_check_ins c SET latitude = NULL, longitude = NULL FROM old WHERE c.id = old.id
+    UPDATE event_check_ins c
+       SET latitude = NULL, longitude = NULL,
+           device_info = CASE WHEN jsonb_typeof(c.device_info) = 'object' THEN
+             (SELECT jsonb_object_agg(key, value) FROM jsonb_each(c.device_info) WHERE key = ANY(${KEPT_DEVICE_INFO_KEYS}::text[]))
+           END
+      FROM old WHERE c.id = old.id
   `
+  const sessions = await db.$executeRaw`
+    UPDATE presence_sessions SET last_lat = NULL, last_lng = NULL, last_accuracy = NULL
+     WHERE id = ANY(ARRAY(
+       SELECT id FROM presence_sessions
+        WHERE last_lat IS NOT NULL OR last_lng IS NOT NULL OR last_accuracy IS NOT NULL
+        LIMIT ${limit}
+     ))
+  `
+  if (forgotten === limit || sessions === limit) {
+    logger.warn("Check-in points: a full batch, the rest next pass", { limit, checkIns: forgotten, sessions })
+  }
+  return forgotten + sessions
 }
 
 let timer: NodeJS.Timeout | null = null

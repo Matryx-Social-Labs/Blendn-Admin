@@ -32,7 +32,7 @@ import { performCheckout } from "@/lib/checkout"
 import { db as appDb } from "@/lib/db"
 import {
   expireWindows,
-  forgetGoLiveCoordinates,
+  forgetCheckInPoints,
   MAX_EXPIRIES_PER_SWEEP,
   MAX_VENUE_DAYS_PER_SWEEP,
   sweepPresence,
@@ -467,11 +467,12 @@ describe("coordinates are kept a few days", () => {
     await db.presence_sessions.updateMany({ where: { event_id: dayId }, data: { last_lat: LAT, last_lng: LNG } })
     await db.event_check_ins.updateMany({ where: { event_id: dayId, user_id: ids[0] }, data: { expires_at: new Date(Date.now() - 4 * 86_400_000), status: "checked_out" } })
     await db.event_check_ins.updateMany({ where: { event_id: dayId, user_id: ids[1] }, data: { expires_at: new Date(Date.now() - 2 * 86_400_000), status: "checked_out" } })
-    await forgetGoLiveCoordinates()
+    await forgetCheckInPoints()
     expect(await checkInOf(dayId, ids[0])).toMatchObject({ latitude: null, longitude: null })
     expect((await sessionOf(dayId, ids[0])).last_lat).toBeNull()
     expect(await checkInOf(dayId, ids[1])).toMatchObject({ latitude: LAT, longitude: LNG })
-    expect((await sessionOf(dayId, ids[1])).last_lat).toBe(LAT)
+    // A session's point has no reader at any age (SCRUM-1230): it goes now.
+    expect((await sessionOf(dayId, ids[1])).last_lat).toBeNull()
   })
 })
 

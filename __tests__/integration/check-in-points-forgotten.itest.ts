@@ -89,7 +89,7 @@ async function doorRow(
       check_out_time: out,
       latitude: LAT,
       longitude: LNG,
-      device_info: opts.deviceInfo === undefined ? PHONE : (opts.deviceInfo ?? undefined),
+      ...(opts.deviceInfo !== null && { device_info: opts.deviceInfo ?? PHONE }),
     },
   })
   await db.presence_sessions.create({
@@ -141,7 +141,8 @@ describe("a door check-in forgets where it was three days after the night", () =
     expect(await sessionOf(old)).toEqual({ last_lat: null, last_lng: null, last_accuracy: null })
 
     expect(await rowOf(recent.id)).toMatchObject({ latitude: LAT, longitude: LNG, device_info: PHONE })
-    expect(await sessionOf(recent)).toEqual({ last_lat: LAT, last_lng: LNG, last_accuracy: 8 })
+    // A session's point has no reader at any age, so the ones written before go now.
+    expect(await sessionOf(recent)).toEqual({ last_lat: null, last_lng: null, last_accuracy: null })
   })
 
   it("counts from the occurrence's end for a row never checked out", async () => {
@@ -164,10 +165,12 @@ describe("a door check-in forgets where it was three days after the night", () =
     const n = await night(6)
     const rows = [await doorRow(n, { outDaysAgo: 5 }), await doorRow(n, { outDaysAgo: 5 }), await doorRow(n, { outDaysAgo: 5 })]
 
-    expect(await forgetCheckInPoints(new Date(), 2)).toBe(2)
+    // Other suites' rows share this database, so: never more than the batch, and not all three in one pass.
+    const pointsLeft = async () => (await Promise.all(rows.map((r) => rowOf(r.id)))).filter((r) => r.latitude !== null).length
+    await forgetCheckInPoints(new Date(), 2)
+    expect(await pointsLeft()).toBeGreaterThanOrEqual(1)
     while ((await forgetCheckInPoints(new Date(), 2)) > 0);
-
-    for (const r of rows) expect(await rowOf(r.id)).toMatchObject({ latitude: null, longitude: null })
+    expect(await pointsLeft()).toBe(0)
   })
 })
 

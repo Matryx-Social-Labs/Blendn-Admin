@@ -3009,6 +3009,12 @@
       "mutation": "(A3) the call site passes 'organizer' for every application. (A5) the approval's reviewed_at write removed.",
       "observed": "A3: 1 of 8 failing (the venue owner). A5: 2 of 8. Restored each; 8 of 8 on blendn_growth09a.",
       "date": "2026-11-26"
+    },
+    "check-in-points-forgotten.itest.ts": {
+      "guards": "SCRUM-1230 / D-029 through forgetCheckInPoints on a db:migrate database: every check-in, door or Go Live, loses latitude/longitude three days after the night (check-out, else the window's end, else the occurrence's end), reaching a 90-day backlog, in bounded batches; device_info keeps exactly the KEPT_DEVICE_INFO_KEYS it had (none invented, NULL when none or not an object); the presence session's point goes with it; the row and the dashboard overview are unchanged; the door writes no point into presence_sessions.",
+      "mutation": "(RED) forgetGoLiveCoordinates on origin/dev 028f391d aliased in. (M1) `AND c.expires_at IS NOT NULL` added to the sweep (Go Live only, as before). (M2) `device_info = c.device_info` (left whole). (M3) `qaScale` dropped from KEPT_DEVICE_INFO_KEYS.",
+      "observed": "RED: 10 of 12 failing (door rows kept the point and every key; the 90-day row unreached; the session written with the door's point). M1: 8 of 12. M2: 5 of 12. M3: 1 of 12 (the scale-seed tag). Restored each; 12 of 12 on blendn_serving_10.",
+      "date": "2026-11-27"
     }
   },
   "grandfathered": [
