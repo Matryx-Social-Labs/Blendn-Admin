@@ -2,7 +2,7 @@
 
 ## Overview
 
-Every message sent in event group chat goes through a multi-layer **pre-emit** moderation pipeline. Moderation runs **before** the message is broadcast to other users via Socket.io, so blocked content is never visible to anyone except the sender (who sees a placeholder).
+Every message sent in event group chat goes through a multi-layer **pre-emit** moderation pipeline. The deterministic checks always run **before** the message is broadcast via Socket.io, so content they block is never visible to anyone except the sender (who sees a placeholder). The OpenAI check runs first too, but gets 1 s: if it is late, an event room with more than 200 people checked in holds the message for the verdict, and any other room sends it and removes it if the verdict is hide.
 
 **Pipeline order:**
 
@@ -11,7 +11,7 @@ User sends message
   │
   ├─ [SYNC] Spam check → blocks message if spam detected (429 response)
   │
-  ├─ [SYNC] Keyword filter (~1ms) → if match:
+  ├─ [SYNC] Keyword and contact-detail filter (~1ms) → if match:
   │     Save with moderation_status="hidden", return moderation_hidden=true
   │     Message is NEVER emitted via Socket.io
   │
@@ -19,21 +19,22 @@ User sends message
   │
   ├─ [PRE-EMIT] OpenAI text moderation (1s race; the call itself allows 8s)
   │     If hide → hide before emit, return moderation_hidden=true
-  │     No answer within 1s, small room (200 or fewer people inside, or not an event room):
-  │       emit anyway; the async check below still runs
-  │     No answer within 1s, event room with more than 200 people inside:
-  │       hold the message until the answer arrives; no answer → refuse (503), never emitted
+  │     No answer within 1s, event room with more than 200 people checked in:
+  │       hold the message for the answer; no answer → refuse (503), never emitted
+  │     No answer within 1s, any other room:
+  │       emit it; the async step below finishes the check
   │
-  ├─ Socket.io emit (only if moderation passed)
+  ├─ Socket.io emit (unless hidden or refused above)
   │
   └─ [ASYNC fallback - only if the pre-emit check gave no answer]
-       ├─ OpenAI text moderation (the call already in flight; retried after an error)
-       └─ Action: hide (via socket delete event) / flag / mark clean
+       ├─ OpenAI text moderation (the call already in flight; asked again after an error)
+       └─ Action: hide (via socket delete event) / flag / mark clean,
+          or record `unchecked` for the re-check sweeper (see When OpenAI is down)
 ```
 
 If any layer returns `hide`, the pipeline **stops early** — no further checks run.
 
-Room messages are text only. The room routes accept only `text` with no `metadata` (`lib/validations/chat.ts:23-26`), so no image check runs on room chat. The 200 threshold is `BIG_ROOM_HERE_COUNT` in `lib/moderation/degraded-room.ts:21`.
+Room messages are words only: both room routes accept `type: "text"` and no `metadata` (`roomMessageWords` in `lib/validations/chat.ts`), so no image check runs on room chat. The 200 is `BIG_ROOM_HERE_COUNT` in `lib/moderation/degraded-room.ts`.
 
 ### Rooms of every kind (step 7)
 
@@ -42,7 +43,7 @@ gives them owners (`chat_groups.kind`, `lib/room-kind.ts`). What applies where:
 
 | Feature | Event room | Any other kind | Why |
 |---|---|---|---|
-| The pipeline above (spam, keywords, OpenAI, pre-emit) | yes | yes | It runs on `POST /chat/groups/:id/messages`, which every room uses; a message is never emitted before it passes |
+| The pipeline above (spam, keywords, OpenAI, pre-emit) | yes | yes | It runs on both send routes, `POST /chat/groups/:id/messages` and `POST /events/:eventId/chat`, and every room's sends go through one of them. A message is emitted only after it passes, with one exception: when the OpenAI check is late, an event room with more than 200 people checked in still waits for it, and any other room sends the message and finishes the check after (Layer 3) |
 | Auto-mute / unmute, organizer ban and mute | yes | yes | They live on the member row, which every room has |
 | Reporting a message (`POST /messages/:id/report`) | yes | yes | Keyed by the message; a member may report what they could see — in a room of another kind, only a member its owner stands behind (an unaccepted asker's row reports nothing). Banned or gone members still may |
 | Reporting the whole room (`POST /chat/groups/:id/report`) | yes | no — 404 | It is filed against the room's event (`event_reports.event_id`), and only an event's room has one. Report the messages instead |
@@ -168,10 +169,10 @@ confidence = 0.85 + (number_of_matched_keywords × 0.1)
 
 ## Layer 3: OpenAI Text Moderation
 
-**When:** Pre-emit — runs AFTER saving but BEFORE socket broadcast, with a **1-second race** via `Promise.race`. If the API has not answered by then, an event room with more than 200 people inside waits for the answer, up to the call's 8 s limit (`MODERATION_TIMEOUT_MS`), and refuses the message with a 503 if there is none (`lib/moderation/degraded-room.ts:65-86`). Any other room emits the message, and moderation falls back to async (post-emit hide via socket event).
+**When:** Pre-emit — runs AFTER saving but BEFORE socket broadcast, with a **1-second race** via `Promise.race`. If the API has not answered by then, an event room with more than 200 people checked in waits for the answer, up to the call's 8 s limit (`MODERATION_TIMEOUT_MS`), and refuses the message with a 503 if there is none (`verdictForBigRoom` in `lib/moderation/degraded-room.ts`). Any other room emits the message, and moderation falls back to async (post-emit hide via socket event).
 **Source file:** `lib/moderation/openai-moderation.ts`
 **Model:** `omni-moderation-latest`
-**Fails open:** If the API is down or key is missing, the message is treated as clean.
+**When the API is slow or down:** the message is never treated as clean. An event room with more than 200 people checked in holds it for the verdict and refuses it if none comes; any other room delivers it, records it `unchecked` and re-checks it. See [When OpenAI is down](#when-openai-is-down-degraded-policy).
 
 ### Categories scored
 
@@ -220,18 +221,19 @@ OpenAI returns a confidence score (0.0 to 1.0) for each category:
 
 ## Layer 4: Image Checks (Photos)
 
-**When:** Asynchronous, for profile, blurred profile and Lobby post photos. Room chat has no image check: the room routes accept only `text` with no `metadata` (`lib/validations/chat.ts:23-26`, R9, SCRUM-626). Direct messages get no model check (`lib/dm-moderation.ts:21`, TR5).
-**Source files:** `lib/photos.ts`, `lib/lobby-photo.ts`, `lib/moderation/openai-moderation.ts` (`checkImageContent`)
+**When:** Asynchronous (nobody waits for it), for profile photos, the blurred profile photo and Lobby post photos. Room chat has no image check because a room takes words only (R9, SCRUM-626; see the pipeline above).
+**Source files:** `lib/photos.ts` (`moderateProfilePhoto`, `moderateBlurPhoto`), `lib/lobby-photo.ts` (`moderateLobbyPhoto`), `lib/moderation/openai-moderation.ts` (`checkImageContent`)
 **Model:** `omni-moderation-latest`
 
-The image check uses the same categories, thresholds and result mapping as text moderation. What a result does depends on the photo:
+The image check uses the same categories and thresholds as text moderation: hide at 0.70 or more, flag from 0.40. A passing vendor failure (a rate limit, a server error, a timeout, a failed download) is retried twice before it counts. What a result does depends on the photo:
 
 | Photo | Result | What happens |
 |---|---|---|
-| Profile or blurred profile photo | hide (score 0.70 or more) | Pulled from the profile and the public bucket, kept privately for 180 days (`lib/photos.ts:195-201`) |
-| Profile or blurred profile photo | flag (below 0.70) | Nothing is removed; the check is recorded (`lib/photos.ts:203-221`) |
-| Lobby post photo | hide or flag | Marked `rejected` (`lib/lobby-photo.ts:49-52`) |
-| Check did not run | none | A profile photo stays in place and the photo sweep retries it (`lib/photo-sweeper.ts:52`). A Lobby photo stays `pending` and is retried after 2 minutes (`lib/lobby-photo.ts:83`) |
+| Profile or blurred profile photo | hide | Pulled from the profile and the public bucket, and kept privately for 180 days |
+| Profile or blurred profile photo | flag | Stays on the profile; the check is recorded |
+| Lobby post photo | hide or flag | `rejected`: nobody else is shown it, its author sees that it was rejected, and it is kept for 180 days |
+| Lobby post photo | not yet checked | `pending`: only its author is shown it until it is approved |
+| Any of them | the check could not run | A profile photo stays on the profile and a Lobby photo stays `pending` (shown only to its author) until a background sweep checks it again (`sweepUnmoderatedPhotos`, `recheckPendingPhotos`) |
 
 ---
 
@@ -484,7 +486,7 @@ The system is designed for **safety**, not sentiment. These will pass through as
 - Coded slang not in the wordlist
 - New or uncommon profanity variations
 
-For crowd mood tracking and issue detection, see [live event insights](LIVE-EVENT-INSIGHTS.md).
+For crowd mood tracking and issue detection, see [Live-event insights](LIVE-EVENT-INSIGHTS.md).
 
 ---
 
@@ -492,14 +494,14 @@ For crowd mood tracking and issue detection, see [live event insights](LIVE-EVEN
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                 Chat POST Request                │
-│    /api/mobile/events/[eventId]/chat             │
-│    /api/mobile/chat/groups/[groupId]/messages     │
+│                Chat POST Request                │
+│    /api/mobile/events/[eventId]/chat            │
+│    /api/mobile/chat/groups/[groupId]/messages   │
 └──────────────────────┬──────────────────────────┘
                        │
                        ▼
               ┌────────────────┐
-              │  Spam Detector  │ ◄── SYNC (before save)
+              │  Spam Detector │ ◄── SYNC (before save)
               │  (in-memory)   │
               └───────┬────────┘
                       │
@@ -509,8 +511,8 @@ For crowd mood tracking and issue detection, see [live event insights](LIVE-EVEN
               │               │
           Block msg           ▼
           Return 429  ┌────────────────┐
-                      │  Keyword Filter │ ◄── SYNC (before save)
-                      │  (~1ms)         │
+                      │ Keyword/contact│ ◄── SYNC (before save)
+                      │  (~1ms)        │
                       └───────┬────────┘
                               │
                       ┌───────┴───────┐
@@ -522,8 +524,8 @@ For crowd mood tracking and issue detection, see [live event insights](LIVE-EVEN
                   Return              │
                   moderation_         ▼
                   hidden=true   ┌────────────────┐
-                                │  OpenAI Text    │ ◄── PRE-EMIT (1s timeout)
-                                │  (50-200ms)     │
+                                │  OpenAI Text   │ ◄── PRE-EMIT (1s timeout)
+                                │  (50-200ms)    │
                                 └───────┬────────┘
                                         │
                               ┌─────────┼─────────┐
@@ -539,8 +541,8 @@ For crowd mood tracking and issue detection, see [live event insights](LIVE-EVEN
                                      └──┬──┘
                                         │
                               ┌─────────┴─────────┐
-                              │  OpenAI retry      │
-                              │  text only (rooms) │
+                              │ OpenAI text check │
+                              │ (again on error)  │
                               └─────────┬─────────┘
                                         │
                                    [if hidden]
@@ -551,10 +553,10 @@ For crowd mood tracking and issue detection, see [live event insights](LIVE-EVEN
                                         │
                                         ▼
                             ┌──────────────────┐
-                            │ checkAndAutoMute  │
-                            │ (if message was   │
-                            │  hidden)          │
+                            │ checkAndAutoMute │
+                            │ (if message was  │
+                            │  hidden)         │
                             └──────────────────┘
 ```
 
-\* On timeout, only a small room emits without a verdict. An event room with more than 200 people inside holds the message until its verdict arrives, and refuses it (503) if there is none. See Layer 3.
+\* Except in an event room with more than 200 people checked in, where a late check holds the message for its verdict and no verdict refuses it (503). See Layer 3.
