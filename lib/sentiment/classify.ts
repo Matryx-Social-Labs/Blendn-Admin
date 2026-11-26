@@ -17,7 +17,9 @@ const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
 /** A classifier must never hold up the pipeline that feeds it. Per attempt. */
 const CALL_TIMEOUT_MS = 20_000
-/** The wait before the one retry of a 429, a 5xx or a timeout. */
+/** The first try and one retry, of a 429, a 5xx or a timeout. */
+const MAX_ATTEMPTS = 2
+/** The wait before the retry. */
 const RETRY_BACKOFF_MS = 2_000
 /** Big enough to amortise the call, small enough that one bad batch is cheap. */
 export const BATCH_SIZE = 20
@@ -69,10 +71,11 @@ async function postWithOneRetry(body: string, apiKey: string): Promise<Response>
         body,
         signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
       })
-      if (res.ok || !isTransient(res.status) || attempt === 2) return res
+      if (res.ok || !isTransient(res.status) || attempt === MAX_ATTEMPTS) return res
       logger.warn("Sentiment classification will retry", { status: res.status })
+      await res.body?.cancel()
     } catch (error) {
-      if (attempt === 2) throw error
+      if (attempt === MAX_ATTEMPTS) throw error
       logger.warn("Sentiment classification will retry", { error: error instanceof Error ? error.message : String(error) })
     }
     await new Promise((resolve) => setTimeout(resolve, RETRY_BACKOFF_MS))
@@ -127,9 +130,8 @@ async function classifyBatchWithLlm(
       choices?: Array<{ message?: { content?: string } }>
     }
     const content = body.choices?.[0]?.message?.content
-    if (!content) return out
-
-    const parsed = JSON.parse(content) as {
+    // No content (a refusal, a length cut) is no labels: the check after the loop reports it.
+    const parsed = (content ? JSON.parse(content) : {}) as {
       results?: Array<{
         id?: string
         sentiment?: string
@@ -160,9 +162,17 @@ async function classifyBatchWithLlm(
         source: "llm",
       })
     }
+
+    // Each message the model did not label is the word list's guess for good, so a model that answers 200 with
+    // nothing usable must reach Sentry as surely as one that answers 404.
+    const labelled = messages.filter((m) => out.has(m.id)).length
+    if (labelled < messages.length) {
+      logger.error("Sentiment classifier labelled fewer messages than it was sent", { labelled, sent: messages.length, model })
+    }
   } catch (error) {
     logger.error("Sentiment classification threw", {
-      error: error instanceof Error ? error.message : String(error),
+      // A parse error quotes the model's output, which can echo a guest's message: never into Sentry.
+      error: error instanceof SyntaxError ? "the model's output is not JSON" : error instanceof Error ? error.message : String(error),
       model,
     })
   }

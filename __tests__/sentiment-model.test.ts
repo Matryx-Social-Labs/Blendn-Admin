@@ -21,12 +21,16 @@ const DEFAULT_MODEL_UNDER_TEST = "gpt-6-luna"
 // "where is the bar" is a cue with no opinion: the lexicon declines it, so it goes to the model.
 const ESCALATED = { id: "m1", text: "where is the bar" }
 
-function modelReply(): Response {
-  const content = JSON.stringify({
+function modelReply(
+  content: string | null = JSON.stringify({
     results: [{ id: ESCALATED.id, sentiment: "neutral", category: "other", topic: null, confidence: 0.9 }],
   })
+): Response {
   return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 })
 }
+
+const TIMEOUT = () => new DOMException("The operation was aborted due to timeout", "TimeoutError")
+const NETWORK = () => new TypeError("fetch failed")
 
 const fetchMock = jest.fn<Promise<Response>, [string, RequestInit]>()
 const sentModel = (call = 0) => JSON.parse(String(fetchMock.mock.calls[call][1].body)).model
@@ -91,14 +95,17 @@ describe("the model is a setting", () => {
     expect(body.response_format).toEqual({ type: "json_object" })
   })
 
-  it("treats a blank SENTIMENT_MODEL as unset", async () => {
-    process.env.SENTIMENT_MODEL = "  "
-    fetchMock.mockResolvedValueOnce(modelReply())
+  it.each([["blank", "  ", DEFAULT_MODEL_UNDER_TEST], ["empty", "", DEFAULT_MODEL_UNDER_TEST], ["padded", " m ", "m"]])(
+    "reads a %s SENTIMENT_MODEL",
+    async (_, value, expected) => {
+      process.env.SENTIMENT_MODEL = value
+      fetchMock.mockResolvedValueOnce(modelReply())
 
-    await classify()
+      await classify()
 
-    expect(sentModel()).toBe(DEFAULT_MODEL_UNDER_TEST)
-  })
+      expect(sentModel()).toBe(expected)
+    }
+  )
 })
 
 describe("a transient failure is retried once", () => {
@@ -112,14 +119,25 @@ describe("a transient failure is retried once", () => {
     expect(captureMessage).not.toHaveBeenCalled()
   })
 
-  it("retries a timeout", async () => {
-    fetchMock
-      .mockRejectedValueOnce(new DOMException("The operation was aborted due to timeout", "TimeoutError"))
-      .mockResolvedValueOnce(modelReply())
+  it.each([["a timeout", TIMEOUT], ["a dropped connection", NETWORK]])("retries %s", async (_, error) => {
+    fetchMock.mockRejectedValueOnce(error()).mockResolvedValueOnce(modelReply())
 
     const [result] = await classify()
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.source).toBe("llm")
+  })
+
+  it("waits the backoff before the retry", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 503 })).mockResolvedValueOnce(modelReply())
+
+    const pending = classifyMessages([ESCALATED])
+    await jest.advanceTimersByTimeAsync(1_999)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await jest.advanceTimersByTimeAsync(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    const [result] = await pending
     expect(result.source).toBe("llm")
   })
 
@@ -156,17 +174,64 @@ describe("a failure that stays reaches Sentry once, through logger.error", () =>
 
     await classify()
 
+    expect(captureException).not.toHaveBeenCalled()
     expect(captureMessage).toHaveBeenCalledTimes(1)
     expect(captureMessage.mock.calls[0][1]).toMatchObject({ extra: { status: 404, model: "a-retired-model" } })
   })
 
   it("reports two timeouts once", async () => {
-    fetchMock.mockRejectedValue(new DOMException("The operation was aborted due to timeout", "TimeoutError"))
+    fetchMock.mockRejectedValue(TIMEOUT())
+
+    const [result] = await classify()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.source).toBe("lexicon")
+    expect(captureException).not.toHaveBeenCalled()
+    expect(captureMessage).toHaveBeenCalledTimes(1)
+    expect(captureMessage.mock.calls[0][0]).toBe("Sentiment classification threw")
+  })
+
+  it("reports a dropped connection then a 404 once, as the 404", async () => {
+    fetchMock.mockRejectedValueOnce(NETWORK()).mockResolvedValueOnce(new Response("", { status: 404 }))
 
     const [result] = await classify()
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(result.source).toBe("lexicon")
     expect(captureMessage).toHaveBeenCalledTimes(1)
+    expect(captureMessage.mock.calls[0][1]).toMatchObject({ extra: { status: 404 } })
+  })
+
+  it("reports a 200 the model left empty: every message would be the word list's guess for good", async () => {
+    // Was silent: `if (!content) return out`, no log at any level.
+    fetchMock.mockResolvedValueOnce(modelReply(null))
+
+    const [result] = await classify()
+
+    expect(result.source).toBe("lexicon")
+    expect(captureMessage).toHaveBeenCalledTimes(1)
+    expect(captureMessage.mock.calls[0][1]).toMatchObject({ extra: { labelled: 0, sent: 1, model: DEFAULT_MODEL_UNDER_TEST } })
+  })
+
+  it("reports a batch the model labelled only in part", async () => {
+    const second = { id: "m2", text: "the sound was not great" } // a negation: the lexicon declines it
+    fetchMock.mockResolvedValueOnce(modelReply())
+
+    const pending = classifyMessages([ESCALATED, second])
+    await jest.runAllTimersAsync()
+    const results = await pending
+
+    expect(results.find((r) => r.id === second.id)?.source).toBe("lexicon")
+    expect(captureMessage).toHaveBeenCalledTimes(1)
+    expect(captureMessage.mock.calls[0][1]).toMatchObject({ extra: { labelled: 1, sent: 2 } })
+  })
+
+  it("reports unparseable model output without quoting it: the output can echo a guest's message", async () => {
+    fetchMock.mockResolvedValueOnce(modelReply("following"))
+
+    await classify()
+
+    expect(captureMessage).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(captureMessage.mock.calls[0])).not.toContain("following")
   })
 })

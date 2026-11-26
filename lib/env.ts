@@ -556,7 +556,7 @@ export function revenuecatWebhookSecret(): string | null {
  * https://developers.openai.com/api/docs/deprecations (read 2026-11-26, SCRUM-1226). It was a hard-coded
  * gpt-4o-mini, which OpenAI shuts down on 2027-01-14. When OpenAI retires this one, set `SENTIMENT_MODEL`.
  */
-export const DEFAULT_SENTIMENT_MODEL = "gpt-6-luna"
+const DEFAULT_SENTIMENT_MODEL = "gpt-6-luna"
 
 /** The mood classifier's model: `SENTIMENT_MODEL`, or the default when unset or blank. */
 export function sentimentModel(): string {
