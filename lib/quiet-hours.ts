@@ -7,10 +7,10 @@ import { logger } from "./logger"
 import type { NotificationData } from "./push-notifications"
 
 /** Quiet from 23:00 to 09:00 on the recipient's clock (launch gate 7, SCRUM-1276). */
-export const QUIET_FROM_HOUR = 23
-export const QUIET_UNTIL_HOUR = 9
+const QUIET_FROM_HOUR = 23
+const QUIET_UNTIL_HOUR = 9
 /** The clock of somebody with no event on the push and no home city. */
-export const FALLBACK_ZONE = "Asia/Kolkata"
+const FALLBACK_ZONE = "Asia/Kolkata"
 
 /**
  * Kinds that ring at any hour: a person writing to you (a DM, a room reply, a request and its answer), a crew
@@ -27,7 +27,7 @@ const ALWAYS_RINGS: ReadonlySet<NotificationData["type"]> = new Set<Notification
   "board_post_removed",
 ])
 
-export function isQuietAt(now: Date, timeZone: string): boolean {
+function isQuietAt(now: Date, timeZone: string): boolean {
   const hour = Number(formatInTimeZone(now, eventClock(timeZone).zone, "H"))
   return hour >= QUIET_FROM_HOUR || hour < QUIET_UNTIL_HOUR
 }

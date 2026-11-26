@@ -717,7 +717,7 @@ export async function sendBulkPushNotifications(
       ? await recordBulk(userIds, title, body, data, holds)
       : new Map<string, string>()
 
-  const ringing = holds.size > 0 ? userIds.filter((id) => !holds.has(id)) : userIds
+  const ringing = userIds.filter((id) => !holds.has(id))
   const tokenMap = await getBulkUserPushTokens(ringing, data)
   // One count for everybody with a device, after their rows are in; never a query per person.
   const badges = options.badge === undefined && tokenMap.size > 0 ? await badgesFor([...tokenMap.keys()]) : new Map<string, number>()
