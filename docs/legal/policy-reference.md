@@ -295,13 +295,13 @@ All chat messages pass through an **automated multi-layer moderation pipeline** 
 
 | Type | Content | When Sent |
 |------|---------|-----------|
-| **Private message** | Sender name + message preview (truncated 100 chars) | New private message received |
+| **Private message** | Sender name + message preview (truncated 100 chars); a pseudonym until both swap names in a match. In a conversation that began as a message request: "New message" / "Open Blend’n to read it", no name and no words | New private message received |
 | **Group message** | Anonymous name + message preview (truncated 80 chars) | New message in event chat |
 | **Event check-in** | "[Name] checked in to [Event]" | Someone checks into an event |
 | **Event update** | Event title + update details | Organizer updates event |
 | **Announcement** | Announcement content preview | Organizer sends announcement |
-| **Message request** | "[Name] wants to connect" | New message request received |
-| **Message request response** | "[Name] accepted your request" | Request accepted/declined |
+| **Message request** | "New message request" / "Someone wants to connect" (no name) | New message request received |
+| **Message request response** | "Message request accepted" / "Your message request was accepted" (no name) | Request accepted (a decline sends nothing) |
 
 ### Notification Channels (Android)
 - `messages` — Chat and private messages
@@ -315,7 +315,7 @@ All chat messages pass through an **automated multi-layer moderation pipeline** 
 
 ### Important for Privacy Policy
 - Push tokens are shared with Expo's notification service
-- Message previews are included in notification payloads (visible on lock screen)
+- Message previews are included in notification payloads (visible on lock screen), except in a conversation that began as a message request, whose pushes carry no name and no words
 - Users can unregister tokens to stop receiving notifications
 
 ---

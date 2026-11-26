@@ -561,7 +561,8 @@ export async function DELETE(request: NextRequest) {
        * Their name in other people's notification centres.
        *
        * A DM push is titled with the sender's name — the real one after a
-       * reveal — and a message-request push names them in the body. Those
+       * reveal — and a message-request push named them in the body until
+       * SCRUM-1266 (a new one names nobody and reads as below). Those
        * rows belong to the other person and survive this deletion, so the
        * name kept appearing in a list two hours after the account was gone.
        * Driven: "Dev Tester — Sent you a message" in the recipient's centre
@@ -585,7 +586,7 @@ export async function DELETE(request: NextRequest) {
           )`,
       db.$executeRaw`
         UPDATE notifications
-        SET body = 'Someone accepted your message request'
+        SET body = 'Your message request was accepted'
         WHERE kind = 'message_request_response'
           AND data->>'requestId' IN (
             SELECT id::text FROM message_requests WHERE recipient_id = ${authUser.userId}

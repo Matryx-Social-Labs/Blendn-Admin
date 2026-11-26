@@ -3023,8 +3023,11 @@ un-reveal anything already seen — nothing can.
 | POST | `/message-requests` | Send a message request |
 | POST | `/message-requests/:id/respond` | Accept / decline / block |
 
-**Only an accept tells the sender** (SCRUM-621): a push and a bell row naming the
-accepter. `decline` and `block` send nothing and write nothing the sender reads;
+**Only an accept tells the sender** (SCRUM-621): a push and a bell row, "Message
+request accepted" / "Your message request was accepted", naming nobody (launch
+gate 7, SCRUM-1266: a lock screen is not an authenticated surface; the
+conversation shows who). The request's own push is "New message request" /
+"Someone wants to connect", without the sender's name. `decline` and `block` send nothing and write nothing the sender reads;
 the product has no declined state and a no is silent. The response to the
 responder is unchanged.
 
@@ -4995,7 +4998,7 @@ them any more. Rows written before that are hidden, and retention removes them.
 
 | What happened | Who gets a push | On the phone |
 |---|---|---|
-| A DM | The recipient, when the conversation goes from read to unread; while it stays unread, at most once every 5 minutes, as "N new messages" | One notification per conversation, replaced in place (`dm:{conversationId}`) |
+| A DM | The recipient, when the conversation goes from read to unread; while it stays unread, at most once every 5 minutes, as "N new messages". Titled with the sender's name as the conversation shows it (a match's pseudonym until both swap) and the message's first 100 characters; in a conversation that began as a message request, "New message" / "Open Blend’n to read it", with no name and no words (SCRUM-1266) | One notification per conversation, replaced in place (`dm:{conversationId}`) |
 | A room message | **Nobody** | — |
 | A reply to your room message | Its author, if still in the room and not in a block with the sender; at most once per room every 3 minutes. `data: { type: "group_message", chatGroupId, senderId, kind }` — `kind` is the room's: `event` (a venue day's room too), `crew` (with `crewId`), `blend` (with `blendId`) or `board_post`; open the tap as that room | `room:{chatGroupId}`, replaced in place |
 | A check-in | **Nobody** — the live roster carries arrivals | — |
