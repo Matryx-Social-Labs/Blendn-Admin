@@ -2728,6 +2728,8 @@ model event_feedback_tallies {
   contributors Json
   /// `{ [topic]: distinct people }` over the positive messages; null on a tally frozen before topics (2026-11-24).
   topics       Json?
+  /// `{ [category]: the largest single person's messages }`, the dominance rule's numerator (SCRUM-1285); null on a tally frozen before 2026-11-26, which then reads without it.
+  top_messages Json?
   frozen_at    DateTime @default(now()) @db.Timestamptz(6)
 
   event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
