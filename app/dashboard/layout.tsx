@@ -71,8 +71,8 @@ export default async function DashboardLayout({
   ])
   // The top bar's Create event pill asks what every other door to the event
   // form asks (SCRUM-145), from the memberships already loaded: the first live
-  // one is `homeOrgIdFor`'s answer, by the same order.
-  const canCreate = mayCreateEventsWith(user.role, orgs.length > 0)
+  // one is `homeOrgIdFor`'s answer, by the same order, and its staff create nothing (SCRUM-1244).
+  const canCreate = mayCreateEventsWith(user.role, orgs[0]?.role ?? null)
   // Who this person acts for, said once for the card and the first crumb. A
   // member only of a suspended organisation still belongs to it — the notice
   // below says why the controls are gone — and someone in none is told so.

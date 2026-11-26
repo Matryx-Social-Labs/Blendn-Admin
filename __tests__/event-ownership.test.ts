@@ -24,7 +24,7 @@ jest.mock("@/lib/db", () => ({ db: mockDb }))
 import { readFileSync } from "fs"
 import { join } from "path"
 
-import { owningOrgFor } from "@/lib/event-ownership"
+import { mayCreateEvents, owningOrgFor } from "@/lib/event-ownership"
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -61,10 +61,24 @@ describe("owningOrgFor", () => {
     )
   })
 
+  it("refuses a staff member: they would create an event they cannot edit (SCRUM-1244)", async () => {
+    mockDb.organisation_members.findFirst.mockResolvedValue({ org_id: "org-1", role: "staff" })
+    await expect(owningOrgFor({ id: "u1", role: "organizer" })).rejects.toThrow(/owner or admin/i)
+  })
+
   it("returns null for an admin without querying", async () => {
     // `eventPermissions` short-circuits app_admin before it looks at ownership.
     expect(await owningOrgFor({ id: "a1", role: "app_admin" })).toBeNull()
     expect(mockDb.organisation_members.findFirst).not.toHaveBeenCalled()
+  })
+})
+
+describe("mayCreateEvents", () => {
+  it("offers the form to an owner or admin of the home org, never to its staff (SCRUM-1244)", async () => {
+    mockDb.organisation_members.findFirst.mockResolvedValue({ org_id: "org-1", role: "admin" })
+    expect(await mayCreateEvents({ id: "u1", role: "organizer" })).toBe(true)
+    mockDb.organisation_members.findFirst.mockResolvedValue({ org_id: "org-1", role: "staff" })
+    expect(await mayCreateEvents({ id: "u1", role: "organizer" })).toBe(false)
   })
 })
 

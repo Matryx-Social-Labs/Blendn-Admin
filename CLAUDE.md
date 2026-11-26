@@ -107,13 +107,13 @@ The API:
 
 | Function | Answers |
 |---|---|
-| `eventPermissions(actor, event)` | `{ canEdit, canOperate }` for one event. The main resolver. `canEdit` = edit/publish/cancel. `canOperate` = chat, moderation, the attendee list. |
+| `eventPermissions(actor, event)` | `{ canEdit, canOperate, canViewAttendees }` for one event. The main resolver. `canEdit` = edit/publish/cancel. `canOperate` = chat, moderation, the door. `canViewAttendees` = the attendee list. The organising org's `owner`/`admin` get all three; its `staff` get `canOperate` only, and create no events (SCRUM-1244). |
 | `eventPermissionSelect` | The `select` fragment `eventPermissions` needs. Spread it rather than hand-picking columns; a select missing `venue` reads as "no venue" and silently denies a venue owner. |
 | `canBroadcast(actor, event, kind, maySponsor)` | Who may put a non-user message in a room. |
 | `broadcastMayCarryMedia(kind)` | Whether a broadcast kind may carry an image. |
 | `canAccessDashboard(role)` | Dashboard entry. Read by `middleware.ts`. |
 
-Build the actor with `actorFor(user)` from `lib/org-membership.ts` — it loads memberships, and `PermissionActor.orgIds` is required precisely so a bare session user cannot typecheck into the resolver and silently deny everyone.
+Build the actor with `actorFor(user)` from `lib/org-membership.ts` — it loads memberships, and `PermissionActor.orgIds` and `editOrgIds` (the owner/admin subset) are required precisely so a bare session user cannot typecheck into the resolver and silently deny everyone.
 
 Mobile routes must read the role from the database, not the JWT: the token carries no role, and a 30-day refresh cycle would outlive any role change baked into it.
 

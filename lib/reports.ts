@@ -169,7 +169,8 @@ const NOTHING: Prisma.eventsWhereInput = { id: { in: [] } }
 /**
  * Which events an actor reports on, split by how they reach each one.
  *
- * - `hosted`: the events their organisations run, plus the creator floor
+ * - `hosted`: the events the organisations they own or administer run (not
+ *   their staff: SCRUM-1244), plus the creator floor
  *   (gated like `visibleEventsWhere`'s, SCRUM-8). Exact counts, per-guest rows.
  * - `venueOnly`: a venue owner's reach through the building — other hosts'
  *   events at their venues, from the claim on (SCRUM-355, SCRUM-500). Counts
@@ -199,9 +200,12 @@ export async function reportScope(role: user_role, userId: string): Promise<Repo
 
   const memberships = await db.organisation_members.findMany({
     where: { user_id: userId, ...activeMembership },
-    select: { org_id: true },
+    select: { org_id: true, role: true },
   })
   const orgIds = memberships.map((m) => m.org_id)
+  // Per-guest rows are the roster in another shape: an org's staff run its
+  // nights and read none of it (SCRUM-1244), as `eventPermissions` says.
+  const editOrgIds = memberships.filter((m) => m.role === "owner" || m.role === "admin").map((m) => m.org_id)
 
   // No org means no events. Returning an unscoped filter here would export the
   // whole platform to someone with no organisation at all.
@@ -210,7 +214,7 @@ export async function reportScope(role: user_role, userId: string): Promise<Repo
   }
 
   const hostedArms: Prisma.eventsWhereInput[] = [
-    { organizer_org_id: { in: orgIds } },
+    { organizer_org_id: { in: editOrgIds } },
     // The creator arm, for events with no organisation only: one that has an org is its members' (SCRUM-942).
     { organizer_id: userId, organizer_org_id: null, ...hostNotSuspended },
   ]
@@ -232,7 +236,10 @@ export async function reportScope(role: user_role, userId: string): Promise<Repo
           ],
         }
       : NOTHING,
-    actor: { id: userId, orgIds },
+    // Who `hostsEvent` counts as running an event: its owners and admins. A
+    // staff member who also owns the venue's org gets the venue's held-back
+    // figures for that night, never the host's exact ones (SCRUM-1244).
+    actor: { id: userId, orgIds: editOrgIds },
   }
 }
 

@@ -47,7 +47,7 @@ afterAll(async () => {
 async function org(...members: string[]) {
   const o = await db.organisations.create({ data: { kind: "company", display_name: testId("Kerala Design Week & Friends"), status: "verified" }, select: { id: true, display_name: true } })
   orgs.push(o.id)
-  for (const [i, user_id] of members.entries()) await db.organisation_members.create({ data: { org_id: o.id, user_id, role: i === 0 ? "owner" : "staff" } })
+  for (const [i, user_id] of members.entries()) await db.organisation_members.create({ data: { org_id: o.id, user_id, role: i === 0 ? "owner" : "admin" } })
   return o
 }
 
