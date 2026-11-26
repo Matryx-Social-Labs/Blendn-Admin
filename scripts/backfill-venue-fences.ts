@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
+import { mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, writeFileSync } from "node:fs"
+import { dirname, join, relative, resolve } from "node:path"
 
 import { Prisma, type PrismaClient, type venue_type } from "@prisma/client"
 
@@ -173,27 +173,31 @@ async function batchOf(client: PrismaClient, rows: FenceRow[], write: boolean): 
       JOIN venues v ON v.id = x.id
       WHERE ${SCOPE} AND v.geofence IS NOT DISTINCT FROM x.was`
   }
-  // Locked, then written, in one statement: `old` is the row as it was, and the scope is asked again under the lock.
+  // One statement. Once it holds a row's lock Postgres re-checks the whole WHERE against the row's newest version, so a
+  // venue claimed or edited after the export drops out here instead of being overwritten. `previous` is `was`: the
+  // WHERE says the two are the same.
   const [, written] = await client.$transaction([
     client.$executeRaw`SET LOCAL lock_timeout = '5s'`,
     client.$queryRaw<RollbackRow[]>`
-      WITH x AS (SELECT * FROM jsonb_to_recordset(${json}::jsonb) AS x(id uuid, was jsonb, fence jsonb)),
-      old AS (
-        SELECT v.id, v.geofence FROM venues v JOIN x ON x.id = v.id
-        WHERE ${SCOPE} AND v.geofence IS NOT DISTINCT FROM x.was
-        FOR UPDATE OF v
-      )
       UPDATE venues v SET geofence = x.fence, updated_at = now()
-      FROM old JOIN x ON x.id = old.id
-      WHERE v.id = old.id AND ${SCOPE} AND v.geofence IS NOT DISTINCT FROM x.was
-      RETURNING v.id::text AS id, old.geofence AS previous, x.fence AS written`,
+      FROM jsonb_to_recordset(${json}::jsonb) AS x(id uuid, was jsonb, fence jsonb)
+      WHERE v.id = x.id AND ${SCOPE} AND v.geofence IS NOT DISTINCT FROM x.was
+      RETURNING v.id::text AS id, x.was AS previous, x.fence AS written`,
   ])
   return written
 }
 
+/** Whole or not at all: a run killed mid-write must not leave half a rollback file. */
+function saveRollback(path: string, rollback: RollbackFile) {
+  writeFileSync(`${path}.tmp`, JSON.stringify(rollback, null, 1) + "\n")
+  renameSync(`${path}.tmp`, path)
+}
+
 /**
- * Writes (or, dry, counts) the file's fences, in batches. The rollback file is rewritten after every batch, so a run
- * that dies part-way still says what it changed.
+ * Writes (or, dry, counts) the file's fences, in batches. Before each batch the rollback file already lists the batch
+ * as it would be written, so a run killed between a commit and the next save still holds every row it changed (a row
+ * it did not change is harmless there: `--revert` skips a venue whose fence is not the one written). After the batch
+ * the file is narrowed to the rows that changed.
  */
 export async function applyFences(
   client: PrismaClient,
@@ -205,17 +209,25 @@ export async function applyFences(
       throw new Error(`This database holds the pilot venue. Run again with --exclude ${PILOT_VENUE_ID}.`)
     }
   }
-  const rows = file.rows.filter((r) => !opts.exclude.has(r.id.toLowerCase()))
-  const done: RollbackRow[] = []
-  const save = () => {
-    const rollback: RollbackFile = { release: file.release, mode: opts.write ? "apply" : "dry-run", rows: done }
-    writeFileSync(opts.rollbackPath, JSON.stringify(rollback, null, 1) + "\n")
+  // The file sits on disk until after the pilot: nothing in it is written unless the editor would save it.
+  for (const r of file.rows) {
+    if (!UUID.test(r.id) || !("was" in r) || r.fence?.type !== "polygon" || !validateGeofence(r.fence).ok) {
+      throw new Error(`${r.id}: not a venue id, its fence at export and a valid outline; nothing written`)
+    }
   }
-  save()
+  const rows = file.rows.filter((r) => !opts.exclude.has(r.id.toLowerCase()))
+  const mode = opts.write ? "apply" : "dry-run"
+  const done: RollbackRow[] = []
+  saveRollback(opts.rollbackPath, { release: file.release, mode, rows: done })
   const size = opts.batch ?? BATCH
   for (let i = 0; i < rows.length; i += size) {
-    done.push(...(await batchOf(client, rows.slice(i, i + size), opts.write)))
-    save()
+    const batch = rows.slice(i, i + size)
+    if (opts.write) {
+      const intended = batch.map((r) => ({ id: r.id, previous: r.was, written: r.fence }))
+      saveRollback(opts.rollbackPath, { release: file.release, mode, rows: [...done, ...intended] })
+    }
+    done.push(...(await batchOf(client, batch, opts.write)))
+    saveRollback(opts.rollbackPath, { release: file.release, mode, rows: done })
   }
   return done
 }
@@ -226,11 +238,16 @@ export async function revertFences(client: PrismaClient, file: RollbackFile, opt
   for (let i = 0; i < file.rows.length; i += BATCH) {
     const json = JSON.stringify(file.rows.slice(i, i + BATCH))
     const rows = opts.write
-      ? await client.$queryRaw<{ id: string }[]>`
-          UPDATE venues v SET geofence = x.previous, updated_at = now()
-          FROM jsonb_to_recordset(${json}::jsonb) AS x(id uuid, previous jsonb, written jsonb)
-          WHERE v.id = x.id AND v.geofence = x.written
-          RETURNING v.id::text AS id`
+      ? (
+          await client.$transaction([
+            client.$executeRaw`SET LOCAL lock_timeout = '5s'`,
+            client.$queryRaw<{ id: string }[]>`
+              UPDATE venues v SET geofence = x.previous, updated_at = now()
+              FROM jsonb_to_recordset(${json}::jsonb) AS x(id uuid, previous jsonb, written jsonb)
+              WHERE v.id = x.id AND v.geofence = x.written
+              RETURNING v.id::text AS id`,
+          ])
+        )[1]
       : await client.$queryRaw<{ id: string }[]>`
           SELECT v.id::text AS id
           FROM jsonb_to_recordset(${json}::jsonb) AS x(id uuid, previous jsonb, written jsonb)
@@ -245,11 +262,14 @@ const readNdjson = <T>(path: string): T[] =>
   readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as T)
 
 /** A directory outside this checkout: the files carry every seeded venue's point. */
-function outsideRepo(dir: string | undefined): string {
+export function outsideRepo(dir: string | undefined): string {
   if (!dir) throw new Error("name a directory outside the repo")
-  const abs = resolve(dir)
-  if (abs.startsWith(resolve(".") + "/") || abs === resolve(".")) throw new Error(`${abs} is inside the repo`)
-  mkdirSync(abs, { recursive: true })
+  const repo = realpathSync(resolve(__dirname, ".."))
+  const inside = (path: string) => !relative(repo, path).startsWith("..")
+  if (inside(resolve(dir))) throw new Error(`${resolve(dir)} is inside the repo`)
+  mkdirSync(dir, { recursive: true })
+  const abs = realpathSync(dir) // and not through a symlink into it
+  if (inside(abs)) throw new Error(`${abs} is inside the repo`)
   return abs
 }
 
@@ -333,14 +353,14 @@ function pickStep(dir: string) {
   console.log(`Wrote ${dir}/fences.json. Next: apply ${dir}/fences.json (a dry run until --apply).`)
 }
 
-const stamp = () => new Date().toISOString().replace(/[:.]/g, "-")
-
 async function applyStep(fencesPath: string, args: string[]) {
+  const unknown = args.filter((a, i) => a.startsWith("--") && a !== "--apply" && a !== "--exclude" && args[i - 1] !== "--exclude")
+  if (unknown.length) throw new Error(`unknown ${unknown.join(" ")}: only --apply and --exclude <id>`)
   const write = args.includes("--apply")
   console.log(write ? "APPLY" : "DRY RUN")
   const exclude = readExclude(args)
   const file = JSON.parse(readFileSync(fencesPath, "utf8")) as FencesFile
-  const rollbackPath = join(dirname(resolve(fencesPath)), `rollback-${write ? "apply" : "dry-run"}-${stamp()}.json`)
+  const rollbackPath = join(outsideRepo(dirname(resolve(fencesPath))), `rollback-${write ? "apply" : "dry-run"}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`)
   const done = await applyFences(db, file, { write, exclude, rollbackPath })
   console.log(`${write ? "Wrote" : "Would write"} ${done.length} of ${file.rows.length} fences (release ${file.release}); excluded ${exclude.size}.`)
   console.log(`Rollback file: ${rollbackPath}`)
@@ -348,7 +368,6 @@ async function applyStep(fencesPath: string, args: string[]) {
 
 async function revertStep(path: string, write: boolean) {
   console.log(write ? "REVERT" : "REVERT DRY RUN")
-  if (!existsSync(path)) throw new Error(`${path} does not exist`)
   const file = JSON.parse(readFileSync(path, "utf8")) as RollbackFile
   const ids = await revertFences(db, file, { write })
   console.log(`${write ? "Restored" : "Would restore"} ${ids.length} of ${file.rows.length} venues (release ${file.release}).`)

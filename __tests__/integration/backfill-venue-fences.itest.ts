@@ -74,14 +74,21 @@ describe("the export reads only the scope", () => {
     const drawn = await venue("export-drawn", { geofence: building })
     const deleted = await venue("export-deleted", { deleted_at: new Date() })
     const handAdded = await venue("export-hand", { source: null })
-    const ids = new Set((await exportVenues(db)).map((v) => v.id))
-    expect([inScope, bare].every((id) => ids.has(id))).toBe(true)
-    expect([claimed, drawn, deleted, handAdded].some((id) => ids.has(id))).toBe(false)
+    const noPin = await venue("export-nopin", { latitude: null })
+    const bengaluru = await venue("export-blr", { city: "Bangalore" })
+    const exported = new Map((await exportVenues(db)).map((v) => [v.id, v]))
+    expect([inScope, bare, bengaluru].every((id) => exported.has(id))).toBe(true)
+    expect([claimed, drawn, deleted, handAdded, noPin].some((id) => exported.has(id))).toBe(false)
+    // The city is the catalogue's slug, whatever the spelling; one it does not know is "elsewhere".
+    expect(exported.get(bengaluru)?.city).toBe("bengaluru")
+    expect(exported.get(inScope)?.city).toBe("elsewhere")
+    expect(exported.get(bare)?.was).toBeNull()
   })
 })
 
 describe("apply", () => {
   let inScope: string, bare: string, claimed: string, drawn: string, deleted: string, excluded: string, raced: string
+  let handAdded: string
   let rows: FenceRow[]
   let rollbackPath: string
 
@@ -94,7 +101,9 @@ describe("apply", () => {
     claimed = await venue("claimed", {})
     drawn = await venue("drawn", {})
     deleted = await venue("deleted", {})
-    rows = await Promise.all([inScope, bare, excluded, raced, claimed, drawn, deleted].map(rowFor))
+    // Never seeded: typed in by a host, so no dataset source. Not the backfill's, whatever the file says.
+    handAdded = await venue("hand", { source: null })
+    rows = await Promise.all([inScope, bare, excluded, raced, claimed, drawn, deleted, handAdded].map(rowFor))
     await db.venues.update({ where: { id: claimed }, data: { claimed_at: new Date() } })
     await db.venues.update({ where: { id: drawn }, data: { geofence: polygonOf(0.0003) } })
     await db.venues.update({ where: { id: deleted }, data: { deleted_at: new Date() } })
@@ -126,11 +135,22 @@ describe("apply", () => {
     expect(await fenceOf(raced)).toEqual(racedBefore)
     expect(await fenceOf(excluded)).toEqual(circle(lat, lng))
     expect(await fenceOf(deleted)).toEqual(circle(lat, lng))
+    expect(await fenceOf(handAdded)).toEqual(circle(lat, lng))
 
     const rollback = JSON.parse(readFileSync(rollbackPath, "utf8")) as RollbackFile
     expect(rollback.release).toBe("2026-11-18.0")
     expect(rollback.rows.find((r) => r.id === inScope)).toEqual({ id: inScope, previous: circle(lat, lng), written: building })
     expect(rollback.rows.find((r) => r.id === bare)).toEqual({ id: bare, previous: null, written: building })
+  })
+
+  it("refuses a file with a fence the editor would not save, before writing any row", async () => {
+    const id = await venue("bad-file", {})
+    const bowTie = { type: "polygon", ring: [[lat, lng], [lat + 0.001, lng + 0.001], [lat, lng + 0.001], [lat + 0.001, lng]], buffer: 20 }
+    const bad = [await rowFor(id), { ...(await rowFor(id)), fence: bowTie as FenceRow["fence"] }]
+    await expect(
+      applyFences(db, file(bad), { write: true, exclude: new Set(), rollbackPath: join(dir, "bad.json") })
+    ).rejects.toThrow(/valid outline/)
+    expect(await fenceOf(id)).toEqual(circle(lat, lng))
   })
 
   it("changes nothing the second time", async () => {
@@ -172,6 +192,10 @@ describe("the pilot venue", () => {
   it("an apply refuses a database holding it unless it is excluded", async () => {
     const rows = [await rowFor(PILOT_VENUE_ID)]
     const path = join(dir, "pilot.json")
+    // Refused for the database, not the file: a file without the pilot is refused too.
+    const other = await venue("pilot-other", {})
+    await expect(applyFences(db, file([await rowFor(other)]), { write: true, exclude: new Set(), rollbackPath: path })).rejects.toThrow(/pilot venue/)
+    expect(await fenceOf(other)).toEqual(circle(lat, lng))
     await expect(applyFences(db, file(rows), { write: true, exclude: new Set(), rollbackPath: path })).rejects.toThrow(
       /--exclude 0fbaa05a-2d36-45fc-8066-82742636044c/
     )

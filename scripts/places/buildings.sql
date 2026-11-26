@@ -10,6 +10,7 @@
 -- `fenceFromCandidates` in the script, which is `pickBuilding`'s rule (lib/outline.ts), so the two cannot disagree.
 -- One city per run: the box read from S3 is that city's venues, so a run reads one city's buildings, not a country's.
 
+.bail on
 INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial;
 SET s3_region = 'us-west-2';
 SET threads = 2;
@@ -27,6 +28,13 @@ SELECT id, lat, lng
 FROM read_json(getvariable('dir') || '/venues.ndjson', format = 'newline_delimited',
                columns = {id: 'VARCHAR', lat: 'DOUBLE', lng: 'DOUBLE', city: 'VARCHAR'})
 WHERE city = getvariable('city');
+
+-- A typo'd or unset CITY reads nothing and says so; "elsewhere" (uncatalogued cities) is scattered over the world and
+-- would read a continent's buildings, so it is refused too.
+SELECT CASE WHEN count(*) = 0 THEN error('no venues for CITY=' || coalesce(getvariable('city'), '(unset)'))
+            WHEN max(lng) - min(lng) > 1.5 OR max(lat) - min(lat) > 1.5 THEN error('the venues of CITY=' || getvariable('city') || ' span more than 1.5 degrees: not one city')
+       END AS checked
+FROM points;
 
 -- The city's box, from its own venues, with room for a building whose edge is 25 m off a pin at the box's edge.
 SET VARIABLE xmin = (SELECT min(lng) - 0.001 FROM points);

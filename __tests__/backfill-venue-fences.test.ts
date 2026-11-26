@@ -1,6 +1,6 @@
 jest.mock("@/lib/db", () => ({ db: {}, closeDb: jest.fn() }))
 
-import { fenceFromCandidates, readExclude, type Candidate } from "../scripts/backfill-venue-fences"
+import { fenceFromCandidates, outsideRepo, readExclude, type Candidate } from "../scripts/backfill-venue-fences"
 import { DEFAULT_BUFFER_M, GEOFENCE_LIMITS, pointInPolygon, validateGeofence } from "@/lib/geofence"
 
 /*
@@ -80,7 +80,9 @@ describe("fenceFromCandidates — pickBuilding's rule over Overture buildings", 
     expect(pick).toMatchObject({ ok: true, building: "multi", dataset: "Microsoft ML Buildings" })
     if (!pick.ok || pick.fence.type !== "polygon") throw new Error("no polygon")
     expect(pick.fence.ring).toHaveLength(4)
-    expect(pointInPolygon(pin, pick.fence.ring)).toBe(true)
+    // The 24 m outer ring, not the 6 m hole (which holds the pin too).
+    const lats = pick.fence.ring.map(([la]) => la)
+    expect((Math.max(...lats) - Math.min(...lats)) * M_PER_DEG_LAT).toBeCloseTo(24, 0)
   })
 
   it("refuses a self-intersecting ring rather than store a fence the editor would reject", () => {
@@ -100,6 +102,10 @@ describe("fenceFromCandidates — pickBuilding's rule over Overture buildings", 
     if (!pick.ok || pick.fence.type !== "polygon") throw new Error("no polygon")
     expect(pick.fence.ring.length).toBeLessThanOrEqual(GEOFENCE_LIMITS.MAX_RING)
     expect(validateGeofence(pick.fence).ok).toBe(true)
+    // Simplified, not truncated: still the whole 15 m round building around the pin.
+    expect(pointInPolygon(pin, pick.fence.ring)).toBe(true)
+    const lats = pick.fence.ring.map(([la]) => la)
+    expect((Math.max(...lats) - Math.min(...lats)) * M_PER_DEG_LAT).toBeGreaterThan(29)
   })
 
   it.each(["cafe", "pub_bar", "brewery", "lounge_rooftop", "nightclub", "restaurant", "live_music_venue"] as const)(
@@ -118,6 +124,14 @@ describe("fenceFromCandidates — pickBuilding's rule over Overture buildings", 
     expect(fenceFromCandidates(pin, null, [building("hall", square(75))])).toMatchObject({ ok: true })
     // 140 m square = 19,600 m²
     expect(fenceFromCandidates(pin, "cafe", [building("big", square(70))])).toMatchObject({ ok: true })
+  })
+})
+
+describe("outsideRepo", () => {
+  it("refuses a directory inside the checkout: the files hold every seeded venue's point", () => {
+    expect(() => outsideRepo("scripts/places/out")).toThrow(/inside the repo/)
+    expect(() => outsideRepo(".")).toThrow(/inside the repo/)
+    expect(() => outsideRepo(undefined)).toThrow(/outside the repo/)
   })
 })
 
