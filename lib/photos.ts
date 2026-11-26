@@ -1,6 +1,6 @@
 import { checkImageContent } from "./moderation/openai-moderation"
 import { forcedHide } from "./moderation/staging-override"
-import { escalateChildSafetyImage } from "./moderation/child-safety"
+import { holdSexualImage } from "./moderation/sexual-image-hold"
 import { deleteFile, ownedPhotoKey, sealUpload, withdrawFromPublic, type SealRefusal } from "./tigris"
 import { db } from "./db"
 import { logger } from "./logger"
@@ -205,11 +205,11 @@ export async function moderateProfilePhoto(url: string, userId: string): Promise
   try {
     const check = forcedHide(userId) ?? (await checkImageContent(url, PHOTO_CHECK))
     if (check.checked && check.result?.action === "hide") {
-      // The page goes whether or not the pull went through: a failed pull is logged below, and is the more urgent.
+      // The page goes whether or not the pull went through: a failed pull is logged below, and needs a person more.
       try {
         await pullPhoto(url, userId)
       } finally {
-        await escalateChildSafetyImage(check, ownedPhotoKey(url, userId), userId)
+        await holdSexualImage(check, "profile", ownedPhotoKey(url, userId), userId)
       }
       return
     }
@@ -242,7 +242,7 @@ export async function moderateBlurPhoto(url: string, userId: string): Promise<vo
         await withdraw(url, userId)
         logger.warn("Blurred profile photo removed after moderation", { userId })
       } finally {
-        await escalateChildSafetyImage(check, ownedPhotoKey(url, userId), userId)
+        await holdSexualImage(check, "blur", ownedPhotoKey(url, userId), userId)
       }
       return
     }

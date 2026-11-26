@@ -1,6 +1,6 @@
 import { logger } from "../logger"
 import type { ModerationResult, OpenAIModerationCategory } from "./types"
-import { AUTO_HIDE_THRESHOLD, CHILD_SAFETY_CATEGORY, CHILD_SAFETY_IMAGE_THRESHOLD, FLAG_THRESHOLD } from "./config"
+import { AUTO_HIDE_THRESHOLD, FLAG_THRESHOLD } from "./config"
 import { breakerIsOpen, recordTextFailure, recordTextSuccess } from "./text-breaker"
 
 const OPENAI_MODERATION_URL = "https://api.openai.com/v1/moderations"
@@ -68,11 +68,6 @@ function evaluateScores(
     if (value >= FLAG_THRESHOLD) {
       categories[key] = value
     }
-  }
-
-  const minors = scores[CHILD_SAFETY_CATEGORY] ?? 0
-  if (source === "openai_image" && minors >= CHILD_SAFETY_IMAGE_THRESHOLD) {
-    return { action: "hide", source, categories: { ...categories, [CHILD_SAFETY_CATEGORY]: minors }, confidence: maxScore }
   }
 
   // If nothing above threshold and OpenAI didn't flag, it's clean

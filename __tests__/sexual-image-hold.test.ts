@@ -1,13 +1,17 @@
 /**
- * A child-safety image verdict pulls the photo, pages staff once, and leaves an
- * audit row (SCRUM-1163, launch gate 9), on every path that acts on an image
- * verdict: the profile photo, its blurred copy, and a Lobby post's photo.
+ * A sexual image that moderation pulls goes to a person (SCRUM-1163, launch gate 9).
  *
- * The page leaves the platform, so it carries the storage key and the user id
- * and nothing else: no URL, no image, no name. And the page and the audit row
- * come after the pull and can never undo it: a channel that is down, or none
- * configured, or an audit write that throws, is logged as an error and the
- * photo stays down.
+ * OpenAI's omni-moderation scores `sexual/minors` on text only: an image alone
+ * scores 0 on it (developers.openai.com/api/docs/guides/moderation, read
+ * 2026-11-26). Nothing here can tell a minor or a non-consensual image from
+ * any other sexual image, so every IMAGE hide naming `sexual` (or
+ * `sexual/minors`, should the vendor ever score it on images) pages staff once
+ * and leaves a `moderation.sexual_image_hold` audit row, on every path that
+ * acts on an image verdict: the profile photo, its blurred copy, a Lobby photo.
+ *
+ * The page leaves the platform: a fixed sentence, the storage key, the user id
+ * and the dashboard link, nothing else. It and the audit row come after the
+ * pull and can never undo it.
  */
 jest.mock("@/lib/tigris", () => ({
   ownedPhotoKey: jest.fn(),
@@ -24,7 +28,8 @@ jest.mock("@/lib/photo-checks", () => ({
   notePulledProfilePhoto: jest.fn().mockResolvedValue(undefined),
 }))
 jest.mock("@/lib/staff-alert", () => ({ notifyStaff: jest.fn() }))
-jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
+jest.mock("@/lib/audit-log", () => ({ auditInTx: jest.fn().mockResolvedValue(undefined) }))
+jest.mock("@/lib/email", () => ({ dashboardUrl: () => "https://dash.test" }))
 jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }))
 jest.mock("@/lib/db", () => ({
   db: {
@@ -41,11 +46,12 @@ import { checkImageContent, type ModerationCheck } from "@/lib/moderation/openai
 import { recordPhotoPulled } from "@/lib/photo-checks"
 import { ownedPhotoKey, sealedChatKey, withdrawFromPublic } from "@/lib/tigris"
 import { notifyStaff } from "@/lib/staff-alert"
-import { auditLog } from "@/lib/audit-log"
+import { auditInTx } from "@/lib/audit-log"
 import { logger } from "@/lib/logger"
 import { db } from "@/lib/db"
 import { moderateBlurPhoto, moderateProfilePhoto } from "@/lib/photos"
 import { moderateLobbyPhoto } from "@/lib/lobby-photo"
+import { holdSexualImage } from "@/lib/moderation/sexual-image-hold"
 
 const USER = "4b8f8a52-7a0e-4c39-9d0b-0a3c2f1e5d11"
 const PROFILE_KEY = `profile/${USER}/1764100000000-ab12cd-sealed`
@@ -56,18 +62,22 @@ const POST = "9c1d2e3f-0000-4000-8000-000000000001"
 const LOBBY_KEY = "chat/sealed/0f0e0d0c-0b0a-4909-8807-060504030201"
 const LOBBY_URL = `https://blendn-media-private.fly.storage.tigris.dev/${LOBBY_KEY}`
 
-const CHILD_SAFETY: ModerationCheck = {
+const SEXUAL_HIDE: ModerationCheck = {
   checked: true,
-  result: { action: "hide", source: "openai_image", categories: { "sexual/minors": 0.25 }, confidence: 0.25 },
+  result: { action: "hide", source: "openai_image", categories: { sexual: 0.92 }, confidence: 0.92 },
 }
-const ORDINARY_HIDE: ModerationCheck = {
+const VIOLENCE_HIDE: ModerationCheck = {
   checked: true,
   result: { action: "hide", source: "openai_image", categories: { violence: 0.9 }, confidence: 0.9 },
+}
+const SEXUAL_FLAG: ModerationCheck = {
+  checked: true,
+  result: { action: "flag", source: "openai_image", categories: { sexual: 0.5 }, confidence: 0.5 },
 }
 
 const vendor = checkImageContent as jest.Mock
 const page = notifyStaff as jest.Mock
-const audit = auditLog as jest.Mock
+const audit = auditInTx as jest.Mock
 const pulled = recordPhotoPulled as jest.Mock
 const withdraw = withdrawFromPublic as jest.Mock
 const lobbyCheck = jest.fn()
@@ -75,6 +85,7 @@ const lobbyCheck = jest.fn()
 /** One image path: how to run it with a verdict, the key it names, and what "pulled" means on it. */
 interface ImagePath {
   name: string
+  path: "profile" | "blur" | "lobby"
   key: string
   run: (check: ModerationCheck) => Promise<unknown>
   expectPulled: () => void
@@ -83,6 +94,7 @@ interface ImagePath {
 const PATHS: ImagePath[] = [
   {
     name: "profile photo",
+    path: "profile",
     key: PROFILE_KEY,
     run: async (check) => {
       vendor.mockResolvedValue(check)
@@ -95,6 +107,7 @@ const PATHS: ImagePath[] = [
   },
   {
     name: "blur photo",
+    path: "blur",
     key: BLUR_KEY,
     run: async (check) => {
       vendor.mockResolvedValue(check)
@@ -108,6 +121,7 @@ const PATHS: ImagePath[] = [
   },
   {
     name: "Lobby photo",
+    path: "lobby",
     key: LOBBY_KEY,
     run: async (check) => {
       lobbyCheck.mockResolvedValue(check)
@@ -130,79 +144,105 @@ beforeEach(() => {
   ;(db.board_posts.findUnique as jest.Mock).mockResolvedValue({ author_id: USER, photo_url: LOBBY_URL, photo_status: "pending" })
   ;(db.board_posts.updateMany as jest.Mock).mockResolvedValue({ count: 1 })
   page.mockResolvedValue("sent")
+  audit.mockResolvedValue(undefined)
 })
 
-describe.each(PATHS)("a child-safety verdict on the $name", (path) => {
-  it("pulls it, pages staff once with the key and the user id only, and writes the audit row", async () => {
-    await path.run(CHILD_SAFETY)
+const message = (path: string, key: string) =>
+  `Sexual image pulled (${path}). A person must check it for a minor or a non-consensual image. key ${key} user ${USER}\nhttps://dash.test/dashboard/moderation`
+const auditEntry = (path: string, key: string, category = "sexual") => ({
+  action: "moderation.sexual_image_hold",
+  resource: "user",
+  resourceId: USER,
+  details: { objectKey: key, path, category },
+})
+
+describe.each(PATHS)("an image hide naming sexual on the $name", (path) => {
+  it("pulls it, pages staff once with the sentence, key, user id and link only, and writes the audit row", async () => {
+    await path.run(SEXUAL_HIDE)
 
     path.expectPulled()
     expect(page).toHaveBeenCalledTimes(1)
-    expect(page).toHaveBeenCalledWith(`Child-safety image hold (sexual/minors).\nUser: ${USER}\nObject key: ${path.key}`)
+    expect(page).toHaveBeenCalledWith(message(path.path, path.key))
     expect(audit).toHaveBeenCalledTimes(1)
     // No actor: the platform did this, as for every automated row (lib/audit-log.ts `actsFor`).
-    expect(audit).toHaveBeenCalledWith({
-      action: "moderation.child_safety_hold",
-      resource: "user",
-      resourceId: USER,
-      details: { objectKey: path.key, category: "sexual/minors" },
-    })
+    expect(audit).toHaveBeenCalledWith(expect.anything(), auditEntry(path.path, path.key))
   })
 
   it("pages only after the photo is pulled", async () => {
-    await path.run(CHILD_SAFETY)
-    const pullCall = path.name === "Lobby photo" ? (db.board_posts.updateMany as jest.Mock) : withdraw
+    await path.run(SEXUAL_HIDE)
+    const pullCall = path.path === "lobby" ? (db.board_posts.updateMany as jest.Mock) : withdraw
     expect(pullCall.mock.invocationCallOrder[0]).toBeLessThan(page.mock.invocationCallOrder[0])
   })
 
-  it("an ordinary hide pulls it and pages nobody", async () => {
-    await path.run(ORDINARY_HIDE)
+  it("a hide for another category (violence) pulls it and pages nobody", async () => {
+    await path.run(VIOLENCE_HIDE)
     path.expectPulled()
+    expect(page).not.toHaveBeenCalled()
+    expect(audit).not.toHaveBeenCalled()
+  })
+
+  it("a sexual score at flag level is judged as today and pages nobody", async () => {
+    await path.run(SEXUAL_FLAG)
     expect(page).not.toHaveBeenCalled()
     expect(audit).not.toHaveBeenCalled()
   })
 
   it.each(["failed", "unconfigured"])("a page that comes back %s leaves the photo pulled and logs an error", async (result) => {
     page.mockResolvedValue(result)
-    await path.run(CHILD_SAFETY)
+    await path.run(SEXUAL_HIDE)
 
     path.expectPulled()
     expect(audit).toHaveBeenCalledTimes(1)
-    expect(logger.error).toHaveBeenCalledWith(
-      "Child-safety image hold: staff were not paged",
-      { userId: USER, objectKey: path.key, result }
-    )
+    expect(logger.error).toHaveBeenCalledWith("Sexual image hold: staff were not paged", { userId: USER, objectKey: path.key, result })
   })
 
-  it("an audit write that throws leaves the photo pulled, still pages, and logs an error", async () => {
-    audit.mockImplementation(() => {
-      throw new Error("audit down")
-    })
-    await path.run(CHILD_SAFETY)
+  it("an audit write that fails leaves the photo pulled, still pages, and logs an error naming the user and key", async () => {
+    audit.mockRejectedValue(new Error("audit down"))
+    await path.run(SEXUAL_HIDE)
 
     path.expectPulled()
     expect(page).toHaveBeenCalledTimes(1)
-    expect(logger.error).toHaveBeenCalledWith(
-      "Child-safety image hold: audit row not written",
-      { userId: USER, objectKey: path.key, error: "audit down" }
-    )
+    expect(logger.error).toHaveBeenCalledWith("Sexual image hold: audit row not written", { userId: USER, objectKey: path.key, error: "audit down" })
+  })
+})
+
+describe("holdSexualImage", () => {
+  it("never runs for a text verdict naming sexual", async () => {
+    await holdSexualImage({ checked: true, result: { ...SEXUAL_HIDE.result!, source: "openai_text" } }, "profile", PROFILE_KEY, USER)
+    expect(page).not.toHaveBeenCalled()
+    expect(audit).not.toHaveBeenCalled()
+  })
+
+  it("runs for sexual/minors too, should the vendor ever score it on images", async () => {
+    await holdSexualImage({ checked: true, result: { action: "hide", source: "openai_image", categories: { "sexual/minors": 0.8 }, confidence: 0.8 } }, "lobby", LOBBY_KEY, USER)
+    expect(page).toHaveBeenCalledTimes(1)
+    expect(audit).toHaveBeenCalledWith(expect.anything(), auditEntry("lobby", LOBBY_KEY, "sexual/minors"))
+  })
+
+  it("never throws: a page that throws is logged, and the call resolves", async () => {
+    page.mockRejectedValue(new Error("channel exploded"))
+    await expect(holdSexualImage(SEXUAL_HIDE, "profile", PROFILE_KEY, USER)).resolves.toBeUndefined()
+    expect(logger.error).toHaveBeenCalledWith("Sexual image hold failed", { userId: USER, objectKey: PROFILE_KEY, error: "channel exploded" })
   })
 })
 
 describe("the page is never lost to a pull that fails", () => {
   it("a profile pull that throws still pages, and the failure is logged", async () => {
     pulled.mockRejectedValueOnce(new Error("deadlock detected"))
-    vendor.mockResolvedValue(CHILD_SAFETY)
+    vendor.mockResolvedValue(SEXUAL_HIDE)
 
     await moderateProfilePhoto(PROFILE_URL, USER)
 
     expect(page).toHaveBeenCalledTimes(1)
-    expect(logger.error).toHaveBeenCalledWith("Profile photo moderation failed; photo left in place", expect.objectContaining({ userId: USER }))
+    expect(logger.error).toHaveBeenCalledWith(
+      "Profile photo moderation failed; photo left in place",
+      expect.objectContaining({ userId: USER, error: "deadlock detected" })
+    )
   })
 
   it("a Lobby photo another pass already decided pages nobody: that pass did", async () => {
     ;(db.board_posts.updateMany as jest.Mock).mockResolvedValue({ count: 0 })
-    lobbyCheck.mockResolvedValue(CHILD_SAFETY)
+    lobbyCheck.mockResolvedValue(SEXUAL_HIDE)
 
     await moderateLobbyPhoto(POST, lobbyCheck)
 

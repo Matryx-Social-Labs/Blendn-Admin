@@ -1,4 +1,4 @@
-// Relative: the child-safety hold (lib/moderation/child-safety.ts) writes from the photo sweeper, which server.ts reaches.
+// Relative: the sexual image hold (lib/moderation/sexual-image-hold.ts) writes from the photo sweeper, which server.ts reaches.
 import { clientIpFrom } from "./client-ip"
 import { logger } from "./logger"
 import { db } from "./db"

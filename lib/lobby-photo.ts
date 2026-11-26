@@ -5,7 +5,7 @@ import { db } from "./db"
 import { logger } from "./logger"
 import { checkImageContent, type ModerationCheck } from "./moderation/openai-moderation"
 import { forcedHide } from "./moderation/staging-override"
-import { escalateChildSafetyImage } from "./moderation/child-safety"
+import { holdSexualImage } from "./moderation/sexual-image-hold"
 import { readableUrl, sealedChatKey } from "./tigris"
 
 /**
@@ -74,7 +74,7 @@ export async function moderateLobbyPhoto(postId: string, check = checkImageConte
     if (verdict === "rejected") {
       logger.warn("Lobby photo rejected by moderation", { postId })
       // Only the pass that rejected it pages: one that lost the race returned above.
-      await escalateChildSafetyImage(judged, sealedChatKey(post.photo_url), post.author_id)
+      await holdSexualImage(judged, "lobby", sealedChatKey(post.photo_url), post.author_id)
     }
     return verdict
   } catch (error) {

@@ -1,14 +1,6 @@
 // Confidence thresholds for moderation actions
 export const AUTO_HIDE_THRESHOLD = 0.7
 export const FLAG_THRESHOLD = 0.4
-/**
- * An IMAGE whose `sexual/minors` score reaches this is a hide naming that
- * category, whatever its other scores (SCRUM-1163). Folded into the max it was
- * at most a flag, which profile and blur photos drop. Images only: text keeps
- * the two thresholds above.
- */
-export const CHILD_SAFETY_IMAGE_THRESHOLD = 0.2
-export const CHILD_SAFETY_CATEGORY = "sexual/minors"
 
 // Spam detection
 export const SPAM_BURST_LIMIT = 5

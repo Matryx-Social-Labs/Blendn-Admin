@@ -85,7 +85,7 @@ Be honest that this is one or two people, not a rota:
 | **Contact the reporter** | -- | **No** |
 | **Tell the organizer someone at their event is in trouble** | -- | **No** |
 | **Get paged when a report or severe flag lands** | `lib/staff-alert.ts`, once a minute, to `STAFF_ALERT_SLACK_WEBHOOK_URL` / `STAFF_ALERT_EMAIL` | **Yes, once a channel is set** (SCRUM-1161) |
-| **Child-safety image hold** (an image scoring `sexual/minors` ≥ 0.2) | Pulled on the profile, blur and Lobby photo paths; staff paged at once with the storage key and user id only; audit row `moderation.child_safety_hold` (`lib/moderation/child-safety.ts`). The object stays in the private bucket on the ordinary 180-day schedule: a longer hold is for the lawyer to confirm | **Yes, page once a channel is set** (SCRUM-1163) |
+| **A sexual image that moderation pulls** | Profile, blur and Lobby photos: staff are paged at once with the storage key and user id, and audit row `moderation.sexual_image_hold` is written (`lib/moderation/sexual-image-hold.ts`). There is no automatic detection of child sexual abuse material: OpenAI does not score minors on images, so a person checks each one | **Yes, page once a channel is set** (SCRUM-1163) |
 
 The two gaps above it are the work.
 
