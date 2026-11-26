@@ -133,7 +133,7 @@ describe("an organiser sees labels and counts; an admin sees the person", () => 
     await db.organisation_members.createMany({
       data: [
         { org_id: orgA, user_id: hostA, role: "owner" },
-        { org_id: orgA, user_id: colleagueA, role: "staff" },
+        { org_id: orgA, user_id: colleagueA, role: "admin" },
         { org_id: orgB, user_id: hostB, role: "owner" },
       ],
     })

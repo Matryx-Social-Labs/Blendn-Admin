@@ -2302,7 +2302,10 @@ place and time are not separate fields: the post's words carry them, as `name`.
 `groups` and `rooms` alike, `lastMessage` and `unreadCount` leave out messages
 from anybody you blocked or who blocked you — the same filter the room's
 history applies — so a blocked person's line is never previewed, named or
-counted. Your own messages are never unread. Reading a room's newest page
+counted. Your own messages are never unread. **`unreadCount` stops at 10** on
+every row (SCRUM-1223): the app says "9+" above 9, and a capped count reads at
+most ten rows a room however long its history, a room with a read marker only
+after it. Reading a room's newest page
 (`GET /chat/groups/:chatGroupId/messages` without `before`) marks it read, as
 `GET /events/:eventId/chat` does for an event's room. On `rooms`, `lastMessageAt` is the time of the newest message you can
 see, and the list is ordered by it. (A `groups` row's `lastMessageAt`, and the

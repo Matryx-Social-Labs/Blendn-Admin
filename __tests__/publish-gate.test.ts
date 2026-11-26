@@ -33,7 +33,7 @@ jest.mock("@/lib/rate-limit", () => ({
 }))
 
 jest.mock("@/lib/org-membership", () => ({
-  actorFor: jest.fn(async (u: { id: string; role: string }) => ({ ...u, orgIds: [] })),
+  actorFor: jest.fn(async (u: { id: string; role: string }) => ({ ...u, orgIds: [], editOrgIds: [] })),
 }))
 
 jest.mock("@/lib/venue-link", () => ({

@@ -38,14 +38,18 @@ async function hostOf(eventId: string) {
 }
 
 describe("who may write ticket types", () => {
-  it("lets a member of the event's organization write, and nobody else", async () => {
+  it("lets an owner or admin of the event's organization write, and nobody else", async () => {
     const { eventId, orgId } = await ticketedEvent(w, [])
     // A colleague at the same organization, who did not create the event (CLAUDE.md: organization-shaped).
     const colleague = await makeUser(testId("tix-colleague"), "organizer")
     w.users.push(colleague)
-    await db.organisation_members.create({ data: { org_id: orgId, user_id: colleague, role: "staff" } })
+    await db.organisation_members.create({ data: { org_id: orgId, user_id: colleague, role: "admin" } })
     const stranger = await makeUser(testId("tix-stranger"), "organizer")
-    w.users.push(stranger)
+    const volunteer = await makeUser(testId("tix-staff"), "organizer")
+    w.users.push(stranger, volunteer)
+    // Staff run the night and edit none of it (SCRUM-1244).
+    await db.organisation_members.create({ data: { org_id: orgId, user_id: volunteer, role: "staff" } })
+    expect(await saveTicketType(eventId, { id: volunteer, role: "organizer" }, general({ name: "Door" }))).toEqual({ ok: false, reason: "not_authorized", message: expect.any(String) })
 
     const mine = await saveTicketType(eventId, { id: colleague, role: "organizer" }, general())
     expect(mine).toMatchObject({ ok: true })

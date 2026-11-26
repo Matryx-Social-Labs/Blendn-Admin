@@ -32,7 +32,7 @@ it("the top bar's Create event pill is offered only when the same rule says so",
   // The layout has the memberships in hand for the sidebar's card, and asks
   // the pure half of mayCreateEvents with them rather than querying again.
   const layout = read("app/dashboard/layout.tsx")
-  expect(layout).toMatch(/const canCreate = mayCreateEventsWith\(user\.role, orgs\.length > 0\)/)
+  expect(layout).toMatch(/const canCreate = mayCreateEventsWith\(user\.role, orgs\[0\]\?\.role \?\? null\)/)
   expect(layout).toMatch(/canCreate=\{canCreate\}/)
   expect(read("lib/event-ownership.ts")).toMatch(
     /export async function mayCreateEvents\([^)]*\)[^{]*\{\s*return mayCreateEventsWith\(/
@@ -42,11 +42,14 @@ it("the top bar's Create event pill is offered only when the same rule says so",
   )
 })
 
-it("mayCreateEventsWith: the role, then a live organisation for anyone but an admin", () => {
-  expect(mayCreateEventsWith("app_admin", false)).toBe(true)
-  expect(mayCreateEventsWith("organizer", true)).toBe(true)
-  expect(mayCreateEventsWith("venue_owner", true)).toBe(true)
-  expect(mayCreateEventsWith("organizer", false)).toBe(false)
-  expect(mayCreateEventsWith("sponsor", true)).toBe(false)
-  expect(mayCreateEventsWith("attendee", true)).toBe(false)
+it("mayCreateEventsWith: the role, then a live organisation it is owner or admin of, for anyone but an admin", () => {
+  expect(mayCreateEventsWith("app_admin", null)).toBe(true)
+  expect(mayCreateEventsWith("organizer", "owner")).toBe(true)
+  expect(mayCreateEventsWith("organizer", "admin")).toBe(true)
+  expect(mayCreateEventsWith("venue_owner", "owner")).toBe(true)
+  expect(mayCreateEventsWith("organizer", null)).toBe(false)
+  // Staff run the org's nights and edit none of them, so they create none (SCRUM-1244).
+  expect(mayCreateEventsWith("organizer", "staff")).toBe(false)
+  expect(mayCreateEventsWith("sponsor", "owner")).toBe(false)
+  expect(mayCreateEventsWith("attendee", "owner")).toBe(false)
 })

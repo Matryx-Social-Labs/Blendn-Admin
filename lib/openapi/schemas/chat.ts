@@ -163,7 +163,7 @@ export const ChatGroupSchema = z
       .number()
       .nullable()
       .describe("`hereCount` under its old name, for the apps installed before it. Null for a venue day's room."),
-    unreadCount: z.number().describe("Messages you can see and have not read: none from somebody in a block with you."),
+    unreadCount: z.number().int().max(10).describe("Messages you can see and have not read, none from somebody in a block with you; capped at 10 (the app says \"9+\" above 9)."),
     mute: RoomMuteSchema,
     lastMessageAt: z.string().datetime().nullable(),
     fromMatch: z
@@ -242,7 +242,7 @@ export const ChatRoomListItemSchema = z
       })
       .optional()
       .describe("A Lobby room only: who else is in it, as the room names people."),
-    unreadCount: z.number().describe("Messages you can see and have not read: none from somebody in a block with you."),
+    unreadCount: z.number().int().max(10).describe("Messages you can see and have not read, none from somebody in a block with you; capped at 10 (the app says \"9+\" above 9)."),
     mute: RoomMuteSchema,
     lastMessageAt: z.string().datetime().nullable().describe("The newest message you can see — never one from somebody in a block with you."),
     lastMessage: z

@@ -14,7 +14,7 @@ import { claimEmail, claimEventInput, claimInputRefusal } from "@/lib/claim-inpu
 import { isUuid } from "@/lib/api-input"
 import { db } from "@/lib/db"
 import { violatedConstraint } from "@/lib/prisma-errors"
-import { owningOrgFor } from "@/lib/event-ownership"
+import { owningOrgFor, StaffMayNotCreate } from "@/lib/event-ownership"
 import { logger } from "@/lib/logger"
 import { notifyClaimant } from "@/lib/claim-decision-notify"
 import { appUrl } from "@/lib/email"
@@ -80,14 +80,16 @@ export async function fileEventClaim(
    *
    * `owningOrgFor` throws for a signed-in user with no membership, which is a
    * broken onboarding rather than a claim problem — so it is caught and read
-   * as "you have no organisation yet", and they take the no-account path.
+   * as "you have no organisation yet", and they take the no-account path. A
+   * staff member has one, and claims nothing for it (SCRUM-1244).
    */
   const session = await getAuth()
   let orgId: string | null = null
   if (session?.user && session.user.role !== "app_admin") {
     try {
       orgId = await owningOrgFor(session.user)
-    } catch {
+    } catch (error) {
+      if (error instanceof StaffMayNotCreate) return { ok: false, error: "Ask an owner or admin of your organization to claim this event." }
       orgId = null
     }
   }
