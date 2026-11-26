@@ -62,13 +62,19 @@ export async function flagForReview(
         auto_action: result.action === "hide" ? "hidden" : "none",
       },
     })
-    const status = db.chat_messages.update({
-      where: { id: messageId },
-      data: {
-        moderation_status: result.action === "hide" ? "hidden" : "flagged",
-      },
-    })
-    await db.$transaction(messageStatus ? [flag, status] : [flag])
+    if (!messageStatus) {
+      await flag
+    } else {
+      await db.$transaction([
+        flag,
+        db.chat_messages.update({
+          where: { id: messageId },
+          data: {
+            moderation_status: result.action === "hide" ? "hidden" : "flagged",
+          },
+        }),
+      ])
+    }
 
     logger.info("Message flagged for review", {
       messageId,
