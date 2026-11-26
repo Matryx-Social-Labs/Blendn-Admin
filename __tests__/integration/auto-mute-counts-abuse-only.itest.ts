@@ -5,6 +5,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 
 import { checkAndAutoMute, checkAndAutoUnmute } from "@/lib/moderation/actions"
 import { checkContactInfo } from "@/lib/moderation/contact-info"
+import { checkKeywords } from "@/lib/moderation/keyword-filter"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 
@@ -36,7 +37,7 @@ async function room() {
   events.push(eventId)
   const group = await db.chat_groups.create({ data: { event_id: eventId, name: "room", status: "active" } })
   await db.chat_group_members.create({ data: { chat_group_id: group.id, user_id: sender, anonymous_name: testId("Otter"), status: "active" } })
-  return { groupId: group.id, userId: sender }
+  return { groupId: group.id, userId: sender, host }
 }
 
 async function flag(r: { groupId: string; userId: string }, categories: Record<string, number>, createdAt?: Date, groupId = r.groupId, userId = r.userId) {
@@ -57,7 +58,7 @@ describe("the auto-mute count", () => {
     // The categories the pipeline really writes for a number, not a hand-typed key.
     const contact = checkContactInfo("call me on 98765 43210")!.categories as Record<string, number>
     for (let i = 0; i < 3; i++) await flag(r, contact)
-    await flag(r, { profanity: 1 })
+    await flag(r, { slur: 1 })
     await checkAndAutoMute(r.userId, r.groupId)
     expect(await statusOf(r)).toBe("active")
   })
@@ -69,9 +70,9 @@ describe("the auto-mute count", () => {
     await flag(r, {})
     await flag(r, { "sexual/minors": 0.9 })
     // None of these are this person's abuse in this room within the hour.
-    await flag(r, { profanity: 1 }, old)
-    await flag(other, { profanity: 1 })
-    await flag(r, { profanity: 1 }, undefined, r.groupId, other.userId)
+    await flag(r, { slur: 1 }, old)
+    await flag(other, { slur: 1 })
+    await flag(r, { slur: 1 }, undefined, r.groupId, other.userId)
     await checkAndAutoMute(r.userId, r.groupId)
     expect(await statusOf(r)).toBe("active")
     await flag(r, { hate: 0.8 })
@@ -82,16 +83,51 @@ describe("the auto-mute count", () => {
   it("mutes at three abusive hides, whatever contact hides sit beside them", async () => {
     const r = await room()
     await flag(r, { contact_phone: 1 })
-    for (let i = 0; i < 3; i++) await flag(r, { profanity: 1 })
+    for (let i = 0; i < 3; i++) await flag(r, { slur: 1 })
     await checkAndAutoMute(r.userId, r.groupId)
     expect(await statusOf(r)).toBe("muted")
   })
 
   it("counts a hide that carries both a contact detail and abuse", async () => {
     const r = await room()
-    for (let i = 0; i < 3; i++) await flag(r, { contact_phone: 1, profanity: 1 })
+    for (let i = 0; i < 3; i++) await flag(r, { contact_phone: 1, slur: 1 })
     await checkAndAutoMute(r.userId, r.groupId)
     expect(await statusOf(r)).toBe("muted")
+  })
+
+  it("does not count a swear word the keyword list hid (D-052a)", async () => {
+    const r = await room()
+    // The categories the pipeline really writes for a swear word.
+    const swear = checkKeywords("tu chutiya hai")!.categories as Record<string, number>
+    for (let i = 0; i < 3; i++) await flag(r, swear)
+    await flag(r, { profanity: 1, contact_phone: 1 })
+    await checkAndAutoMute(r.userId, r.groupId)
+    expect(await statusOf(r)).toBe("active")
+  })
+
+  it("lifts an automatic mute that only swear-word hides were holding up (D-052a)", async () => {
+    const r = await room()
+    await db.chat_group_members.updateMany({ where: { chat_group_id: r.groupId, user_id: r.userId }, data: { status: "muted", muted_at: new Date(), muted_by: null } })
+    for (let i = 0; i < 3; i++) await flag(r, { profanity: 1 })
+    expect(await checkAndAutoUnmute(r.userId, r.groupId)).toBe(true)
+    expect(await statusOf(r)).toBe("active")
+  })
+
+  it("never lifts a host's mute, whatever the count", async () => {
+    const r = await room()
+    await db.chat_group_members.updateMany({ where: { chat_group_id: r.groupId, user_id: r.userId }, data: { status: "muted", muted_at: new Date(), muted_by: r.host } })
+    for (let i = 0; i < 3; i++) await flag(r, { profanity: 1 })
+    expect(await checkAndAutoUnmute(r.userId, r.groupId)).toBe(false)
+    expect(await db.chat_group_members.findUniqueOrThrow({ where: { chat_group_id_user_id: { chat_group_id: r.groupId, user_id: r.userId } } })).toMatchObject({ status: "muted", muted_by: r.host })
+  })
+
+  it("leaves a host's mute that landed before the count alone", async () => {
+    // The model's verdict on a hidden line is counted seconds after the send; a host may have muted in between.
+    const r = await room()
+    await db.chat_group_members.updateMany({ where: { chat_group_id: r.groupId, user_id: r.userId }, data: { status: "muted", muted_at: new Date(), muted_by: r.host } })
+    for (let i = 0; i < 3; i++) await flag(r, { harassment: 0.97 })
+    await checkAndAutoMute(r.userId, r.groupId)
+    expect(await db.chat_group_members.findUniqueOrThrow({ where: { chat_group_id_user_id: { chat_group_id: r.groupId, user_id: r.userId } } })).toMatchObject({ status: "muted", muted_by: r.host })
   })
 
   it("lifts an automatic mute that only contact hides were holding up", async () => {

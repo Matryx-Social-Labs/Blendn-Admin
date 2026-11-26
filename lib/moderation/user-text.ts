@@ -44,10 +44,12 @@ export function objectionableText(text: string): ModerationResult | null {
   return checkLinkSpam(text)
 }
 
-/** The chat rule as a verdict: a message is refused or left alone, never flagged here. */
+/** The chat rule as a verdict: refused as the room would hide it; any other keyword hit is let through and recorded for review. */
 function messageTextVerdict(text: string): TextVerdict {
   const result = objectionableText(text)
-  return result ? { action: "refuse", result } : null
+  if (result) return { action: "refuse", result }
+  const keyword = checkKeywords(text)
+  return keyword ? { action: "flag", result: keyword } : null
 }
 
 /** The identity rule, for a name or a card: refused only for an unambiguous slur or link spam; any other keyword hit is flagged. */

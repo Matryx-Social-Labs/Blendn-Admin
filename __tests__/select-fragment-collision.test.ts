@@ -51,6 +51,9 @@ const ROOT = join(__dirname, "..")
 const ALLOWED: Record<string, string> = {
   // Empty since step 15: the event page's select moved to `lib/event-page.ts`,
   // which spreads `curationSelect` and does not name its keys again.
+  // SCRUM-1153: `start_time` is `true` in duplicateSourceSelect and eventPermissionSelect; the
+  // resolver's fragment is spread last, so nothing either reads can be lost.
+  "lib/event-duplicate.ts": "start_time is true in both fragments; eventPermissionSelect spread last",
 }
 
 function sourceFiles(dir: string, acc: string[] = []): string[] {

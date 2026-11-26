@@ -191,7 +191,7 @@ carry real ids.
 | `chat:messageDeleted` | `{ chatGroupId, messageId, moderation?, userId? }` | Message deleted. When `moderation: true`, it was auto-hidden by moderation — `userId` identifies the sender (their real id to them, a handle to everyone else) so the sender's client can show a placeholder instead of removing. |
 | `chat:memberBanned` | `{ chatGroupId, userId, banned }` | Member ban status changed. Also sent to the member's own `user:{id}` room, so an unban reaches somebody a ban took out of the room. The member receives it under their own id; on a ban their sockets then leave the room. |
 | `chat:memberLeft` | `{ chatGroupId, userId }` | Somebody left the room themselves (`POST /chat/groups/:id/leave`) — drop them from the roster. `userId` is their handle in this event; the leaver's own sockets get their real id, then leave the room. Not sent to anyone in a block with the leaver. |
-| `chat:memberMuted` | `{ chatGroupId, userId, muted, reason? }` | Member mute status changed. `muted: true` = auto-muted (3+ hidden abusive messages in 1hr; contact-detail hides do not count) or admin-muted. `muted: false` = auto-unmute expired or admin-unmuted. |
+| `chat:memberMuted` | `{ chatGroupId, userId, muted, reason? }` | Member mute status changed. `muted: true` = auto-muted (3+ hidden abusive messages in 1hr; contact-detail and swear-word hides do not count) or admin-muted. `muted: false` = auto-unmute expired or admin-unmuted. |
 
 ### Event Events (room: `event:{eventId}`, joinable by anyone who can open the event; `event:cancelled` also goes to `event:room:{eventId}`)
 
