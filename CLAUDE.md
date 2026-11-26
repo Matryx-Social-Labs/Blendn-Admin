@@ -149,6 +149,10 @@ S3-compatible storage via Tigris (`lib/tigris.ts`, uses AWS S3 SDK against a Tig
 
 Admin actions (role changes, moderation overrides, etc.) are recorded via `lib/audit-log.ts` into `audit_logs`. Use this rather than ad-hoc logging when an admin/organizer action changes state that matters for accountability.
 
+### Security findings
+
+Security findings live in Jira (Epic SCRUM-1126), not in this public repo. A gap that is still open, and anything about who is watching or how fast anyone responds, stays out of repo files, code comments, commits and PR text until it is fixed; once fixed, the commit and its test explain it.
+
 ## Database
 
 Prisma schema: `prisma/schema.prisma`. Key models: `User`/`profiles` (NextAuth user vs. extended profile — two separate models, joined), `events`/`event_details`/`recurring_events`, `event_check_ins` (GPS-validated), `chat_groups`/`chat_messages`/`chat_group_members`/`message_reactions`, `private_conversations`/`private_messages`, `event_rsvps`/`event_favorites`/`event_ratings`/`event_reports`, `moderation_flags`, `blocked_users`/`message_requests`, `push_tokens`, `mobile_refresh_tokens`, `audit_logs`.
