@@ -311,7 +311,8 @@ All chat messages pass through an **automated multi-layer moderation pipeline** 
 ### Token Lifecycle
 - Registered when user enables notifications
 - Unregistered on logout or user request
-- Auto-cleaned when Expo reports `DeviceNotRegistered`
+- Auto-cleaned when Expo reports `DeviceNotRegistered` (in a ticket, or in the receipt read about 15 minutes later)
+- Deleted when not refreshed for 90 days (the app refreshes it on every launch)
 
 ### Important for Privacy Policy
 - Push tokens are shared with Expo's notification service
