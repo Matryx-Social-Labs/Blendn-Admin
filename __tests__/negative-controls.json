@@ -2685,6 +2685,12 @@
       "mutation": "(C1) main.mjs reads process.env.DATABASE_URL; (C2) CMD back to npm run start; (C3) handler.ts dropped from COPY; (C4) -f mov to -f hls; (C5) lookup refuses only when every address is private; (C6) literal IPs not checked; (C7) 169.254/16 and 2002::/16 dropped; (C8) the byte cap off; (C9) jobs not queued; (C10) the secret not checked; (C11) URLs logged.",
       "observed": "Each made at least 1 of 100 tests fail: 1 failing, C6 6 failing (C2 and C3: the Dockerfile test; C1: the env test). Restored; 100 of 100 across media-worker, media-clip and check-clip.",
       "date": "2026-11-25"
+    },
+    "node-version-pin.test.ts": {
+      "guards": "SCRUM-1362: package.json engines.node (what Railpack builds production on; RAILPACK_NODE_VERSION is unset on staging and production) is one major, N.x, and equals every node-version: major in .github/workflows/*.yml.",
+      "mutation": "(C1) engines removed (dev's package.json before the fix); (C2) engines.node 24.x; (C3) engines.node >=22; (C4) one ci.yml node-version: \"24\" (pr-test-analyzer).",
+      "observed": "C1: failing, engines received undefined. C2: failing, the per-file diff 24 against 22 for each of the 4 ci.yml entries. C3: failing on the shape, received \">=22\". C4: failing. Restored; 1 of 1.",
+      "date": "2026-11-26"
     }
   },
   "grandfathered": [
