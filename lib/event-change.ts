@@ -271,6 +271,8 @@ export async function updateEventTracked(
     if (delistedMove && !opts.relistBy) throw new EventDelistedError()
     const relisted = delistedMove && updated.visibility === "public"
     if (relisted) {
+      // `delisted_by` is @ignore'd (schema.prisma), so it is cleared here; `delisted_at` with the write below.
+      await tx.$executeRaw`UPDATE events SET delisted_by = NULL WHERE id = ${updated.id}::uuid`
       await auditInTx(tx, { userId: opts.relistBy, action: "event.relist", resource: "event", resourceId: updated.id, details: { from: before.visibility } })
     }
     const next = nextChange(before.changed_from, before, updated)
@@ -289,7 +291,7 @@ export async function updateEventTracked(
       data: {
         ...(next && { changed_at: next.changed_at, changed_from: next.changed_from ?? Prisma.DbNull }),
         ...(startMoved && { reminded_at: null }),
-        ...(relisted && { delisted_at: null, delisted_by: null }),
+        ...(relisted && { delisted_at: null }),
       },
     })
   })

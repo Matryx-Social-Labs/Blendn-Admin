@@ -37,12 +37,15 @@ jest.mock("expo-server-sdk", () => {
   return { Expo }
 })
 
+import { NextRequest } from "next/server"
 import { resolveReport } from "@/app/dashboard/moderation/reports/actions"
 import { duplicateFor } from "@/lib/event-duplicate"
 import { refusalText } from "@/lib/refusal"
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const eventRoute = require("@/app/api/events/[id]/route") as typeof import("@/app/api/events/[id]/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const eventsRoute = require("@/app/api/events/route") as typeof import("@/app/api/events/route")
 
 const SENTENCE = "A moderator set this event to Unlisted, so its visibility can’t be changed. Contact support to ask for a review."
 const users: string[] = []
@@ -100,8 +103,13 @@ async function patch(eventId: string, as: { id: string; role: "app_admin" | "org
   )
 }
 
-const row = (id: string) =>
-  db.events.findUniqueOrThrow({ where: { id }, select: { visibility: true, title: true, description: true, delisted_at: true, delisted_by: true } })
+// `delisted_by` is @ignore'd in the client, so the read-back is SQL.
+async function row(id: string) {
+  const [r] = await db.$queryRaw<
+    { visibility: string; title: string; description: string; delisted_at: Date | null; delisted_by: string | null }[]
+  >`SELECT visibility::text, title, description, delisted_at, delisted_by FROM events WHERE id = ${id}::uuid`
+  return r
+}
 
 it("a delist records when and by whom, and its audit row keeps the title and description as reported", async () => {
   const eventId = await hostedEvent("Reported title", "Reported description")
@@ -194,20 +202,18 @@ it("an admin edit that leaves it unlisted leaves the delisting in place", async 
   expect(await db.audit_logs.count({ where: { action: "event.relist", resource_id: eventId } })).toBe(0)
 })
 
-it("the organizer is never told which moderator delisted it; an admin is", async () => {
+it("no answer to the organizer says which moderator delisted it", async () => {
   const eventId = await hostedEvent("Who did it", "x")
   await delist(eventId, admin)
-  const read = (as: { id: string; role: "app_admin" | "organizer" }) => {
-    session = { user: as }
-    return eventRoute.GET(new Request(`http://localhost/api/events/${eventId}`), { params: Promise.resolve({ id: eventId }) })
-  }
+  session = { user: { id: host, role: "organizer" } }
 
   const saved = await (await patch(eventId, { id: host, role: "organizer" }, { title: "Who did it, edited" })).json()
-  const shown = await (await read({ id: host, role: "organizer" })).json()
-  const staff = await (await read({ id: secondAdmin, role: "app_admin" })).json()
+  const shown = await (await eventRoute.GET(new Request(`http://localhost/api/events/${eventId}`), { params: Promise.resolve({ id: eventId }) })).json()
+  const listed = (await (await eventsRoute.GET(new NextRequest("http://localhost/api/events?limit=100"))).json()) as { id: string }[]
 
-  expect(saved).not.toHaveProperty("delisted_by")
-  expect(shown).not.toHaveProperty("delisted_by")
   expect(shown.delisted_at).not.toBeNull()
-  expect(staff.delisted_by).toBe(admin)
+  for (const answer of [saved, shown, listed.find((e) => e.id === eventId)]) {
+    expect(answer).toBeDefined()
+    expect(JSON.stringify(answer)).not.toContain(admin)
+  }
 })

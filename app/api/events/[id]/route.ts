@@ -86,10 +86,7 @@ export async function GET(_: Request, { params }: RouteContext) {
 
     // A venue owner operates the event but does not edit it: who created it is not theirs to read.
     const { organizer_id: _creator, ...operable } = event
-    if (session.user.role === "app_admin") return NextResponse.json(event)
-    // Which moderator delisted it is staff's to know, not the organizer's (SCRUM-1394).
-    const { delisted_by: _moderator, ...shown } = canEdit ? event : operable
-    return NextResponse.json(shown)
+    return NextResponse.json(canEdit ? event : operable)
   } catch (error) {
     logger.error("Error fetching event", { error: error instanceof Error ? error.message : String(error) })
     return errorResponse("Internal error", 500)
@@ -584,9 +581,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       await notifyEventDetailsChanged(updatedEvent.id, updatedEvent.title, changes, eventMoveOf(event, updatedEvent))
     }
 
-    if (session.user.role === "app_admin") return NextResponse.json(updatedEvent)
-    const { delisted_by: _moderator, ...saved } = updatedEvent
-    return NextResponse.json(saved)
+    return NextResponse.json(updatedEvent)
   } catch (error) {
     logger.error("Error updating event", { error: error instanceof Error ? error.message : String(error) })
     return errorResponse("Internal error", 500)

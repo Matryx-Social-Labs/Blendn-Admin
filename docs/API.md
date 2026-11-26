@@ -4331,8 +4331,9 @@ review."* to anybody but an `app_admin` whose save changes `visibility`, and
 writes nothing of that save; a save that sends the same `unlisted` goes
 through. An admin's change to `public` lifts the delisting (both columns
 cleared, audited `event.relist` in the same transaction). A second delist
-keeps the first one's time and moderator. `GET` and `PATCH` answer without
-`delisted_by` to anybody but an admin. Duplicate (`/dashboard/events/new?from=`)
+keeps the first one's time and moderator. `delisted_by` is `@ignore`d in the
+Prisma client, so no answer carries it: which moderator acted is in the audit
+row, never in a response an organizer reads. Duplicate (`/dashboard/events/new?from=`)
 of a delisted event opens the plain form.
 
 Set by the organizer in the dashboard event form, bounded 13–25.

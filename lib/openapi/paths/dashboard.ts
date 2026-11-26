@@ -195,7 +195,7 @@ registry.registerPath({
   path: "/api/events/{id}",
   tags: ["Dashboard Events"],
   summary: "Update event (dashboard)",
-  description: "Full event update including details, categories, and media. Requires organizer/admin role. Cancelling an event auto-cancels active check-ins and closes the presence sessions inside it, so nobody counts as inside a cancelled room. An event a moderator delisted (`delisted_at` set) keeps its visibility: a save that changes it is a 403 and writes nothing, unless the caller is an app_admin, whose change to public lifts the delisting (SCRUM-1394). The response omits `delisted_by` for anybody but an admin.",
+  description: "Full event update including details, categories, and media. Requires organizer/admin role. Cancelling an event auto-cancels active check-ins and closes the presence sessions inside it, so nobody counts as inside a cancelled room. An event a moderator delisted (`delisted_at` set) keeps its visibility: a save that changes it is a 403 and writes nothing, unless the caller is an app_admin, whose change to public lifts the delisting (SCRUM-1394). No response carries `delisted_by` (who delisted it is in the audit log only).",
   security: sessionAuth,
   request: {
     params: z.object({ id: z.string().uuid() }),
