@@ -25,14 +25,6 @@ import { notePulledProfilePhoto, recordPhotoCheck, recordPhotoPulled } from "./p
  *      hundreds.
  *   3. **Not harmful.** OpenAI's omni-moderation endpoint, which is free for
  *      both text and images.
- *
- * ## What this does not do
- *
- * It does not check that the image is a *person*. Omni-moderation scores harm,
- * not subject matter, so a golden retriever passes cleanly. Closing that needs
- * face detection, which means Cairo as a native dependency in the Railway image
- * plus several MB of model weights. Worth doing when photos carry more weight;
- * recorded here so nobody reads "checked" as "verified to be you".
  */
 
 export type PhotoRejection =
@@ -59,13 +51,10 @@ export const MIN_PHOTO_BYTES = 8_000
 /**
  * The cheap gates, on the request path: ours, uploaded, not blank, not huge.
  *
- * The vendor check used to run here too, and the profile PUT — the write the
- * person is watching a spinner for — waited on OpenAI fetching and scoring
- * the image, unbounded. It now runs in `moderateProfilePhoto` after the
- * response. The read side already tolerated an unchecked photo (every
- * failure of the vendor call degraded to `checked: false` and nothing on a
- * read path consults it), so this makes the accidental path the deliberate
- * one, and the moderation screen's unchecked count is where it shows.
+ * The vendor check runs in `moderateProfilePhoto` after the response, so the
+ * profile PUT — the write the person is watching a spinner for — does not wait
+ * on OpenAI fetching and scoring the image. A photo the vendor could not check
+ * is recorded `checked: false`, and `lib/photo-sweeper.ts` checks it again.
  */
 export async function checkProfilePhoto(url: string, userId: string): Promise<PhotoVerdict> {
   return sealOwn(url, userId, MIN_PHOTO_BYTES, undefined, PHOTO_REFUSAL)
@@ -78,10 +67,6 @@ export async function checkProfilePhoto(url: string, userId: string): Promise<Ph
  * portrait shape. The blurred copy is exactly what a viewer who has not
  * identified someone is allowed to see, so the ceiling sits just above what the
  * app makes rather than at a photo's floor (8 KB is a recognisable ~150 px).
- *
- * ponytail: bytes, not pixels — a sharp 40 px thumbnail passes. Reading the
- * header's dimensions needs a ranged GET and a parser per format; add it if a
- * client other than ours ever writes this.
  */
 export const MAX_BLUR_BYTES = 4_000
 
@@ -250,8 +235,7 @@ export async function moderateBlurPhoto(url: string, userId: string): Promise<vo
     await recordPhotoCheck(url, userId, check.checked)
     // Replaced while it waited for this verdict: the write that replaced it left it
     // for us to judge, and it is clean, so it goes now (SCRUM-520). Clean is no
-    // result (the image check) or an "allow"; a borderline "flag" is recorded like
-    // a pass and is not one.
+    // result (the image check) or an "allow".
     if (check.checked && (!check.result || check.result.action === "allow")) {
       const current = await db.profiles.findUnique({ where: { id: userId }, select: { blur_photo: true } })
       if (current?.blur_photo !== url) await deleteReplacedBlur(url, userId)
@@ -269,11 +253,8 @@ export async function moderateBlurPhoto(url: string, userId: string): Promise<vo
  * Off the public bucket, if it is the person's own photo; anything else was
  * never stored. A failure is logged here rather than thrown, so one object that
  * would not move does not leave the other where it was, and the line says what
- * is true: the row is already changed, the public copy is not.
- *
- * ponytail: not retried while the account lives. Account deletion withdraws
- * every pulled key again before it sweeps; a sweep over `hidden` rows is the
- * upgrade if these lines ever show up.
+ * is true: the row is already changed, the public copy is not. Account
+ * deletion withdraws every pulled key again before it sweeps.
  */
 async function withdraw(url: string, userId: string): Promise<void> {
   const key = ownedPhotoKey(url, userId)
@@ -303,13 +284,8 @@ async function withdraw(url: string, userId: string): Promise<void> {
  * first would lose exactly what that hold keeps.
  *
  * One replaced while its verdict was pending is deleted by `moderateBlurPhoto`
- * when the verdict passes. An outage that never judges it leaves it until the
- * account's prefix sweep. Known edges: two concurrent writes can orphan the blur one
- * of them replaced (a leak); a borderline "flag" verdict is
- * kept by the late path but deleted here (photo_checks records it as a pass); a clean late verdict racing a pull's few-ms gap between clearing the column
- * and marking the row hidden can delete the object before its private copy is made.
- * ponytail: a sweep of unreferenced keys under
- * `profile/<uid>/` is the upgrade if those show up.
+ * when the verdict passes. One never judged stays until the account's prefix
+ * sweep.
  */
 export async function deleteReplacedBlur(url: string, userId: string): Promise<void> {
   const key = ownedPhotoKey(url, userId)

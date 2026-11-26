@@ -1,11 +1,7 @@
 /**
  * A sexual image that moderation pulls goes to a person (SCRUM-1163, launch gate 9).
  *
- * OpenAI's omni-moderation scores `sexual/minors` on text only: an image alone
- * scores 0 on it (developers.openai.com/api/docs/guides/moderation, read
- * 2026-11-26). Nothing here can tell a minor or a non-consensual image from
- * any other sexual image, so every IMAGE hide naming `sexual` (or
- * `sexual/minors`, should the vendor ever score it on images) pages staff once
+ * Every IMAGE hide naming `sexual` or `sexual/minors` pages staff once
  * and leaves a `moderation.sexual_image_hold` audit row, on every path that
  * acts on an image verdict: the profile photo, its blurred copy, a Lobby photo.
  *
@@ -220,7 +216,7 @@ describe("holdSexualImage", () => {
     expect(audit).not.toHaveBeenCalled()
   })
 
-  it("runs for sexual/minors too, should the vendor ever score it on images", async () => {
+  it("runs for sexual/minors too", async () => {
     await holdSexualImage({ checked: true, result: { action: "hide", source: "openai_image", categories: { "sexual/minors": 0.8 }, confidence: 0.8 } }, "lobby", LOBBY_KEY, USER)
     expect(page).toHaveBeenCalledTimes(1)
     expect(audit).toHaveBeenCalledWith(expect.anything(), auditEntry("lobby", LOBBY_KEY, "sexual/minors"))
