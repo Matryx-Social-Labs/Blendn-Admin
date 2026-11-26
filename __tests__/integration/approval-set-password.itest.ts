@@ -45,7 +45,10 @@ afterAll(async () => {
   await closeDb()
 })
 
-async function application(email: string, over: { email_verified_at?: Date | null; status?: "pending" | "email_pending" } = {}) {
+async function application(
+  email: string,
+  over: { email_verified_at?: Date | null; status?: "pending" | "email_pending"; requested_role?: "organizer" | "venue_owner" } = {}
+) {
   const r = await db.organiser_onboarding_requests.create({
     data: {
       kind: "company",
@@ -55,7 +58,7 @@ async function application(email: string, over: { email_verified_at?: Date | nul
       tier: "needs_proof",
       status: over.status ?? "pending",
       email_verified_at: over.email_verified_at === undefined ? new Date() : over.email_verified_at,
-      requested_role: "organizer",
+      requested_role: over.requested_role ?? "organizer",
     },
     select: { id: true },
   })
@@ -195,4 +198,19 @@ it("refuses a suspended account", async () => {
   await db.user.update({ where: { id }, data: { emailVerified: new Date(), suspended_at: new Date() } })
   await expect(approveOnboardingRequest(await application(email))).rejects.toThrow(/suspended|deleted/i)
   expect((await db.user.findUniqueOrThrow({ where: { id } })).role).toBe("attendee")
+})
+
+// SCRUM-1342: the mail's one next step follows what the account was approved for, in both parts.
+it.each([
+  ["organizer", "Next, create your first event:", "/dashboard/events/new", "Create your first event"],
+  ["venue_owner", "Next, add your venue, or claim it if it’s already listed:", "/dashboard/venues", "Add or claim your venue"],
+] as const)("an approved %s is pointed at their first step", async (role, line, path, label) => {
+  const email = `${testId(`next-${role}`)}@example.test`
+  const result = await approveOnboardingRequest(await application(email, { requested_role: role }))
+  orgs.push(result.orgId)
+  users.push((await db.user.findUniqueOrThrow({ where: { email }, select: { id: true } })).id)
+  const mail = sent.find((m) => m.to === email)!
+  expect(mail.text).toMatch(new RegExp(`${line}\\n\\S+${path}$`, "m"))
+  expect(mail.html).toMatch(new RegExp(`href="\\S+${path}"[^>]*>${label}</a>`))
+  expect(mail.text).not.toContain("Members")
 })

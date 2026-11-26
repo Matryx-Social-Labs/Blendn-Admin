@@ -316,7 +316,9 @@ export function approvedHtml(
   name: string,
   orgName: string,
   email: string,
-  setPasswordLink: string | null
+  setPasswordLink: string | null,
+  /** The account's first step (SCRUM-1342); null keeps the Members line, for an account with none to point at. */
+  next: { href: string; label: string } | null
 ): string {
   const signIn = `${appUrl()}/login`
   // The sign-in address is monospaced: it is the one thing in this email the
@@ -345,9 +347,9 @@ export function approvedHtml(
             ),
           ]
         : [button(signIn, "Sign in to the dashboard"), fallbackLink(signIn)]),
-      note(
-        "Once you&rsquo;re in, invite your colleagues from Your organisation &rarr; Members."
-      ),
+      next
+        ? `<p style="margin:18px 0 0;font-family:${FONT};font-size:14px;line-height:22px;color:${INK};" class="dm-text">Next: <a class="dm-text" href="${esc(next.href)}" target="_blank" style="color:${INK};font-weight:bold;text-decoration:underline;">${esc(next.label)}</a></p>`
+        : note("Once you&rsquo;re in, invite your colleagues from Your organisation &rarr; Members."),
     ].join("\n"),
   })
 }

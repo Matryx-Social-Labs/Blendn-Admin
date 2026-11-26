@@ -130,7 +130,7 @@ type LifecycleMail = { subject: string; text: string; html: string }
  */
 export async function mailOwnersAndAdmins(
   orgId: string,
-  kind: "results" | "next_night" | "live_alert",
+  kind: "results" | "next_night" | "first_night" | "live_alert",
   build: (unsubscribeUrl: string) => LifecycleMail
 ): Promise<{ recipients: number; sent: number; failed: number }> {
   const members = await db.organisation_members.findMany({
