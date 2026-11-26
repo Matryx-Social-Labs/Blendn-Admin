@@ -4,7 +4,7 @@
  * an outcome. Driven through the real moderation action.
  */
 let session: { user: { id: string; role: "app_admin" } } | null = null
-jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await session; return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await session; return s?.user ? { ...s, user: { signedInAt: Date.now(), ...s.user } } : s } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("@/lib/socket-server", () => ({

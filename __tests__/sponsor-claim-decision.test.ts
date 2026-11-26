@@ -14,7 +14,7 @@ mockDb.$transaction.mockImplementation(async (fn: (tx: typeof mockDb) => Promise
 const auditLog = jest.fn()
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/audit-log", () => ({ auditLog, auditInTx: (_tx: unknown, entry: unknown) => auditLog(entry) }))
-jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "admin", role: "app_admin", signedInAt: 0 } }) }))
+jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "admin", role: "app_admin", signedInAt: Date.now() } }) }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 jest.mock("@/lib/org-membership", () => ({ actorFor: jest.fn() }))
 const sent: { to: string; subject: string; text: string }[] = []

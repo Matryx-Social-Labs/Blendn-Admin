@@ -4,7 +4,7 @@
  * cookie that says app_admin; only the row behind it differs.
  */
 let mockRow: { role: string; suspended_at: Date | null; deletedAt: Date | null; password_changed_at: Date | null; sessions_revoked_at: Date | null } | null = null
-jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "u1", role: "app_admin", signedInAt: 0 } }) }))
+jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "u1", role: "app_admin", signedInAt: Date.now() } }) }))
 jest.mock("@/lib/db", () => ({ db: { user: { findUnique: jest.fn(async () => mockRow) } } }))
 jest.mock("@/lib/lead-queries", () => ({ getLeads: jest.fn().mockResolvedValue([]) }))
 

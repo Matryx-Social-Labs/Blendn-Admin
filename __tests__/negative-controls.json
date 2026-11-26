@@ -2697,6 +2697,12 @@
       "mutation": "(C1) dev 9bcf8f44 unchanged; (C2) on the fix, notifyPrivateMessage ignores the conversation (`named = true`), as a caller deciding the name would.",
       "observed": "C1: 1 of 3 failing ('Priya rbp-a wants to connect'); C2: 1 of 3 failing (title 'Priya rbp-a' instead of 'New message'); push-policy 2 of 37 failing under the same mutation. Restored; 3 of 3, controls green in both.",
       "date": "2026-11-26"
+    },
+    "host-payload.itest.ts": {
+      "guards": "SCRUM-1146: the app's `organizer` on GET /users/:id/favorites, GET /events (the route, and transformEvents) and GET /events/:id is the org (its id) or null, never the creating user's id, name or image; a curated event is Blendn with no id; an org with a blank name falls to person with nothing of the creator.",
+      "mutation": "(C1) the suite run on dev 9bcf8f44, before hostPayload; (C2) favorites put back to `organizer: event.organizer` on the fixed tree; (C3) hostPayload sends `name: host.name` for a person.",
+      "observed": "C1: 3 of 3 failing (the suite then had 3 cases): favorites sent the curated event's creating user's id, name and image; the list and the detail sent the creating user's id and image on the org event. C2: 1 of 3 failing (/users/:id/favorites). C3: 4 of 4 failing (every route). Restored; 4 of 4.",
+      "date": "2026-11-26"
     }
   },
   "grandfathered": [
