@@ -188,8 +188,9 @@ the phone model and the app version are removed. The check-in row stays: who
 came on which night, and when, is the attendance record (kept a year under
 D-029). The presence sweeper does it every five minutes, 1,000 rows a pass
 (`forgetCheckInPoints`, `KEPT_DEVICE_INFO_KEYS` in `lib/presence-sweeper.ts`).
-A presence session (`presence_sessions`) stores no point at all; the ones
-written before SCRUM-1230 are nulled with their check-in. Not behind
+A presence session (`presence_sessions`) stores no point at all; nothing read
+one, and the ones written before SCRUM-1230 are nulled by the same pass,
+whatever their age. Not behind
 `LOBBY_PURGE`: nothing reads a point after the night. A fence refusal
 (`check_in_refusals`) never stored one, only how far outside and how accurate.
 
