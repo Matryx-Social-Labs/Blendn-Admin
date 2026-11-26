@@ -172,3 +172,29 @@ test("/pricing says three months for venues", async ({ baseURL }) => {
     await ctx.close()
   }
 })
+
+// SCRUM-1340: Blend'n+ is out of 1.0 (DECISIONS gate 5), and one event's product has one name.
+const NOT_SOLD = /Blend['’]?n\+|Event\s+Pass/i
+
+test("/pricing and the Venue Pro card sell no Blend'n+ and name Event Insights only", async ({ baseURL }) => {
+  for (const width of [1280, 768] as const) {
+    const anon = await browser.newContext({ baseURL, viewport: { width, height: 900 } })
+    const pricing = await anon.newPage()
+    await pricing.goto("/pricing")
+    const text = await pricing.locator("body").innerText()
+    expect(text).not.toMatch(NOT_SOLD)
+    await expect(pricing.getByText("Event Insights is a single payment", { exact: false })).toBeVisible()
+    expect(await overflow(pricing), `pricing overflow at ${width}`).toBeLessThanOrEqual(0)
+    // The read-back: every "Blend" on the page is the brand name.
+    console.log(`READBACK ${JSON.stringify({ width, blend: text.match(/Blend/g)?.length ?? 0, brand: text.match(/Blend['’]n(?!\+)/g)?.length ?? 0 })}`)
+    await anon.close()
+
+    const ctx = await browser.newContext({ baseURL, viewport: { width, height: 900 }, storageState: await sessionFor(baseURL!) })
+    const plan = await ctx.newPage()
+    await plan.goto("/dashboard/plan")
+    await expect(plan.getByText("Blind offers to your regulars, with a monthly send quota (coming)")).toBeVisible()
+    expect(await plan.locator("main").innerText()).not.toMatch(NOT_SOLD)
+    expect(await overflow(plan), `plan overflow at ${width}`).toBeLessThanOrEqual(0)
+    await ctx.close()
+  }
+})
