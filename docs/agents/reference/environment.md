@@ -22,22 +22,24 @@ into a file. Change the variable to rotate it; Railway redeploys. To re-seed
 staging from a laptop, `RAILWAY_ENVIRONMENT_NAME=staging` must be set as well —
 the seed refuses any database that is not staging or `localhost`.
 
-| Email | Role | Persona |
-|---|---|---|
-| `admin@blendn.app` | app_admin | Priya Menon |
-| `organizer@blendn.app` | organizer | Arjun Rao, Nightshift Collective |
-| `venue.owner@blendn.app` | venue_owner | Fatima Sheikh, Indiranagar Hospitality Group |
-| `sponsor@blendn.app` | sponsor | Meera Iyer, Blue Tokai Coffee Roasters |
-| `organizer.pro@blendn.app` | organizer | Nisha Pro, Pro Collective (QA): Analytics grant, ended nights (SCRUM-561) |
-| `venue.pro@blendn.app` | venue_owner | Vikram Pro, Pro Hospitality (QA): claimed venue, Venue Pro grant (SCRUM-561) |
+This repo is public, so its docs name the accounts by role, never by address.
+The addresses are in the script that defines each one:
 
-The personas were renamed in place from `priya.menon@`, `arjun.rao@`,
-`fatima.sheikh@` and `meera.iyer@` — same ids, same history. Also seeded by
-`seed-qa.ts`, same password: `sagar.kishore@`, `hemanth.ramesh@`,
-`likhith.gowda@` (named admins), `daniel.weber@` (organizer with no org — the
-negative control), `rhea.kapoor@` (sponsor whose org, Third Wave Coffee
-Roasters, has no brand: she filed the pending Third Wave claim, SCRUM-465), and
-the attendees `ananya.b@`, `rohan.d@`, `sneha.p@`, ….
+| Account | Role | Persona | Address in |
+|---|---|---|---|
+| The admin test account | app_admin | Priya Menon | `TEST_ACCOUNTS`, `scripts/test-accounts.ts` |
+| The organizer test account | organizer | Arjun Rao, Nightshift Collective | `TEST_ACCOUNTS` |
+| The venue-owner test account | venue_owner | Fatima Sheikh, Indiranagar Hospitality Group | `TEST_ACCOUNTS` |
+| The sponsor test account | sponsor | Meera Iyer, Blue Tokai Coffee Roasters | `TEST_ACCOUNTS` |
+| The pro organizer persona | organizer | Nisha Pro, Pro Collective (QA): Analytics grant, ended nights (SCRUM-561) | `PRO_ACCOUNTS`, `scripts/seed-pro-personas.ts` |
+| The pro venue-owner persona | venue_owner | Vikram Pro, Pro Hospitality (QA): claimed venue, Venue Pro grant (SCRUM-561) | `PRO_ACCOUNTS` |
+
+The four role personas were renamed in place from their persona-named
+addresses: same ids, same history. Also seeded by `scripts/seed-qa.ts`, same
+password, and listed in `SEED_PERSONAS` (`scripts/test-accounts.ts`): the named
+admins, the organizer with no org (the negative control), a sponsor whose org,
+Third Wave Coffee Roasters, has no brand (she filed the pending Third Wave
+claim, SCRUM-465), the under-18 control, and the attendees.
 
 Resolve ids against the staging DB rather than hardcoding (staging ids are
 `cmt…`, distinct from local).

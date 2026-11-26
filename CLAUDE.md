@@ -282,7 +282,8 @@ three constraints were missing.
 Required: `DATABASE_URL`, `NEXTAUTH_URL`, `NEXTAUTH_SECRET` (32+ chars), `MOBILE_JWT_SECRET` (32+ chars). On Railway `production` also `OPENAI_API_KEY` (boot refuses without it; elsewhere it warns).
 
 Staging only: `SEED_PASSWORD` — the password of the dashboard test accounts
-(`admin@`, `organizer@`, `venue.owner@`, `sponsor@blendn.app`), which the
+(admin, organizer, venue owner, sponsor; addresses in `TEST_ACCOUNTS`,
+`scripts/test-accounts.ts`, never listed in a doc: this repo is public), which the
 pre-deploy step (`scripts/test-accounts.ts`) re-asserts on every deploy.
 `seed:qa --apply` refuses to run without it, and refuses any database that is
 not Railway `staging` or `localhost`.

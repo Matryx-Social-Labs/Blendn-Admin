@@ -159,9 +159,9 @@ the statements it excuses.
 Staging's pre-deploy command is `npm run railway:predeploy`
 (`.railway/railway.ts`; production's is `npm run db:migrate`, the migrations only): the
 migrations, then `scripts/test-accounts.ts`. That creates or repairs one
-dashboard account per role — `admin@`, `organizer@`, `venue.owner@` and
-`sponsor@blendn.app` — with their organisations and memberships, and sets their
-password to `SEED_PASSWORD`.
+dashboard account per role — admin, organizer, venue owner and sponsor; the
+addresses are `TEST_ACCOUNTS` in that script — with their organisations and
+memberships, and sets their password to `SEED_PASSWORD`.
 
 - **Staging only.** It writes nothing when `SEED_PASSWORD` is unset, and nothing
   on any Railway environment but `staging` even when it is set — production and
@@ -342,7 +342,7 @@ SEED_ROOM=yes SEED_ROOM_PASSWORD=<pick one> DATABASE_URL=<staging> npm run seed:
 SEED_ROOM=yes SEED_ROOM_PASSWORD=<same one> DATABASE_URL=<staging> npm run seed:room -- --clean
 ```
 
-The room's organiser is `organizer@blendn.app` in Nightshift Collective, so it
+The room's organiser is the organizer test account in Nightshift Collective, so it
 is on the dashboard people already sign in to. The script only looks that
 account up and refuses if a deploy has not created it yet.
 
