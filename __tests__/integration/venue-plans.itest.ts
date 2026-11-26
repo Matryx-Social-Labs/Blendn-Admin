@@ -268,7 +268,7 @@ describe("no charge before three months of venue-day data", () => {
 
   it("counts guests only: a staff member going live does not start the clock (review M4)", async () => {
     const v = await venue("vp-staffclock")
-    await liveSince(v, 40, "staff")
+    await liveSince(v, 95, "staff")
     expect(await venueReadiness(v)).toMatchObject({ dataSince: null, chargeable: false })
     await liveSince(v, 10)
     expect(await venueReadiness(v)).toMatchObject({ chargeable: false, dataDays: 10 })

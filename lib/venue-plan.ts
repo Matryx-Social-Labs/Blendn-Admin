@@ -18,7 +18,7 @@ import { mayManageVenueBilling } from "./rbac"
  * venue has three months of data, the same three months free as organisers
  * (DECISIONS 2026-11-25 night). Venue days are the venue's own live room
  * (lib/venue-day.ts); "data" starts with the first person who went live
- * there. So a venue becomes chargeable `VENUE_DATA_DAYS` after its first
+ * there. So a venue becomes chargeable `VENUE_DATA_DAYS` days after its first
  * venue-day check-in, and before that the Plan page says when, and the checkout action
  * refuses (`lib/billing-actions.ts`). A founding grant (3 months of Pro) is
  * not a charge and is open at any time.

@@ -73,8 +73,10 @@ test.beforeAll(async () => {
     },
   })
   venueId = venue.id
-  // The venue's own live room 40 days ago (lib/venue-day.ts's shape), and one guest who went live in it.
-  const start = new Date(Date.now() - 40 * DAY)
+  // The venue's own live room 40 days ago (lib/venue-day.ts's shape), and one guest who went live in it
+  // exactly 40 days ago, so the page's floor reads 40 (a check-in an hour later would read 39).
+  const wentLive = new Date(Date.now() - 40 * DAY)
+  const start = new Date(wentLive.getTime() - 60 * 60 * 1000)
   const end = new Date(start.getTime() + DAY)
   const day = await db.events.create({
     data: {
@@ -107,20 +109,25 @@ test.beforeAll(async () => {
       user_id: await person("guest"),
       kind: "attendee",
       status: "checked_out",
-      check_in_time: new Date(start.getTime() + 60 * 60 * 1000),
-      check_out_time: new Date(start.getTime() + 3 * 60 * 60 * 1000),
+      check_in_time: wentLive,
+      check_out_time: new Date(wentLive.getTime() + 2 * 60 * 60 * 1000),
     },
   })
 })
 
 test.afterAll(async () => {
   await browser.close()
-  await db.event_check_ins.deleteMany({ where: { event_id: dayId } })
-  await db.event_occurrences.deleteMany({ where: { event_id: dayId } })
-  await db.events.deleteMany({ where: { id: dayId } })
-  await db.venues.deleteMany({ where: { id: venueId } })
-  await db.organisation_members.deleteMany({ where: { org_id: orgId } })
-  await db.organisations.deleteMany({ where: { id: orgId } })
+  // Guarded, so a failed beforeAll reports its own error rather than '' as a uuid.
+  if (dayId) {
+    await db.event_check_ins.deleteMany({ where: { event_id: dayId } })
+    await db.event_occurrences.deleteMany({ where: { event_id: dayId } })
+    await db.events.deleteMany({ where: { id: dayId } })
+  }
+  if (venueId) await db.venues.deleteMany({ where: { id: venueId } })
+  if (orgId) {
+    await db.organisation_members.deleteMany({ where: { org_id: orgId } })
+    await db.organisations.deleteMany({ where: { id: orgId } })
+  }
   await db.user.deleteMany({ where: { id: { in: users } } })
   await db.$disconnect()
 })
@@ -131,10 +138,12 @@ async function overflow(page: Page) {
 }
 
 test("the venue Plan page says 40 of 90 days and the no-charge date the database gives", async ({ baseURL }) => {
-  // The read-back, as the task writes it.
+  // The read-back: the task's SELECT, with venueDataSince's guest filter.
   const [{ first }] = await db.$queryRaw<{ first: Date }[]>`
     SELECT min(c.check_in_time) AS first FROM event_check_ins c JOIN events e ON e.id = c.event_id
-     WHERE e.kind = 'venue_day' AND e.venue_id = ${venueId}::uuid`
+     WHERE e.kind = 'venue_day' AND e.venue_id = ${venueId}::uuid
+       AND c.kind = 'attendee' AND c.status IN ('checked_in', 'checked_out')`
+  expect(first).toBeInstanceOf(Date)
   const noChargeBefore = PLAN_DAY.format(new Date(first.getTime() + 90 * DAY))
   console.log(`READBACK ${JSON.stringify({ venue: venueId, first, plus90: new Date(first.getTime() + 90 * DAY), shown: noChargeBefore })}`)
 

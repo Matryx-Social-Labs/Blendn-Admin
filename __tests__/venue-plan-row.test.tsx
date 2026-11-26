@@ -89,3 +89,9 @@ it("SCRUM-1320: a venue 40 days in reads 40 of 90 days and its no-charge date, o
   expect(html).not.toContain("weeks")
   expect(offersBuy(html)).toBe(false)
 })
+
+it("SCRUM-1320: a venue nobody has gone live at yet says charges start 90 days after, and offers no Buy", () => {
+  const html = render(row({ readiness: { dataSince: null, chargeableFrom: null, dataDays: 0, chargeable: false } }))
+  expect(html).toContain("No data yet · charges start 90 days after people first go live here")
+  expect(offersBuy(html)).toBe(false)
+})
