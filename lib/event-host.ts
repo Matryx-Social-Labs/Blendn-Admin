@@ -29,6 +29,7 @@ import type { event_kind } from "@prisma/client"
 /** The columns `eventHost` needs. Spread it; do not hand-pick. */
 export const eventHostSelect = {
   kind: true,
+  organizer_org_id: true,
   venue_name: true,
   curated_at: true,
   organizer_org: { select: { display_name: true } },
@@ -90,4 +91,31 @@ export function eventHost(event: HostSource): EventHost {
   if (person) return { name: person, isPlatform: false, kind: "person" }
 
   return { name: PLATFORM_HOST, isPlatform: true, kind: "platform" }
+}
+
+/** What the app is sent as an event's `organizer`. */
+export interface HostPayload {
+  /** The organisation's id; null for every other kind. Never a user's. */
+  id: string | null
+  /** Null only for `person`: the creating user's name is theirs, and the app never shows it (SCRUM-1146). */
+  name: string | null
+  /** Always null. Kept so the response shape does not change; no host has a picture yet. */
+  image: null
+  kind: EventHost["kind"]
+}
+
+/**
+ * The `organizer` of every mobile event read (SCRUM-1146): the org, never the creating user.
+ *
+ * `organizer_id` is who made the row; for a curated event that is the admin who ran the curation. Every route used to
+ * send that user's id and picture beside the host's name, and the saved list sent the user row whole. This is the one
+ * place the payload is built, so no route can send the creator again.
+ */
+export function hostPayload(
+  // Required, not optional as in `HostSource`: a select that forgot one would quietly turn an org event into a person's.
+  event: HostSource & Required<Pick<HostSource, "kind" | "organizer_org">> & { organizer_org_id: string | null }
+): HostPayload {
+  const host = eventHost(event)
+  if (host.kind === "org") return { id: event.organizer_org_id, name: host.name, image: null, kind: "org" }
+  return { id: null, name: host.kind === "person" ? null : host.name, image: null, kind: host.kind }
 }

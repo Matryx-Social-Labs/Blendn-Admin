@@ -214,16 +214,17 @@ export const EventCitiesResponseSchema = z
 // Response schemas
 const OrganizerSchema = z.object({
   id: z.string().nullable().openapi({
-    description: "Null when the host is the platform itself (a curated event); `image` is then null too.",
+    description: "The organisation's id when `kind` is `org`; null for every other kind. Never a user's id (SCRUM-1146).",
   }),
-  name: z.string(),
-  image: z.string().nullable(),
+  name: z.string().nullable().openapi({
+    description: "Null only for `person`: the creating user's name is not sent.",
+  }),
+  image: z.null().openapi({ description: "Always null. Kept so the shape does not change." }),
   kind: z.enum(["org", "venue", "platform", "person"]).openapi({
     description:
-      "What `name` is (SCRUM-1095): an organisation, a venue day's venue, the platform standing in, or the creating user of an event with no organisation. Draw a \"Host\" only for `org`.",
+      "What `name` is (SCRUM-1095): an organisation, a venue day's venue, the platform standing in, or an event with no organisation (`person`, sent with no name). Draw a \"Host\" only for `org`.",
   }),
-  // No email. A host's public identity is their name and picture; the address
-  // was returned by the detail endpoint only, and is no longer sent.
+  // No email, no creating user: `hostPayload` (lib/event-host.ts) builds this for every event read.
 })
 
 // The leaf the event is tagged to, as stored. No parent is sent (SCRUM-460).
