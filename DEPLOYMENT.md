@@ -415,6 +415,7 @@ so it is never related to session or login state.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `MOBILE_MIN_APP_VERSION`, `MOBILE_MIN_APP_BUILD_IOS`, `MOBILE_MIN_APP_BUILD_ANDROID` | No | The oldest app version, or store build number per platform, the mobile API serves; older builds get 426 `UPDATE_REQUIRED`. Unset: no minimum. Set only once the fixed build is live (Operating production, step 5; `docs/API.md`) |
 | `DATABASE_POOL_MAX` | No | Connections this process may hold (default 20), shared by every request, Socket.io and every background loop (`lib/background.ts`). A query waiting for one fails after 5 s ("timeout exceeded when trying to connect") instead of queueing for ever (SCRUM-1221); `/api/health` reports `pool.waiting` |
 | `HEALTH_METRICS_TOKEN` | Production: yes, before the ops monitor | 32+ characters (`openssl rand -hex 32`). `/api/health` adds `pool`, `eventLoopDelayMs` and `sockets` only for `Authorization: Bearer <this>`; anyone else gets the plain payload, still 200, so Railway's healthcheck is unaffected. Unset: the numbers are omitted on Railway `production` and shown to anyone elsewhere (staging, local). Set but under 32 characters, `validateEnv` fails. Not set by an agent: the owner sets it (SCRUM-1221) |
 | `DATABASE_STATEMENT_TIMEOUT_MS` | No | Postgres `statement_timeout` for the server's connections. `server.ts` sets **8000** when unset, so a runaway statement is cancelled (`57014`) rather than holding its connection; `0` turns the cap off. Scripts that import `lib/db` (seeds, backfills, imports) do not set it and have no cap. Not whole milliseconds: the server refuses to boot (SCRUM-1221) |
@@ -520,13 +521,127 @@ npm run build
 npm start
 ```
 
-## Monitoring
+## Operating production
 
-Railway provides built-in monitoring:
-- CPU/Memory usage
-- Request logs
-- Error tracking
+What to do when production breaks. One replica, no over-the-air updates, and a
+rollback that never touches the schema.
 
-For advanced monitoring, consider adding:
-- Sentry for error tracking
-- LogDNA/Papertrail for log aggregation
+**Who.** The owner, and the on-call person: **ON-CALL: ____ (the owner names
+them; not yet named)**. How to reach each is in the password manager note
+"Blendn on-call", never in git. **Nothing pages.** Sentry only emails the Sentry
+team "Matryx Social Labs Private Limited": the on-call person is a member of it
+and has Sentry mail notifying on their phone.
+
+**Severity.**
+- **S1:** the API or sign-in is down, or data is exposed or lost. Act now, any hour, and call the owner at once.
+- **S2:** one feature is broken for many people. Same day.
+- **S3:** the rest, and anything on staging. A Jira ticket.
+
+**First 15 minutes of an S1.** Open a Jira ticket in project SCRUM, label
+`incident`, and keep the timeline in it. Consoles: railway.com (project Blendn,
+service Blendn-Admin, environment production) and
+`https://matryx-social-labs-private-lim.sentry.io` (project `blendn-admin`). For
+the CLI, once, in a clone of `Matryx-Social-Labs/Blendn-Admin`:
+`railway link --project Blendn --environment production --service Blendn-Admin`.
+Do step 1, then the first of steps 2 to 6 that matches.
+1. **Look.** `curl -s -m 10 https://api.blendn.app/api/health` (200 and `"database":"connected"` is up;
+   503 is up with the database unreachable: open the Postgres service in the console;
+   a timeout is down) and `curl -s -m 10 -o /dev/null -w '%{http_code}\n' https://dashboard.blendn.app/login` (200).
+   Do not wait for an alert: the production uptime monitors are off (below).
+   `railway deployment list` shows the deployments and their times;
+   `railway logs --deployment --lines 200` (a flag, no value) shows the running one.
+   Logs can hold personal data: quote the error, never paste lines into the ticket or a reply.
+2. **Data exposed.** Call the owner. Contain it: revoke an exposed credential where it
+   was issued; for a leaking route the owner decides whether to take the service down.
+   Do not restart or redeploy before the logs are read (a restart loses the process's
+   state). Whether anyone must be notified is the owner's call.
+3. **Crashed or hung.** The console shows the deployment Crashed (Railway restarts a crash
+   at most 3 times, then leaves it down), or health times out while it shows Active
+   (Railway does not restart that: its healthcheck runs only during a deploy). Restart:
+   `railway restart --yes`, or Restart in the console. It does not rebuild.
+4. **The last deploy caused it** (the outage began within an hour of the newest
+   SUCCESS deployment). Roll back: in the console, Deployments, the previous SUCCESS
+   deployment, its ⋮ menu, Redeploy (`railway redeploy` can only repeat the newest).
+   An S1 skips the live-room check below. If that deployment's commit carried a
+   migration, the schema stays: never hand-revert it, forward-fix in a new migration
+   ([A migration is additive for one release](#a-migration-is-additive-for-one-release)).
+   If the redeploy's pre-deploy step fails, or health is not 200 within 15 minutes,
+   stop and call the owner. How long a rollback takes is not measured yet.
+5. **A client build caused it.** Ship a fixed build (Hotfix path, below). Only once it is
+   live in both stores, retire the bad one (console: Blendn-Admin, production, Variables;
+   checked twice; saving redeploys): `MOBILE_MIN_APP_VERSION` (a version like `1.0.3`)
+   if the fix has a higher version, else `MOBILE_MIN_APP_BUILD_IOS` / `_ANDROID` (the
+   store build number). Older builds then get 426 "update required"; a build that sends
+   no version or build header is never refused (`docs/API.md`, Update required).
+6. **Data lost.** There is no tested restore yet: the backups and restore section will
+   be written by the backups task and **does not exist yet**. Change nothing more and
+   call the owner.
+
+**Comms.** The app cannot show a message without the API. Within 15 minutes of an
+S1, reply to store reviews that report it (App Store Connect, Ratings and Reviews;
+Play Console, Reviews; logins in the password manager) and put the same text at the
+top of www.blendn.app (no banner switch exists: a commit to `main` in the
+BlendnLanding repo, which deploys itself; revert it after):
+
+> Blend'n is having trouble right now: <what people see>.
+> We are working on it<, and expect it back by <time>, India time>.
+> <Only once checked: nothing you posted is lost. Otherwise: we are checking what was affected.>
+
+After an S1, the post-incident note on the ticket: **what** happened, **when**
+(started, noticed, fixed), **why**, and **the check that would have caught it**.
+
+**One replica.** Production runs one process (`.railway/railway.ts`, one
+replica in `asia-southeast1-eqsg3a`). Polling clients, the ops broadcast loop and the sweepers are not
+safe on two: there is no shared Socket.io adapter, so a second process splits a
+room. A crash is restarted at most 3 times (`restartPolicyMaxRetries: 3`, applied to
+both environments on 2026-11-25), then the service stays down until someone acts. A deploy must
+not be two processes either: `.railway/railway.ts` sets `overlapSeconds: 0` (the
+old process stops when the new one is healthy) and `drainingSeconds: 15` (15 s from
+SIGTERM to SIGKILL, over `server.ts`'s own 10 s force-exit, so the shutdown gets to
+flush, close the pool and print "Socket.io closed" and "HTTP server closed"). **Those
+two are not applied yet:** the file reaches Railway only through `railway config
+apply` ([The deploy settings are on the Railway service](#the-deploy-settings-are-on-the-railway-service));
+staging after 2026-11-29, production with the production promotion. Until then
+Railway's default, 0 s of draining, kills the old process at once. So: **no deploy
+or promotion while a room is live** (an S1 rollback excepted). Before one, open
+`railway connect Postgres` for that environment, run
+`SET default_transaction_read_only = on;`, then this; both must be 0:
+
+```sql
+SELECT count(DISTINCT o.id) FILTER (WHERE e.kind = 'event') AS live_events, count(c.id) FILTER (WHERE c.status = 'checked_in' AND (c.expires_at IS NULL OR c.expires_at > now())) AS checked_in_now FROM event_occurrences o JOIN events e ON e.id = o.event_id LEFT JOIN event_check_ins c ON c.occurrence_id = o.id WHERE o.cancelled_at IS NULL AND e.deleted_at IS NULL AND e.status <> 'draft' AND now() BETWEEN o.start_time - interval '90 minutes' AND o.end_time;
+```
+
+(Live is from doors, 90 minutes before the start, to the end. A venue day is open
+all day, so it counts only through the people checked in. The room's 24 hours of
+chat after the end are not gated: a deploy then costs a reconnect, not a night.)
+
+**Pool budget.** Processes × `DATABASE_POOL_MAX` (default 20, `lib/db.ts`) stays
+under 80% of `SHOW max_connections`. Read 2026-11-26: production 500, staging 500,
+so the ceiling is 400 and one replica uses 20.
+
+**Hotfix path for 1.0.** There are no over-the-air updates (the app has no
+`expo-updates`). A client defect is fixed by a new store build (the client repo's
+`docs/RELEASING.md`; the owner holds the store accounts): Apple, request an
+expedited review in App Store Connect; Play has no expedited review, submit to the
+production track. Then retire the bad build once the fix is live (step 5). A server defect is a
+normal merge and promotion, or the rollback above.
+
+**Monitoring.** Sentry, org `matryx-social-labs-private-lim`, project
+`blendn-admin`; every rule emails the team above. Set up 2026-11-26 (ops task 07).
+**The two production uptime monitors are disabled until the owner raises the
+Sentry budget**: until then a production outage that throws no error is found
+by a user. An alert that names `staging` is not a production incident.
+
+| Id | What | Threshold | Env | State |
+|---|---|---|---|---|
+| 11072503 | uptime `https://api.blendn.app/api/health` | 60 s, 10 s timeout, down after 3 failures | production | **disabled (budget)** |
+| 11072504 | uptime `https://dashboard.blendn.app/login` | 60 s, 10 s timeout, 3 failures | production | **disabled (budget)** |
+| 11072505 | uptime `https://staging-api.blendn.app/api/health` | 60 s, 10 s timeout, 3 failures | staging | active |
+| 6408882 | alert: new issue → team email | first event of a new issue, at most every 5 min | production | enabled |
+| 11072512 | metric monitor: error spike | `count()` ≥ 20 in 5 min | production | enabled |
+| 11072513 | metric monitor: mobile p95 | `p95(span.duration)` > 2,000 ms over 10 min, `/api/mobile/*` | production | enabled |
+| 6408883 | alert: monitors (uptime, error spike, mobile p95) → team email | a monitor's issue opens or reopens | all | enabled |
+
+Railway's own graphs (CPU, memory, HTTP) are on the service's Metrics tab;
+`/api/health` reports the pool, event-loop delay and sockets only to a request with
+the `HEALTH_METRICS_TOKEN` header (see Health Check, above).
