@@ -68,6 +68,14 @@ describe("the first event that starts the clock (SCRUM-1269)", () => {
     })
   })
 
+  it("keeps a window already written, whatever that night's count, and never re-derives it", async () => {
+    mockDb.organisations.findUnique.mockResolvedValue({ analytics_free_until: new Date("2026-12-01T00:00:00Z"), first_free_event_id: "six" })
+    const access = await analyticsAccess("org", now)
+    expect(access).toMatchObject({ freeUntil: new Date("2026-12-01T00:00:00Z"), firstFreeEventId: "six", reason: "free_window" })
+    expect(mockDb.events.findMany).not.toHaveBeenCalled()
+    expect(mockDb.organisations.updateMany).not.toHaveBeenCalled()
+  })
+
   it("has not started while every night had fewer than 8", async () => {
     mockCounts.mockResolvedValue(new Map([["seven", 7], ["eight", 7]]))
     const access = await analyticsAccess("org", now)

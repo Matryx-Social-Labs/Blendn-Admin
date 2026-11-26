@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: "Contact" }
 
 export default function ContactPage() {
   return (
-    <PolicyPage path="/contact" title="Contact us" updated="26 October 2026">
+    <PolicyPage path="/contact" title="Contact us" updated="26 November 2026">
       <h2>{COMPANY.legalName}</h2>
       <p>
         Registered and operating address:
@@ -24,7 +24,7 @@ export default function ContactPage() {
           Phone: <a href={COMPANY.phoneHref}>{COMPANY.phone}</a>
         </li>
       </ul>
-      <p>We reply within two business days. For a payment, include your organisation&apos;s name and the Razorpay payment or invoice reference from your Plan page.</p>
+      <p>We reply within two business days. For a payment, include your organisation&apos;s name and the Razorpay payment reference from your Plan page.</p>
 
       <h2>Privacy and your data</h2>
       <p>

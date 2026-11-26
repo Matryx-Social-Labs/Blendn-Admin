@@ -15,8 +15,15 @@ jest.mock("@/lib/db", () => ({ db: {} }))
 
 const read = (file: string) => readFileSync(join(__dirname, "..", file), "utf8")
 
-const FREE_WINDOW_COPY = ["lib/access-line-copy.ts", "app/dashboard/plan/page.tsx", "app/pricing/page.tsx", "app/apply/page.tsx"]
-const PAYMENT_COPY = ["app/dashboard/plan/page.tsx", "app/dashboard/plan/venue-plan.tsx", "app/pricing/page.tsx"]
+const FREE_WINDOW_COPY = ["lib/access-line-copy.ts", "app/dashboard/plan/page.tsx", "app/dashboard/analytics/page.tsx", "app/pricing/page.tsx", "app/apply/page.tsx"]
+const PAYMENT_COPY = [
+  "app/dashboard/plan/page.tsx",
+  "app/dashboard/plan/venue-plan.tsx",
+  "app/pricing/page.tsx",
+  "app/contact/page.tsx",
+  "app/refunds/page.tsx",
+  "app/shipping/page.tsx",
+]
 
 describe("the free window in copy", () => {
   it("is 90 days from the first night with 8 people", () => {
@@ -28,6 +35,7 @@ describe("the free window in copy", () => {
     const text = read(file)
     expect(text).not.toMatch(/\b30 days after\b|\bfor 30 days\b/)
     expect(text).not.toMatch(/\b(5|five|six) people\b/i)
+    expect(text).not.toMatch(/cleared the floor/i)
   })
 
   it.each(["lib/access-line-copy.ts", "app/dashboard/plan/page.tsx", "app/pricing/page.tsx"])("%s interpolates both constants", (file) => {
