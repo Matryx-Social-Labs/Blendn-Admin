@@ -10,12 +10,14 @@ const cspReportUri = sentryCspReportUri(
 
 /*
  * The CSP is enforced on the pages that hold the session cookie or load
- * Razorpay (SCRUM-1243), and only reported everywhere else -- Swagger UI at
- * /api-docs needs 'unsafe-eval'. Each path gets exactly one of the two
- * headers: the report-only rule's source excludes these by lookahead.
+ * Razorpay (SCRUM-1243; /invite reads the session to accept), and only
+ * reported everywhere else -- Swagger UI at /api-docs needs 'unsafe-eval'.
+ * Each path gets exactly one of the two headers: the report-only rule's
+ * source excludes these by lookahead, so a path added to one list without
+ * the other fails csp-report.test.ts.
  */
-const CSP_ENFORCED_SOURCES = ["/dashboard/:path*", "/pay/:path*", "/login"];
-const CSP_REPORT_ONLY_SOURCE = "/:path((?!dashboard(?:/|$)|pay(?:/|$)|login$).*)";
+const CSP_ENFORCED_SOURCES = ["/dashboard/:path*", "/pay/:path*", "/login", "/invite"];
+const CSP_REPORT_ONLY_SOURCE = "/:path((?!dashboard(?:/|$)|pay(?:/|$)|login$|invite$).*)";
 
 const nextConfig: NextConfig = {
   // Image optimization

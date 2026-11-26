@@ -1,5 +1,7 @@
 /**
- * Where the report-only Content-Security-Policy sends its reports (SCRUM-321).
+ * Where the Content-Security-Policy sends its reports (SCRUM-321), and the
+ * policy itself: enforced on the dashboard, /pay, /login and /invite
+ * (SCRUM-1243), report-only elsewhere (next.config.ts).
  *
  * Sentry's security endpoint, derived from the DSN the app already reports
  * errors to: `https://<key>@<host>/<project>` →

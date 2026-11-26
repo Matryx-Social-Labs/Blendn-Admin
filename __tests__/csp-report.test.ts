@@ -1,5 +1,6 @@
 /*
- * Where the report-only CSP sends its reports (SCRUM-321).
+ * Where the CSP sends its reports (SCRUM-321), and (SCRUM-1243, below) where
+ * it is enforced rather than only reported.
  *
  * The policy was report-only with no reporting directive, so it neither
  * blocked nor collected — and its own plan to become enforcing needed a week of
@@ -102,17 +103,23 @@ it("drops 'unsafe-eval' when eval is not allowed, and keeps the rest", () => {
 
 type HeaderRule = { source: string; headers: { key: string; value: string }[] }
 
-/** The headers next.config.ts sends on a path, matched the way Next's server matches them. */
+/**
+ * The headers next.config.ts sends on a path, matched the way Next's server
+ * matches them, built with `DSN` so the reporting directive is there to check.
+ */
 async function headersFor(nodeEnv: string, path: string): Promise<Record<string, string>> {
   const env = process.env as Record<string, string | undefined>
-  const before = env.NODE_ENV
+  const before = { NODE_ENV: env.NODE_ENV, NEXT_PUBLIC_SENTRY_DSN: env.NEXT_PUBLIC_SENTRY_DSN }
   env.NODE_ENV = nodeEnv
+  env.NEXT_PUBLIC_SENTRY_DSN = DSN
   try {
     let rules: HeaderRule[] = []
     await jest.isolateModulesAsync(async () => {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       rules = await (require("../next.config").default as { headers: () => Promise<HeaderRule[]> }).headers()
     })
+    // Next's own server matcher, internal on purpose: the lookahead source is
+    // only worth testing the way production evaluates it.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { buildCustomRoute } = require("next/dist/server/lib/router-utils/filesystem")
     const sent: Record<string, string> = {}
@@ -122,25 +129,41 @@ async function headersFor(nodeEnv: string, path: string): Promise<Record<string,
     }
     return sent
   } finally {
-    env.NODE_ENV = before
+    for (const [key, value] of Object.entries(before)) {
+      if (value === undefined) delete env[key]
+      else env[key] = value
+    }
   }
 }
 
-const ENFORCED = ["/dashboard", "/dashboard/events/abc/edit", "/dashboard/plan", "/pay/o/tok_123", "/login"]
-const REPORT_ONLY = ["/", "/api-docs", "/pricing", "/invite/abc", "/dashboards", "/payments", "/login-help", "/api/health"]
+const ENFORCED = ["/dashboard", "/dashboard/", "/dashboard/events/abc/edit", "/dashboard/plan", "/pay", "/pay/o/tok_123", "/login", "/invite"]
+// /reset-password and /forgot-password hold a token, not the session: step 2 (security/06b) decides them.
+const REPORT_ONLY = ["/", "/api-docs", "/pricing", "/invite/abc", "/dashboards", "/payments", "/login-help", "/invites", "/reset-password", "/api/health"]
+const reportUri = () => sentryCspReportUri(DSN, process.env.RAILWAY_ENVIRONMENT_NAME)
 
 it.each(ENFORCED)("enforces the production policy, without 'unsafe-eval', on %s", async (path) => {
   const sent = await headersFor("production", path)
-  expect(sent["Content-Security-Policy"]).toBeDefined()
+  // Exactly the library's policy, reporting to Sentry: a blocked load must show up there.
+  expect(sent["Content-Security-Policy"]).toBe(contentSecurityPolicy(reportUri(), false))
   expect(sent["Content-Security-Policy"]).not.toContain("'unsafe-eval'")
-  expect(sent["Content-Security-Policy"]).toContain("https://checkout.razorpay.com")
+  expect(sent["Content-Security-Policy"]).toContain(`report-uri ${reportUri()}`)
   expect(sent["Content-Security-Policy-Report-Only"]).toBeUndefined()
+  expect(sent["X-Frame-Options"]).toBe("DENY")
 })
 
 it.each(REPORT_ONLY)("only reports on %s", async (path) => {
   const sent = await headersFor("production", path)
   expect(sent["Content-Security-Policy"]).toBeUndefined()
-  expect(sent["Content-Security-Policy-Report-Only"]).toContain("'unsafe-eval'")
+  expect(sent["Content-Security-Policy-Report-Only"]).toBe(contentSecurityPolicy(reportUri()))
+  expect(sent["X-Frame-Options"]).toBe("DENY")
+})
+
+it("still sends no referrer, and no cache, from the pay page (its URL carries the pay token)", async () => {
+  const pay = await headersFor("production", "/pay/o/tok_123")
+  expect(pay["Referrer-Policy"]).toBe("no-referrer")
+  expect(pay["Cache-Control"]).toBe("no-store, max-age=0")
+  expect(pay["X-Robots-Tag"]).toBe("noindex, nofollow")
+  expect((await headersFor("production", "/dashboard"))["Referrer-Policy"]).toBe("strict-origin-when-cross-origin")
 })
 
 it("keeps 'unsafe-eval' in development, where Next's overlay needs it", async () => {
