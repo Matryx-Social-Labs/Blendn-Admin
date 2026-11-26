@@ -40,13 +40,19 @@ import { readFileSync } from "fs"
 import { join } from "path"
 import {
   RATING_REQUEST_COPY,
-  RATING_REQUEST_LOOKBACK_MS,
+  RATING_REQUEST_ENDED_WITHIN_MS,
   rateRequestAudience,
   sendRatingRequests,
 } from "@/lib/services/event-notifications.service"
 
-const EVENT = { id: "e0000000-0000-4000-8000-000000000001", title: "Friday at Toit" }
-const NOW = new Date("2026-09-28T22:05:00Z")
+/** Ended at 01:00 IST on Tue 2026-09-29: asked at 10:00 IST that morning (SCRUM-1274). */
+const EVENT = {
+  id: "e0000000-0000-4000-8000-000000000001",
+  title: "Friday at Toit",
+  end_time: new Date("2026-09-28T19:30:00Z"),
+  timezone: "Asia/Kolkata",
+}
+const NOW = new Date("2026-09-29T04:30:00Z")
 
 /** A, B matched here; C and D matched but C blocked D; E came alone; F opted out of push. */
 function world() {
@@ -152,13 +158,64 @@ describe("sendRatingRequests", () => {
       deleted_at: null,
       rating_requested_at: null,
       status: { in: ["published", "completed"] },
-      end_time: { lte: NOW, gt: new Date(NOW.getTime() - RATING_REQUEST_LOOKBACK_MS) },
+      end_time: { lte: NOW, gt: new Date(NOW.getTime() - RATING_REQUEST_ENDED_WITHIN_MS) },
     })
+    expect(mockDb.events.findMany.mock.calls[0][0].select).toMatchObject({ end_time: true, timezone: true })
   })
 
   it("never throws: a failing query is logged and the pass returns 0", async () => {
     mockDb.events.findMany.mockRejectedValue(new Error("db down"))
     await expect(sendRatingRequests(NOW)).resolves.toBe(0)
+  })
+})
+
+/*
+ * Gate 7: a 01:00 close no longer pushes the room at 01:00. The sweep still
+ * runs every five minutes and selects every ended night; it claims only the
+ * ones whose next 10:00 on their own clock has come.
+ */
+describe("asked at 10:00 the next morning, on the event's clock", () => {
+  it("an event that ended at 01:00 IST is not claimed at 01:05 IST", async () => {
+    expect(await sendRatingRequests(new Date("2026-09-28T19:35:00Z"))).toBe(0)
+    expect(mockDb.events.updateMany).not.toHaveBeenCalled()
+    expect(sent).toHaveLength(0)
+  })
+
+  it("nor at 09:55 IST, and it is claimed at 10:00 IST", async () => {
+    expect(await sendRatingRequests(new Date("2026-09-29T04:25:00Z"))).toBe(0)
+    expect(mockDb.events.updateMany).not.toHaveBeenCalled()
+
+    const ten = new Date("2026-09-29T04:30:00Z")
+    expect(await sendRatingRequests(ten)).toBe(6)
+    expect(mockDb.events.updateMany).toHaveBeenCalledWith({
+      where: { id: EVENT.id, rating_requested_at: null },
+      data: { rating_requested_at: ten },
+    })
+  })
+
+  it("Toronto, the night the clocks go back: not at 10:00 EDT, at 10:00 EST", async () => {
+    // Sat 2026-10-31 23:00 EDT.
+    mockDb.events.findMany.mockResolvedValue([{ ...EVENT, end_time: new Date("2026-11-01T03:00:00Z"), timezone: "America/Toronto" }])
+    expect(await sendRatingRequests(new Date("2026-11-01T14:05:00Z"))).toBe(0)
+    expect(mockDb.events.updateMany).not.toHaveBeenCalled()
+    expect(await sendRatingRequests(new Date("2026-11-01T15:00:00Z"))).toBe(6)
+  })
+
+  it("a night that ends at 10:01 IST waits for 10:00 the next day, still inside the window", async () => {
+    const end = new Date("2026-09-29T04:31:00Z")
+    mockDb.events.findMany.mockResolvedValue([{ ...EVENT, end_time: end }])
+    expect(await sendRatingRequests(new Date("2026-09-30T04:25:00Z"))).toBe(0)
+    const next = new Date("2026-09-30T04:30:00Z")
+    expect(next.getTime() - end.getTime()).toBeLessThan(RATING_REQUEST_ENDED_WITHIN_MS)
+    expect(await sendRatingRequests(next)).toBe(6)
+  })
+
+  it("claims only the due events in a pass that selected both", async () => {
+    // Ended at 10:00 IST exactly, as NOW: its 10:00 is tomorrow's.
+    const endedNow = { ...EVENT, id: "e0000000-0000-4000-8000-000000000002", end_time: NOW }
+    mockDb.events.findMany.mockResolvedValue([EVENT, endedNow])
+    await sendRatingRequests(NOW)
+    expect(mockDb.events.updateMany.mock.calls.map(([a]) => a.where.id)).toEqual([EVENT.id])
   })
 })
 
@@ -175,7 +232,8 @@ describe("it is reachable", () => {
     expect(code("app/api/cron/event-reminders/route.ts")).toMatch(/await sendRatingRequests\(\)/)
   })
 
-  it("the lookback bounds the first pass after deploy to hours, not the whole history", () => {
-    expect(RATING_REQUEST_LOOKBACK_MS).toBeLessThanOrEqual(24 * 60 * 60 * 1000)
+  it("the window reaches the next 10:00 from any end, with slack, and not the whole history", () => {
+    expect(RATING_REQUEST_ENDED_WITHIN_MS).toBeGreaterThan(24 * 60 * 60 * 1000)
+    expect(RATING_REQUEST_ENDED_WITHIN_MS).toBeLessThanOrEqual(36 * 60 * 60 * 1000)
   })
 })

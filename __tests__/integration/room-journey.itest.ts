@@ -23,6 +23,7 @@ jest.mock("expo-server-sdk", () => ({
 import { signAccessToken } from "@/lib/mobile-auth"
 import { canJoinChat } from "@/lib/socket-auth"
 import { sendRatingRequests } from "@/lib/services/event-notifications.service"
+import { nextLocalTime } from "@/lib/event-wall-clock"
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, putInRoom, testId } from "./helpers"
 
 /**
@@ -269,24 +270,26 @@ describe("the signed-out invite preview", () => {
 })
 
 describe("the rate-who-you-met push", () => {
-  it("asks everyone who was there exactly once, and never about an old night", async () => {
+  it("asks everyone who was there exactly once, at 10:00 the next morning, and never about an old night", async () => {
     const host = await makeUser(testId("rq-host"), "organizer")
     users.push(host)
     const a = await person("rq-a")
     const b = await person("rq-b")
     const late = await person("rq-late")
 
-    const now = Date.now()
+    // The clock is injected (SCRUM-1274): a night that ended at 01:00 IST, asked at 10:00 IST.
+    const ten = nextLocalTime(new Date(), "Asia/Kolkata", 10)
+    const H = 3600_000
     const ended = await makeEvent(host)
     const ancient = await makeEvent(host)
     events.push(ended, ancient)
     await db.events.update({
       where: { id: ended },
-      data: { start_time: new Date(now - 4 * 3600_000), end_time: new Date(now - 10 * 60_000) },
+      data: { start_time: new Date(ten.getTime() - 13 * H), end_time: new Date(ten.getTime() - 9 * H), timezone: "Asia/Kolkata" },
     })
     await db.events.update({
       where: { id: ancient },
-      data: { start_time: new Date(now - 50 * 3600_000), end_time: new Date(now - 48 * 3600_000) },
+      data: { start_time: new Date(ten.getTime() - 50 * H), end_time: new Date(ten.getTime() - 48 * H), timezone: "Asia/Kolkata" },
     })
     const occ = await occurrenceOf(ended)
     await putInRoom({ eventId: ended, occurrenceId: occ, userId: a.id })
@@ -295,8 +298,14 @@ describe("the rate-who-you-met push", () => {
     // Checked out by the end, as most people are: attendance, not presence.
     await db.event_check_ins.updateMany({ where: { event_id: ended, user_id: b.id }, data: { status: "checked_out" } })
 
-    await sendRatingRequests()
-    await sendRatingRequests() // the next pass, five minutes later
+    // 01:05 and 09:55 IST: ended, not yet asked.
+    expect(await sendRatingRequests(new Date(ten.getTime() - 9 * H + 5 * 60_000))).toBe(0)
+    expect(await sendRatingRequests(new Date(ten.getTime() - 5 * 60_000))).toBe(0)
+    const before = await db.events.findUniqueOrThrow({ where: { id: ended }, select: { rating_requested_at: true } })
+    expect(before.rating_requested_at).toBeNull()
+
+    await sendRatingRequests(ten)
+    await sendRatingRequests(new Date(ten.getTime() + 5 * 60_000)) // the next pass, five minutes later
 
     const rows = await db.notifications.findMany({
       where: { user_id: { in: [a.id, b.id, late.id] }, kind: "rating_request" },
@@ -306,7 +315,7 @@ describe("the rate-who-you-met push", () => {
     for (const r of rows) expect(r.data).toMatchObject({ type: "rating_request", eventId: ended })
 
     const claimed = await db.events.findUniqueOrThrow({ where: { id: ended }, select: { rating_requested_at: true } })
-    expect(claimed.rating_requested_at).toBeInstanceOf(Date)
+    expect(claimed.rating_requested_at).toEqual(ten)
     const old = await db.events.findUniqueOrThrow({ where: { id: ancient }, select: { rating_requested_at: true } })
     expect(old.rating_requested_at).toBeNull()
   })

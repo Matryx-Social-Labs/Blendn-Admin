@@ -23,7 +23,7 @@ export const metadata = routeMetadata("/dashboard/plan")
 export const dynamic = "force-dynamic"
 
 /**
- * An organisation's plan: Free, an Event Pass for one event, or Analytics
+ * An organisation's plan: Free, Event Insights for one event, or Analytics
  * (plan v2 §9.1b; the kit's Plan screen, `screens-org.jsx`).
  *
  * What it says about the plan comes from the server's own rows: the

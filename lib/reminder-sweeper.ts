@@ -38,9 +38,10 @@ async function pass(): Promise<void> {
   if (notified > 0) logger.info("Event reminders sent", { notified })
 
   /*
-   * The other end of the night: "rate who you met", once per event, soon after
-   * it ends. Same claim-before-send idempotency as the reminder, same cadence,
-   * so it rides this loop rather than adding a seventh timer.
+   * The other end of the night: "rate who you met", once per event, at 10:00
+   * on the event's clock the morning after it ends. Same claim-before-send
+   * idempotency as the reminder, same cadence, so it rides this loop rather
+   * than adding a seventh timer.
    */
   const asked = await sendRatingRequests()
   if (asked > 0) logger.info("Rating requests sent", { asked })
