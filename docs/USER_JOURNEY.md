@@ -74,8 +74,8 @@ not a count here.
 | | |
 |---|---|
 | Designed | Hard-gated, before anything is visible |
-| Built | Six steps, which a new account goes through before the tabs: `basics`, `preferences`, `details`, `media`, `location`, `ready`. The header counts the five questions ("Step N of 5"); `ready` is the payoff. Only `basics` cannot be skipped. Back and the edge swipe move between steps; nothing swipes out of the flow |
-| Served | `PUT /profiles/:userId`, one call per step with only that step's fields; interests also through `/profiles/:userId/interests` |
+| Built | Six steps, which a new account goes through before the tabs: `basics`, `preferences`, `details`, `media`, `location`, `ready`. Five are questions, and the progress bar counts five; `ready` is the payoff. `preferences`, `details` and `media` can be skipped and `location` answered "Maybe later"; `basics` cannot. Back and the edge swipe move between steps; nothing swipes out of the flow |
+| Served | `PUT /profiles/:userId` with only the fields a step answered (a skip sends nothing); `ready` sends the whole draft with `onboarded: true`. Interests also through `/profiles/:userId/interests` |
 
 What each step asks: `basics` the name, gender and date of birth;
 `preferences` orientations and whether to show them, why you go out
@@ -85,13 +85,13 @@ interests and a bio; `media` photos; `location` the location permission
 first time it pays off.
 
 **History.** The eight screens that once stood here, two of which discarded what
-they collected, were deleted on 2026-08-10 for a minimal sign in → browse →
-check in; per-step-saved screens came back on 2026-08-14, and the flow became
+they collected, were deleted on 2026-08-10 with the gate that sent people to
+them; per-step-saved screens came back on 2026-08-14, and the flow became
 today's six on 2026-11-01.
 
 **Interests reach matching.** `details` picks from the server's category tree
-and writes both the free-text `profiles.interests` that surfaces render and the
-structured `user_interests → categories` graph that matching ranks on.
+and writes both the free-text `profiles.interests` and the structured
+`user_interests → categories` graph that matching ranks on (`lib/matching.ts`).
 
 ### 3. Browse and discover
 
