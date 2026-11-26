@@ -105,3 +105,38 @@ describe("a category nobody dominates (ruling 5)", () => {
     )
   })
 })
+
+describe("quotes are never looser than the rule they replace (mayQuote, deleted in SCRUM-1285)", () => {
+  /*
+   * A quote now comes only from a category whose count is shown (`buildFeedbackDigest`: `quotable` is the
+   * categories `discloseCategories` does not suppress). The old rule is written out here as it was. Over the grid,
+   * every category the new rule quotes, the old rule quoted too; the cases it no longer quotes are tallied by why.
+   */
+  const oldMayQuote = (contributors: number, population: number) => !discloseFigure({ count: 1, contributors, population }).suppressed
+
+  it("quotes a category only if the old rule did, over population 1–40, every contributor count, 1–5× messages and every top share", () => {
+    const looser: string[] = []
+    const stricter = new Map<string, number>()
+    for (let population = 1; population <= 40; population++) {
+      for (let contributors = 0; contributors <= population; contributors++) {
+        const people = Math.max(1, contributors)
+        for (let count = people; count <= 5 * people; count++) {
+          for (let top = 1; top <= count; top++) {
+            const [shown] = discloseCategories(new Map([["c", count]]), new Map([["c", contributors]]), population, new Map([["c", top]]))
+            const quotesNow = !shown.suppressed
+            const quotedBefore = oldMayQuote(contributors, population)
+            if (quotesNow && !quotedBefore) looser.push(JSON.stringify({ population, contributors, count, top }))
+            if (!quotesNow && quotedBefore) {
+              const why = discloseFigure({ count, contributors, population, topContributorShare: top / count }).reason!
+              stricter.set(why, (stricter.get(why) ?? 0) + 1)
+            }
+          }
+        }
+      }
+    }
+    expect(looser.slice(0, 5)).toEqual([])
+    // Stricter only where one person wrote more than half: dominance, and nothing else.
+    expect([...stricter.keys()]).toEqual(["dominance"])
+    expect(stricter.get("dominance")).toBeGreaterThan(0)
+  })
+})

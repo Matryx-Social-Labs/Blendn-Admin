@@ -2885,9 +2885,9 @@
       "date": "2026-11-26"
     },
     "complaint-dominance.test.tsx": {
-      "guards": "SCRUM-1285: a complaint category one person wrote more than half of is held back (5 people, one with 20 of 25), shown at exactly half (10 of 20), shown when spread evenly; tallyFeedback counts the largest single person's messages from the rows it reads; the disclosed entry and its CategoryBars markup are identical to a sub-floor category's apart from the name, sort after the shown ones, and carry no suppressionReason or reason word; an undominated category's payload is the same with the largest share as without it.",
-      "mutation": "(N0) the test run on origin/dev 33eea380 before the change; (M4) `topContributorShare > MAX_DOMINANCE` made `>=`; (M5) `suppressionReason: disclosure.reason` put back on discloseCategories' entries.",
-      "observed": "N0: 10 of 11 failing; 5 people with one writing 20 of 25 read count 25, suppressed false (the negative control). M4: 1 of 27 failing (exactly half). M5: 6 of 27 failing. Restored; 27 of 27.",
+      "guards": "SCRUM-1285: a complaint category one person wrote more than half of is held back (5 people, one with 20 of 25), shown at exactly half (10 of 20), shown when spread evenly; tallyFeedback counts the largest single person's messages from the rows it reads; the disclosed entry and its CategoryBars markup are identical to a sub-floor category's apart from the name, sort after the shown ones, and carry no suppressionReason or reason word; an undominated category's payload is the same with the largest share as without it; over a grid (population 1–40, contributors 0–population, 1–5× messages, every top count) a quote never comes from a category the deleted mayQuote refused, and the only cases now refused are dominance.",
+      "mutation": "(N0) the test run on origin/dev 33eea380 before the change; (M4) `topContributorShare > MAX_DOMINANCE` made `>=`; (M5) `suppressionReason: disclosure.reason` put back on discloseCategories' entries; (M7) discloseCategories passes `population: 0` (completeness and residual skipped for the new rule only).",
+      "observed": "N0: 10 of 11 failing; 5 people with one writing 20 of 25 read count 25, suppressed false (the negative control). M4: 1 of 27 failing (exactly half). M5: 6 of 27 failing. M7: the grid failing, first leak {population 5, contributors 5, count 5, top 1}. Restored; 28 of 28. Grid: 2,859,120 cases, 1,685,627 the same, 1,173,493 stricter, all dominance, none looser.",
       "date": "2026-11-26"
     },
     "complaint-dominance.itest.ts": {
