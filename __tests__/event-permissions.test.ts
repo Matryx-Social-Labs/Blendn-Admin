@@ -108,6 +108,12 @@ describe("eventPermissions — the matrix", () => {
     expect(eventPermissions(staff(DEV, "organizer", [ORG_VENUE]), event(ORG_VENUE, ORG_VENUE, { kind: "venue_day" })).canOperate).toBe(false)
   })
 
+  it("lets the host org's rule win for someone who is its staff and also owns the venue's org", () => {
+    // Narrower than the venue branch alone (no held-back count); task 09 revisits `ownsVenueAt`.
+    const twoHats = actor(DEV, "venue_owner", [ORG_HOST, ORG_VENUE], [ORG_VENUE])
+    expect(eventPermissions(twoHats, event(ORG_HOST, ORG_VENUE))).toEqual({ canEdit: false, canOperate: true, canViewAttendees: false })
+  })
+
   it("gives a member of a different org nothing", () => {
     const p = eventPermissions(actor(STRANGER, "organizer", [ORG_OTHER]), event(ORG_HOST))
     expect(p.canEdit).toBe(false)

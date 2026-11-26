@@ -43,6 +43,10 @@ describe("announcement — whoever runs the event", () => {
     expect(canBroadcast(host, event, "announcement")).toBe(true)
   })
 
+  it("refuses the organising org's staff member: speaking for the event is an edit (SCRUM-1244)", () => {
+    expect(canBroadcast({ ...host, editOrgIds: [] }, event, "announcement")).toBe(false)
+  })
+
   it("refuses the venue owner on an event another org runs in their building", () => {
     /*
      * This row said `true` until SCRUM-335: `canOperate` is true for a venue

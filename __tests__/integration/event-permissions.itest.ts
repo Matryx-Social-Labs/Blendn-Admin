@@ -218,6 +218,21 @@ describe("an org's staff member, against real rows (SCRUM-1244)", () => {
     expect(await resolve(owner, "organizer", eventId)).toEqual({ canEdit: true, canOperate: true, canViewAttendees: true })
   })
 
+  it("reads each membership's own role: staff at one org, owner of another", async () => {
+    const owner = await makeUser("perm_two_owner", "organizer")
+    const person = await makeUser("perm_two_hats", "organizer")
+    users.push(owner, person)
+    const theirs = await makeOrg(owner)
+    const own = await makeOrg(person)
+    await db.organisation_members.create({ data: { org_id: theirs, user_id: person, role: "staff" } })
+
+    const actor = await actorFor({ id: person, role: "organizer" })
+    expect([...actor.orgIds].sort()).toEqual([theirs, own].sort())
+    expect(actor.editOrgIds).toEqual([own])
+    expect((await resolve(person, "organizer", await makeEventAt(owner, null, theirs))).canEdit).toBe(false)
+    expect((await resolve(person, "organizer", await makeEventAt(person, null, own))).canEdit).toBe(true)
+  })
+
   it("gives an org admin everything", async () => {
     const owner = await makeUser("perm_admin_owner", "organizer")
     const colleague = await makeUser("perm_admin_colleague", "organizer")

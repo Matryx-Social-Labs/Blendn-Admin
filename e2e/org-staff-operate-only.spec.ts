@@ -64,8 +64,10 @@ test("an org's staff member gets the room, not the editor or the roster; the own
   // The seeded night that is running now, and the organisation that runs it.
   const event = await db.events.findFirstOrThrow({
     where: { slug: "founders-filter-coffee", deleted_at: null },
-    select: { id: true, title: true, status: true, organizer_org_id: true },
+    select: { id: true, title: true, status: true, organizer_org_id: true, start_time: true, end_time: true },
   })
+  const now = new Date()
+  expect(event.start_time <= now && now < event.end_time, "the seeded night is running, so Live is offered").toBe(true)
   expect(event.organizer_org_id, "the seeded night belongs to an organisation").not.toBeNull()
   const orgId = event.organizer_org_id!
   const owner = await db.user.findUniqueOrThrow({ where: { email: "organizer@blendn.app" }, select: { id: true } })
@@ -89,10 +91,11 @@ test("an org's staff member gets the room, not the editor or the roster; the own
   await expect(main(page).getByRole("heading", { level: 1, name: event.title })).toBeVisible()
   await expect(tabs(page).getByRole("link", { name: "Room chat", exact: true })).toBeVisible()
   await expect(tabs(page).getByRole("link", { name: "Live", exact: true })).toBeVisible()
-  for (const name of ["Attendees", "Announcements & sponsors", "QR & link", "Tickets"]) {
+  // (Tickets is off in CI for everyone, so it proves nothing here.)
+  for (const name of ["Attendees", "Announcements & sponsors", "QR & link"]) {
     await expect(tabs(page).getByRole("link", { name, exact: true })).toHaveCount(0)
   }
-  await expect(main(page).getByRole("link", { name: "Edit event" })).toHaveCount(0)
+  for (const name of ["Edit event", "QR code"]) await expect(main(page).getByRole("link", { name })).toHaveCount(0)
   await expect(page.getByRole("link", { name: "Create event" })).toHaveCount(0)
 
   // The room is theirs: it opens, under the same header.
@@ -101,10 +104,13 @@ test("an org's staff member gets the room, not the editor or the roster; the own
   await expect(main(page).getByRole("heading", { level: 1 })).toHaveText(event.title)
 
   // A URL is not a way round the tab list: the roster, the composer and the editor send them back.
-  for (const path of [`${eventUrl}?tab=attendees`, `${eventUrl}?tab=announcements`, `${eventUrl}/edit`]) {
+  for (const path of [`${eventUrl}?tab=attendees`, `${eventUrl}?tab=announcements`, `${eventUrl}?tab=share`, `${eventUrl}/edit`]) {
     await page.goto(path, { waitUntil: "domcontentloaded" })
     await expect(page).toHaveURL(new RegExp(`${eventUrl}$`), { timeout: 30_000 })
   }
+  // Nor is the event form theirs: an event they created would refuse them at its own edit screen.
+  await page.goto("/dashboard/events/new", { waitUntil: "domcontentloaded" })
+  await expect(page).not.toHaveURL(/\/dashboard\/events\/new$/, { timeout: 30_000 })
   // And the event API answers without the creator, as it does a venue.
   const api = await page.request.get(`/api/events/${event.id}`)
   expect(api.status()).toBe(200)
@@ -115,10 +121,12 @@ test("an org's staff member gets the room, not the editor or the roster; the own
   const ownerContext = await browser.newContext({ storageState: statePathFor("organizer"), baseURL })
   const ownerPage = await ownerContext.newPage()
   await ownerPage.goto(eventUrl, { waitUntil: "domcontentloaded" })
-  await expect(main(ownerPage).getByRole("link", { name: "Edit event" })).toBeVisible()
-  for (const name of ["Attendees", "Announcements & sponsors", "Room chat"]) {
+  for (const name of ["Edit event", "QR code"]) await expect(main(ownerPage).getByRole("link", { name })).toBeVisible()
+  await expect(ownerPage.getByRole("link", { name: "Create event" })).toBeVisible()
+  for (const name of ["Attendees", "Announcements & sponsors", "QR & link", "Room chat"]) {
     await expect(tabs(ownerPage).getByRole("link", { name, exact: true })).toBeVisible()
   }
+  expect(await (await ownerPage.request.get(`/api/events/${event.id}`)).json()).toHaveProperty("organizer_id")
   await ownerContext.close()
 
   // Read back: nothing the staff member opened changed the night.

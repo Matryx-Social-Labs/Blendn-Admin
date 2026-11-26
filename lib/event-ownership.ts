@@ -78,6 +78,13 @@ async function homeMembershipFor(user: { id: string; role: user_role }): Promise
  */
 const mayCreateIn = (role: org_role) => role !== "staff"
 
+/** `owningOrgFor`'s refusal of a staff member: its own type, so a caller can tell it from "no organisation". */
+export class StaffMayNotCreate extends Error {
+  constructor() {
+    super("Only an owner or admin of your organization can create its events. Ask one of them to create it, or to make you an admin.")
+  }
+}
+
 export async function owningOrgFor(user: {
   id: string
   role: user_role
@@ -101,9 +108,7 @@ export async function owningOrgFor(user: {
     )
   }
 
-  if (!mayCreateIn(membership.role)) {
-    throw new Error("Only an owner or admin of your organisation can create its events. Ask one of them to create it, or to make you an admin.")
-  }
+  if (!mayCreateIn(membership.role)) throw new StaffMayNotCreate()
 
   return membership.org_id
 }
