@@ -4,6 +4,7 @@
 import { logger } from "./logger"
 import { cleanupExpiredTokens } from "./mobile-auth"
 import { checkPushReceipts, pruneIdlePushTokens, releaseHeldNotifications } from "./push-notifications"
+import { sendResultsMails } from "./results-mail"
 import { sendEventReminders, sendRatingRequests } from "./services/event-notifications.service"
 
 /**
@@ -45,6 +46,10 @@ async function pass(): Promise<void> {
    */
   const asked = await sendRatingRequests()
   if (asked > 0) logger.info("Rating requests sent", { asked })
+
+  // The host's half of the same morning (SCRUM-1282): the night's results to the organization's owners and admins.
+  const mailed = await sendResultsMails()
+  if (mailed > 0) logger.info("Results mails sent", { mailed })
 
   const pruned = await cleanupExpiredTokens()
   if (pruned > 0) logger.info("Expired refresh tokens pruned", { pruned })

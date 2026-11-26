@@ -2793,6 +2793,18 @@
       "mutation": "(M10) the single path pushes a held row; (M1) the open check-in clause removed; (M14) the release claims held_until > now.",
       "observed": "M10: 2 of 6 failing. M1: 2 of 6. M14: 1 of 6. Restored; 6 of 6 on blendn_growth04 (db:migrate).",
       "date": "2026-11-26"
+    },
+    "results-mail.test.ts": {
+      "guards": "SCRUM-1282, launch gate 14: the morning results mail. Not before 10:00 on the event's clock (Asia/Kolkata, and America/Toronto across the 2026-11-01 DST change); one send per event through the results_mailed_at claim even when a stale pass still reads the row; the sweep's where (kind event, an organization, published or completed, not deleted, not mailed, ended in the last 34 h); recipients from organisation membership (owner, admin; not deleted, not suspended); a suppressed owner skipped and a failed send not stopping the other owner; 12,480 checked in, the rating only from 5 raters, the mood count, one button to the Overview and one 'List your next night' link, no Plus; under 5 checked in as 'fewer than 5' with no number and no rating; List-Unsubscribe with the per-recipient token over the canonical address, List-Unsubscribe-Post One-Click, tag kind=results, a mailto only with EMAIL_REPLY_TO; zero check-ins: the help mail on the org's first mailed night, silence after; never throws.",
+      "mutation": "(C1) the suite on origin/dev c209d6d1 (no lib/results-mail.ts); (M1) the claim removed; (M1b) the claim without results_mailed_at: null; (M2) staff mailed; (M3) the 10:00 check removed; (M4) the disclosure floor removed; (M5) the 34 h lookback removed; (M6) stream lifecycle dropped; (M8) the MAC compare always true; (M10) the zero-check-in mail every night.",
+      "observed": "C1: the suite fails to load (module not found). M1: 3 of 16 failing. M1b: 1. M2: 1. M3: 2. M4: 1. M5: 1. M6: 1. M8: 1. M10: 1. Restored each; 16 of 16.",
+      "date": "2026-11-26"
+    },
+    "results-mail.itest.ts": {
+      "guards": "SCRUM-1282 on a db:migrate database (blendn_growth04b): events.results_mailed_at; two owners and an admin of one organization mailed once each, staff and a member who left not, nothing at 09:59 IST, results_mailed_at read back, a second pass and three concurrent passes mailing nobody twice; a night 35 h old and a cancelled one never mailed or claimed; an unsubscribed owner skipped. POST /api/email/unsubscribe: one-click writes one unsubscribe row and a repeat stays one row; the confirm page's form is a 303 to /unsubscribe?done=1; a bounce is never downgraded; eight bad tokens (none, empty, no dot, no MAC, a changed MAC, another user's id, an extra part, a path) are 400 and write nothing; a deleted account's link is 400; the route is rate-limited per network. GET writes nothing and is a 303 to the confirm page.",
+      "mutation": "(M1) the claim removed; (M1b) the claim without results_mailed_at: null; (M2) staff mailed; (M3) the 10:00 check removed; (M5) the 34 h lookback removed; (M6) stream lifecycle dropped (the unsubscribed owner mailed); (M7) GET unsubscribes; (M8) the MAC compare always true; (M9) an unsubscribe upserts over a bounce; (M11) the route's rate limit removed; (M12) a deleted account's token accepted.",
+      "observed": "M1: 2 of 10 failing. M1b: 1 of 10 (the concurrent-pass case, added after M1b passed the first draft). M2: 1. M3: 1. M5: 1. M6: 1. M7: 1. M8: 1. M9: 1. M11: 1. M12: 1 of 11 (case added after it passed). Restored each; 11 of 11.",
+      "date": "2026-11-26"
     }
   },
   "grandfathered": [

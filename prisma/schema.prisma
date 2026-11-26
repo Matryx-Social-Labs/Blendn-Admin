@@ -669,6 +669,9 @@ model events {
   /// Null means not yet asked. Claimed with a conditional update before the
   /// send, like `reminded_at`, so two passes or two replicas never both send.
   rating_requested_at DateTime?           @db.Timestamptz(6)
+  /// When the host's morning results mail went to the organization's owners and admins (SCRUM-1282, lib/results-mail.ts).
+  /// Null means not yet mailed. Claimed with a conditional update before the send, like `rating_requested_at`.
+  results_mailed_at   DateTime?           @db.Timestamptz(6)
 
   event_issues            event_issues[]
   board_posts             board_posts[]

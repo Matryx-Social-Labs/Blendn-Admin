@@ -159,7 +159,6 @@ describe("who", () => {
 describe("what", () => {
   it("12,480 checked in, a long title, the rating once 5 rated, the mood count; one button to the Overview", async () => {
     const title = "Thiruvananthapuram Indie Night: Third Edition Rooftop Session"
-    mockDb.events.findMany.mockImplementation(async () => (mailedAt ? [] : [{ ...EVENT, title }]))
     world({ attendees: 12480, raters: [0, 1, 2, 4, 5], feedback: 318 })
     mockDb.events.findMany.mockImplementation(async () => (mailedAt ? [] : [{ ...EVENT, title }]))
     await sendResultsMails(TEN_IST)
@@ -185,7 +184,7 @@ describe("what", () => {
     expect(mail.text).not.toMatch(/\b3 people/)
     // Two raters: no average, and the count is not said either.
     expect(mail.text).not.toMatch(/average rating from/)
-    expect(mail.text).toContain("The average shows on the Overview once 5 people have rated")
+    expect(mail.text).toContain("The average rating shows on the Overview once 5 people have rated")
     expect(mail.text).toContain("“fewer than 5”, so nobody can be picked out")
     expect(mail.html).toContain("Fewer than 5 people")
   })
