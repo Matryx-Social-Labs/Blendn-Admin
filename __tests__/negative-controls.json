@@ -2278,6 +2278,12 @@
       "observed": "M1526: 1 of 2 failing (the start/stop test). Reverted; 2 of 2. M1780: 1 of 3 failing.",
       "date": "2026-10-22"
     },
+    "staff-alert-started.test.ts": {
+      "guards": "SCRUM-1161: lib/background.ts starts the staff alert sweeper (new reports and severe flags, once a minute) and stops it on shutdown, and names it in the start-up log.",
+      "mutation": "M1 the start line commented out in background.ts.",
+      "observed": "M1: 1 of 2 failing (the start/stop test). Reverted; 2 of 2.",
+      "date": "2026-11-26"
+    },
     "moderation-recheck-started.test.ts": {
       "guards": "Moderation-degraded policy: lib/background.ts starts the room-message re-check sweeper and stops it on shutdown, names it in the start-up log, and the files it reaches import by relative path because server.ts compiles with plain tsc.",
       "mutation": "M1694 the sweeper not started in background.ts (the start line commented out).",
