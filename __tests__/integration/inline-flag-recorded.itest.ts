@@ -92,11 +92,11 @@ const send = (which: "group" | "event", r: Room, content: string) =>
     : eventRoute.POST(post(`http://localhost/api/mobile/events/${r.eventId}/chat`, r.token, content), { params: Promise.resolve({ eventId: r.eventId }) })
 
 /** The flag and the status are written off the response path: give them a moment. */
-async function settled(groupId: string, content: string) {
+async function settled(groupId: string, content: string, flagCount = 0) {
   for (let i = 0; i < 40; i++) {
     const message = await db.chat_messages.findFirst({ where: { chat_group_id: groupId, content }, select: { id: true, moderation_status: true, deleted_at: true } })
     const flags = message ? await db.moderation_flags.findMany({ where: { message_id: message.id }, select: { source: true, status: true, auto_action: true } }) : []
-    if (message?.moderation_status && message.moderation_status !== "pending") return { message, flags }
+    if (message?.moderation_status && message.moderation_status !== "pending" && flags.length >= flagCount) return { message, flags }
     await new Promise((ok) => setTimeout(ok, 50))
   }
   throw new Error(`no verdict recorded for ${content}`)
@@ -132,6 +132,16 @@ describe.each(["group", "event"] as const)("%s route, the inline check answered"
     const { message, flags } = await settled(r.groupId, "borderline line")
     expect(message.moderation_status).toBe("flagged")
     expect(flags).toEqual([{ source: "auto_text", status: "pending", auto_action: "none" }])
+  })
+
+  it("a line both flag is recorded twice, once per reason, and is still delivered", async () => {
+    const r = await liveRoom()
+    mockCheckText.mockResolvedValue(MODEL_FLAG)
+    expect((await send(which, r, "chod yaar, borderline")).status).toBe(201)
+    expect(emitted).toEqual(["chod yaar, borderline"])
+    const { message, flags } = await settled(r.groupId, "chod yaar, borderline", 2)
+    expect(message.moderation_status).toBe("flagged")
+    expect(flags.map((f) => f.source).sort()).toEqual(["auto_keyword", "auto_text"])
   })
 
   it("an ordinary line is still clean, with no flag (control)", async () => {
