@@ -221,14 +221,10 @@ export class EventTimesRefusedError extends Error {
   }
 }
 
-/** What a refused visibility change on a delisted event says, in the editor's toast (SCRUM-1394). */
-export const EVENT_DELISTED_SENTENCE =
-  "A moderator set this event to Unlisted, so its visibility can’t be changed. Contact support to ask for a review."
-
-/** A delisted event's visibility, changed by somebody who is not an admin: refused under the row lock. */
+/** A delisted event's visibility, changed by somebody who is not an admin: refused under the row lock. The message is the editor's toast. */
 export class EventDelistedError extends Error {
   constructor() {
-    super(EVENT_DELISTED_SENTENCE)
+    super("A moderator set this event to Unlisted, so its visibility can’t be changed. Contact support to ask for a review.")
   }
 }
 
@@ -263,9 +259,6 @@ export async function updateEventTracked(
     if (opts.fromStatus !== undefined && before.status !== opts.fromStatus) throw new EventStatusMovedError(before.status)
     const updated = await tx.events.update(args)
     if (updated.start_time.getTime() >= updated.end_time.getTime()) throw new EventTimesOrderError()
-    // Every writer through here: a sold event's times only move later, decided under the row lock (security review 7).
-    const timesRefusal = await ticketTimesRefusal(tx, { id: updated.id, start_time: before.start_time, end_time: before.end_time }, updated)
-    if (timesRefusal) throw new EventTimesRefusedError(timesRefusal)
     // A moderator's delisting (SCRUM-1394): only an admin changes its visibility, and only a move back to public lifts it.
     const delistedMove = before.delisted_at !== null && updated.visibility !== before.visibility
     if (delistedMove && !opts.relistBy) throw new EventDelistedError()
@@ -275,6 +268,9 @@ export async function updateEventTracked(
       await tx.$executeRaw`UPDATE events SET delisted_by = NULL WHERE id = ${updated.id}::uuid`
       await auditInTx(tx, { userId: opts.relistBy, action: "event.relist", resource: "event", resourceId: updated.id, details: { from: before.visibility } })
     }
+    // Every writer through here: a sold event's times only move later, decided under the row lock (security review 7).
+    const timesRefusal = await ticketTimesRefusal(tx, { id: updated.id, start_time: before.start_time, end_time: before.end_time }, updated)
+    if (timesRefusal) throw new EventTimesRefusedError(timesRefusal)
     const next = nextChange(before.changed_from, before, updated)
     /*
      * A reminder is claimed once, by `reminded_at IS NULL`

@@ -40,6 +40,7 @@ jest.mock("expo-server-sdk", () => {
 import { NextRequest } from "next/server"
 import { resolveReport } from "@/app/dashboard/moderation/reports/actions"
 import { duplicateFor } from "@/lib/event-duplicate"
+import { updateEventTracked } from "@/lib/event-change"
 import { refusalText } from "@/lib/refusal"
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -216,4 +217,17 @@ it("no answer to the organizer says which moderator delisted it", async () => {
     expect(answer).toBeDefined()
     expect(JSON.stringify(answer)).not.toContain(admin)
   }
+})
+
+it("a write that leaves visibility alone passes on a delisted event (the admin status control, the app's organizer PATCH)", async () => {
+  const eventId = await hostedEvent("Status only", "x")
+  await delist(eventId, admin)
+  const before = await row(eventId)
+
+  // No relistBy, as those doors call it: only a visibility change is refused.
+  await updateEventTracked({ where: { id: eventId }, data: { status: "draft", title: "Renamed from the app" } }, { fromStatus: "published" })
+
+  const after = await row(eventId)
+  expect(after).toMatchObject({ visibility: "unlisted", title: "Renamed from the app", delisted_by: admin })
+  expect(after.delisted_at).toEqual(before.delisted_at)
 })

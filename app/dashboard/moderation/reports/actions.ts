@@ -656,9 +656,9 @@ export async function resolveReport(
       /*
        * When and by whom, which is what stops its organizer putting it back
        * (`updateEventTracked`). The first delisting stands: a second report's
-       * keeps it, and still snapshots the text in its own audit row.
+       * keeps it, and still snapshots the text in its own audit row. Raw,
+       * because `delisted_by` is @ignore'd: no Prisma read hands it to anybody.
        */
-      // Raw: `delisted_by` is @ignore'd, so no Prisma read can hand a moderator's id to the organizer.
       await tx.$executeRaw`UPDATE events SET delisted_at = now(), delisted_by = ${admin.id} WHERE id = ${eventId}::uuid AND delisted_at IS NULL`
       delisted = { eventId, title, description }
     }
