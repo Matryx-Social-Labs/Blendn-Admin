@@ -109,8 +109,9 @@ export async function markJudged(messageId: string): Promise<void> {
  * Hidden messages in the mute window that count toward a mute: abuse, not
  * contact details (SCRUM-485), and not a swear word the keyword list hid
  * (D-052a): a flag whose only category is `profanity` (`checkKeywords`; a slur
- * is `slur`) is left out the same way, and so is `UNJUDGED_KEY` beside it. The model's own `hide` on such a line is
- * a flag of its own and counts (`recordHide` in `index.ts`).
+ * is `slur`) is left out the same way, and so is `UNJUDGED_KEY` beside it. The
+ * model's own `hide` on such a line is a flag of its own and counts
+ * (`recordHide` in `index.ts`).
  *
  * `preSaveCheck` says sharing your own number is not a reason to silence
  * somebody (`autoMute: false`), but the count that decides the NEXT mute read
