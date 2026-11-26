@@ -59,6 +59,10 @@ it("lets Razorpay Checkout load its script and open its frames, and loosens noth
   expect(d["frame-src"]).toEqual(["'self'", "https://checkout.razorpay.com", "https://api.razorpay.com"])
   // Its images (cdn.razorpay.com) and beacons (lumberjack.razorpay.com) are already https.
   expect(d["img-src"]).toEqual(["'self'", "data:", "blob:", "https:"])
+  // The event form's video previews: the picked file (blob:), then the
+  // uploaded clip on Tigris. The only CSP reports Sentry ever had (staging,
+  // 2026-11-25, BLENDN-ADMIN-M and -N).
+  expect(d["media-src"]).toEqual(["'self'", "blob:", "https://*.fly.storage.tigris.dev"])
   expect(d["connect-src"]).toEqual(["'self'", "https:", "wss:"])
   expect(d["frame-ancestors"]).toEqual(["'none'"])
   expect(d["default-src"]).toEqual(["'self'"])
@@ -74,4 +78,72 @@ it("is the header next.config.ts sends", async () => {
   expect(sent?.value).toBe(
     contentSecurityPolicy(sentryCspReportUri(process.env.NEXT_PUBLIC_SENTRY_DSN, process.env.RAILWAY_ENVIRONMENT_NAME))
   )
+})
+
+/*
+ * SCRUM-1243: enforcing on the pages that hold the session cookie or load
+ * Razorpay. Production gets no 'unsafe-eval' (only Next's dev overlay needs
+ * it); everything else stays report-only, Swagger at /api-docs included.
+ */
+it("drops 'unsafe-eval' when eval is not allowed, and keeps the rest", () => {
+  const reportUri = sentryCspReportUri(DSN, "production")
+  const d = directives(contentSecurityPolicy(reportUri, false))
+  expect(d["script-src"]).toEqual([
+    "'self'",
+    "'unsafe-inline'",
+    "https://checkout.razorpay.com",
+    "https://api.razorpay.com",
+    "https://cdn.razorpay.com",
+  ])
+  expect(d["frame-src"]).toEqual(["'self'", "https://checkout.razorpay.com", "https://api.razorpay.com"])
+  expect(d["report-uri"]).toEqual([reportUri])
+  expect(contentSecurityPolicy(reportUri, false)).toBe(contentSecurityPolicy(reportUri).replace(" 'unsafe-eval'", ""))
+})
+
+type HeaderRule = { source: string; headers: { key: string; value: string }[] }
+
+/** The headers next.config.ts sends on a path, matched the way Next's server matches them. */
+async function headersFor(nodeEnv: string, path: string): Promise<Record<string, string>> {
+  const env = process.env as Record<string, string | undefined>
+  const before = env.NODE_ENV
+  env.NODE_ENV = nodeEnv
+  try {
+    let rules: HeaderRule[] = []
+    await jest.isolateModulesAsync(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      rules = await (require("../next.config").default as { headers: () => Promise<HeaderRule[]> }).headers()
+    })
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { buildCustomRoute } = require("next/dist/lib/build-custom-route")
+    const sent: Record<string, string> = {}
+    for (const rule of rules) {
+      if (!new RegExp(buildCustomRoute("header", rule).regex).test(path)) continue
+      for (const h of rule.headers) sent[h.key] = h.value
+    }
+    return sent
+  } finally {
+    env.NODE_ENV = before
+  }
+}
+
+const ENFORCED = ["/dashboard", "/dashboard/events/abc/edit", "/dashboard/plan", "/pay/o/tok_123", "/login"]
+const REPORT_ONLY = ["/", "/api-docs", "/pricing", "/invite/abc", "/dashboards", "/payments", "/login-help", "/api/health"]
+
+it.each(ENFORCED)("enforces the production policy, without 'unsafe-eval', on %s", async (path) => {
+  const sent = await headersFor("production", path)
+  expect(sent["Content-Security-Policy"]).toBeDefined()
+  expect(sent["Content-Security-Policy"]).not.toContain("'unsafe-eval'")
+  expect(sent["Content-Security-Policy"]).toContain("https://checkout.razorpay.com")
+  expect(sent["Content-Security-Policy-Report-Only"]).toBeUndefined()
+})
+
+it.each(REPORT_ONLY)("only reports on %s", async (path) => {
+  const sent = await headersFor("production", path)
+  expect(sent["Content-Security-Policy"]).toBeUndefined()
+  expect(sent["Content-Security-Policy-Report-Only"]).toContain("'unsafe-eval'")
+})
+
+it("keeps 'unsafe-eval' in development, where Next's overlay needs it", async () => {
+  const sent = await headersFor("development", "/dashboard")
+  expect(sent["Content-Security-Policy"]).toContain("'unsafe-eval'")
 })
