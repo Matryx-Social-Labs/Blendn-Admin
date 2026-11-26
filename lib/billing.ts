@@ -201,7 +201,7 @@ function subscriptionState(s: {
 
 export async function planPageData(org: BillingOrg, now: Date = new Date()): Promise<PlanPageData> {
   const [access, analytics, subscriptionRows, events, paid] = await Promise.all([
-    analyticsAccess(org.orgId, now),
+    analyticsAccess(org, now),
     liveEntitlement({ kind: "org", id: org.orgId }, "analytics", now),
     db.billing_checkouts.findMany({
       where: { org_id: org.orgId, venue_id: null, kind: "subscription", status: { in: [...OPEN_SUBSCRIPTION_STATUSES] } },

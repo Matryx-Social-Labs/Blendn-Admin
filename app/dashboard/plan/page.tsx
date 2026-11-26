@@ -218,7 +218,14 @@ function StatusPanel({ view, pending, pendingFor }: { view: PlanPageData; pendin
   } else if (view.free.reason === "free_window") {
     headline = "Free · Analytics open for now"
     detail = `Every Analytics view is open until ${FREE_WINDOW_DAYS} days after ${FIRST_EVENT_RULE}.`
+  } else if (view.free.reason === "market") {
+    // Where plans are not sold (SCRUM-1277), design/05's board: every view is open, so no event is named as the one
+    // that stays open, and no date; each paid card already says "Free while we launch in your city."
+    headline = "Free"
+    detail = "Every event you run, and the numbers you see for each one, cost nothing."
   } else {
+    // Analytics and a grant are answered above by `view.analytics`; a new reason must get its own branch.
+    void (view.free.reason satisfies "free" | "analytics" | "grant")
     headline = "Free"
     detail = view.free.firstEventTitle
       ? `Every event you run, and its own numbers, cost nothing. ${view.free.firstEventTitle}'s analytics stay open for good.`

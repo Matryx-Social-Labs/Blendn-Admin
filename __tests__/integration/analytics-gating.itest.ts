@@ -23,6 +23,7 @@ jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 import { randomUUID } from "crypto"
 
 import { analyticsAccess } from "@/lib/analytics-access"
+import { analyticsAccessLine } from "@/lib/access-line-copy"
 import { billingOrgFor } from "@/lib/billing"
 import { grantEntitlement } from "@/lib/entitlements"
 import { analyticsPage, eventAnalytics, orgAnalytics } from "@/lib/org-analytics"
@@ -325,6 +326,7 @@ describe("an Event Pass is not sold for what is already open", () => {
  */
 describe("where plans are not sold, Analytics stays open (SCRUM-1277)", () => {
   const LINE = "Free while we launch in your city."
+  const MARKET = '"access":{"org":true,"reason":"market","freeUntil":null'
   const NOTHING_TO_BUY = /See plans|₹|Open until|\(locked\)|upgrade/i
   const windowOf = async (id: string) =>
     db.$queryRaw<{ analytics_free_until: Date | null; first_free_event_id: string | null }[]>`
@@ -348,9 +350,12 @@ describe("where plans are not sold, Analytics stays open (SCRUM-1277)", () => {
     expect(view.access).toMatchObject({ org: true, reason: "market", freeUntil: null })
     expect(view.org?.comparison.find((r) => r.eventId === canaryEventId)?.medianStayMin).toBe(173)
     expect(view.events.every((e) => e.open)).toBe(true)
+    // The tree carries the view the access line is drawn from; its words are analyticsAccessLine's (and e2e reads them).
+    expect(analyticsAccessLine(view.access, String).headline).toBe(LINE)
     const tree = await renderedTree({ event: canaryEventId })
     for (const c of CANARY) expect(tree).toContain(c)
-    expect(tree).toContain(LINE)
+    expect(tree).toContain(MARKET)
+    expect(tree).toContain('"pass":null')
     expect(tree).not.toMatch(NOTHING_TO_BUY)
     expect(tree).not.toContain("Sample: Rooftop social")
 
@@ -367,9 +372,20 @@ describe("where plans are not sold, Analytics stays open (SCRUM-1277)", () => {
     const tree = await renderedTree({ event: canaryEventId })
     for (const c of CANARY) expect(tree).not.toContain(c)
     expect(tree).toContain("Sample: Rooftop social")
-    expect(tree).not.toContain(LINE)
+    expect(tree).not.toContain(MARKET)
 
     expect(await windowOf(orgId)).toEqual(before)
+  })
+
+  it("an Indian organisation that adds a draft Toronto night is still locked: a draft is no market", async () => {
+    await db.events.update({ where: { id: canaryEventId }, data: { city: "Toronto", status: "draft" } })
+    try {
+      const org = await orgOf(owner)
+      expect(org.mayBuyHere).toBe(true)
+      expect(await analyticsAccess(org, now)).toMatchObject({ org: false, reason: "free" })
+    } finally {
+      await db.events.update({ where: { id: canaryEventId }, data: { city: null, status: "published" } })
+    }
   })
 
   it("a Toronto organisation with no window written keeps none: its reads write nothing; in India it is found and locks at once", async () => {
@@ -407,7 +423,7 @@ describe("where plans are not sold, Analytics stays open (SCRUM-1277)", () => {
     const org = await orgOf(caOwner)
     expect(org.mayBuyHere).toBe(false)
     expect(await analyticsAccess(org, now)).toMatchObject({ org: true, reason: "market", freeUntil: null, firstFreeEventId: null })
-    expect(await renderedTree()).toContain(LINE)
+    expect(await renderedTree()).toContain(MARKET)
     expect(await windowOf(caOrg)).toEqual([{ analytics_free_until: null, first_free_event_id: null }])
 
     await db.events.update({ where: { id: night.id }, data: { city: "Bengaluru" } })

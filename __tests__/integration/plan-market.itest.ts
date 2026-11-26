@@ -80,7 +80,7 @@ async function orgWithOwner(label: string, role: "organizer" | "venue_owner" = "
 }
 
 /** An event of the organisation's in `city`, ended `endedDaysAgo` days ago. */
-async function eventIn(orgId: string, owner: string, city: string | null, opts: { deleted?: boolean; status?: "cancelled"; endedDaysAgo?: number } = {}) {
+async function eventIn(orgId: string, owner: string, city: string | null, opts: { deleted?: boolean; status?: "cancelled" | "draft" | "completed"; endedDaysAgo?: number } = {}) {
   const id = await makeEvent(owner)
   events.push(id)
   const end = new Date(Date.now() - (opts.endedDaysAgo ?? 30) * DAY)
@@ -176,6 +176,10 @@ describe("mayBuyHere: the organisation's events and venues, by the catalogue's c
     ["no city at all counts as India", [{ city: null }], true],
     ["a deleted Toronto event is no reason", [{ city: "Bengaluru" }, { city: "Toronto", deleted: true }], true],
     ["a cancelled Toronto event still is", [{ city: "Bengaluru" }, { city: "Toronto", status: "cancelled" as const }], false],
+    // SCRUM-1277: not being able to buy now opens Analytics, so the evidence must cost something; a draft costs nothing.
+    ["a draft Toronto event is no reason", [{ city: "Bengaluru" }, { city: "Toronto", status: "draft" as const }], true],
+    ["an organisation whose only event is a Toronto draft counts as India", [{ city: "Toronto", status: "draft" as const }], true],
+    ["a completed Toronto event is", [{ city: "Toronto", status: "completed" as const }], false],
   ])("%s", async (_label, rows, expected) => {
     const { owner, orgId } = await orgWithOwner("pm-rule")
     for (const r of rows) await eventIn(orgId, owner, r.city, { deleted: "deleted" in r && r.deleted, status: "status" in r ? r.status : undefined })

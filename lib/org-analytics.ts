@@ -2,7 +2,7 @@ import "server-only"
 
 import { Prisma, type rsvp_status } from "@prisma/client"
 
-import { analyticsAccess, mayOpenEvent, type AnalyticsAccess } from "./analytics-access"
+import { analyticsAccess, mayOpenEvent, type AccessOrg, type AnalyticsAccess } from "./analytics-access"
 import { planBadgeFor, type PlanDate } from "./billing"
 import { ATTENDED } from "./counting"
 import { db } from "./db"
@@ -540,11 +540,12 @@ export interface AnalyticsPageView {
 
 /** Everything the Analytics page renders, for one organisation. Nothing paid is computed while locked. */
 export async function analyticsPage(
-  orgId: string,
+  accessOrg: AccessOrg,
   opts: { range: Range; eventId?: string },
   now: Date = new Date()
 ): Promise<AnalyticsPageView> {
-  const access = await analyticsAccess(orgId, now)
+  const { orgId } = accessOrg
+  const access = await analyticsAccess(accessOrg, now)
   const [org, ended, firstFree, badge] = await Promise.all([
     orgAnalytics(access, opts.range, now),
     db.events.findMany({
