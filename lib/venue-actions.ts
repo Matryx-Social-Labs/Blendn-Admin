@@ -490,10 +490,11 @@ export async function setVenueAmenities(id: string, amenityIds: string[]): Promi
  * Who: as for amenities, an admin or any active member of the owning
  * organisation; the organisation that only added an unclaimed venue does not
  * say when it is open. What: the stored shape, and nothing `hoursProblems`
- * refuses, so every saved week is one the readers place right. The row and its
- * audit entry, with the week before and after, are one transaction; the read
- * of "before" locks the row, so of two saves at once the second records the
- * first's week as its before. A save that changes nothing writes nothing.
+ * refuses against the venue's day reset hour, so every saved week is one the
+ * readers place right. The row and its audit entry, with the week before and
+ * after, are one transaction; the reset hour and "before" are read under the
+ * row's lock, so of two saves at once the second records the first's week as
+ * its before. A save that changes nothing writes nothing.
  */
 export async function setVenueHours(id: string, rows: unknown): Promise<void> {
   const user = await requireUser()
@@ -503,14 +504,16 @@ export async function setVenueHours(id: string, rows: unknown): Promise<void> {
   }
   const parsed = venueHoursSchema.safeParse(rows)
   if (!parsed.success) throw new Refusal("Those hours are not a day with an open and a close time. Pick them again.")
-  const { day_reset_hour } = await db.venues.findUniqueOrThrow({ where: { id }, select: { day_reset_hour: true } })
-  const [problem] = hoursProblems(parsed.data, day_reset_hour)
-  if (problem) throw new Refusal(problem.message)
   const after = parsed.data.length === 0 ? null : [...parsed.data].sort((a, b) => a.day - b.day)
 
   const changed = await db.$transaction(async (tx) => {
-    const [row] = await tx.$queryRaw<{ hours: unknown }[]>`SELECT hours FROM venues WHERE id = ${id}::uuid FOR UPDATE`
-    const before = row?.hours ?? null
+    // The week and the day it is judged against, as they stand under the lock.
+    const [row] = await tx.$queryRaw<{ hours: unknown; day_reset_hour: number }[]>`
+      SELECT hours, day_reset_hour FROM venues WHERE id = ${id}::uuid AND deleted_at IS NULL FOR UPDATE`
+    if (!row) throw new Refusal("Venue not found")
+    const [problem] = hoursProblems(parsed.data, row.day_reset_hour)
+    if (problem) throw new Refusal(problem.message)
+    const before = row.hours ?? null
     if (isDeepStrictEqual(before, after)) return false
     await tx.venues.update({ where: { id }, data: { hours: after ?? Prisma.DbNull } })
     await auditInTx(tx, {

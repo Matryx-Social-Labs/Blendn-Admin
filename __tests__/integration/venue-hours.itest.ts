@@ -145,6 +145,28 @@ describe("setVenueHours: who may write", () => {
   })
 })
 
+describe("setVenueHours: an admin and the venue's own day", () => {
+  it("lets an admin set an unclaimed venue's hours, filed under no organisation", async () => {
+    const admin = await person("vh-admin2", "app_admin")
+    const v = await venue({})
+    admin.as()
+    await setVenueHours(v, [WEEK[1]])
+    expect(await hoursOf(v)).toEqual([WEEK[1]])
+    const [audit] = await auditsOf(v)
+    expect(audit).toMatchObject({ user_id: admin.id, org_id: null })
+  })
+
+  it("judges a night against the venue's own reset hour", async () => {
+    const owner = await person("vh-owner8", "venue_owner")
+    const v = await venue({ owner_org_id: owner.orgId })
+    await db.venues.update({ where: { id: v }, data: { day_reset_hour: 4 } })
+    owner.as()
+    await setVenueHours(v, [{ day: 5, open: "05:00", close: "03:30" }])
+    await expect(setVenueHours(v, [{ day: 5, open: "18:00", close: "05:00" }])).rejects.toThrow(/past 04:00 on Saturday/)
+    expect(await hoursOf(v)).toEqual([{ day: 5, open: "05:00", close: "03:30" }])
+  })
+})
+
 describe("setVenueHours: what it accepts", () => {
   it("refuses what the readers would show wrong, and anything not the shape, and writes nothing", async () => {
     const owner = await person("vh-owner4", "venue_owner")

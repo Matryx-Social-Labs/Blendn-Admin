@@ -31,7 +31,7 @@ export const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"
  */
 export const MAX_OPENINGS_PER_DAY = 1
 
-export interface HoursProblem {
+interface HoursProblem {
   /** The row's index in what was given. */
   index: number
   field: "open" | "close"

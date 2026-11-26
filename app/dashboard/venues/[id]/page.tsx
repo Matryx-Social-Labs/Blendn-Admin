@@ -397,10 +397,8 @@ export default async function VenueDetailPage({
         <OpenOnBlendn venueId={venue.id} name={venue.name} open={venue.open_on_blendn} />
       ) : null}
 
-      {/* When it is open, as the app shows it (SCRUM-1154): the owner's organisation or an admin. Remounted on the stored week after a save. */}
-      {venue.deleted_at ? null : (
-        <VenueHoursPanel key={JSON.stringify(venue.hours)} venueId={venue.id} hours={venueHours(venue.hours)} resetHour={venue.day_reset_hour} />
-      )}
+      {/* When it is open, as the app shows it (SCRUM-1154). Only an admin or a member of the owning organisation reaches this branch, and both may write it. */}
+      {venue.deleted_at ? null : <VenueHoursPanel venueId={venue.id} hours={venueHours(venue.hours)} resetHour={venue.day_reset_hour} />}
 
       {/* The record last. "Is the pin right" is the third question a venue
           owner asks of this page, after "how busy" and "who books here" — and
