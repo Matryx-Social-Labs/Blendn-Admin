@@ -1,4 +1,5 @@
-import { randomBytes } from "crypto"
+import { readFileSync } from "fs"
+import { join } from "path"
 import { Client } from "pg"
 import { cleanup, closeDb, makeUser } from "./helpers"
 
@@ -6,32 +7,26 @@ import { cleanup, closeDb, makeUser } from "./helpers"
  * SCRUM-1358: the app connects as `blendn_app`, a role that reads and writes rows and can do nothing else.
  *
  * The web process and `prisma migrate deploy` ran with the same owner (on Railway, superuser) credentials, so one slip
- * in a `$queryRawUnsafe` would run with the right to drop any table or `COPY … PROGRAM`. The migration creates the
- * role with no password (no secret in git); this suite gives it one, connects as it, and checks rows work and DDL does
- * not. The owner connection (`DATABASE_URL`, the role migrations run as) is the negative control: the same DDL passes.
+ * in a `$queryRawUnsafe` would run with the right to drop any table or `COPY … PROGRAM`. This suite acts as the role
+ * through `SET ROLE` on a second connection (privileges are checked against `current_user`), so it never sets the
+ * cluster-wide role's password. The `DATABASE_URL` connection, the superuser migrations run as in CI, is the negative
+ * control: the same statements pass.
  */
 const ROLE = "blendn_app"
 const INSUFFICIENT_PRIVILEGE = "42501"
-const password = randomBytes(18).toString("hex")
+const MIGRATION = join(process.cwd(), "prisma", "migrations", "20261126190000_blendn_app_role", "migration.sql")
 
-function urlAs(user: string, pass: string): string {
-  const url = new URL(process.env.DATABASE_URL!)
-  url.username = user
-  url.password = pass
-  return url.toString()
-}
-
-async function connect(connectionString: string): Promise<Client> {
-  const client = new Client({ connectionString })
+async function connect(): Promise<Client> {
+  const client = new Client({ connectionString: process.env.DATABASE_URL })
   await client.connect()
   return client
 }
 
 /** The SQLSTATE a statement fails with, or "ok". Each runs in its own transaction, rolled back. */
-async function attempt(client: Client, sql: string, params: unknown[] = []): Promise<string> {
+async function attempt(client: Client, sql: string): Promise<string> {
   await client.query("BEGIN")
   try {
-    await client.query(sql, params)
+    await client.query(sql)
     return "ok"
   } catch (e) {
     return (e as { code?: string }).code ?? String(e)
@@ -40,12 +35,19 @@ async function attempt(client: Client, sql: string, params: unknown[] = []): Pro
   }
 }
 
-const DDL = [
+const REFUSED = [
   "CREATE TABLE itest_app_role_x (id int)",
+  "CREATE TEMP TABLE itest_app_role_t (id int)",
+  "CREATE SCHEMA itest_app_role_s",
+  "CREATE FUNCTION itest_app_role_f() RETURNS int LANGUAGE sql AS 'SELECT 1'",
+  "CREATE EXTENSION pg_trgm",
   "DROP TABLE notifications",
   "ALTER TABLE notifications ADD COLUMN itest_x int",
+  "ALTER TABLE notifications DISABLE TRIGGER ALL",
   "TRUNCATE notifications",
   "CREATE INDEX itest_app_role_idx ON notifications (title)",
+  "COPY (SELECT 1) TO PROGRAM 'true'",
+  "SELECT pg_read_file('/etc/hostname')",
 ]
 
 let owner: Client
@@ -53,27 +55,36 @@ let app: Client
 const users: string[] = []
 
 beforeAll(async () => {
-  owner = await connect(process.env.DATABASE_URL!)
-  // The password exists only for this run; the migration leaves the role without one.
-  await owner.query(`ALTER ROLE ${ROLE} WITH PASSWORD '${password}'`)
-  app = await connect(urlAs(ROLE, password))
+  owner = await connect()
+  const { rowCount } = await owner.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [ROLE])
+  if (!rowCount) throw new Error(`${ROLE} is missing: build the database with \`npm run db:migrate\`, not db:push`)
+  app = await connect()
+  await app.query(`SET ROLE ${ROLE}`)
 })
 
 afterAll(async () => {
-  await app?.end()
-  await owner?.query(`ALTER ROLE ${ROLE} WITH PASSWORD NULL`)
-  await owner?.query("DROP TABLE IF EXISTS itest_app_role_future")
-  await owner?.end()
+  const quietly = (p: Promise<unknown> | undefined) => p?.catch(() => {})
+  await quietly(app?.end())
+  await quietly(owner?.query("DROP TABLE IF EXISTS itest_app_role_future"))
+  await quietly(owner?.end())
   await cleanup(users, [])
   await closeDb()
 })
 
 describe("the app's database role", () => {
-  it("is blendn_app and holds no superuser, create-role or create-db right", async () => {
+  it("can sign in and holds no superuser, create-role, create-db, replication or bypass-RLS right", async () => {
     const { rows } = await app.query(
-      "SELECT current_user AS who, rolsuper, rolcreaterole, rolcreatedb, rolbypassrls FROM pg_roles WHERE rolname = current_user",
+      `SELECT current_user AS who, rolcanlogin, rolsuper, rolcreaterole, rolcreatedb, rolreplication, rolbypassrls
+       FROM pg_roles WHERE rolname = current_user`,
     )
-    expect(rows).toEqual([{ who: ROLE, rolsuper: false, rolcreaterole: false, rolcreatedb: false, rolbypassrls: false }])
+    expect(rows).toEqual([
+      { who: ROLE, rolcanlogin: true, rolsuper: false, rolcreaterole: false, rolcreatedb: false, rolreplication: false, rolbypassrls: false },
+    ])
+  })
+
+  it("is a member of no other role", async () => {
+    const { rows } = await owner.query("SELECT roleid::regrole::text AS r FROM pg_auth_members WHERE member = $1::regrole", [ROLE])
+    expect(rows).toEqual([])
   })
 
   it("inserts, reads, updates and deletes a row", async () => {
@@ -91,7 +102,18 @@ describe("the app's database role", () => {
     expect(deleted.rowCount).toBe(1)
   })
 
-  it.each(DDL)("is refused DDL: %s", async (sql) => {
+  it("can read and write every table but the migration history, including those later migrations created", async () => {
+    const { rows } = await owner.query(
+      `SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname <> '_prisma_migrations'
+         AND NOT (has_table_privilege($1, c.oid, 'SELECT') AND has_table_privilege($1, c.oid, 'INSERT')
+              AND has_table_privilege($1, c.oid, 'UPDATE') AND has_table_privilege($1, c.oid, 'DELETE'))`,
+      [ROLE],
+    )
+    expect(rows).toEqual([])
+  })
+
+  it.each(REFUSED)("is refused: %s", async (sql) => {
     expect(await attempt(app, sql)).toBe(INSUFFICIENT_PRIVILEGE)
   })
 
@@ -100,15 +122,21 @@ describe("the app's database role", () => {
     expect(await attempt(app, "DELETE FROM _prisma_migrations")).toBe(INSUFFICIENT_PRIVILEGE)
   })
 
-  it("can read and write a table a later migration creates (default privileges)", async () => {
-    await owner.query("CREATE TABLE itest_app_role_future (id int)")
-    await app.query("INSERT INTO itest_app_role_future VALUES (1)")
-    expect((await app.query("SELECT id FROM itest_app_role_future")).rows).toEqual([{ id: 1 }])
+  it("can read and write a table a later migration creates, its sequence too (default privileges)", async () => {
+    await owner.query("CREATE TABLE itest_app_role_future (id serial PRIMARY KEY, v int)")
+    await app.query("INSERT INTO itest_app_role_future (v) VALUES (7)")
+    expect((await app.query("SELECT v FROM itest_app_role_future")).rows).toEqual([{ v: 7 }])
     expect(await attempt(app, "DROP TABLE itest_app_role_future")).toBe(INSUFFICIENT_PRIVILEGE)
   })
 
-  // Negative control: the role migrations run as can still do every one of them.
-  it.each(DDL)("the owner role can: %s", async (sql) => {
+  it("the migration runs again cleanly where the role already exists (another database, a rebuilt schema)", async () => {
+    await owner.query(readFileSync(MIGRATION, "utf8"))
+    expect(await attempt(app, "SELECT count(*) FROM notifications")).toBe("ok")
+    expect(await attempt(app, "SELECT count(*) FROM _prisma_migrations")).toBe(INSUFFICIENT_PRIVILEGE)
+  })
+
+  // Negative control: the superuser migrations run as in CI can do every one of them, so each refusal is the role's.
+  it.each(REFUSED)("the migrating superuser can: %s", async (sql) => {
     expect(await attempt(owner, sql)).toBe("ok")
   })
 })

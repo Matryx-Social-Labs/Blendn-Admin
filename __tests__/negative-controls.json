@@ -35,6 +35,12 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "app-db-role.itest.ts": {
+      "guards": "SCRUM-1358: the app role blendn_app (migration 20261126190000_blendn_app_role) reads and writes every public table and nothing else: refused CREATE TABLE/TEMP/SCHEMA/FUNCTION/EXTENSION, DROP, ALTER, DISABLE TRIGGER, TRUNCATE, CREATE INDEX, COPY TO PROGRAM, pg_read_file and _prisma_migrations; no superuser/createrole/createdb/replication/bypassrls, no role memberships; default privileges reach a later table and its sequence; the migration re-runs where the role already exists. The superuser the migrations run as passes every refused statement (control). readFileSync reads the migration to re-run it.",
+      "mutation": "migration.sql: M1 the CREATE ROLE's `EXCEPTION WHEN duplicate_object` handler removed; M2 the REVOKE TEMPORARY replaced by NULL; M2b the same with the closing end-state check's RAISE EXCEPTION made a NOTICE; M3 both ALTER DEFAULT PRIVILEGES lines removed.",
+      "observed": "Before the migration: every case failed (role \"blendn_app\" does not exist). M1 13 of 31 failing (the re-run raises 42710). M2 `prisma migrate deploy` itself refused by the end-state check (the deploy applies nothing). M2b 1 failing (CREATE TEMP TABLE). M3 1 failing (the later table). Restored from a copy; 31/31 on a db:migrate database (Postgres 17).",
+      "date": "2026-11-26"
+    },
     "live-tab-stale.test.tsx": {
       "guards": "With a snapshot and status error the Live tab shows 'Connection lost at <time>. These figures are from then; reconnecting.' in a status region rendered before it is filled, drops '· live' from the hero on the host and venue copies, keeps the last alerts, and says 'Nothing needed attention at <time>.' rather than the present-tense all-clear (SCRUM-1348)",
       "mutation": "A: replace the `stale ? <Callout … /> : null` child of the role=status div in components/dashboard/live-tab.tsx with `null`. B: delete the `stale={stale}` line passed to OccupancyHero. E: change the Alerts empty line's `{stale ? (` to `{false ? (`",
