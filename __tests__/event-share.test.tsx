@@ -33,6 +33,14 @@ describe("eventShareUrl", () => {
     expect(url.pathname).toBe(`/event/${ID}`)
   })
 
+  // SCRUM-1273: the one exception to "the id and nothing else" is where the scan or the paste came from.
+  it.each(["door", "link"] as const)("tags the address with ?s=%s and nothing more", (source) => {
+    const url = new URL(eventShareUrl(ID, source))
+    expect(url.pathname).toBe(`/event/${ID}`)
+    expect(url.search).toBe(`?s=${source}`)
+    expect(url.hash).toBe("")
+  })
+
   it("cannot be bent out of its path by a strange id", () => {
     expect(new URL(eventShareUrl("a/../../f/x?y=1#z")).pathname).toBe("/event/a%2F..%2F..%2Ff%2Fx%3Fy%3D1%23z")
   })
@@ -49,18 +57,19 @@ const codes = (markup: string) =>
 describe("EventShare", () => {
   const html = (androidOpensApp = false) =>
     renderToStaticMarkup(
-      createElement(EventShare, { url: eventShareUrl(ID), title: TITLE, when: WHEN, androidOpensApp })
+      createElement(EventShare, { doorUrl: eventShareUrl(ID, "door"), linkUrl: eventShareUrl(ID, "link"), title: TITLE, when: WHEN, androidOpensApp })
     )
 
-  it("draws the code on the tab, and it scans to the event's address", () => {
+  it("draws the code on the tab, and it scans to the event's address tagged as the door", () => {
     const svgs = codes(html())
     expect(svgs).toHaveLength(1)
-    expect(decode(svgs[0])).toBe(`https://www.blendn.app/event/${ID}`)
+    expect(decode(svgs[0])).toBe(`https://www.blendn.app/event/${ID}?s=door`)
   })
 
-  it("offers the link to copy, the two downloads, the slide and the print", () => {
+  it("offers the link to copy, tagged as a link, the two downloads, the slide and the print", () => {
     const out = html()
-    expect(out).toContain(`value="https://www.blendn.app/event/${ID}"`)
+    expect(out).toContain(`value="https://www.blendn.app/event/${ID}?s=link"`)
+    expect(out).not.toContain(`value="https://www.blendn.app/event/${ID}?s=door"`)
     for (const action of ["Copy", "Download PNG", "Download SVG", "Full-screen slide", "Print for the door"]) {
       expect(out).toContain(action)
     }
@@ -87,12 +96,12 @@ describe("EventShare", () => {
 
 describe("DoorSlide", () => {
   const slide = () =>
-    renderToStaticMarkup(createElement(DoorSlide, { url: eventShareUrl(ID), title: TITLE, when: WHEN }))
+    renderToStaticMarkup(createElement(DoorSlide, { url: eventShareUrl(ID, "door"), title: TITLE, when: WHEN }))
 
-  it("puts the code at the size of the screen, and it scans to the event", () => {
+  it("puts the code at the size of the screen, and it scans to the event tagged as the door", () => {
     const svgs = codes(slide())
     expect(svgs).toHaveLength(1)
-    expect(decode(svgs[0])).toBe(`https://www.blendn.app/event/${ID}`)
+    expect(decode(svgs[0])).toBe(`https://www.blendn.app/event/${ID}?s=door`)
     expect(slide()).toContain("Scan to check in")
   })
 

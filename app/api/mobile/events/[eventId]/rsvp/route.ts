@@ -14,6 +14,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { readJson, isUuid } from "@/lib/api-input"
+import { acquisitionSource } from "@/lib/product-events"
 import { ticketsRequired } from "@/lib/ticket-views"
 
 /** A native ticketed event: going is having a ticket. */
@@ -79,7 +80,9 @@ export async function POST(
     // 100-capacity room without limit, which made `going` useless as a planning
     // number. `placeRsvp` waitlists instead of refusing, and promotes whoever
     // is next when this RSVP frees a seat.
-    const { status: placed, goingCount } = await placeRsvp(eventId, user.userId, status)
+    // Where they came from (SCRUM-1273), kept from the first RSVP; an unknown source is none, never a refusal.
+    const source = acquisitionSource((body as { source?: unknown }).source)
+    const { status: placed, goingCount } = await placeRsvp(eventId, user.userId, status, source)
     emitEventRsvpUpdate(eventId, goingCount)
 
     return successResponse({ rsvpStatus: placed, rsvpCount: goingCount })
