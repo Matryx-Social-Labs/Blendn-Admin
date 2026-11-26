@@ -114,10 +114,10 @@
       "date": "2026-10-29"
     },
     "product-events-flush-timer.test.ts": {
-      "guards": "A signal recorded inside the flush window of the last flush is written when the window ends, without a third record(): one unref'd timer per non-empty buffer, one statement for the burst, cleared by a flush or a reset, re-armed for a signal that arrived while a flush was writing (SCRUM-756).",
-      "mutation": "M2264 armFlushTimer() removed from record() (the state before the fix: a buffered signal waits for the next call).",
-      "observed": "M2264: 3 of 4 failing (the second signal was never written, no timer existed); the shutdown-drain case stayed green. Restored; 4 of 4 green.",
-      "date": "2026-10-29"
+      "guards": "A signal recorded inside the flush window of the last flush is written when the window ends, without a third record(): one unref'd timer per non-empty buffer, one statement for the burst, cleared by a flush or a reset, re-armed for a signal that arrived while a flush was writing (SCRUM-756). SCRUM-1345 (insights/02a): a failed flush forgets its rows' dedupe keys, so the same person's next request that day is buffered and written again; the failure logs at warn with the dropped count; the buffer-full drop warns once per flush window, not per signal.",
+      "mutation": "M2264 armFlushTimer() removed from record() (the state before the fix: a buffered signal waits for the next call). SCRUM-1345: (C1) the three new cases on origin/dev baafdb99, before the change; (M1) the seen.delete loop removed; (M2) the flush failure logged at debug again; (M3) the bufferFullWarned guard replaced by true; (M4) the flag no longer reset when a flush starts.",
+      "observed": "M2264: 3 of 4 failing (the second signal was never written, no timer existed); the shutdown-drain case stayed green. Restored; 4 of 4 green. SCRUM-1345: C1 3 of 7 failing (re-record, warn with count, buffer-full warn). M1, M2, M3, M4: 1 of 7 failing each (the matching case). Restored each; 7 of 7.",
+      "date": "2026-11-26"
     },
     "events-list-start-before.itest.ts": {
       "guards": "GET /events?startBefore= lists what starts at or before the bound, not what starts after it; with startDate it is a start window on both sides; it is in the cache key (another bound is another entry); absent changes nothing; a non-datetime is a 400 (SCRUM-877).",

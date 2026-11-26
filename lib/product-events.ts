@@ -108,7 +108,8 @@ export const dayKey = (at: Date): string => at.toISOString().slice(0, 10)
  * ## What a crash costs
  *
  * Up to one flush window of first-opens, and nothing else — because the write
- * is idempotent, the next request that person makes today records them. That is
+ * is idempotent, the next request that person makes today records them (a
+ * failed flush forgets its rows' keys so that request is not deduped). That is
  * the same trade `record` already makes by never throwing, and it is why this
  * needs no outbox: the requirement was exactly-once *counting*, and a unique
  * index plus a retry-by-accident gives that.
@@ -138,6 +139,8 @@ let seenDay = ""
 let seen = new Set<string>()
 let buffer: Pending[] = []
 let lastFlush = 0
+/** The buffer-full drop warns once per flush window, not once per signal. */
+let bufferFullWarned = false
 /**
  * The one timer behind a non-empty buffer (SCRUM-756).
  *
@@ -180,6 +183,7 @@ export function resetProductEventCache(): void {
   seen = new Set<string>()
   buffer = []
   lastFlush = 0
+  bufferFullWarned = false
   flushing = null
   clearFlushTimer()
 }
@@ -198,6 +202,7 @@ export async function flushProductEvents(): Promise<number> {
   const batch = buffer
   buffer = []
   lastFlush = Date.now()
+  bufferFullWarned = false
 
   flushing = (async () => {
     try {
@@ -208,11 +213,12 @@ export async function flushProductEvents(): Promise<number> {
       return count
     } catch (error) {
       /*
-       * Dropped, not requeued. Requeueing a failing batch is how a buffer
-       * becomes unbounded, and every row in it is recoverable by the next
-       * request that person makes today.
+       * Dropped, not requeued: requeueing a failing batch is how a buffer
+       * becomes unbounded. Its keys leave the seen-set instead, so the next
+       * request that person makes today records the row again (SCRUM-1345).
        */
-      logger.debug("product events not flushed", {
+      for (const row of batch) seen.delete(row.dedupe_key)
+      logger.warn("product events not flushed", {
         dropped: batch.length,
         error: String(error),
       })
@@ -289,6 +295,9 @@ export function record(input: {
         occurred_at: at,
         ...(input.props && { props: input.props }),
       })
+    } else if (!bufferFullWarned) {
+      bufferFullWarned = true
+      logger.warn("product events buffer full", { buffered: buffer.length })
     }
 
     if (Date.now() - lastFlush >= FLUSH_MS) {
