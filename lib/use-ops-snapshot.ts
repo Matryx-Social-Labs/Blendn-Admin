@@ -51,8 +51,21 @@ export function useOpsSnapshot(eventId: string, enabled: boolean) {
       setStatus(payload.code === "OPS_FORBIDDEN" ? "denied" : "error")
     })
 
+    // A dropped transport is retried by Socket.io about a second later, and a
+    // drop that comes back on that retry shows nothing. The first retry that
+    // fails is this `connect_error`: from then the screen says its figures
+    // stopped (SCRUM-1348). The next `ops:snapshot` clears it.
     socket.on("connect_error", () => {
       if (!cancelled) setStatus("error")
+    })
+
+    // A close Socket.io will not retry (the server sent DISCONNECT, as
+    // `evictUserSockets` does) is stale at once, and is retried here, so the
+    // screen's "reconnecting" stays true. An ended session fails the handshake.
+    socket.on("disconnect", () => {
+      if (cancelled || socket?.active) return
+      setStatus("error")
+      socket?.connect()
     })
 
     return () => {

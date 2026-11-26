@@ -15,7 +15,7 @@
 
 type Handler = (...args: unknown[]) => void
 
-const state: { status?: string; snapshot?: unknown } = {}
+const state: Record<string, unknown> = {}
 jest.mock("react", () => {
   const slots = ["snapshot", "status"] as const
   let call = 0

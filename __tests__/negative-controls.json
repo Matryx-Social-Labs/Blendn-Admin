@@ -35,6 +35,18 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "live-tab-stale.test.tsx": {
+      "guards": "With a snapshot and status error the Live tab shows 'Connection lost at <time>. These figures are from then; reconnecting.' in a status region rendered before it is filled, drops '· live' from the hero on the host and venue copies, keeps the last alerts, and says 'Nothing needed attention at <time>.' rather than the present-tense all-clear (SCRUM-1348)",
+      "mutation": "A: replace the `stale ? <Callout … /> : null` child of the role=status div in components/dashboard/live-tab.tsx with `null`. B: delete the `stale={stale}` line passed to OccupancyHero. E: change the Alerts empty line's `{stale ? (` to `{false ? (`",
+      "observed": "A: 4 failing (the line, the filled status region, kept alerts, the venue copy). B: 2 failing (host and venue still read '· live'). E: 1 failing ('makes no present-tense all-clear'). Each reverted green, 11/11",
+      "date": "2026-11-26"
+    },
+    "use-ops-snapshot.test.ts": {
+      "guards": "The Live tab's socket rule: a drop that comes back on Socket.io's first retry never flashes; the first failed retry (connect_error) goes stale; a close Socket.io will not retry (socket.active false) goes stale at once and is reconnected by hand; the next ops:snapshot clears it (SCRUM-1348)",
+      "mutation": "C: delete the `socket.on(\"disconnect\", …)` listener from lib/use-ops-snapshot.ts. D: change its guard `if (cancelled || socket?.active) return` to `if (cancelled) return` (every disconnect goes stale)",
+      "observed": "C: 1 failing ('goes stale at once on a close Socket.io will not retry'). D: 1 failing ('does not flash on a drop that comes back on its first retry'). Each reverted green, 11/11",
+      "date": "2026-11-26"
+    },
     "server-statement-cap.test.ts": {
       "guards": "SCRUM-1221: server.ts sets DATABASE_STATEMENT_TIMEOUT_MS to 8000 when unset or blank, and checks it with statementTimeoutMs(), before app.prepare, initSocketServer and startBackgroundWork can open a connection; scripts that import lib/db never set it and keep no cap.",
       "mutation": "M2268 the default line deleted from server.ts; M2269 the default line moved to after startBackgroundWork().",
