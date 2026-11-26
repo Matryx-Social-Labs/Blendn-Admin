@@ -26,6 +26,30 @@ const HOUR = 3_600_000
 // Full page for the tab; the viewport for the full-screen view, which is fixed to it.
 const shot = (page: Page, name: string, fullPage = true) => page.screenshot({ path: `test-results/screens/${name}.png`, fullPage })
 
+/**
+ * The arrival row as laid out: the pseudonym's height against its line height
+ * (a name is one unit, never wrapped), and whether any two of the row's
+ * children overlap. The pseudonym is the element holding it as its own text.
+ */
+async function rowLayout(page: Page, name: string) {
+  return page.evaluate((name) => {
+    const li = [...document.querySelectorAll("#main li")].find((el) => el.textContent?.includes(name))
+    const holder = li
+      ? ([...li.querySelectorAll("*")].find((el) => [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent?.includes(name))) as HTMLElement | undefined)
+      : undefined
+    if (!li || !holder) return null
+    const style = getComputedStyle(holder)
+    const lineHeight = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.2
+    const boxes = [...li.children].map((c) => c.getBoundingClientRect())
+    const overlap = (a: DOMRect, b: DOMRect) =>
+      Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5
+    return {
+      oneLine: holder.getBoundingClientRect().height <= 1.5 * lineHeight,
+      overlaps: boxes.some((a, i) => boxes.some((b, j) => j > i && overlap(a, b))),
+    }
+  }, name)
+}
+
 let eventId: string | undefined
 let guestId: string | undefined
 
@@ -124,12 +148,25 @@ test("the host shows the code full screen; a guest 400 m out checks in with it; 
   await expect(page.getByText("just now")).toBeVisible()
   const html = await page.content()
   for (const leak of [guest.id, guest.email, "E2E Door Guest"]) expect(html).not.toContain(leak)
+  expect(await rowLayout(page, pseudonym), "the pseudonym on one line, nothing overlapping, at 1280").toEqual({ oneLine: true, overlaps: false })
   await shot(page, "door-tab-1280")
 
   // A phone held up at the door.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.reload()
   // Scoped to the page's main: a streamed render can hold a second, hidden copy for a moment.
+  await expect(page.locator("#main").getByText(pseudonym)).toBeVisible()
+  expect(await rowLayout(page, pseudonym), "the pseudonym on one line, nothing overlapping, at 390").toEqual({ oneLine: true, overlaps: false })
+  // And a long one: still one line, still whole for a screen reader.
+  const long = "Thunderous Hummingbird"
+  await db.chat_group_members.updateMany({ where: { user_id: guest.id, chat_group: { event_id: event.id } }, data: { anonymous_name: long } })
+  await page.reload()
+  await expect(page.locator("#main").getByText(long)).toBeVisible()
+  expect(await rowLayout(page, long), "a long pseudonym on one line, nothing overlapping, at 390").toEqual({ oneLine: true, overlaps: false })
+  await expect(page.locator("#main").getByRole("button", { name: `Remove ${long} from the room` })).toBeVisible()
+  await shot(page, "door-tab-390-long")
+  await db.chat_group_members.updateMany({ where: { user_id: guest.id, chat_group: { event_id: event.id } }, data: { anonymous_name: pseudonym } })
+  await page.reload()
   await expect(page.locator("#main").getByText(pseudonym)).toBeVisible()
   await shot(page, "door-tab-390")
   await page.locator("#main").getByRole("button", { name: "Show the door code" }).click()
