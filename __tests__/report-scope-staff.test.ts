@@ -37,3 +37,12 @@ it("does not count a staff member who also owns the venue's org as the night's h
   // `hostsEvent(actor, …)` reads these: the host org is not among them, so the venue's figures are held back.
   expect(actor.orgIds).toEqual(["org-venue"])
 })
+
+it("gives an organizer-role member of a venue-owning org the venue's events, not only a venue_owner (SCRUM-1246)", async () => {
+  const { claimedVenueEventsWhere } = jest.requireMock("@/lib/event-visibility") as { claimedVenueEventsWhere: jest.Mock }
+  claimedVenueEventsWhere.mockResolvedValueOnce([{ venue_id: "venue-1", start_time: { gte: new Date(0) } }])
+  mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: "org-venue", role: "owner" }])
+  const { all, venueOnly } = await reportScope("organizer", "u1")
+  expect(JSON.stringify(all)).toContain("venue-1")
+  expect(JSON.stringify(venueOnly)).toContain("venue-1")
+})

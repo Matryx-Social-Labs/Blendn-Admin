@@ -108,10 +108,11 @@ describe("eventPermissions — the matrix", () => {
     expect(eventPermissions(staff(DEV, "organizer", [ORG_VENUE]), event(ORG_VENUE, ORG_VENUE, { kind: "venue_day" })).canOperate).toBe(false)
   })
 
-  it("lets the host org's rule win for someone who is its staff and also owns the venue's org", () => {
-    // Narrower than the venue branch alone (no held-back count); task 09 revisits `ownsVenueAt`.
+  it("gives someone who is the host org's staff and owns the venue's org the union: operate and the count, never edit (SCRUM-1246)", () => {
+    // Rights are the union of memberships: being host staff takes nothing from the venue.
+    // `canEdit` stays false, so the Attendees view is the held-back count, never labels.
     const twoHats = actor(DEV, "venue_owner", [ORG_HOST, ORG_VENUE], [ORG_VENUE])
-    expect(eventPermissions(twoHats, event(ORG_HOST, ORG_VENUE))).toEqual({ canEdit: false, canOperate: true, canViewAttendees: false })
+    expect(eventPermissions(twoHats, event(ORG_HOST, ORG_VENUE))).toEqual({ canEdit: false, canOperate: true, canViewAttendees: true })
   })
 
   it("gives a member of a different org nothing", () => {
@@ -147,9 +148,62 @@ describe("eventPermissions — the matrix", () => {
     expect(p.canOperate).toBe(false)
   })
 
-  it("gives an attendee nothing, ever", () => {
+  it("gives an attendee who is in no organisation nothing", () => {
     for (const ev of [event(ORG_HOST), event(ORG_HOST, ORG_VENUE)]) {
-      expect(eventPermissions(actor(STRANGER, "attendee", [ORG_HOST]), ev).canOperate).toBe(false)
+      expect(eventPermissions(actor(STRANGER, "attendee"), ev)).toEqual({ canEdit: false, canOperate: false, canViewAttendees: false })
+    }
+  })
+})
+
+/*
+ * Rights come from the organisation, not the person's `User.role` (SCRUM-1246,
+ * DECISIONS 2026-11-25: hosts keep the attendee app). `role` is read only for
+ * `app_admin`; everything else is which orgs, in which org role, and the venue's
+ * claim.
+ */
+describe("eventPermissions — organisation facts, whatever User.role says", () => {
+  it("gives an attendee-role owner of the organising org what an organizer-role owner gets", () => {
+    for (const ev of [event(ORG_HOST), event(ORG_HOST, ORG_VENUE)]) {
+      expect(eventPermissions(actor(ALICE, "attendee", [ORG_HOST]), ev)).toEqual(eventPermissions(actor(ALICE, "organizer", [ORG_HOST]), ev))
+      expect(eventPermissions(actor(ALICE, "attendee", [ORG_HOST]), ev)).toEqual({ canEdit: true, canOperate: true, canViewAttendees: true })
+    }
+  })
+
+  it("gives an attendee-role staff member of the organising org what an organizer-role staff member gets", () => {
+    expect(eventPermissions(staff(DEV, "attendee", [ORG_HOST]), event(ORG_HOST))).toEqual({ canEdit: false, canOperate: true, canViewAttendees: false })
+  })
+
+  it("gives a sponsor-role member of the organising org the same as an organizer-role one", () => {
+    expect(eventPermissions(actor(ALICE, "sponsor", [ORG_HOST]), event(ORG_HOST))).toEqual({ canEdit: true, canOperate: true, canViewAttendees: true })
+  })
+
+  it("lets an organizer-role member of the venue-owning org operate an event there after the claim", () => {
+    expect(eventPermissions(actor(ALICE, "organizer", [ORG_VENUE]), event(ORG_HOST, ORG_VENUE))).toEqual({ canEdit: false, canOperate: true, canViewAttendees: true })
+  })
+
+  it("still closes the venue's past to that member: before the claim is nothing", () => {
+    const before = event(ORG_HOST, ORG_VENUE, { startsAt: new Date(CLAIMED.getTime() - DAY) })
+    expect(eventPermissions(actor(ALICE, "organizer", [ORG_VENUE]), before)).toEqual({ canEdit: false, canOperate: false, canViewAttendees: false })
+  })
+
+  it("keeps the held-back count for the venue-owning org's staff, as the venue page already shows them", () => {
+    expect(eventPermissions(staff(DEV, "organizer", [ORG_VENUE]), event(ORG_HOST, ORG_VENUE))).toEqual({ canEdit: false, canOperate: true, canViewAttendees: true })
+  })
+
+  it("keeps an organizer-role owner/admin's rights exactly as before (the pilot hosts)", () => {
+    // Every event shape an organiser's org meets, for an owner and an admin of it.
+    const shapes = [
+      event(ORG_HOST),
+      event(ORG_HOST, ORG_VENUE),
+      event(ORG_HOST, null),
+      event(ORG_HOST, ORG_VENUE, { startsAt: new Date(CLAIMED.getTime() - DAY) }),
+      event(ORG_OTHER),
+      event(ORG_OTHER, ORG_VENUE),
+    ]
+    const ALL = { canEdit: true, canOperate: true, canViewAttendees: true }
+    const NONE = { canEdit: false, canOperate: false, canViewAttendees: false }
+    for (const who of [ALICE, BOB]) {
+      expect(shapes.map((e) => eventPermissions(actor(who, "organizer", [ORG_HOST]), e))).toEqual([ALL, ALL, ALL, ALL, NONE, NONE])
     }
   })
 })
@@ -168,11 +222,12 @@ describe("eventPermissions — a venue day", () => {
     expect(p).toEqual({ canEdit: false, canOperate: true, canViewAttendees: false })
   })
 
-  it("does not read organizer_org_id: owning the day's org is not running it", () => {
-    // An organiser-role member of the venue's org matches organizer_org_id and
-    // would take the host branch — edit and the roster — on an ordinary event.
+  it("does not read organizer_org_id: a member of the day's org gets the venue's answer, never the host's", () => {
+    // A member of the venue's org matches organizer_org_id and would take the
+    // host branch — edit and the roster — on an ordinary event. Whatever their
+    // User.role, they get what the venue's owner gets (SCRUM-1246).
     const p = eventPermissions(actor(ALICE, "organizer", [ORG_VENUE]), day(ORG_VENUE))
-    expect(p).toEqual({ canEdit: false, canOperate: false, canViewAttendees: false })
+    expect(p).toEqual({ canEdit: false, canOperate: true, canViewAttendees: false })
   })
 
   it("gives an organiser of another event at the venue nothing", () => {
@@ -270,13 +325,10 @@ describe("eventPermissions — fails closed", () => {
     expect(p.canOperate).toBe(false)
   })
 
-  it("denies an unknown role outright", () => {
-    const p = eventPermissions(
-      actor(ALICE, "unknown_role" as PermissionActor["role"], [ORG_HOST]),
-      event(ORG_HOST)
-    )
-    expect(p.canEdit).toBe(false)
-    expect(p.canOperate).toBe(false)
+  it("denies any role with no memberships: the role grants nothing but app_admin", () => {
+    for (const role of ["organizer", "venue_owner", "sponsor", "attendee", "unknown_role"] as PermissionActor["role"][]) {
+      expect(eventPermissions(actor(ALICE, role, []), event(ORG_HOST, ORG_VENUE))).toEqual({ canEdit: false, canOperate: false, canViewAttendees: false })
+    }
   })
 })
 
