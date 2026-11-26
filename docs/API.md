@@ -138,13 +138,21 @@ most one access-token lifetime (15 minutes) after deploy.
 ### A suspended account
 
 Every route that issues a token — `signin`, `google`, `apple`, `refresh` and
-`session` — returns **403** with a message naming the suspension and an address
-to appeal to. The client should show it rather than treating 403 as a generic
-failure: a silent refusal to sign in is indistinguishable from a bug.
+`session` — returns **403** with a message naming the suspension, its category
+and the address to appeal to. The client should show it rather than treating 403
+as a generic failure: a silent refusal to sign in is indistinguishable from a bug.
 
 ```json
-{ "success": false, "error": "This account has been suspended. Contact support@blendn.app if you think that's a mistake." }
+{ "success": false, "error": "This account has been suspended. Reason: harassment. To appeal, write to grievance@blendn.app.", "errorCode": "FORBIDDEN", "reasonCode": "ACCOUNT_SUSPENDED" }
 ```
+
+The category is one of a fixed list (`SUSPENSION_CATEGORIES`, `lib/suspension.ts`):
+the reason of the report the account was suspended from, else "breaking our
+community guidelines". It is only sent to the account's owner — after the
+password, a verified Google or Apple token, that account's refresh token, or an
+authenticated request. `accountRefusal("suspended")` with no owner sends the
+generic sentence: "This account has been suspended. Contact support@blendn.app
+if you think that's a mistake."
 
 On `signin` it is checked **after** the password, so the response cannot be used
 to discover which addresses are suspended.
@@ -182,7 +190,7 @@ the new code in `errorCode` as well, and `reasonCode` repeats it.
 
 | Where | Status | `errorCode` | `reasonCode` | Sentence (unchanged) |
 |---|---|---|---|---|
-| `signin`, `google`, `apple`, `refresh`, `session` | 403 | `FORBIDDEN` | `ACCOUNT_SUSPENDED` | "This account has been suspended. Contact support@blendn.app if you think that's a mistake." |
+| `signin`, `google`, `apple`, `refresh`, `session` | 403 | `FORBIDDEN` | `ACCOUNT_SUSPENDED` | "This account has been suspended. Reason: <category>. To appeal, write to grievance@blendn.app." (starts as before) |
 | the same five | 403 | `FORBIDDEN` | `ACCOUNT_STAFF` | "This app is for attendees. Organizers, venue owners and sponsors sign in at the dashboard." |
 | `google`, `apple` | 401 | `ACCOUNT_DELETED` | `ACCOUNT_DELETED` | "Account not found" |
 | `session` | 404 | `NOT_FOUND` | `ACCOUNT_DELETED` | "User not found" |

@@ -49,11 +49,11 @@ import {
   signRefreshToken,
   storeRefreshToken,
   STAFF_MESSAGE,
-  SUSPENDED_MESSAGE,
   verifyAppleIdToken,
   verifyGoogleIdToken,
 } from "@/lib/mobile-auth"
 import { changePassword, revokeMobileSessions } from "@/lib/account-actions"
+import { suspendedMessageFor } from "@/lib/account-refusal"
 import { issuePasswordResetLink } from "@/lib/password-reset"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
 import { cleanupExpiredTokens, REVOKED_REASON_CODE } from "@/lib/mobile-auth"
@@ -171,7 +171,8 @@ function blocklistJustRead() {
  * exactly that pair (socialSignInMessage), and the reason is `reasonCode`.
  */
 const THE_REFUSALS = [
-  ["suspended", 403, "ACCOUNT_SUSPENDED", SUSPENDED_MESSAGE],
+  // Each case proves the account (password, provider token, its own refresh or access token), so it is told why (SCRUM-1174).
+  ["suspended", 403, "ACCOUNT_SUSPENDED", suspendedMessageFor(null)],
   ["staff", 403, "ACCOUNT_STAFF", STAFF_MESSAGE],
 ] as const
 
@@ -227,7 +228,7 @@ describe("account codes: errorCode and sentence stay, the reason is added beside
     await db.user.update({ where: { id: a.id }, data: { suspended_at: new Date(at.getTime() - 1000) } })
     const res = await refreshRoute.POST(post("/api/mobile/auth/refresh", { refreshToken: token }))
     expect(res.status).toBe(403)
-    expect(await res.json()).toEqual({ success: false, error: SUSPENDED_MESSAGE, errorCode: "FORBIDDEN", reasonCode: "ACCOUNT_SUSPENDED" })
+    expect(await res.json()).toEqual({ success: false, error: suspendedMessageFor(null), errorCode: "FORBIDDEN", reasonCode: "ACCOUNT_SUSPENDED" })
   })
 
   describe("deleted", () => {

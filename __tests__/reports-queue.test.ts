@@ -403,7 +403,7 @@ describe("resolveReport", () => {
     await resolveReport("user", "ur1", "reinstate")
     expect(tx.user.update).toHaveBeenCalledWith({
       where: { id: "u9" },
-      data: { suspended_at: null, suspended_by: null },
+      data: { suspended_at: null, suspended_by: null, suspension_reason: null },
     })
   })
 
@@ -419,7 +419,7 @@ describe("resolveReport", () => {
     await resolveReport("user", "ur1", "reinstate")
     expect(tx.user.update).toHaveBeenCalledWith({
       where: { id: "u9" },
-      data: { suspended_at: null, suspended_by: null },
+      data: { suspended_at: null, suspended_by: null, suspension_reason: null },
     })
     // The report's own verdict stands; only the suspension is lifted.
     expect(tx.user_reports.updateMany).not.toHaveBeenCalled()

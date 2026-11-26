@@ -12,7 +12,8 @@ import { NextRequest } from "next/server"
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
 import jwt from "jsonwebtoken"
-import { signRefreshToken, storeRefreshToken, SUSPENDED_MESSAGE } from "@/lib/mobile-auth"
+import { suspendedMessageFor } from "@/lib/account-refusal"
+import { signRefreshToken, storeRefreshToken } from "@/lib/mobile-auth"
 import { applySuspension } from "@/lib/suspension"
 import { cleanup, closeDb, db, makeUser } from "./helpers"
 
@@ -55,7 +56,8 @@ it("tells a suspended person why, with the token the suspension revoked", async 
 
   const res = await refresh(token)
   expect(res.status).toBe(403)
-  expect(res.body.error).toBe(SUSPENDED_MESSAGE)
+  // The token is the account's own, so its holder is told why and where to appeal (SCRUM-1174).
+  expect(res.body.error).toBe(suspendedMessageFor("community_guidelines"))
   expect(res.body.errorCode).toBe("FORBIDDEN")
   expect(res.body.reasonCode).toBe("ACCOUNT_SUSPENDED")
   expect(res.body.data).toBeUndefined()
@@ -130,7 +132,7 @@ it("still refuses a live token of a suspended account with the sentence (the rou
 
   const res = await refresh(token)
   expect(res.status).toBe(403)
-  expect(res.body.error).toBe(SUSPENDED_MESSAGE)
+  expect(res.body.error).toBe(suspendedMessageFor(null))
 })
 
 it("does not confirm a deleted account, even one the suspension revoked", async () => {

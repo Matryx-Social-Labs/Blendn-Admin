@@ -25,18 +25,25 @@ import { readJson } from "@/lib/api-input"
 
 /**
  * A refused refresh token, with the reason when its holder may be told one
- * (`refusedRefreshReason`): the sentence stays the generic one, the code is why.
+ * (`refusedRefreshReason`). A token the suspension ended is that account's own,
+ * so its holder is told the category and where to appeal.
  */
 async function refusedRefresh(token: string) {
   const reason = await refusedRefreshReason(token)
-  if (reason === "ACCOUNT_SUSPENDED") return accountRefusal("suspended")
+  if (reason === "ACCOUNT_SUSPENDED") {
+    // Verified there: our signature, unexpired, its row this user's and revoked by the suspension.
+    const { userId } = jwt.decode(token) as { userId: string }
+    const owner = await db.user.findUnique({ where: { id: userId }, select: { suspension_reason: true } })
+    return accountRefusal("suspended", owner ?? undefined)
+  }
   if (reason) return errorResponse("Invalid or expired refresh token", 401, reason, reason)
   return errorResponse("Invalid or expired refresh token", 401, ErrorCode.UNAUTHORIZED)
 }
 
-function accountBlockedResponse(reason: "deleted" | "suspended" | "staff") {
+/** `owner`: the account the verified token belongs to (`accountRefusal`). */
+function accountBlockedResponse(reason: "deleted" | "suspended" | "staff", owner?: { suspension_reason: string | null } | null) {
   if (reason === "deleted") return errorResponse("User not found", 401, ErrorCode.ACCOUNT_DELETED, ErrorCode.ACCOUNT_DELETED)
-  return accountRefusal(reason)
+  return accountRefusal(reason, owner ?? undefined)
 }
 
 export async function POST(request: NextRequest) {
@@ -75,7 +82,7 @@ export async function POST(request: NextRequest) {
      * rotating means the token they are holding stays revoked-free but useless.
      */
     const blocked = accountBlockReason(user)
-    if (blocked) return accountBlockedResponse(blocked)
+    if (blocked) return accountBlockedResponse(blocked, user)
     // `!user` is already covered by `blocked === "deleted"`; naming it again is
     // what narrows the type for everything below.
     if (!user) return accountBlockedResponse("deleted")
@@ -107,10 +114,10 @@ export async function POST(request: NextRequest) {
       await tx.$queryRaw`SELECT 1 FROM "User" WHERE id = ${user.id} FOR SHARE`
       const current = await tx.user.findUnique({
         where: { id: user.id },
-        select: { id: true, deletedAt: true, suspended_at: true, role: true, mobile_sessions_revoked_at: true },
+        select: { id: true, deletedAt: true, suspended_at: true, suspension_reason: true, role: true, mobile_sessions_revoked_at: true },
       })
       const blockedNow = accountBlockReason(current)
-      if (blockedNow) return { kind: "blocked", reason: blockedNow } as const
+      if (blockedNow) return { kind: "blocked", reason: blockedNow, owner: current } as const
       /*
        * Ended since the check above, or before it by a path that left this row
        * alone? Two ways to know, both under the lock:
@@ -154,7 +161,7 @@ export async function POST(request: NextRequest) {
       })
       return { kind: "ok" } as const
     })
-    if (outcome.kind === "blocked") return accountBlockedResponse(outcome.reason)
+    if (outcome.kind === "blocked") return accountBlockedResponse(outcome.reason, outcome.owner)
     if (outcome.kind === "ended") return refusedRefresh(oldRefreshToken)
 
     return successResponse({
