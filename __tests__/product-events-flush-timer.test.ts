@@ -80,6 +80,19 @@ it("arms the timer for a signal that arrives while a flush is still writing", as
   expect(written()).toEqual(["app_opened", "searched"])
 })
 
+it("a flush called while another is writing also writes what was recorded after that one began (SCRUM-1419)", async () => {
+  let release: () => void = () => undefined
+  createMany.mockImplementationOnce(
+    ({ data }) => new Promise((resolve) => (release = () => resolve({ count: data.length })))
+  )
+  record({ name: PRODUCT_EVENTS.app_opened, userId: "u1" }) // flush starts and hangs
+  record({ name: PRODUCT_EVENTS.searched, userId: "u1" }) // not in that batch
+  const drained = flushProductEvents()
+  release()
+  await drained
+  expect(written()).toEqual(["app_opened", "searched"])
+})
+
 /*
  * SCRUM-1345: a failed flush used to log at debug (never printed in production)
  * and leave the dropped rows' keys in the seen-set, so the next request that

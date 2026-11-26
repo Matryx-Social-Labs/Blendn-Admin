@@ -86,6 +86,22 @@ const markOf = async (orgId: string) =>
 
 const sent = { sent: true, id: "re_test" }
 
+// `sendEmail` is mocked, but the pass asks `emailConfigured()` first (SCRUM-1421): configured unless a test says otherwise.
+const mailEnv = { RESEND_API_KEY: process.env.RESEND_API_KEY, EMAIL_FROM: process.env.EMAIL_FROM }
+const configureMail = (on: boolean) => {
+  for (const key of Object.keys(mailEnv)) {
+    if (on) process.env[key] = key === "EMAIL_FROM" ? "Blendn <test@blendn.app>" : "re_dummy"
+    else delete process.env[key]
+  }
+}
+beforeAll(() => configureMail(true))
+afterAll(() => {
+  for (const [key, value] of Object.entries(mailEnv)) {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+})
+
 afterEach(() => {
   mockSendEmail.mockReset()
   mockSendEmail.mockResolvedValue(sent)
@@ -215,5 +231,114 @@ describe("a send that fails after the claim", () => {
     expect(await markOf(throwing.id)).toEqual(now)
     expect(warn).toHaveBeenCalledWith("Free-window ending mail lost for this window", { orgId: throwing.id, error: "socket hang up" })
     expect(mailedFor(next)).toEqual([next.owner, next.admin].sort())
+  })
+})
+
+/*
+ * SCRUM-1421: a host who never opened Plan or Analytics has no window written (only `analyticsAccess` wrote it),
+ * so the pick above never saw them. The pass writes it first, through the same write-once step.
+ */
+async function neverVisited(label: string, nights: { endedDaysAgo: number; people: number }[]) {
+  const owner = await makeUser(testId(`fw-${label}-owner`), "organizer")
+  users.push(owner)
+  const org = await db.organisations.create({ data: { kind: "company", display_name: testId(`fw-${label}`), status: "verified" } })
+  orgs.push(org.id)
+  await db.organisation_members.create({ data: { org_id: org.id, user_id: owner, role: "owner" } })
+  const nightIds: { id: string; end: Date }[] = []
+  for (const [i, night] of nights.entries()) {
+    const end = new Date(now.getTime() - night.endedDaysAgo * DAY)
+    const start = new Date(end.getTime() - 3 * 60 * 60 * 1000)
+    const e = await db.events.create({
+      data: {
+        slug: testId(`fw-${label}-night${i}`),
+        title: `Never visited ${label} ${i}`,
+        description: "fixture",
+        start_time: start,
+        end_time: end,
+        timezone: "Asia/Kolkata",
+        city: "Bengaluru",
+        status: "completed",
+        organizer_id: owner,
+        organizer_org_id: org.id,
+      },
+    })
+    events.push(e.id)
+    const occ = await db.event_occurrences.create({
+      data: { event_id: e.id, occurs_on: new Date(start.toISOString().slice(0, 10)), start_time: start, end_time: end },
+    })
+    for (let p = 0; p < night.people; p++) {
+      const guest = await makeUser(testId(`fw-${label}-g${i}-${p}`))
+      users.push(guest)
+      await db.event_check_ins.create({
+        data: { event_id: e.id, occurrence_id: occ.id, user_id: guest, status: "checked_out", check_in_time: start },
+      })
+    }
+    nightIds.push({ id: e.id, end })
+  }
+  const email = (await db.user.findUniqueOrThrow({ where: { id: owner } })).email
+  return { id: org.id, owner: email, admin: email, staff: email, gone: email, nights: nightIds }
+}
+
+const windowOf = (orgId: string) =>
+  db.organisations.findUniqueOrThrow({
+    where: { id: orgId },
+    select: { analytics_free_until: true, first_free_event_id: true, analytics_free_ending_mailed_at: true },
+  })
+
+describe("an organisation that never opened Plan or Analytics (SCRUM-1421)", () => {
+  it("gets its window and one mail in one pass, 77 days after a night of 8, and none on the next", async () => {
+    const host = await neverVisited("never", [{ endedDaysAgo: 77, people: 8 }])
+    await sendFreeWindowEndingMail(now)
+    const row = await windowOf(host.id)
+    // The task's read-back, printed for the CI log (the drive, while this Mac is too loaded for a dev server).
+    console.log("SCRUM-1421 read-back: SELECT analytics_free_until, first_free_event_id, analytics_free_ending_mailed_at FROM organisations WHERE id =", host.id, "→", JSON.stringify(row))
+    expect(row).toEqual({
+      analytics_free_until: new Date(host.nights[0].end.getTime() + 90 * DAY),
+      first_free_event_id: host.nights[0].id,
+      analytics_free_ending_mailed_at: now,
+    })
+    expect(mailedFor(host)).toEqual([host.owner])
+
+    mockSendEmail.mockClear()
+    await sendFreeWindowEndingMail(new Date(now.getTime() + 5 * 60_000))
+    expect(mailedFor(host)).toEqual([])
+  })
+
+  it("writes no window for a night under 8, and mails nobody", async () => {
+    const small = await neverVisited("small", [{ endedDaysAgo: 77, people: 7 }])
+    await sendFreeWindowEndingMail(now)
+    expect(await windowOf(small.id)).toEqual({ analytics_free_until: null, first_free_event_id: null, analytics_free_ending_mailed_at: null })
+    expect(mailedFor(small)).toEqual([])
+  })
+
+  it("writes a window already in the past (the first night of 8 was 100 days ago) and mails nobody", async () => {
+    const old = await neverVisited("old", [{ endedDaysAgo: 100, people: 8 }, { endedDaysAgo: 80, people: 2 }])
+    await sendFreeWindowEndingMail(now)
+    expect(await windowOf(old.id)).toEqual({
+      analytics_free_until: new Date(old.nights[0].end.getTime() + 90 * DAY),
+      first_free_event_id: old.nights[0].id,
+      analytics_free_ending_mailed_at: null,
+    })
+    expect(mailedFor(old)).toEqual([])
+  })
+})
+
+describe("mail not configured (SCRUM-1421)", () => {
+  it("claims nothing, and the first configured pass mails once", async () => {
+    const waiting = await orgEndingIn(11 * DAY, BLR, "unset")
+    configureMail(false)
+    try {
+      expect(await sendFreeWindowEndingMail(now)).toBe(0)
+    } finally {
+      configureMail(true)
+    }
+    expect(mockSendEmail).not.toHaveBeenCalled()
+    expect(await markOf(waiting.id)).toBeNull()
+
+    await sendFreeWindowEndingMail(new Date(now.getTime() + 5 * 60_000))
+    expect(mailedFor(waiting)).toEqual([waiting.owner, waiting.admin].sort())
+    mockSendEmail.mockClear()
+    await sendFreeWindowEndingMail(new Date(now.getTime() + 10 * 60_000))
+    expect(mailedFor(waiting)).toEqual([])
   })
 })
