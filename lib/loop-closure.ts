@@ -5,6 +5,7 @@ import { Prisma } from "@prisma/client"
 import { ATTENDED } from "./counting"
 import { db } from "./db"
 import { SYSTEM_USER_ID } from "./event-kind"
+import { ACQUISITION_SOURCES, type AcquisitionSource } from "./product-events"
 
 /**
  * The loop, closed or not: signed up → onboarded → RSVP'd → checked in →
@@ -136,4 +137,160 @@ export async function loopClosure(): Promise<LoopStage[]> {
     { label: "matched", value: n(row?.matched), base: "checked in" },
     { label: "conversed", value: n(row?.conversed) },
   ]
+}
+
+/**
+ * A stage of a signup cohort: how many reached it, out of how many have had
+ * the whole window. Null when nobody has — "not yet known", never a low number.
+ */
+export type CohortStage = { count: number; of: number } | null
+
+export interface CohortRow {
+  signedUp: number
+  rsvp7: CohortStage
+  checkIn14: CohortStage
+  back30: CohortStage
+}
+
+export interface SignupCohorts {
+  /** Newest first. `week` is the Monday of an ISO week in India's calendar, YYYY-MM-DD. */
+  weeks: Array<CohortRow & { week: string }>
+  /** Every source with anybody, in `ACQUISITION_SOURCES` order, then "unknown". */
+  sources: Array<CohortRow & { source: AcquisitionSource | "unknown" }>
+}
+
+type CohortCounts = {
+  signed_up: number
+  of7: number
+  rsvp7: number
+  of14: number
+  checkin14: number
+  of30: number
+  back30: number
+}
+
+/**
+ * Sign-ups by week (SCRUM-1281): of the people who signed up in each of the
+ * last `weeks` ISO weeks, who RSVP'd within 7 days, checked in within 14, and
+ * came to a second distinct event within 30; and the same by `signup_source`.
+ *
+ * `loopClosure` above cannot say any of this: it has no dates, and its "came
+ * back" has no time bound.
+ *
+ * ## Independent stages, not nested
+ *
+ * Each stage is a share of the cohort, not of the stage before it. The door
+ * QR is the launch's install path, and somebody who signs up at the door and
+ * checks in never RSVPs: nesting would hide exactly the people the launch is
+ * betting on. A table draws no narrowing shape, so the funnel's reason to nest
+ * does not apply.
+ *
+ * ## Not yet known is not zero
+ *
+ * A stage counts only people whose own window has closed (`of`). A week's
+ * stage is shown only once that is everybody in the week; a source's stage is
+ * a share of those people, and null while there are none.
+ *
+ * ## Bounded
+ *
+ * The cohort is read off `User_createdAt_idx` for the weeks asked; each
+ * person's RSVPs and check-ins by `user_id`. The same `ATTENDED`, event-kind
+ * and system-user rules as `loopClosure`, so the two never disagree about who
+ * turned up.
+ */
+export async function signupCohorts(weeks = 8, now: Date = new Date()): Promise<SignupCohorts> {
+  const rows = await db.$queryRaw<Array<{ week: string; source: string | null } & Record<keyof CohortCounts, bigint>>>`
+    WITH weeks AS (
+      SELECT generate_series(
+        date_trunc('week', ${now}::timestamptz AT TIME ZONE 'Asia/Kolkata') - make_interval(weeks => ${weeks - 1}::int),
+        date_trunc('week', ${now}::timestamptz AT TIME ZONE 'Asia/Kolkata'),
+        interval '1 week'
+      ) AS week
+    ),
+    cohort AS (
+      -- "createdAt" is a timestamp without time zone, written in UTC.
+      SELECT u.id, u."createdAt" AT TIME ZONE 'UTC' AS joined, p.signup_source AS source
+      FROM "User" u
+      LEFT JOIN profiles p ON p.id = u.id
+      WHERE u."deletedAt" IS NULL
+        AND u.id <> ${SYSTEM_USER_ID}
+        AND u."createdAt" >= ((SELECT min(week) FROM weeks) AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC'
+        AND u."createdAt" <= ${now}::timestamptz AT TIME ZONE 'UTC'
+    ),
+    person AS (
+      SELECT
+        date_trunc('week', c.joined AT TIME ZONE 'Asia/Kolkata') AS week,
+        c.source,
+        c.joined + interval '7 days'  <= ${now}::timestamptz AS known7,
+        c.joined + interval '14 days' <= ${now}::timestamptz AS known14,
+        c.joined + interval '30 days' <= ${now}::timestamptz AS known30,
+        EXISTS (
+          SELECT 1 FROM event_rsvps r WHERE r.user_id = c.id AND r.created_at < c.joined + interval '7 days'
+        ) AS rsvp7,
+        COALESCE(a.events14, 0) > 0  AS checkin14,
+        COALESCE(a.events30, 0) >= 2 AS back30
+      FROM cohort c
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(DISTINCT ci.event_id) FILTER (WHERE COALESCE(ci.check_in_time, ci.created_at) < c.joined + interval '14 days') AS events14,
+          COUNT(DISTINCT ci.event_id) AS events30
+        FROM event_check_ins ci
+        -- Events only: going live at a venue is not a night anybody hosted.
+        JOIN events e ON e.id = ci.event_id AND e.kind = 'event'
+        WHERE ci.user_id = c.id
+          AND ci.kind = 'attendee'
+          AND ci.status::text IN (${Prisma.join(ATTENDED)})
+          AND COALESCE(ci.check_in_time, ci.created_at) < c.joined + interval '30 days'
+      ) a ON true
+    )
+    SELECT
+      to_char(w.week, 'YYYY-MM-DD')                    AS week,
+      p.source,
+      COUNT(p.week)                                     AS signed_up,
+      COUNT(*) FILTER (WHERE p.known7)                  AS of7,
+      COUNT(*) FILTER (WHERE p.known7 AND p.rsvp7)      AS rsvp7,
+      COUNT(*) FILTER (WHERE p.known14)                 AS of14,
+      COUNT(*) FILTER (WHERE p.known14 AND p.checkin14) AS checkin14,
+      COUNT(*) FILTER (WHERE p.known30)                 AS of30,
+      COUNT(*) FILTER (WHERE p.known30 AND p.back30)    AS back30
+    FROM weeks w
+    LEFT JOIN person p ON p.week = w.week
+    GROUP BY w.week, p.source
+  `
+
+  const parts = rows.map((r) => ({
+    week: r.week,
+    source: (ACQUISITION_SOURCES as readonly (string | null)[]).includes(r.source) ? (r.source as AcquisitionSource) : null,
+    signed_up: Number(r.signed_up),
+    of7: Number(r.of7),
+    rsvp7: Number(r.rsvp7),
+    of14: Number(r.of14),
+    checkin14: Number(r.checkin14),
+    of30: Number(r.of30),
+    back30: Number(r.back30),
+  }))
+  const sum = (group: CohortCounts[]): CohortCounts => {
+    const keys = ["signed_up", "of7", "rsvp7", "of14", "checkin14", "of30", "back30"] as const
+    return Object.fromEntries(keys.map((k) => [k, group.reduce((n, g) => n + g[k], 0)])) as CohortCounts
+  }
+  const row = (c: CohortCounts, whole: boolean): CohortRow => {
+    // A week is shown only when everybody in it has had the window; a source as soon as anybody has.
+    const stage = (count: number, of: number): CohortStage => (of === 0 || (whole && of < c.signed_up) ? null : { count, of })
+    return {
+      signedUp: c.signed_up,
+      rsvp7: stage(c.rsvp7, c.of7),
+      checkIn14: stage(c.checkin14, c.of14),
+      back30: stage(c.back30, c.of30),
+    }
+  }
+
+  const weekKeys = [...new Set(parts.map((p) => p.week))].sort().reverse()
+  const sourceKeys = [...ACQUISITION_SOURCES, null]
+  return {
+    weeks: weekKeys.map((week) => ({ week, ...row(sum(parts.filter((p) => p.week === week)), true) })),
+    sources: sourceKeys
+      .map((source) => ({ source: source ?? ("unknown" as const), counts: sum(parts.filter((p) => p.source === source && p.signed_up > 0)) }))
+      .filter(({ counts }) => counts.signed_up > 0)
+      .map(({ source, counts }) => ({ source, ...row(counts, false) })),
+  }
 }

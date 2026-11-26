@@ -79,9 +79,9 @@ describe("signupCohorts", () => {
 
     const a2 = ist("2020-03-03T10:00")
     const late = await person("sc-a2", a2)
-    await rsvp(first.eventId, late, after(a2, 8)) // day 8: not within 7
+    await rsvp(first.eventId, late, after(a2, 7.5)) // on day 8: not within 7
     await came(first, late, after(a2, 20)) // day 20: not within 14
-    await came(second, late, after(a2, 31)) // day 31: not a second event within 30
+    await came(second, late, after(a2, 30.5)) // on day 31: not a second event within 30
 
     const a3 = ist("2020-03-04T10:00")
     const venueGoer = await person("sc-a3", a3)
@@ -98,6 +98,10 @@ describe("signupCohorts", () => {
     const b1 = ist("2020-03-31T10:00")
     const door = await person("sc-b1", b1, "door")
     await came(first, door, after(b1, 10))
+
+    // Week of 6 Apr: 14 days have passed for one of the two, so the week's 14-day stage is not known yet.
+    await person("sc-d1", ist("2020-04-06T10:00"))
+    await person("sc-d2", ist("2020-04-12T10:00"))
 
     // Week of 13 Apr: five days old.
     const c1 = ist("2020-04-15T12:00")
@@ -131,6 +135,9 @@ describe("signupCohorts", () => {
     expect(result.weeks.find((w) => w.week === "2020-03-30")).toMatchObject({
       signedUp: 1, rsvp7: { count: 0, of: 1 }, checkIn14: { count: 1, of: 1 }, back30: null,
     })
+    expect(result.weeks.find((w) => w.week === "2020-04-06")).toMatchObject({
+      signedUp: 2, rsvp7: { count: 0, of: 2 }, checkIn14: null, back30: null,
+    })
     // Checked in the day after signing up, and still "—" at five days old.
     expect(result.weeks.find((w) => w.week === "2020-04-13")).toMatchObject({
       signedUp: 1, rsvp7: null, checkIn14: null, back30: null,
@@ -140,7 +147,7 @@ describe("signupCohorts", () => {
   it("splits by source, unknown for none, each stage a share of the people whose window has closed", () => {
     expect(result.sources).toEqual([
       { source: "door", signedUp: 2, rsvp7: { count: 0, of: 1 }, checkIn14: { count: 1, of: 1 }, back30: null },
-      { source: "unknown", signedUp: 4, rsvp7: { count: 1, of: 4 }, checkIn14: { count: 1, of: 4 }, back30: { count: 1, of: 4 } },
+      { source: "unknown", signedUp: 6, rsvp7: { count: 1, of: 6 }, checkIn14: { count: 1, of: 5 }, back30: { count: 1, of: 4 } },
     ])
   })
 })

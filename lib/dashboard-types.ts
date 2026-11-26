@@ -3,6 +3,7 @@ import type { AttentionQueue } from "@/lib/attention-queues"
 import type { BuildingOccupancy } from "@/lib/building-occupancy"
 import type { RefusalBreakdown } from "@/lib/check-in-refusals"
 import type { EventRowData } from "@/lib/event-row"
+import type { SignupCohorts } from "@/lib/loop-closure"
 import type { SetupFacts } from "@/lib/setup-checklist"
 
 /**
@@ -194,6 +195,8 @@ export interface AdminOverview {
    * which, or it is two numbers wearing one label.
    */
   activeThisWeek: { count: number; source: "app_opens" | "proxy" }
+  /** Sign-ups by week and by source, last 8 weeks (`signupCohorts`). Admin only. */
+  cohorts: SignupCohorts
   /** Arrivals in the window. Rows, not people — see the panel's own note. */
   checkIns: number
   /** People turned away at a door in the same window. The other half of turn-up. */
