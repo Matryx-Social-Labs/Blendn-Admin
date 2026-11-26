@@ -98,7 +98,7 @@ const WEEK_MS = 7 * 86_400_000
 
 /** The same wall-clock time `weeks` calendar weeks later on `zone`'s clock: 21:00 stays 21:00 across DST. */
 function weeksLater(at: Date, zone: string, weeks: number): Date {
-  const [day, time] = formatInTimeZone(at, zone, "yyyy-MM-dd'T'HH:mm:ss.SSS").split("T")
+  const [day, time] = formatInTimeZone(at, zone, "yyyy-MM-dd HH:mm:ss.SSS").split(" ")
   const moved = new Date(Date.parse(`${day}T00:00:00Z`) + weeks * WEEK_MS).toISOString().slice(0, 10)
   return fromZonedTime(`${moved}T${time}`, zone)
 }
@@ -183,6 +183,7 @@ export async function duplicateFor(
   if (!isUuid(from)) return null
   const source = await db.events.findFirst({
     where: { id: from, deleted_at: null, kind: "event" },
+    // The resolver's fragment last, so its columns are its own; the one overlap, `start_time`, is `true` in both.
     select: { ...duplicateSourceSelect, ...eventPermissionSelect },
   })
   if (!source || !eventPermissions(await actorFor(user), source).canEdit) return null
