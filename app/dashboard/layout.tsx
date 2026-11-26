@@ -82,13 +82,14 @@ export default async function DashboardLayout({
   // Decoration like the badges: a failure logs and drops the card, never the shell.
   // Where plans are not sold (`mayBuyHere`, SCRUM-1277) there is nothing to see plans for and Analytics is open:
   // no card. Asked only without a live plan, so a paying organisation pays no query for it.
+  const home = orgs[0]
   const plan =
-    user.role === "organizer" && orgs[0]
-      ? await planBadgeFor(orgs[0].id)
-          .then(async (b) => (b.analytics || (await mayBuyHere(orgs[0].id)) ? b : null))
+    user.role === "organizer" && home
+      ? await planBadgeFor(home.id)
+          .then(async (b) => (b.analytics || (await mayBuyHere(home.id)) ? b : null))
           .then((b) => b && { analytics: b.analytics, date: b.date ? { word: b.date.word, at: b.date.at.toISOString() } : null })
           .catch((error: unknown) => {
-            logger.error("plan badge failed; rendering the nav without the plan card", {
+            logger.error("plan badge or market check failed; rendering the nav without the plan card", {
               error: error instanceof Error ? error.message : String(error),
             })
             return null

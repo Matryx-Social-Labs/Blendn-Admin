@@ -9,7 +9,8 @@ const mockDb = {
 const mockCounts = jest.fn()
 jest.mock("@/lib/db", () => ({ get db() { return mockDb } }))
 jest.mock("@/lib/attendee-counts", () => ({ distinctAttendeeCounts: (ids: string[]) => mockCounts(ids) }))
-jest.mock("@/lib/entitlements", () => ({ liveEntitlement: async () => null, eventPassesFor: async () => new Set<string>() }))
+const mockLive = jest.fn()
+jest.mock("@/lib/entitlements", () => ({ liveEntitlement: () => mockLive(), eventPassesFor: async () => new Set<string>() }))
 
 /*
  * DK-U01: the plan gate, as a pure decision, with literal dates (never the
@@ -86,6 +87,7 @@ describe("the first event that starts the clock (SCRUM-1269)", () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+    mockLive.mockResolvedValue(null)
     mockDb.organisations.findUnique.mockResolvedValue({ analytics_free_until: null, first_free_event_id: null })
     mockDb.organisations.updateMany.mockResolvedValue({ count: 1 })
     mockDb.events.findMany.mockResolvedValueOnce([seven, eight]).mockResolvedValue([])
@@ -124,6 +126,15 @@ describe("the first event that starts the clock (SCRUM-1269)", () => {
     expect(mockDb.organisations.findUnique).not.toHaveBeenCalled()
     expect(mockDb.organisations.updateMany).not.toHaveBeenCalled()
     expect(mockDb.events.findMany).not.toHaveBeenCalled()
+  })
+
+  it("keeps a grant's or a subscription's own reason and end where plans are not sold, still reading no window", async () => {
+    const until = new Date("2027-01-01T00:00:00Z")
+    mockLive.mockResolvedValue({ source: "grant", expiresAt: until })
+    expect(await analyticsAccess(CANADA, now)).toMatchObject({ org: true, reason: "grant", paidUntil: until, freeUntil: null })
+    mockLive.mockResolvedValue({ source: "razorpay", expiresAt: until })
+    expect(await analyticsAccess(CANADA, now)).toMatchObject({ org: true, reason: "analytics", paidUntil: until })
+    expect(mockDb.organisations.findUnique).not.toHaveBeenCalled()
   })
 })
 

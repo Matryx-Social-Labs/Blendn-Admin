@@ -118,6 +118,8 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await browser.close()
+  if (!orgId) return await db.$disconnect()
+  await db.entitlements.deleteMany({ where: { subject_id: orgId } })
   await db.presence_sessions.deleteMany({ where: { event_id: { in: events } } })
   await db.event_check_ins.deleteMany({ where: { event_id: { in: events } } })
   await db.event_occurrences.deleteMany({ where: { event_id: { in: events } } })
@@ -168,6 +170,17 @@ test("a Toronto organizer past its window sees its own figures and the launch li
     await ctx.close()
   }
   expect(await windowRow("after Toronto reads")).toEqual(before)
+
+  // A paying Toronto organisation keeps its plan in the sidebar: the card goes only where there is nothing to see plans for.
+  await db.entitlements.create({
+    data: { subject_kind: "org", subject_id: orgId, product: "analytics", source: "grant", starts_at: new Date(Date.now() - DAY), expires_at: new Date(Date.now() + 30 * DAY) },
+  })
+  {
+    const { ctx, page } = await open(baseURL!, 1280)
+    await expect(page.locator('nav a[href="/dashboard/plan"]').filter({ hasText: /until/ })).toBeVisible()
+    await ctx.close()
+  }
+  await db.entitlements.deleteMany({ where: { subject_id: orgId } })
 
   await db.events.updateMany({ where: { id: { in: events } }, data: { city: "Bengaluru", timezone: "Asia/Kolkata" } })
   for (const width of WIDTHS) {

@@ -30,8 +30,9 @@ import { realEventsWhere } from "./event-kind"
  *    2026-11-25: Canada stays free until a Canadian host asks to pay). An
  *    organisation that may not buy here (`mayBuyHere`, lib/plan-market.ts, the
  *    one market rule) has nothing it could pay for, so nothing is locked:
- *    reason "market", no end date, whatever its window says. Its window is
- *    neither read nor written. The day it may buy again (its Toronto night
+ *    reason "market", no end date, whatever its window says. A view neither
+ *    reads nor writes its window (the free-window mail's pass may write it,
+ *    the same date a view would find later). The day it may buy again (its Toronto night
  *    deleted, or plans sold in its country) the ordinary rule applies from its
  *    window, stored or found then, which can mean locked at once.
  *
@@ -159,7 +160,7 @@ export async function analyticsAccess({ orgId, mayBuyHere }: AccessOrg, now: Dat
   const subject = { kind: "org" as const, id: orgId }
   const [live, window] = await Promise.all([
     liveEntitlement(subject, "analytics", now),
-    // Never where plans are not sold: the window is neither read nor written there (rule 5).
+    // Never where plans are not sold: a view neither reads nor writes the window there (rule 5).
     mayBuyHere ? freeWindow(orgId, now) : null,
   ])
   const decision = decideAccess({

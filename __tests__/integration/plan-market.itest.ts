@@ -20,6 +20,8 @@ jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockGetA
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { randomUUID } from "crypto"
+import type React from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 
 import { resetMemoryStore } from "@/lib/rate-limit-store"
 
@@ -324,6 +326,11 @@ describe("review: the cases the first pass missed", () => {
     expect(t).not.toContain("Every event is open while Analytics is free.")
     expect(t).not.toMatch(/"enabled":(true|false)/)
     expect(t).not.toMatch(/₹/)
+    // SCRUM-1277: everything is open there, so the status says design/05's words, names no event "open for good", and no date.
+    const html = renderToStaticMarkup((await page.default({ searchParams: Promise.resolve({}) })) as React.ReactElement)
+    expect(html).toContain("Every event you run, and the numbers you see for each one, cost nothing.")
+    expect(html).not.toMatch(/stay open for good|Open until|open until|See plans|₹/)
+    expect(await db.organisations.findUnique({ where: { id: orgId }, select: { first_free_event_id: true } })).toEqual({ first_free_event_id: night })
   })
 
   it("the payer of Venue Pro on a Toronto venue may still cancel it, and may not start a new one", async () => {

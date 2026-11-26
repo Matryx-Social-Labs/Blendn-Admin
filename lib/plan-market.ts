@@ -33,6 +33,8 @@ export async function mayBuyHere(orgId: string): Promise<boolean> {
     // Published, cancelled or completed: never a draft, and never a deleted event. Not being able to buy here opens
     // Analytics (SCRUM-1277), so the evidence must cost something: a Toronto draft nobody sees would be a free pass.
     // `status` is a non-null enum, so `not` keeps every other row.
+    // ponytail: every matching row's city comes back and is deduped in memory (no nativeDistinct); at thousands of
+    // events per organisation, groupBy city, then a partial (organizer_org_id, city) index if it is measured slow.
     db.events.findMany({
       where: { organizer_org_id: orgId, deleted_at: null, status: { not: "draft" }, ...realEventsWhere },
       select: { city: true },
