@@ -32,20 +32,27 @@
  * thing. Note in App Review Notes that onboarding is reachable by signing up
  * fresh.
  *
- * **There is an event.** An empty Events tab reads as a broken app, and that is
- * a likelier rejection than anything about authentication. One is created only
- * if nothing upcoming exists, so this stays a no-op on a populated database.
+ * **There is an event the reviewer can enter.** One, by the fixed slug
+ * `review-demo-event`, made or moved on every run (launch gate 6, SCRUM-1196).
+ * Unlisted, so no feed or search shows it to real users; the reviewer opens it
+ * from the link printed below, pasted into the App Review notes. Open around
+ * the clock for a week from the run, because a review takes days and the
+ * reviewer is not in Bengaluru (the geofence half is `REVIEW_ACCOUNT_IDS`).
  */
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
 import { checkPassword } from "../lib/password"
+import { closeDb } from "../lib/db"
 import { syncOccurrences } from "../lib/occurrences"
-import { realEventsWhere } from "../lib/event-kind"
+import { eventShareUrl } from "../lib/event-share"
 
 const db = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
 })
+
+/** The review event's one row: found by this on every run, never a second. */
+const REVIEW_DEMO_SLUG = "review-demo-event"
 
 /** Where the demo event sits. Bengaluru — the launch city. */
 const CITY = {
@@ -131,29 +138,20 @@ async function main() {
     })
   }
 
-  // Only if the reviewer would otherwise see an empty Events tab.
-  const upcoming = await db.events.count({
-    where: { ...realEventsWhere, status: "published", end_time: { gte: new Date() } },
-  })
-
-  let eventNote = `${upcoming} upcoming event(s) already published — none created`
-  if (upcoming === 0) {
-    /*
-     * The organiser cannot be the review account: it is an attendee, and an
-     * attendee owning an event is a state nothing else in the product produces.
-     * Reuse a real organiser if one exists, otherwise make a dedicated one.
-     */
-    const organizer =
+  /*
+   * The organiser cannot be the review account: it is an attendee, and an
+   * attendee owning an event is a state nothing else in the product produces.
+   * Reuse a real organiser if one exists, otherwise make a dedicated one. Read
+   * only when the event is created: a re-run keeps the row's organiser.
+   */
+  const organizerId = async () =>
+    (
       (await db.user.findFirst({ where: { role: { not: "attendee" } }, orderBy: { createdAt: "asc" } })) ??
       (await db.user.create({
         data: { email: `demo-organiser@${email.split("@")[1]}`, name: "Blend'n Demo", role: "organizer" },
       }))
-
-    const { event, occurrences } = await createReviewDemoEvent(db, organizer.id)
-    eventNote =
-      `created "${event.title}" (${event.id}) starting ${event.start_time.toISOString()}` +
-      ` — ${occurrences} occurrence(s)`
-  }
+    ).id
+  const { event, occurrences } = await upsertReviewDemoEvent(organizerId)
 
   console.log("Review account ready.")
   console.log(`  email         ${email}`)
@@ -162,8 +160,11 @@ async function main() {
   console.log(`  emailVerified ${user.emailVerified?.toISOString() ?? "NOT SET — investigate"}`)
   console.log(`  onboarded     true (reviewer lands on the events tab, not onboarding)`)
   console.log(`  interests     ${leaves.length} leaf categories`)
-  console.log(`  events        ${eventNote}`)
-  console.log("\nPut these credentials in App Store Connect → App Review Information → Sign-In Information.")
+  console.log(`  review event  "${event.title}" (${event.id}), unlisted, ${occurrences} daily session(s)`)
+  console.log(`                door open ${event.start_time.toISOString()} to ${event.end_time.toISOString()}`)
+  console.log(`  share link    ${eventShareUrl(event.id)}`)
+  console.log("\nPut these credentials, and the share link, in App Store Connect → App Review Information.")
+  console.log("Run it again on submission day: the week starts from the run.")
 }
 
 if (require.main === module) {
@@ -174,58 +175,73 @@ if (require.main === module) {
   })
   .finally(async () => {
     await db.$disconnect()
+    // `syncOccurrences` writes through the app's own pool; left open, the script never exits.
+    await closeDb()
   })
 }
 
-/** The demo event a reviewer checks in to, with its occurrences. Exported for its itest (SCRUM-976). */
-export async function createReviewDemoEvent(
-  client: Pick<PrismaClient, "events" | "event_occurrences">,
-  organizerId: string,
-  slug?: string
-) {
-  const start = new Date(Date.now() + 26 * 60 * 60 * 1000)
-  const event = await client.events.create({
-    data: {
-      slug: slug ?? `review-demo-event-${start.toISOString().slice(0, 10)}`,
-      title: "Rooftop Sessions: Live Set",
-      description:
-        "An evening of live music on a rooftop in the city centre. Doors at 7, first set at 8. " +
-        "Check in when you arrive to see who else is here.",
-      short_description: "Live music, rooftop, city centre",
-      latitude: CITY.latitude,
-      longitude: CITY.longitude,
-      address: `MG Road, ${CITY.name}`,
-      venue_name: "The Rooftop",
-      city: CITY.name,
-      state: CITY.state,
-      country: CITY.country,
-      start_time: start,
-      end_time: new Date(start.getTime() + 4 * 60 * 60 * 1000),
-      timezone: CITY.timezone,
-      status: "published",
-      visibility: "public",
-      max_capacity: 120,
-      organizer_id: organizerId,
-      check_in_radius: 150,
-      // A REVIEW_ACCOUNT_IDS account may check in here from anywhere (lib/review-accounts.ts).
-      review_demo: true,
-    },
-  })
+/**
+ * The review event, by its fixed slug: created on the first run, its window
+ * moved to start now on every later one.
+ *
+ * The end's clock time is what keeps the door open all week.
+ * `syncOccurrences` cuts a span into daily sessions, each from the start's
+ * clock time to the end's, rolled into the next day when the end's is not
+ * later. "Now − 1 h to now + 7 d" ends an hour after the start's clock: every
+ * day after the first is a one-hour session and the door is shut 156 hours of
+ * the week. Ending one minute short of seven days runs each session into the
+ * next day's (the 90-minute door lead covers the seam) and leaves no sliver of
+ * a last day.
+ */
+async function upsertReviewDemoEvent(organizerId: () => Promise<string>) {
+  const start = new Date(Date.now() - 60 * 60 * 1000)
+  const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000 - 60 * 1000)
+  const window = {
+    start_time: start,
+    end_time: end,
+    status: "published" as const,
+    visibility: "unlisted" as const,
+    deleted_at: null,
+    // A REVIEW_ACCOUNT_IDS account may check in here from anywhere (lib/review-accounts.ts).
+    review_demo: true,
+  }
+  const existing = await db.events.findUnique({ where: { slug: REVIEW_DEMO_SLUG }, select: { id: true } })
+  const event = existing
+    ? await db.events.update({ where: { id: existing.id }, data: window })
+    : await db.events.create({
+        data: {
+          ...window,
+          slug: REVIEW_DEMO_SLUG,
+          title: "Rooftop Sessions: Live Set",
+          description:
+            "An evening of live music on a rooftop in the city centre. Doors at 7, first set at 8. " +
+            "Check in when you arrive to see who else is here.",
+          short_description: "Live music, rooftop, city centre",
+          latitude: CITY.latitude,
+          longitude: CITY.longitude,
+          address: `MG Road, ${CITY.name}`,
+          venue_name: "The Rooftop",
+          city: CITY.name,
+          state: CITY.state,
+          country: CITY.country,
+          timezone: CITY.timezone,
+          max_capacity: 120,
+          organizer_id: await organizerId(),
+          check_in_radius: 150,
+        },
+      })
 
   /*
    * Occurrences, or nobody can check in.
    *
    * `resolveOccurrence` returns `none` for an event with no occurrence rows,
    * and the check-in route reads `none` as `too_late` — "Event has already
-   * ended", however far in the future the event sits. Reusing the product's
-   * own writer rather than inserting rows keeps this fixture honest; a
-   * fixture that hand-rolls what production computes is a second
-   * implementation and will drift.
+   * ended", however far in the future the event sits. The product's own writer,
+   * so a re-run keeps a day's row (and its check-ins) and drops the days the
+   * window has left. A hand-rolled insert next to it broke
+   * @@unique(event_id, occurs_on) once (SCRUM-976).
    */
-  await syncOccurrences(event.id, start, new Date(start.getTime() + 4 * 60 * 60 * 1000), "Asia/Kolkata")
-
-  // `syncOccurrences` above is the only writer: a second, hand-rolled insert of the same days broke
-  // @@unique(event_id, occurs_on) and killed the seed on a database with no upcoming event (SCRUM-976).
-  const occurrences = await client.event_occurrences.count({ where: { event_id: event.id } })
+  await syncOccurrences(event.id, start, end, CITY.timezone)
+  const occurrences = await db.event_occurrences.count({ where: { event_id: event.id, cancelled_at: null } })
   return { event, occurrences }
 }

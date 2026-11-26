@@ -2597,10 +2597,10 @@
       "date": "2026-11-01"
     },
     "seed-review-account.itest.ts": {
-      "guards": "SCRUM-976: the App Review seed's demo event gets one set of occurrences (syncOccurrences only), so the seed runs to the end on a database with no upcoming event.",
-      "mutation": "M976a the hand-rolled event_occurrences.createMany after syncOccurrences put back (the pre-fix seed).",
-      "observed": "M976a: 1 of 1 failing (Unique constraint failed on event_occurrences_event_id_occurs_on_key). Removed; 1/1.",
-      "date": "2026-11-01"
+      "guards": "SCRUM-1196 / launch gate 6: seed:review, run as a script on a database with a real upcoming public event, makes exactly one unlisted review-demo-event, open at every hour for a week, openable by id from anywhere, and prints its share link. SCRUM-976 rides along: the seed must run to the end (exit 0) with one set of occurrences.",
+      "mutation": "M1196a the populated-database gate put back (the pre-change script: an event only when nothing upcoming is published). M1196b the window as first specified, now - 1 h to now + 7 d.",
+      "observed": "M1196a: 4 of 4 failing (no review-demo-event row). M1196b: 'keeps the door open at every hour' failing, the door shut 156 of 167 hours. Restored; 4/4.",
+      "date": "2026-11-26"
     },
     "invite-accept-attendee.itest.ts": {
       "guards": "SCRUM-984: an attendee accepting an invite comes out as the role fixed at send, and every accept is refused when the sender lost their standing in the org.",
