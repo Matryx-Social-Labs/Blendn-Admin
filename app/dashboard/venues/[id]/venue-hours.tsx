@@ -96,7 +96,7 @@ export function VenueHoursPanel({ venueId, hours, resetHour }: { venueId: string
       {given ? null : (
         <p className="text-[0.8125rem] text-muted-foreground">Not given yet. The app shows no hours for this place until you add them.</p>
       )}
-      <ul className="flex flex-col">
+      <ul className="@container/hours flex flex-col">
         {MONDAY_FIRST.map((day) => {
           const name = DAY_NAMES[day]
           const opening = week[day]
@@ -109,9 +109,9 @@ export function VenueHoursPanel({ venueId, hours, resetHour }: { venueId: string
               key={day}
               role="group"
               aria-labelledby={`hours-day-${day}`}
-              className="grid gap-x-3 gap-y-1.5 border-t border-border py-2.5 first:border-t-0 @md/main:grid-cols-[7rem_minmax(0,1fr)]"
+              className="grid gap-x-3 gap-y-1.5 border-t border-border py-2.5 first:border-t-0 @lg/hours:grid-cols-[7rem_minmax(0,1fr)]"
             >
-              <span id={`hours-day-${day}`} className="text-[0.875rem] font-semibold @md/main:pt-2">{name}</span>
+              <span id={`hours-day-${day}`} className="text-[0.875rem] font-semibold @lg/hours:pt-2">{name}</span>
               {opening ? (
                 <div className="flex min-w-0 flex-col gap-1.5">
                   <div className="flex flex-wrap items-center gap-2">
@@ -127,7 +127,7 @@ export function VenueHoursPanel({ venueId, hours, resetHour }: { venueId: string
                           invalid={problem?.field === field}
                           aria-describedby={describe(field)}
                           disabled={pending}
-                          className="w-[7.75rem] tabular-nums"
+                          className="w-[7rem] tabular-nums"
                         />
                       </span>
                     ))}
