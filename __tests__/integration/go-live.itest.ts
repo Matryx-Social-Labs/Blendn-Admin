@@ -245,7 +245,8 @@ describe("POST /venues/:id/live", () => {
   it.each([
     ["not onboarded, no age", { age: null, onboarded: false }, "FORBIDDEN", "PROFILE_INCOMPLETE"],
     ["onboarded, no age on file", { age: null, onboarded: true }, "AGE_RESTRICTED", "AGE_UNKNOWN"],
-    ["onboarded at 17, from before the 18+ ruling", { age: 17, onboarded: true }, "AGE_RESTRICTED", undefined],
+    // Known to be under 18 (SCRUM-1169): the participation refusal, said in both fields.
+    ["onboarded at 17, from before the 18+ ruling", { age: 17, onboarded: true }, "AGE_RESTRICTED", "AGE_RESTRICTED"],
   ])("refuses somebody %s (strictly 18+, known age)", async (_label, opts, code, reason) => {
     const v = await venue()
     const p = await person("glage", { age: opts.age })
@@ -253,11 +254,11 @@ describe("POST /venues/:id/live", () => {
     const { status, json } = await goLive(p.token, v)
     expect(status).toBe(403)
     // `errorCode` is what installed builds match on and never changes; the two a
-    // person can fix say so in `reasonCode` (Flow 15), and a known age under 18 has none.
+    // person can fix say so in `reasonCode` (Flow 15); a known age under 18 says AGE_RESTRICTED there too.
     expect(json.errorCode).toBe(code)
     expect(json.reasonCode).toBe(reason)
     // Only an age that is not on file is the person's to add; telling a 17-year-old to add a birth date is wrong (SCRUM-558).
-    expect(/date of birth/i.test(json.error)).toBe(reason === "AGE_UNKNOWN")
+    expect(/add your (age|date of birth)/i.test(json.error)).toBe(reason === "AGE_UNKNOWN")
     expect(await db.event_check_ins.count({ where: { user_id: p.id } })).toBe(0)
     expect((await venueDetail(p.token, v)).status).toBe(403)
   })

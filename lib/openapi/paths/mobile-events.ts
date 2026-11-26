@@ -210,7 +210,7 @@ registry.registerPath({
   description:
     "Drafts and private events you are not on the list for answer 404. An 18+ event answers " +
     "403 `AGE_RESTRICTED` for a viewer below the line (see lib/event-access.ts), and `reasonCode` says which refusal it is: " +
-    "`AGE_RESTRICTED` (a known age below the line), `AGE_UNKNOWN`, `PROFILE_INCOMPLETE`, and for an event hidden because its " +
+    "`AGE_RESTRICTED` (a known age below the line, or on taking part an account known to be under 18), `AGE_UNKNOWN`, `PROFILE_INCOMPLETE`, and for an event hidden because its " +
     "organisation was suspended a 404 `NOT_FOUND` with `reasonCode` `ORGANISER_SUSPENDED`, which every route that refuses such an event " +
     "says the same way to the same people (RSVP, save, Lobby, room preview, the door, the guest list, crews, chat). " +
     "Also carries `changedAt`/`changedFields`/`changedFrom` (changed while you are going) and `days`/`dayCount`/`dayNumber` (a multi-day run).",
@@ -312,6 +312,7 @@ registry.registerPath({
     "A refusal the person can fix says so in `reasonCode`, with `errorCode` and the sentence unchanged: " +
     "403 `FORBIDDEN` + `PROFILE_INCOMPLETE` before onboarding is finished, 403 `AGE_RESTRICTED` + " +
     "`AGE_UNKNOWN` when an age-restricted event meets no age on file (a known age below the line has none). " +
+    "An account known to be under 18 is 403 `AGE_RESTRICTED` + `AGE_RESTRICTED` with the participation sentence. " +
     "404 for a venue day's id: a venue's room is entered by going live there (`POST /api/mobile/venues/{venueId}/live`). " +
     "While `TICKETING` is on, a native ticketed event answers 403 `tickets_required` to someone who holds no ticket whose order is paid " +
     "and is not the event's staff; letting a ticket in at the door does not check its holder in.",

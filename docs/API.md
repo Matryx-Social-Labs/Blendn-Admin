@@ -74,7 +74,8 @@ Returns **201**: `{ accessToken, refreshToken, user: { id, email, name, profile 
 and no account is written. Google and Apple create profiles without an age;
 those accounts cannot finish onboarding until a date of birth of 18+ is on file
 (see `PUT /profiles/:userId`). Accounts made before the ruling keep whatever age
-they have. Prefer
+they have; one known to be under 18 takes part nowhere (see *Taking part* under
+`PUT /profiles/:userId`). Prefer
 `dateOfBirth` on `PUT /profiles/:userId` over this `age` — see *The age is
 derived, never remembered* below for why the number alone is not enough.
 
@@ -293,7 +294,9 @@ below the line has no `reasonCode`. **`reasonCode` is on the event doors only**:
 messaging and friend routes (conversations, message requests, friend requests and
 invites) answer the same unfinished-profile 403 with `FORBIDDEN` and no
 `reasonCode`, and the regulars opt-in answers `AGE_RESTRICTED` with none; nothing
-has been rolled out to them.
+has been rolled out to them. An account **known to be under 18** (SCRUM-1169) is
+the exception on every route that takes part, the messaging ones included:
+`errorCode` and `reasonCode` both `AGE_RESTRICTED`, sentence “Blend’n is for people 18 and over. If your date of birth is wrong, write to grievance@blendn.app.”.
 
 
 ### Password reset
@@ -709,6 +712,7 @@ it in the old kind and shape (`kind` and `data.type` `event_update`, the rest of
 | Event is age-restricted and the viewer's known age is below it | 403 | `AGE_RESTRICTED` | `AGE_RESTRICTED` |
 | Taking part (RSVP, save, Lobby, check-in) in one with no age on file | 403 | `AGE_RESTRICTED` | `AGE_UNKNOWN` |
 | Taking part with an unfinished profile | 403 | `FORBIDDEN` | `PROFILE_INCOMPLETE` |
+| Taking part as an account known to be under 18 (a derived age under 18, or `profiles.under_18_since` set; SCRUM-1169), onboarded or not | 403 | `AGE_RESTRICTED` | `AGE_RESTRICTED` |
 | A new `going` or `maybe` RSVP on a cancelled event (`POST /events/:id/rsvp`; SCRUM-892) | 409 | `CONFLICT` | `EVENT_CANCELLED` |
 | The event was live and its organisation was suspended, and you are going (or maybe, or waitlisted) or are of the organisation | 404 | `NOT_FOUND` | `ORGANISER_SUSPENDED` |
 | The same event, and you are a stranger or said `not_going` (public or private alike) | 404 | `NOT_FOUND` | none |
@@ -888,6 +892,7 @@ each other still answer the same body.
 | Where | Status | `errorCode` | `reasonCode` |
 |---|---|---|---|
 | Any friends or DM route, unfinished profile | 403 | `FORBIDDEN` | `PROFILE_INCOMPLETE` |
+| Any friends or DM route, an account known to be under 18 (SCRUM-1169) | 403 | `AGE_RESTRICTED` | `AGE_RESTRICTED` |
 | `POST /friends/requests` `{ userId }`, out of reach | 404 | `NOT_FOUND` | `PERSON_UNAVAILABLE` |
 | `POST /friends/requests` `{ token }`, link does not work | 404 | `NOT_FOUND` | `INVITE_UNAVAILABLE` |
 | `POST /friends/requests` to yourself | 400 | none | `CANNOT_ADD_SELF` |
@@ -1809,7 +1814,8 @@ holds the seats for 10 minutes and answers 201
 
 First the RSVP's door, with exactly the answers `POST /events/:eventId/rsvp`
 gives: 404 for a draft or a stranger's private event, 403 `AGE_RESTRICTED`
-(`reasonCode` `AGE_RESTRICTED` / `AGE_UNKNOWN`) under the event's minimum age,
+(`reasonCode` `AGE_RESTRICTED` / `AGE_UNKNOWN`) under the event's minimum age or
+for an account known to be under 18,
 403 `FORBIDDEN` + `PROFILE_INCOMPLETE` for an account not set up: whoever may
 not say "going" may not buy their way in. Then refusals are 409 with the code in
 `errorCode`: `sold_out`, `not_on_sale`, `over_order_limit`, `over_buyer_limit`
@@ -2021,7 +2027,7 @@ per person, then 429.
 
 One venue, as the Go Live screen needs it. 404 for an unknown, archived or
 deleted venue; 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) for a profile not onboarded, `AGE_RESTRICTED`
-(`reasonCode` `AGE_UNKNOWN` when no age is on file) for one without a known adult age (as at its door). 60 a minute per person, then
+(`reasonCode` `AGE_UNKNOWN` when no age is on file, `AGE_RESTRICTED` for an account known to be under 18) for one without a known adult age (as at its door). 60 a minute per person, then
 429.
 
 ```json
@@ -2135,7 +2141,7 @@ today (choosing it again does not restart the four hours). Anything else is
 | Refusal | When |
 |---|---|
 | 404 | Unknown, archived or deleted venue, or today's room there was deleted |
-| 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) / `AGE_RESTRICTED` (`reasonCode` `AGE_UNKNOWN` when no age is on file) | Not onboarded / no adult age (an unknown age is refused here) |
+| 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) / `AGE_RESTRICTED` (`reasonCode` `AGE_UNKNOWN` when no age is on file, `AGE_RESTRICTED` for an account known to be under 18) | Not onboarded / no adult age (an unknown age is refused here) |
 | 409 `EVENT_LIVE_HERE` | A public event at this venue (link confirmed, or its own area at the venue) is on, or starts within the hour. The body carries `eventId`: hand off to that event's check-in. Checked before the fence |
 | 400 `GPS_TOO_VAGUE` | A fix worse than 150 m (`deviceInfo.gpsAccuracy`): a better fix where you stand, not directions |
 | 400 `VALIDATION_FAILED` | `deviceInfo.gpsAccuracy` below 0 (a platform's "no fix"): leave the field out instead. Also on `POST /checkins/inside` |
@@ -3187,7 +3193,8 @@ racing a block never leaves a blocked person on the list. Refusals cost the
 same work as a link that never existed, so timing tells a caller nothing either.
 
 **Why a send, an accept or an invite open was refused.** An unfinished profile
-is `403` `errorCode: "FORBIDDEN"` with `reasonCode: "PROFILE_INCOMPLETE"`; a
+is `403` `errorCode: "FORBIDDEN"` with `reasonCode: "PROFILE_INCOMPLETE"`; an
+account known to be under 18 is `403` with both codes `"AGE_RESTRICTED"`; a
 rate limit is `429` `errorCode: "RATE_LIMITED"` with `reasonCode:
 "RATE_LIMITED"` and `retryAfter` (seconds; also the `Retry-After` header) —
 on `POST /friends/requests`, `POST /friends/requests/:id`, `GET
@@ -4212,8 +4219,8 @@ Five consequences worth knowing about:
   that is not yet onboarded is **403** "Blend'n is for people 18 and over. Add
   your date of birth to finish." unless the age after the request is 18+ — send
   `dateOfBirth` in the same call or before it. Google and Apple accounts start
-  with no age, so this is where they are held. A profile already onboarded
-  (including one under 18 from before the ruling) is not re-checked.
+  with no age, so this is where they are held. A profile already onboarded is
+  not re-checked here; one known to be under 18 takes part nowhere (below).
 - **Taking part needs the same.** RSVP, favourite, the Lobby, check-in,
   starting a conversation, a message request and a DM send answer **403**
   `FORBIDDEN` "Finish setting up your profile first. Blend'n is for people 18
@@ -4221,6 +4228,13 @@ Five consequences worth knowing about:
   (SCRUM-331), so the hold above is not only the app's. Viewing events is not
   gated; neither are replies to a message request (decline and block are
   safety actions). An onboarded profile with no age keeps taking part.
+- **An account known to be under 18 takes part nowhere** (SCRUM-1169, D-026):
+  a derived age under 18, or `profiles.under_18_since` set, onboarded or not.
+  The same routes answer **403** with `errorCode` and `reasonCode` both
+  `AGE_RESTRICTED` and “Blend’n is for people 18 and over. If your date of birth is wrong, write to grievance@blendn.app.” The
+  stamp is set by `scripts/under-18-accounts.ts --apply`, which lists stamped
+  accounts for deletion 14 days on; staff clear it with `--correct` on a
+  corrected birth date. Viewing events and editing the profile are unchanged.
 - **Check-in filters rather than refuses.** A profile written before this rule
   can still carry `dating`; copying it onto a check-in row drops it silently,
   because nobody should be kept out of a room over a stale profile field.

@@ -534,9 +534,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
      *
      * Google and Apple create accounts with no age. The app holds them at "The
      * basics" until a birth date of 18+ is given; this is the same rule for any
-     * client. Only the step from not-onboarded to onboarded is checked, so an
-     * account onboarded before the ruling — a 16-year-old included — is left
-     * alone, as the owner ruled.
+     * client. Only the step from not-onboarded to onboarded is checked here; an
+     * account known to be under 18 takes part nowhere, onboarded or not
+     * (`participationDenial`, SCRUM-1169).
      */
     if (finishesOnboarding && !existing?.onboarded && !isAdult(effectiveAge)) {
       return forbiddenResponse(`${ADULTS_ONLY} Add your date of birth to finish.`)
