@@ -2686,6 +2686,12 @@
       "observed": "C1: 2 of 4 failing (blr's 'never writes the cover', and its control, which then finds no null); C2: 1 of 4 failing (qa 'never writes the cover'). Both seeds at origin/dev: 4 of 4. Restored; 4/4.",
       "date": "2026-11-17"
     },
+    "node-version-pin.test.ts": {
+      "guards": "SCRUM-1362: package.json engines.node (what Railpack builds production on; RAILPACK_NODE_VERSION is unset on staging and production) is one major, N.x, and equals every node-version: major in .github/workflows/*.yml.",
+      "mutation": "(C1) engines removed (dev's package.json before the fix); (C2) engines.node 24.x; (C3) engines.node >=22; (C4) one ci.yml node-version: \"24\" (pr-test-analyzer).",
+      "observed": "C1: failing, engines received undefined. C2: failing, the per-file diff 24 against 22 for each of the 4 ci.yml entries. C3: failing on the shape, received \">=22\". C4: failing. Restored; 1 of 1.",
+      "date": "2026-11-26"
+    },
     "public-site-origin.test.ts": {
       "guards": "SCRUM-1366: no www.blendn.app URL in lib/, app/ or components/ code outside the fixed list (links go through publicSiteOrigin()), and production refuses any PUBLIC_SITE_ORIGIN but www.",
       "mutation": "(C1) a template-literal `https://www.blendn.app/f/${...}` appended to lib/friends.ts; (C2) the production check in publicSiteOriginProblem replaced by `if (false)`. Before the fix (eaae4ddb) the guard listed the 7 literals then in lib/.",
