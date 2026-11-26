@@ -2597,10 +2597,10 @@
       "date": "2026-11-01"
     },
     "seed-review-account.itest.ts": {
-      "guards": "SCRUM-976: the App Review seed's demo event gets one set of occurrences (syncOccurrences only), so the seed runs to the end on a database with no upcoming event.",
-      "mutation": "M976a the hand-rolled event_occurrences.createMany after syncOccurrences put back (the pre-fix seed).",
-      "observed": "M976a: 1 of 1 failing (Unique constraint failed on event_occurrences_event_id_occurs_on_key). Removed; 1/1.",
-      "date": "2026-11-01"
+      "guards": "SCRUM-1196 / launch gate 6: seed:review, run as a script on a database with a real upcoming public event, makes exactly one unlisted review-demo-event, open at every hour for a week, that the review account checks in to from Cupertino and a passer-by at its pin is not offered; a re-run restores it on the same row, un-cancels its days and clears the bypass from earlier runs' events; it refuses a slug it did not make and a staff address. SCRUM-976 rides along: the seed runs to the end (exit 0).",
+      "mutation": "M1196a the pre-change script and places-inside (origin/dev). M1196b the window as first specified, now - 1 h to now + 7 d. M1196c review_demo: false removed from eventsInside. M1196d the slug guard removed. M1196e the un-cancel removed. M1196f the staff-address guard removed.",
+      "observed": "M1196a: 7 of 7 failing. M1196b: 'keeps the door open at every hour' failing, the door shut 156 of 167 hours. M1196c: 'is not offered to a passer-by' failing. M1196d and M1196f: 'refuses, writing nothing' failing. M1196e: 'on a second run, puts the same row back' failing. Restored; 7/7.",
+      "date": "2026-11-26"
     },
     "invite-accept-attendee.itest.ts": {
       "guards": "SCRUM-984: an attendee accepting an invite comes out as the role fixed at send, and every accept is refused when the sender lost their standing in the org.",
