@@ -3,7 +3,6 @@ import { registry } from "@/lib/openapi/registry"
 import { ErrorResponseSchema, MODERATION_UNAVAILABLE_NOTE, moderationUnavailableError, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
 import {
   EventQuerySchema,
-  CheckinRequestSchema,
   EventCheckinRequestSchema,
   RatingRequestSchema,
   RsvpRequestSchema,

@@ -171,3 +171,27 @@ describe("the Tickets tab (SCRUM-1014)", () => {
     expect(withTickets({ canEdit: true, ticketing: "native", kind: "venue_day" })).not.toContain("tickets")
   })
 })
+
+describe("the Door tab (gate 13)", () => {
+  const operator = { canOperate: true }
+  afterEach(() => jest.useRealTimers())
+
+  it("shows from doors (start − 90 min) to the end, after Live", () => {
+    jest.useFakeTimers().setSystemTime(at("2026-08-05T17:29:00.000Z"))
+    expect(keys(START, END, operator)).not.toContain("door")
+    jest.setSystemTime(at("2026-08-05T17:30:00.000Z"))
+    expect(keys(START, END, operator)).toContain("door")
+    jest.setSystemTime(at("2026-08-05T21:00:00.000Z"))
+    const tabs = keys(START, END, operator)
+    expect(tabs.indexOf("door")).toBe(tabs.indexOf("live") + 1)
+    jest.setSystemTime(at("2026-08-06T02:00:00.000Z"))
+    expect(keys(START, END, operator)).not.toContain("door")
+  })
+
+  it("never for a draft, a venue day, or someone who cannot operate the event", () => {
+    jest.useFakeTimers().setSystemTime(at("2026-08-05T21:00:00.000Z"))
+    expect(keys(START, END, { ...operator, status: "draft" })).not.toContain("door")
+    expect(keys(START, END, { ...operator, kind: "venue_day" })).not.toContain("door")
+    expect(keys(START, END, { canOperate: false })).not.toContain("door")
+  })
+})

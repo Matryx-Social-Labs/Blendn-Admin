@@ -587,6 +587,15 @@ jobs:
             /tmp/server.log
           retention-days: 7
 
+      # Screens a spec saved on purpose (test-results/screens/), for reading against the approved mockup.
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: e2e-screens
+          path: test-results/screens/
+          if-no-files-found: ignore
+          retention-days: 7
+
   build:
     runs-on: ubuntu-latest
     # A squash-merge into dev is content this workflow already passed minutes
