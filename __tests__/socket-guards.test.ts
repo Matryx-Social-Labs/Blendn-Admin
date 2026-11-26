@@ -30,6 +30,7 @@ import {
   emitChatTyping,
   emitPrivateTyping,
   emitPrivateRead,
+  TYPING_ROOM_CAP,
 } from "@/lib/socket-server"
 import type { AuthenticatedSocket } from "@/lib/socket-server"
 import { roomHandle } from "@/lib/room-handle"
@@ -55,10 +56,13 @@ const member = (anonymous_name: string | null, status: string, venueDayWindow?: 
 // can only fail on a genuine email leak.
 const EMAIL_LOCAL_PART = "zaphod.beeblebrox"
 
-function makeSocket() {
+/** `roomSize`: the sockets the adapter holds in the chat room, the typist's included (`TYPING_ROOM_CAP`). */
+function makeSocket({ roomSize = 3, chatId = CHAT_ID, inRoom = true } = {}) {
   const roomEmit = jest.fn()
   const except = jest.fn()
-  const broadcast = { emit: roomEmit, except }
+  // `socket.to(room).volatile.emit`: the room-level `typing:several`.
+  const volatileRoomEmit = jest.fn()
+  const broadcast = { emit: roomEmit, except, volatile: { emit: volatileRoomEmit } }
   except.mockReturnValue(broadcast)
   /*
    * The chat room as `fetchSockets` returns it: somebody else, the typist's
@@ -83,12 +87,17 @@ function makeSocket() {
     leave: jest.fn(),
     emit: jest.fn(),
     to: jest.fn(() => broadcast),
-    nsp: { in: jest.fn(() => chatRoom) },
+    rooms: new Set(inRoom ? ["sock-self", `chat:${chatId}`] : ["sock-self"]),
+    nsp: {
+      in: jest.fn(() => chatRoom),
+      adapter: { rooms: new Map([[`chat:${chatId}`, new Set(Array.from({ length: roomSize }, (_, i) => `sock-${i}`))]]) },
+    },
   }
   return {
     socket: socket as unknown as AuthenticatedSocket,
     raw: socket,
     roomEmit,
+    volatileRoomEmit,
     except,
     ownOtherDeviceEmit,
     typingSocketEmit,
@@ -356,6 +365,91 @@ describe("emitChatTyping", () => {
 
     await expect(emitChatTyping(socket, "not-a-uuid", true)).resolves.toBeUndefined()
     expect(roomEmit).not.toHaveBeenCalled()
+  })
+})
+
+describe("emitChatTyping above TYPING_ROOM_CAP (SCRUM-1309)", () => {
+  // Each test its own room: the 5 s window is per room and process-wide.
+  let n = 0
+  const room = () => `33333333-3333-4333-8333-${String(++n).padStart(12, "0")}`
+  const reads = () =>
+    mockDb.chat_group_members.findUnique.mock.calls.length +
+    mockDb.blocked_users.findMany.mock.calls.length +
+    mockDb.events.findUnique.mock.calls.length
+
+  it("is 50", () => {
+    expect(TYPING_ROOM_CAP).toBe(50)
+  })
+
+  it("at the cap keeps today's per-person event, sent volatile", async () => {
+    mockDb.chat_group_members.findUnique.mockResolvedValue(member("Cosmic Panda", "active"))
+    const plain = jest.fn()
+    const volatile = jest.fn()
+    const { socket, raw, volatileRoomEmit } = makeSocket({ roomSize: TYPING_ROOM_CAP })
+    raw.nsp.in.mockReturnValue({
+      except: () => ({ fetchSockets: async () => [{ id: "sock-peer", data: { userId: "user_peer" }, emit: plain, volatile: { emit: volatile } }] }),
+    } as never)
+
+    await emitChatTyping(socket, CHAT_ID, true)
+
+    expect(volatile).toHaveBeenCalledWith("chat:typing", expect.objectContaining({ userName: "Cosmic Panda", isTyping: true }))
+    expect(plain).not.toHaveBeenCalled()
+    expect(volatileRoomEmit).not.toHaveBeenCalled()
+  })
+
+  it("above it reads nothing and sends one room-level typing:several, no names", async () => {
+    const id = room()
+    const { socket, raw, roomEmit, volatileRoomEmit } = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id })
+
+    await emitChatTyping(socket, id, true)
+
+    expect(reads()).toBe(0)
+    expect(raw.nsp.in).not.toHaveBeenCalled()
+    expect(raw.to).toHaveBeenCalledWith(`chat:${id}`)
+    expect(volatileRoomEmit).toHaveBeenCalledTimes(1)
+    expect(volatileRoomEmit).toHaveBeenCalledWith("typing:several", { chatGroupId: id })
+    expect(roomEmit).not.toHaveBeenCalled()
+  })
+
+  it("sends it at most once every 5 s per room, whoever types", async () => {
+    const id = room()
+    const now = jest.spyOn(Date, "now").mockReturnValue(1_000_000)
+    const a = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id })
+    const b = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id })
+
+    await emitChatTyping(a.socket, id, true)
+    now.mockReturnValue(1_004_999)
+    await emitChatTyping(b.socket, id, true)
+    expect(a.volatileRoomEmit).toHaveBeenCalledTimes(1)
+    expect(b.volatileRoomEmit).not.toHaveBeenCalled()
+
+    now.mockReturnValue(1_005_000)
+    await emitChatTyping(a.socket, id, true)
+    expect(a.volatileRoomEmit).toHaveBeenCalledTimes(2)
+    expect(reads()).toBe(0)
+  })
+
+  it("sends no stop: the app lets it expire", async () => {
+    const id = room()
+    const { socket, volatileRoomEmit, roomEmit } = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id })
+
+    await emitChatTyping(socket, id, true)
+    await emitChatTyping(socket, id, false)
+
+    expect(volatileRoomEmit).toHaveBeenCalledTimes(1)
+    expect(roomEmit).not.toHaveBeenCalled()
+    expect(reads()).toBe(0)
+  })
+
+  it("says nothing for a socket that is not in the room", async () => {
+    // The join was the door; a socket that never passed it, or was taken out, types into nothing.
+    const id = room()
+    const { socket, volatileRoomEmit } = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id, inRoom: false })
+
+    await emitChatTyping(socket, id, true)
+
+    expect(volatileRoomEmit).not.toHaveBeenCalled()
+    expect(reads()).toBe(0)
   })
 })
 
