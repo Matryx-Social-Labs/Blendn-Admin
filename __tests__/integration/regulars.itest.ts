@@ -72,7 +72,7 @@ const orgs: string[] = []
 const venues: string[] = []
 const events: string[] = []
 
-const as = (id: string, role: "venue_owner" | "app_admin" = "venue_owner") => mockGetAuth.mockResolvedValue({ user: { id, role, signedInAt: Date.now() } })
+const as = (id: string, role: "venue_owner" | "app_admin" | "organizer" = "venue_owner") => mockGetAuth.mockResolvedValue({ user: { id, role, signedInAt: Date.now() } })
 const yearsAgo = (years: number) => new Date(Date.now() - (years * 365.25 + 30) * DAY)
 
 /**
@@ -98,7 +98,7 @@ async function person(label: string, o: { age?: number | null; first?: string; f
   return { id, token: signAccessToken(id, `${id}@itest.invalid`) }
 }
 
-async function dashboardUser(label: string, role: "venue_owner" | "app_admin" = "venue_owner") {
+async function dashboardUser(label: string, role: "venue_owner" | "app_admin" | "organizer" = "venue_owner") {
   const id = await makeUser(testId(label))
   users.push(id)
   await db.user.update({ where: { id }, data: { role } })
@@ -845,8 +845,9 @@ describe("review pass 2", () => {
     expect(await rateLimitStore.peek(`door-fail:${A}:${otherOwner}`)).toBe(0)
   })
 
-  it("one staff account’s lock does not stop a colleague’s valid redeem (DoS scan)", async () => {
-    const colleague = await dashboardUser("rg_staff2")
+  it("one staff account’s lock does not stop a colleague’s valid redeem (DoS scan), whatever the colleague’s User.role (SCRUM-1246)", async () => {
+    // An organizer-role staff member of the venue's org: the door is any member's, not a venue_owner's.
+    const colleague = await dashboardUser("rg_staff2", "organizer")
     await db.organisation_members.create({ data: { org_id: orgA, user_id: colleague, role: "staff" } })
     const offer = await db.venue_offers.findFirstOrThrow({ where: { venue_id: A }, orderBy: { created_at: "asc" } })
     as(staff)
@@ -855,7 +856,7 @@ describe("review pass 2", () => {
     const { json } = await openOffer(R[4].token, offer.id)
     as(staff)
     expect(await refusal(actions.redeemPass({ venueId: A, code: json.data.offer.pass.code }))).toBe("Too many wrong codes from this account. Wait five minutes, then try again.")
-    as(colleague)
+    as(colleague, "organizer")
     expect(await actions.redeemPass({ venueId: A, code: json.data.offer.pass.code })).toEqual({ text: "First drink on the house, Thu–Sun before 10" })
   })
 

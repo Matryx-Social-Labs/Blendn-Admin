@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { IconEdit, IconQrcode } from "@tabler/icons-react"
+import { IconCopy, IconEdit, IconQrcode } from "@tabler/icons-react"
 
 import { EventTabs, eventTabHref, eventTabsFor, sharesLink, type EventTabKey } from "@/app/dashboard/events/[id]/event-tabs"
 import { EventVenueLink } from "@/app/dashboard/events/[id]/venue-link"
@@ -14,11 +14,11 @@ import { eventClock, eventStateFor } from "@/lib/event-phase"
  * One event's header and tabs, the same on every route under it (step 15):
  * the overview, Room chat and Feedback.
  *
- * The event is named by its own title (`OWNED_HEADERS`), with the two things
- * an organiser reaches for from anywhere on it — the QR code and the editor —
- * as the header's actions. Both are `canEdit`'s (the code only for a published
- * event that is not a venue day, `sharesLink`); a venue owner operates the
- * night and hands out nobody's link.
+ * The event is named by its own title (`OWNED_HEADERS`), with the three things
+ * an organiser reaches for from anywhere on it — the QR code, the editor and
+ * Duplicate — as the header's actions. All are `canEdit`'s (the code only for a
+ * published event that is not a venue day, `sharesLink`; Duplicate never on a
+ * venue day); a venue owner operates the night and hands out nobody's link.
  */
 export function EventHeader({
   data: { event, permissions, ticketing },
@@ -78,6 +78,15 @@ export function EventHeader({
                 <Link href={`/dashboard/events/${event.id}/edit`}>
                   <IconEdit aria-hidden className="size-4" />
                   Edit event
+                </Link>
+              </Button>
+            ) : null}
+            {/* Next week's night, prefilled and unsaved (SCRUM-1153). Never a venue day: nobody runs one. */}
+            {permissions.canEdit && event.kind === "event" ? (
+              <Button asChild variant="outline" className="pointer-coarse:h-11">
+                <Link href={`/dashboard/events/new?from=${event.id}`} aria-label="Duplicate event">
+                  <IconCopy aria-hidden className="size-4" />
+                  Duplicate
                 </Link>
               </Button>
             ) : null}

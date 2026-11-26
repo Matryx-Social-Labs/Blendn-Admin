@@ -30,6 +30,7 @@ import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { answerRoomRetry, findRoomSend, replayRoomRetry } from "@/lib/room-retry"
 import { chatClosedMessage, LEFT_ROOM_MESSAGE, NOT_LIVE_MESSAGE } from "@/lib/chat-window"
 import { withOwnerDoor, mayWriteToRoomFor, roomOwnerDenial, roomReadDenialFor, roomScope } from "@/lib/room-kind"
+import { markRoomRead } from "@/lib/chat-list"
 import { replyCounts } from "@/lib/reply-counts"
 import { roomMessageWords } from "@/lib/validations/chat"
 import { readJson, isUuid } from "@/lib/api-input"
@@ -203,12 +204,7 @@ export async function GET(
      * in `GET /chat/groups` counted everything as unread for ever without it.
      */
     const markRead =
-      !before && membership && messagesToReturn.length > 0
-        ? db.chat_group_members.update({
-            where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: user.userId } },
-            data: { last_read_message_id: messagesToReturn[0].id, updated_at: new Date() },
-          })
-        : null
+      !before && membership && messagesToReturn.length > 0 ? markRoomRead(chatGroupId, user.userId, messagesToReturn[0].id) : null
 
     // Reverse to get chronological order (oldest first within the batch)
     messagesToReturn.reverse()

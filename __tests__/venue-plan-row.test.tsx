@@ -33,6 +33,7 @@ function row(overrides: Partial<VenuePlanRow>): VenuePlanRow {
     readiness: READY,
     subscriptions: [],
     openElsewhere: false,
+    mayBuyHere: true,
     ...overrides,
   }
 }
@@ -94,4 +95,48 @@ it("SCRUM-1320: a venue nobody has gone live at yet says charges start 90 days a
   const html = render(row({ readiness: { dataSince: null, chargeableFrom: null, dataDays: 0, chargeable: false } }))
   expect(html).toContain("No data yet · charges start 90 days after people first go live here")
   expect(offersBuy(html)).toBe(false)
+})
+
+describe("SCRUM-1151: a venue whose organisation is outside India (Toronto)", () => {
+  const LINE = "Free while we launch in your city."
+  const toronto = (overrides: Partial<VenuePlanRow> = {}) => row({ name: "The Drake Hotel Underground and Sky Yard Rooftop, Queen Street West", city: "Toronto", mayBuyHere: false, ...overrides })
+
+  it("past its 90 days: no Buy, no 'can be bought', and the launch line once in place of the price", () => {
+    const html = render(toronto())
+    expect(offersBuy(html)).toBe(false)
+    expect(html).not.toContain("can be bought")
+    expect(html.split(LINE)).toHaveLength(2)
+    expect(html).not.toMatch(/₹|GST/)
+    expect(html).not.toContain("Nothing is charged until")
+  })
+
+  it("still counting days: no meter and no charge date, since nothing will be charged", () => {
+    const html = render(toronto({ readiness: { dataSince: READY.dataSince, chargeableFrom: READY.chargeableFrom, dataDays: 19, chargeable: false } }))
+    expect(html).not.toContain('role="meter"')
+    expect(html).not.toContain("no charge before")
+    expect(html).toContain("The Drake Hotel Underground")
+  })
+
+  it("a paid Venue Pro there keeps its state and its Cancel", () => {
+    const html = render(toronto({ pro: { id: "e1", source: "razorpay", startsAt: READY.chargeableFrom, expiresAt: UNTIL }, date: { word: "renews", at: UNTIL }, subscriptions: [subscription("active")] }))
+    expect(html).toContain("Venue Pro · renews")
+    expect(html).toContain("Cancel at the end of this cycle")
+  })
+
+  it("an Indian venue's page is unchanged: price, split and Buy, no launch line", () => {
+    const html = render(row({}))
+    expect(html).not.toContain(LINE)
+    expect(html).toContain("₹3,539")
+    expect(offersBuy(html)).toBe(true)
+  })
+})
+
+it("SCRUM-1151 review: one person in an Indian and a Canadian organisation: the card keeps its price for the Indian venue's Buy, and the Toronto row says the line", () => {
+  const india = row({ venueId: "v-in" })
+  const canada = row({ venueId: "v-ca", name: "Bar Raval", city: "Toronto", orgName: "Raval Hospitality", mayBuyHere: false })
+  const html = renderToStaticMarkup(createElement(VenuePlan, { view: { paymentsOn: true, venues: [india, canada], payments: [] }, pending: false }))
+  expect(html).toContain("₹3,539")
+  expect(html.match(/type="radio"/g)).toHaveLength(2) // one Buy (monthly / yearly), the Indian venue's
+  expect(html.split("Free while we launch in your city.")).toHaveLength(2) // once, on the Toronto row
+  expect(html).not.toMatch(/Bar Raval[\s\S]*Venue Pro can be bought/)
 })

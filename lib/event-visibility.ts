@@ -53,34 +53,21 @@ export async function visibleEventsScope(user: {
   const actor = await actorFor(user)
 
   /*
-   * The org clause is gated on the ROLE, not merely on having an org.
-   *
-   * `eventPermissions` denies every role outside these two outright — a sponsor
-   * gets `canOperate: false` whatever their memberships. The first version of
-   * this gated only the venue clause and added the base org clause for anybody
-   * with `orgIds.length`, and `organisation_members` has no notion of a
-   * "sponsor org" versus an "organiser org": one row can both run events and
-   * hold `may_sponsor`. So a sponsor who is a member of an organising org saw
-   * that org's events listed — titles, RSVPs, arrivals, host names — on a
-   * screen `eventPermissions` would refuse them row by row.
-   *
-   * Bounded (same-organisation, and opening a row still hits the resolver) and
-   * reachable: the nav hides Events from sponsors, but a nav filter is not an
-   * authorization check and `/dashboard/events` answers a direct navigation.
-   *
-   * A resolver and a list filter that disagree is the H2 shape inverted — that
-   * one hid rows somebody was entitled to, this one showed rows they were not.
+   * Membership, not `User.role`, as in `eventPermissions` (SCRUM-1246): any
+   * member of an org sees the events it runs, and the events at the venues it
+   * owns from each claim on. This was gated on the role — a sponsor in an
+   * organising org saw none of its events, because the resolver refused them
+   * row by row. The resolver now grants them by membership, so the list shows
+   * them; a list and a resolver that disagree is H2 either way round.
    */
-  const mayScopeByOrg = user.role === "organizer" || user.role === "venue_owner"
-
   where.OR = [
-    ...(actor.orgIds.length && mayScopeByOrg
+    ...(actor.orgIds.length
       ? [
           { organizer_org_id: { in: actor.orgIds } },
-          // A venue owner operates every event in their building, whoever
+          // A venue's org operates every event in its building, whoever
           // created it, from the claim on — `eventPermissions` grants exactly
           // that, so the list shows exactly that.
-          ...(user.role === "venue_owner" ? await claimedVenueEventsWhere(actor.orgIds) : []),
+          ...(await claimedVenueEventsWhere(actor.orgIds)),
         ]
       : []),
     /*
@@ -163,6 +150,20 @@ export async function claimedVenueEventsWhere(
     const window = claimedWindow(v)
     return window ? [{ venue_id: v.id, start_time: window }] : []
   })
+}
+
+/**
+ * Are this event's counts held back from this viewer (SCRUM-501)? Yes when
+ * they reach it through the building rather than run it — whatever their
+ * User.role (SCRUM-1246) — and never for the platform's admin. The one rule
+ * for the events list and the exports.
+ */
+export function reachedThroughBuilding(
+  role: user_role,
+  actor: { id: string; orgIds: readonly string[] },
+  event: { organizer_id: string; organizer_org_id: string | null }
+): boolean {
+  return role !== "app_admin" && !hostsEvent(actor, event)
 }
 
 /**

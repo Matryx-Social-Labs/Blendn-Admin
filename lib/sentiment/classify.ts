@@ -1,3 +1,4 @@
+import { sentimentModel } from "../env"
 import { logger } from "../logger"
 
 import { classifyWithLexicon, lexiconFallback } from "./lexicon"
@@ -11,12 +12,15 @@ import {
 } from "./taxonomy"
 
 const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
-/**
- * Sentiment needs a completion call. The moderation endpoint returns harm
- * categories, not polarity — `lib/moderation/openai-moderation.ts` is the
- * integration pattern to copy here, not the API to call.
- */
-const MODEL = "gpt-4o-mini"
+// Sentiment needs a completion call (the model is `sentimentModel()`, lib/env.ts). The moderation endpoint returns
+// harm categories, not polarity — `lib/moderation/openai-moderation.ts` is the integration pattern, not the API.
+
+/** A classifier must never hold up the pipeline that feeds it. Per attempt. */
+const CALL_TIMEOUT_MS = 20_000
+/** The first try and one retry, of a 429, a 5xx or a timeout. */
+const MAX_ATTEMPTS = 2
+/** The wait before the retry. */
+const RETRY_BACKOFF_MS = 2_000
 /** Big enough to amortise the call, small enough that one bad batch is cheap. */
 export const BATCH_SIZE = 20
 
@@ -51,6 +55,33 @@ function getApiKey(): string | undefined {
   return process.env.OPENAI_API_KEY
 }
 
+const isTransient = (status: number) => status === 429 || status >= 500
+
+/**
+ * One retry, after a backoff, of a 429, a 5xx or a request that threw (a timeout, a dropped connection): a message
+ * the model never labels is written with the lexicon's guess for good, so a blip must not decide it. Any other 4xx
+ * is returned at once: a bad request or a retired model is the same on the second try.
+ */
+async function postWithOneRetry(body: string, apiKey: string): Promise<Response> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const res = await fetch(OPENAI_CHAT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body,
+        signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+      })
+      if (res.ok || !isTransient(res.status) || attempt === MAX_ATTEMPTS) return res
+      logger.warn("Sentiment classification will retry", { status: res.status })
+      await res.body?.cancel()
+    } catch (error) {
+      if (attempt === MAX_ATTEMPTS) throw error
+      logger.warn("Sentiment classification will retry", { error: error instanceof Error ? error.message : String(error) })
+    }
+    await new Promise((resolve) => setTimeout(resolve, RETRY_BACKOFF_MS))
+  }
+}
+
 /**
  * Tier 3. Classifies a batch in one call and returns only what it could parse.
  *
@@ -65,17 +96,16 @@ async function classifyBatchWithLlm(
   const out = new Map<string, Classification>()
   const apiKey = getApiKey()
   if (!apiKey || messages.length === 0) return out
+  const model = sentimentModel()
 
   try {
-    const res = await fetch(OPENAI_CHAT_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        temperature: 0,
+    const res = await postWithOneRetry(
+      JSON.stringify({
+        model,
+        // gpt-6-luna takes no `temperature` but the default (1). No reasoning: the same labels, a third of the tokens,
+        // and the timeout's headroom for a full batch (measured 2026-11-26, SCRUM-1226). A model set in
+        // SENTIMENT_MODEL must accept it.
+        reasoning_effort: "none",
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
@@ -87,12 +117,12 @@ async function classifyBatchWithLlm(
           },
         ],
       }),
-      // A classifier must never hold up the pipeline that feeds it.
-      signal: AbortSignal.timeout(20_000),
-    })
+      apiKey
+    )
 
+    // logger.error is the Sentry report (lib/logger.ts): one issue for this message, the status and model with it.
     if (!res.ok) {
-      logger.error("Sentiment classification failed", { status: res.status })
+      logger.error("Sentiment classification failed", { status: res.status, model })
       return out
     }
 
@@ -100,9 +130,8 @@ async function classifyBatchWithLlm(
       choices?: Array<{ message?: { content?: string } }>
     }
     const content = body.choices?.[0]?.message?.content
-    if (!content) return out
-
-    const parsed = JSON.parse(content) as {
+    // No content (a refusal, a length cut) is no labels: the check after the loop reports it.
+    const parsed = (content ? JSON.parse(content) : {}) as {
       results?: Array<{
         id?: string
         sentiment?: string
@@ -133,9 +162,18 @@ async function classifyBatchWithLlm(
         source: "llm",
       })
     }
+
+    // Each message the model did not label is the word list's guess for good, so a model that answers 200 with
+    // nothing usable must reach Sentry as surely as one that answers 404.
+    const labelled = messages.filter((m) => out.has(m.id)).length
+    if (labelled < messages.length) {
+      logger.error("Sentiment classifier labelled fewer messages than it was sent", { labelled, sent: messages.length, model })
+    }
   } catch (error) {
     logger.error("Sentiment classification threw", {
-      error: error instanceof Error ? error.message : String(error),
+      // A parse error quotes the model's output, which can echo a guest's message: never into Sentry.
+      error: error instanceof SyntaxError ? "the model's output is not JSON" : error instanceof Error ? error.message : String(error),
+      model,
     })
   }
 
@@ -149,11 +187,8 @@ async function classifyBatchWithLlm(
  * batched to tier 3. At ~500 messages an hour with most being logistics
  * chatter, this is single-digit API calls per hour for a busy event.
  *
- * **The client's own label is not an input.** The mobile app computes one
- * on-device for instant local feedback, but a patched client can send whatever
- * it likes — suppressing a negative or manufacturing an alert that pushes to
- * the organiser's phone. Hints are advisory in the UI and never authoritative
- * here.
+ * **A client-sent label is never an input:** a patched client could suppress a
+ * negative or fake a safety alert.
  *
  * If tier 3 is unavailable — no API key, an outage, a timeout — messages it
  * would have handled come back with the lexicon's best guess at low confidence

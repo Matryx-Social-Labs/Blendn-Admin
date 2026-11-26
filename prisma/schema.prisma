@@ -1509,6 +1509,8 @@ model notifications {
   @@index([user_id, created_at])
   // The unread count, which the bell asks for on every screen.
   @@index([user_id, read_at])
+  // The retention sweep's unread rule (SCRUM-1224). Its read rule has a partial `read_at` index, in migration SQL only.
+  @@index([created_at])
 }
 
 // Private Messaging
@@ -1843,7 +1845,7 @@ model venues {
   /// map's height. Set by the venue's owner or an admin; CHECK 1–200 in SQL.
   floors            Int?         @db.SmallInt
   /// Opening hours as the venue page shows them: `[{ day: 0-6 (Sun-Sat), open: "HH:MM", close: "HH:MM" }]`
-  /// in the venue's own timezone (`lib/venue-hours.ts`). Null: not given. No writer yet.
+  /// in the venue's own timezone (`lib/venue-hours.ts`). Null: not given. Written by `setVenueHours` (venue page, SCRUM-1154).
   hours             Json?
   /// A few lines about the place, shown on the venue page. Null: not given.
   description       String?
@@ -1934,8 +1936,9 @@ model organisations {
   /// end of its first event with at least 8 people checked in, and that event
   /// (SCRUM-1269, lib/analytics-access.ts). Written ONCE, by the first read that
   /// finds such an event, and never re-derived: soft-deleting the event, or a
-  /// later re-count, cannot restart the window. Moved once, by 60 days, when
-  /// the window went from 30 to 90 (migration 20261126100000). A plain id, no foreign key:
+  /// later re-count, cannot restart the window. A window written under the old
+  /// 30-day rule is moved by 60 days in a data migration that lands after the
+  /// pilot (Sun 2026-11-29 14:00 IST; SCRUM-1269). A plain id, no foreign key:
   /// it is a record of a decision, kept if the event goes.
   analytics_free_until            DateTime?               @db.Timestamptz(6)
   first_free_event_id             String?                 @db.Uuid
@@ -2726,6 +2729,8 @@ model event_feedback_tallies {
   contributors Json
   /// `{ [topic]: distinct people }` over the positive messages; null on a tally frozen before topics (2026-11-24).
   topics       Json?
+  /// `{ [category]: the largest single person's messages }`, the dominance rule's numerator (SCRUM-1285); null on a tally frozen before 2026-11-26, which then reads without it.
+  top_messages Json?
   frozen_at    DateTime @default(now()) @db.Timestamptz(6)
 
   event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
@@ -4250,6 +4255,9 @@ model event_issues {
   /// one worth asking about afterwards.
   acknowledged_at DateTime? @db.Timestamptz(6)
   acknowledged_by String?
+  /// The organizer's owners and admins were mailed about this opening (SCRUM-1286, `lib/live-alert-mail.ts`): claimed
+  /// before the send, given back if nobody got it. A critical kind mails again only 30 minutes after the last of these.
+  mailed_at DateTime? @db.Timestamptz(6)
 
   event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
   ///

@@ -122,13 +122,15 @@ async function mailResults(event: MailedEvent): Promise<{ sent: number; failed: 
 type LifecycleMail = { subject: string; text: string; html: string }
 
 /**
- * One lifecycle mail to an organization's owners and admins (04b results, 04c next night, 09a first event), each with
- * their own unsubscribe link. Organization membership, never `events.organizer_id`: a member who left gets nothing
- * (CLAUDE.md RBAC). Counts a provider failure apart from a suppression, so a caller can give its claim back.
+ * One mail to an organization's owners and admins. Lifecycle (04b results, 04c next night, 09a first event): each with
+ * their own unsubscribe link. `live_alert` (09) is transactional: no List-Unsubscribe and no stream, so only a bounce or
+ * a complaint stops it, and `build` is handed "". Organization membership, never `events.organizer_id`: a member who
+ * left gets nothing (CLAUDE.md RBAC). Counts a provider failure apart from a suppression, so a caller can give its
+ * claim back.
  */
 export async function mailOwnersAndAdmins(
   orgId: string,
-  kind: "results" | "next_night",
+  kind: "results" | "next_night" | "first_night" | "live_alert",
   build: (unsubscribeUrl: string) => LifecycleMail
 ): Promise<{ recipients: number; sent: number; failed: number }> {
   const members = await db.organisation_members.findMany({
@@ -138,18 +140,23 @@ export async function mailOwnersAndAdmins(
   const replyTo = emailReplyTo()
   let sent = 0
   let failed = 0
+  const lifecycle = kind !== "live_alert"
   for (const { user } of members) {
-    const unsubscribe = unsubscribeUrl(user)
+    const unsubscribe = lifecycle ? unsubscribeUrl(user) : ""
     // sendEmail never throws, checks the suppression list (an unsubscribe stops `lifecycle`), and logs its own failure.
     const result = await sendEmail({
       to: canonicalEmail(user.email),
       ...build(unsubscribe),
-      stream: "lifecycle",
       tags: [{ name: "kind", value: kind }],
-      headers: {
-        "List-Unsubscribe": `<${unsubscribe}>${replyTo ? `, <mailto:${replyTo}?subject=unsubscribe>` : ""}`,
-        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-      },
+      ...(lifecycle
+        ? {
+            stream: "lifecycle" as const,
+            headers: {
+              "List-Unsubscribe": `<${unsubscribe}>${replyTo ? `, <mailto:${replyTo}?subject=unsubscribe>` : ""}`,
+              "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            },
+          }
+        : {}),
     })
     if (result.sent) sent++
     else if (result.reason === "provider_error") failed++

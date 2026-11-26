@@ -47,6 +47,7 @@ import { discardAndRefuse, refuseBigRoomWhileDown, verdictForBigRoom } from "@/l
 import { readJson, isUuid } from "@/lib/api-input"
 import { createRoom } from "@/lib/check-in-core"
 import { paginationMeta } from "@/lib/pagination"
+import { markRoomRead } from "@/lib/chat-list"
 import { replyCounts } from "@/lib/reply-counts"
 
 interface RouteParams {
@@ -437,21 +438,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * message on the platform; they are taken for the page's ids now.
      */
     const [, pageMembers, repliesByParent] = await Promise.all([
-      // Update last read message for user
-      messages.length > 0
-        ? db.chat_group_members.update({
-            where: {
-              chat_group_id_user_id: {
-                chat_group_id: chatGroup.id,
-                user_id: authUser.userId,
-              },
-            },
-            data: {
-              last_read_message_id: messages[0].id,
-              updated_at: new Date(),
-            },
-          })
-        : null,
+      messages.length > 0 ? markRoomRead(chatGroup.id, authUser.userId, messages[0].id) : null,
       pseudonymFor.size
         ? db.chat_group_members.findMany({
             where: { chat_group_id: chatGroup.id, user_id: { in: [...pseudonymFor] } },
