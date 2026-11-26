@@ -544,7 +544,9 @@ export function GeofenceEditor({
           </div>
         ) : null}
 
-        <div className="pointer-events-none absolute bottom-2.5 left-2.5 z-[800] flex flex-col gap-1.5 rounded-lg border border-border-strong bg-background/90 px-3 py-2 text-[0.71875rem] backdrop-blur">
+        {/* Above the credit's row, not beside it: on a narrow map the linked
+            credit ran under the legend's corner (SCRUM-1147, at 768). */}
+        <div className="pointer-events-none absolute bottom-7 left-2.5 z-[800] flex flex-col gap-1.5 rounded-lg border border-border-strong bg-background/90 px-3 py-2 text-[0.71875rem] backdrop-blur">
           <Legend token="--chart-1" dash="solid" label={legend?.extent ?? "Extent — the venue itself"} />
           <Legend token="--chart-2" dash="dashed" label={legend?.buffer ?? `Buffer — your tolerance (${fence.buffer} m)`} />
           <Legend

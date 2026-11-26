@@ -36,6 +36,13 @@ const CORNERS = [
   [0.5, 0.52],
 ] as const
 
+/** The legend and the credit share the map's bottom edge; on a narrow map they touched (768, first CI run). */
+async function expectLegendClearOfCredit(page: Page) {
+  const legend = await page.getByText(/^GPS allowance/).locator("xpath=ancestor::div[1]").boundingBox()
+  const credit = await page.locator(".leaflet-control-attribution").boundingBox()
+  expect(legend!.y + legend!.height <= credit!.y || legend!.x + legend!.width <= credit!.x).toBe(true)
+}
+
 async function shoot(page: Page, name: string) {
   await page.locator(".leaflet-container").scrollIntoViewIfNeeded()
   await page.screenshot({ path: `${SCREENS}/${name}.png` })
@@ -85,10 +92,12 @@ test("an outline traced by hand on the street map is saved; no Esri tile loads; 
   await handles.first().click()
   await expect(page.getByText("Click your first point to close the outline")).toHaveCount(0)
   await page.getByRole("button", { name: "Adjust area" }).click()
+  await expectLegendClearOfCredit(page)
   await shoot(page, "trace-1280-closed")
 
   await page.setViewportSize({ width: 768, height: 1024 })
   await expect.soft(credit.locator('a[href="https://www.openstreetmap.org/copyright"]')).toBeVisible()
+  await expectLegendClearOfCredit(page)
   await shoot(page, "trace-768-closed")
 
   await page.getByLabel("Title").fill(TITLE)
