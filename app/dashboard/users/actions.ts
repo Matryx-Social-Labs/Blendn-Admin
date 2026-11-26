@@ -401,6 +401,7 @@ export async function updateUserRole(id: string, role: user_role): Promise<{ suc
     )
   }
   if (promoting && before.suspended_at) throw new Refusal("A suspended account can't be made an admin.")
+  if (promoting && before.role === "app_admin") throw new Refusal("They're already an admin.")
 
   const pending = await db.$transaction(async (tx) => {
     let approvedBy: string | null = null

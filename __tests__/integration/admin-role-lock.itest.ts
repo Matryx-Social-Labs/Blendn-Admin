@@ -190,6 +190,16 @@ describe("a second admin", () => {
     expect(await auditRows(id)).toEqual([{ action: "user.admin_promotion_requested", details: { to: "app_admin" }, user_id: a }])
   })
 
+  it("refuses promoting someone who is already an admin, and records nothing", async () => {
+    await signedInAdmin()
+    const id = await anotherAdmin()
+
+    await expect(updateUserRole(id, "app_admin")).rejects.toThrow("already an admin")
+
+    expect(await stateOf(id)).toEqual({ role: "app_admin", admin_requested_by: null, admin_requested_at: null })
+    expect(await auditRows(id)).toEqual([])
+  })
+
   it("A confirming A's own request is still a request", async () => {
     const a = await signedInAdmin()
     const id = await person("p@matrixsociallabs.com")
