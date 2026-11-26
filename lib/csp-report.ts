@@ -43,16 +43,32 @@ export const RAZORPAY_CHECKOUT_ORIGINS = ["https://checkout.razorpay.com", "http
 export const RAZORPAY_SCRIPT_CDN = "https://cdn.razorpay.com"
 
 /**
+ * Where the event form's video previews play from: the picked file (`blob:`),
+ * then the uploaded clip at its public Tigris URL (`getPublicUrl` in
+ * lib/tigris.ts). Any bucket, so the header does not depend on a build-time
+ * `TIGRIS_BUCKET`. These were the only CSP reports Sentry ever received
+ * (staging, 2026-11-25).
+ */
+export const TIGRIS_MEDIA_ORIGIN = "https://*.fly.storage.tigris.dev"
+
+/**
  * The policy itself, as a header value. Here rather than inline in
  * `next.config.ts` so a test can read the real thing.
+ *
+ * `allowEval` is false for the enforcing copy in production (SCRUM-1243):
+ * only Next's dev overlay and Swagger UI need `'unsafe-eval'`, and Swagger
+ * stays report-only. `'unsafe-inline'` stays until the per-request nonce
+ * (security/06b).
  */
-export function contentSecurityPolicy(reportUri: string | null): string {
+export function contentSecurityPolicy(reportUri: string | null, allowEval = true): string {
   const razorpay = RAZORPAY_CHECKOUT_ORIGINS.join(" ")
+  const evalSource = allowEval ? " 'unsafe-eval'" : ""
   return [
     "default-src 'self'",
-    `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${razorpay} ${RAZORPAY_SCRIPT_CDN}`,
+    `script-src 'self' 'unsafe-inline'${evalSource} ${razorpay} ${RAZORPAY_SCRIPT_CDN}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https:",
+    `media-src 'self' blob: ${TIGRIS_MEDIA_ORIGIN}`,
     "font-src 'self' data:",
     "connect-src 'self' https: wss:",
     `frame-src 'self' ${razorpay}`,

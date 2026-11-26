@@ -114,10 +114,10 @@ async function headersFor(nodeEnv: string, path: string): Promise<Record<string,
       rules = await (require("../next.config").default as { headers: () => Promise<HeaderRule[]> }).headers()
     })
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { buildCustomRoute } = require("next/dist/lib/build-custom-route")
+    const { buildCustomRoute } = require("next/dist/server/lib/router-utils/filesystem")
     const sent: Record<string, string> = {}
     for (const rule of rules) {
-      if (!new RegExp(buildCustomRoute("header", rule).regex).test(path)) continue
+      if (!buildCustomRoute("header", rule).match(path)) continue
       for (const h of rule.headers) sent[h.key] = h.value
     }
     return sent
