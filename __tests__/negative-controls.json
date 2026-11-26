@@ -35,6 +35,18 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "duplicate-event.itest.ts": {
+      "guards": "SCRUM-1153 on a db:migrate database: /dashboard/events/new?from=<id> prefills only for an owner/admin of the organising org (eventPermissions(actorFor(user), source).canEdit) on an ordinary, undeleted event; another org's owner, the venue's owner (canOperate only), a member whose org is suspended, a curated event nobody claimed, a deleted event, a venue day (even for app_admin), a non-uuid and an unknown uuid all get props equal to the plain form with no source field; opening the prefill writes no row (events, event_media, event_details, audit_logs counts) and leaves the source row equal; a copy saved through POST /api/events keeps its media after the source's media are replaced and the source is deleted, with no storage delete called.",
+      "mutation": "(RED) the suite on origin/dev 8aaf7ba6. (N1) duplicateFor's canEdit check removed. (N2) its kind: \"event\" filter removed. (N3) its deleted_at filter removed. (N4) isUuid replaced by typeof string.",
+      "observed": "RED: 3 of 12 failing (the two prefill cases and the media case; the nine refusals pass on dev because dev ignores ?from). N1: 4 of 12 (another org, the venue owner, the suspended org, the curated event; staff is redirected by mayCreateEvents before the loader). N2: 1 (venue day). N3: 1 (deleted). N4: 1 (non-uuid: Prisma throws). Restored each (cmp against a copy); 12 of 12 on blendn_design_06.",
+      "date": "2026-11-26"
+    },
+    "event-duplicate.test.ts": {
+      "guards": "SCRUM-1153 duplicatePrefill: dates move by whole calendar weeks on the event's own clock (Toronto across the March and November 2027 changes, an end after midnight, Kolkata, a past source moved 4 weeks, a start exactly now skipped), the note's two strings, the year only across years, and the allow-list: exactly the named keys, status draft, no id, and no value from an unnamed column (ticketing, curation, review_demo, a brand_new_column sentinel).",
+      "mutation": "(RED) module absent on origin/dev 8aaf7ba6. (N5) ...source spread into initialEvent. (N6) weeksLater replaced by a fixed 7-day millisecond offset.",
+      "observed": "RED: suite fails to resolve @/lib/event-duplicate. N5: 2 of 11 (both allow-list cases). N6: 2 of 11 (both Toronto DST cases). Restored each (cmp); 11 of 11.",
+      "date": "2026-11-26"
+    },
     "report-scope-staff.test.ts": {
       "guards": "SCRUM-1244 + SCRUM-1246: an org's staff report on none of its events; an organizer-role member of a venue-owning org gets the venue's arm in reportScope; the per-guest scope (eventScopeFor, the org audience) and the Attendees export read the hosted arm, never a venue's arms.",
       "mutation": "(1) eventScopeFor returns reportScope(...).all; (2) the Attendees case's hostNights reads `scope` (scopes.all) instead of scopes.hosted.",

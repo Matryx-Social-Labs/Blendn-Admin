@@ -6,6 +6,7 @@ import { logger } from "@/lib/logger"
 import type { Rendition } from "@/lib/media-clip"
 import { refusalText } from "@/lib/refusal"
 import Link from "next/link"
+import { IconCopy } from "@tabler/icons-react"
 import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
 import { formatInTimeZone } from "date-fns-tz"
@@ -15,7 +16,7 @@ import { EventForm, type EventFormValues } from "@/components/event-form"
 import { toast } from "sonner"
 import { DEFAULT_CHECK_IN_RADIUS_M } from "@/lib/constants"
 
-interface EventEditorData {
+export interface EventEditorData {
   id?: string
   title: string
   description: string
@@ -35,6 +36,7 @@ interface EventEditorData {
   visibility: "public" | "private" | "unlisted"
   max_capacity?: number | null
   min_age?: number | null
+  door_policy?: "open" | "guest_list" | "members_only" | "invite_only"
   latitude?: number | null
   longitude?: number | null
   cover_image_url?: string | null
@@ -75,6 +77,8 @@ interface EventEditorProps {
   canFeature?: boolean
   /** Clips are checked by the media worker here (`clipCheckOn`). */
   clipCheck?: boolean
+  /** A copy from "Duplicate" (`lib/event-duplicate.ts`): what the form says above itself. */
+  copyNote?: { lead: string; rest: string }
 }
 
 const formatDateTimeInput = (value?: string, timezone = "Asia/Kolkata") => {
@@ -119,7 +123,7 @@ const parseToFaqArray = (value: unknown): Array<{ question: string; answer: stri
   return []
 }
 
-export function EventEditor({ categories, amenities = [], initialEvent, canFeature = false, clipCheck = false }: EventEditorProps) {
+export function EventEditor({ categories, amenities = [], initialEvent, canFeature = false, clipCheck = false, copyNote }: EventEditorProps) {
   const router = useRouter()
   const [isSaving, setIsSaving] = useState(false)
   const isEditing = Boolean(initialEvent?.id)
@@ -148,6 +152,7 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
       visibility: initialEvent.visibility === "private" ? "unlisted" : initialEvent.visibility,
       max_capacity: initialEvent.max_capacity ?? undefined,
       min_age: initialEvent.min_age ?? undefined,
+      door_policy: initialEvent.door_policy,
       latitude: initialEvent.latitude ?? undefined,
       longitude: initialEvent.longitude ?? undefined,
       cover_image_url: initialEvent.cover_image_url ?? undefined,
@@ -305,6 +310,14 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
       >
         ← Back to events
       </Link>
+      {copyNote ? (
+        <div className="flex gap-2.5 rounded-[10px] border border-border bg-card px-3.5 py-3 text-[0.8125rem]">
+          <IconCopy aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <p className="min-w-0 leading-5">
+            <b className="font-bold">{copyNote.lead}</b> <span className="text-muted-foreground">{copyNote.rest}</span>
+          </p>
+        </div>
+      ) : null}
       <EventForm
         onSubmit={handleSubmit}
         defaultValues={defaultValues}
