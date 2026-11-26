@@ -9,8 +9,16 @@ import { cleanup, closeDb, db, makeUser } from "./helpers"
 
 const DAY_MS = 86_400_000
 const users: string[] = []
+let ADMIN = ""
+let ADMIN_ID = ""
+beforeAll(async () => {
+  ADMIN_ID = await makeUser("u18-admin", "app_admin")
+  users.push(ADMIN_ID)
+  ADMIN = `${ADMIN_ID}@matrixsociallabs.com`
+  await db.user.update({ where: { id: ADMIN_ID }, data: { email: ADMIN } })
+})
 afterAll(async () => {
-  await db.audit_logs.deleteMany({ where: { resource_id: { in: users } } })
+  await db.audit_logs.deleteMany({ where: { OR: [{ resource_id: { in: users } }, { user_id: { in: users } }] } })
   await db.profiles.deleteMany({ where: { id: { in: users } } })
   await cleanup(users, [])
   await closeDb()
@@ -83,8 +91,9 @@ describe("the deletion list", () => {
 
 describe("a staff correction", () => {
   it("sets the birth date and its age, clears the stamp, and writes an audit row naming who", async () => {
-    const id = await person("u18-wrong", { age: 16, under_18_since: new Date() })
-    await correctBirthDate(db, { userId: id, dateOfBirth: "1995-06-15", by: "ops@matrixsociallabs.com" }, new Date())
+    const stampedAt = new Date(Date.now() - 3 * DAY_MS)
+    const id = await person("u18-wrong", { age: 16, under_18_since: stampedAt })
+    await correctBirthDate(db, { userId: id, dateOfBirth: "1995-06-15", by: ADMIN.toUpperCase() }, new Date())
 
     const row = await db.profiles.findUniqueOrThrow({ where: { id }, select: { date_of_birth: true, age: true, under_18_since: true } })
     expect(row.date_of_birth?.toISOString().slice(0, 10)).toBe("1995-06-15")
@@ -93,7 +102,8 @@ describe("a staff correction", () => {
     expect(await knownMinorsUnstamped(db, new Date())).not.toContain(id)
 
     const audit = await db.audit_logs.findFirstOrThrow({ where: { resource_id: id, action: "profile.under_18_corrected" } })
-    expect(audit.details).toMatchObject({ by: "ops@matrixsociallabs.com", stampCleared: true })
+    expect(audit.user_id).toBe(ADMIN_ID)
+    expect(audit.details).toMatchObject({ stampedAt: stampedAt.toISOString() })
     // The audit row names who and what changed, never the birth date itself.
     expect(JSON.stringify(audit.details)).not.toContain("1995")
   })
@@ -102,23 +112,30 @@ describe("a staff correction", () => {
     const stampedAt = new Date()
     const id = await person("u18-still", { age: 16, under_18_since: stampedAt })
     await expect(
-      correctBirthDate(db, { userId: id, dateOfBirth: yearsAgo(17).toISOString().slice(0, 10), by: "ops@matrixsociallabs.com" }, new Date())
+      correctBirthDate(db, { userId: id, dateOfBirth: yearsAgo(17).toISOString().slice(0, 10), by: ADMIN }, new Date())
     ).rejects.toThrow(/18 and over/)
-    await expect(correctBirthDate(db, { userId: id, dateOfBirth: "1995-02-30", by: "ops@matrixsociallabs.com" }, new Date())).rejects.toThrow(
+    await expect(correctBirthDate(db, { userId: id, dateOfBirth: "1995-02-30", by: ADMIN }, new Date())).rejects.toThrow(
       /real date/
     )
     expect(await stampOf(id)).toEqual(stampedAt)
     expect(await db.audit_logs.count({ where: { resource_id: id } })).toBe(0)
   })
 
+  it("refuses an actor who is not a live app_admin, and changes nothing", async () => {
+    const stampedAt = new Date()
+    const id = await person("u18-actor", { age: 16, under_18_since: stampedAt })
+    await expect(correctBirthDate(db, { userId: id, dateOfBirth: "1995-06-15", by: "nobody@matrixsociallabs.com" }, new Date())).rejects.toThrow(/app_admin/)
+    expect(await stampOf(id)).toEqual(stampedAt)
+  })
+
   it("refuses a deleted or unknown account", async () => {
     const id = await person("u18-erased", { under_18_since: new Date() })
     await db.user.update({ where: { id }, data: { deletedAt: new Date() } })
-    await expect(correctBirthDate(db, { userId: id, dateOfBirth: "1995-06-15", by: "ops@matrixsociallabs.com" }, new Date())).rejects.toThrow(
+    await expect(correctBirthDate(db, { userId: id, dateOfBirth: "1995-06-15", by: ADMIN }, new Date())).rejects.toThrow(
       /No live account/
     )
     await expect(
-      correctBirthDate(db, { userId: "00000000-0000-4000-8000-000000001169", dateOfBirth: "1995-06-15", by: "ops@matrixsociallabs.com" }, new Date())
+      correctBirthDate(db, { userId: "00000000-0000-4000-8000-000000001169", dateOfBirth: "1995-06-15", by: ADMIN }, new Date())
     ).rejects.toThrow(/No live account/)
   })
 })

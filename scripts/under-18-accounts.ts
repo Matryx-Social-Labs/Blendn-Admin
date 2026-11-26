@@ -21,7 +21,8 @@ import { isStaffEmail } from "../lib/company"
  * `--correct` is the answer to a person who writes to the grievance address
  * that their birth date is wrong: it sets the birth date (18 or over, a real
  * date), the age that goes with it, and clears the stamp, in one transaction
- * with an audit row naming the staff address and never the date.
+ * with an audit row whose actor is the `app_admin` named by `--by`, carrying
+ * when the account was stamped and never the date.
  *
  * Output is counts and user ids only: no name, email, phone or birth date.
  *
@@ -119,7 +120,7 @@ export async function dueForDeletion(db: PrismaClient, now: Date): Promise<strin
   return rows.map((row) => row.id)
 }
 
-/** Set a corrected birth date, clear the stamp, and record who did it. Throws, changing nothing, on a refused date or account. */
+/** Set a corrected birth date, clear the stamp, and record who did it. Throws, changing nothing, on a refused date, account or actor. */
 export async function correctBirthDate(
   db: PrismaClient,
   { userId, dateOfBirth, by, environment }: { userId: string; dateOfBirth: string; by: string; environment?: string },
@@ -129,6 +130,11 @@ export async function correctBirthDate(
   const dob = parseDateOfBirth(dateOfBirth, now)
   if (refusal || !dob) throw new Error(refusal ?? "Enter a real date of birth in YYYY-MM-DD form.")
   await db.$transaction(async (tx) => {
+    const admin = await tx.user.findFirst({
+      where: { email: by.trim().toLowerCase(), role: "app_admin", deletedAt: null, suspended_at: null },
+      select: { id: true },
+    })
+    if (!admin) throw new Error("--by must be the address of a live app_admin")
     const row = await tx.profiles.findFirst({
       where: { id: userId, user: { deletedAt: null } },
       select: { under_18_since: true },
@@ -139,11 +145,12 @@ export async function correctBirthDate(
       data: { date_of_birth: dob, age: ageFrom({ date_of_birth: dob }, now), under_18_since: null },
     })
     await auditInTx(tx, {
+      userId: admin.id,
       action: "profile.under_18_corrected",
       resource: "user",
       resourceId: userId,
       orgId: null,
-      details: { by, stampCleared: row.under_18_since !== null, environment: environment ?? "local" },
+      details: { stampedAt: row.under_18_since?.toISOString() ?? null, environment: environment ?? "local" },
     })
   })
 }
@@ -162,7 +169,7 @@ async function main() {
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) })
   const now = new Date()
   try {
-    console.log(`database: ${command.environment ?? "local"}  mode: ${command.mode}`)
+    console.log(`database: ${command.environment ?? "local"} (${new URL(process.env.DATABASE_URL ?? "").hostname})  mode: ${command.mode}`)
     if (command.mode === "correct") {
       await correctBirthDate(db, { ...command }, now)
       console.log(`corrected: ${command.userId} (birth date set, stamp cleared, audit row written)`)

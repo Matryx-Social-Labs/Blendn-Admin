@@ -31,6 +31,7 @@ const requests = require("@/app/api/mobile/message-requests/route") as typeof im
 const eventDetail = require("@/app/api/mobile/events/[eventId]/route") as typeof import("@/app/api/mobile/events/[eventId]/route")
 const interest = require("@/app/api/mobile/events/[eventId]/interest/route") as typeof import("@/app/api/mobile/events/[eventId]/interest/route")
 const boardRequests = require("@/app/api/mobile/events/[eventId]/board/[postId]/requests/route") as typeof import("@/app/api/mobile/events/[eventId]/board/[postId]/requests/route")
+const respond = require("@/app/api/mobile/message-requests/[requestId]/respond/route") as typeof import("@/app/api/mobile/message-requests/[requestId]/respond/route")
 const friendRequests = require("@/app/api/mobile/friends/requests/route") as typeof import("@/app/api/mobile/friends/requests/route")
 const friendRespond = require("@/app/api/mobile/friends/requests/[requestId]/route") as typeof import("@/app/api/mobile/friends/requests/[requestId]/route")
 const friendInvite = require("@/app/api/mobile/friends/invite/[token]/route") as typeof import("@/app/api/mobile/friends/invite/[token]/route")
@@ -44,7 +45,7 @@ const convos: string[] = []
 afterAll(async () => {
   await db.private_messages.deleteMany({ where: { conversation_id: { in: convos } } })
   await db.private_conversations.deleteMany({ where: { id: { in: convos } } })
-  await db.message_requests.deleteMany({ where: { sender_id: { in: users } } })
+  await db.message_requests.deleteMany({ where: { OR: [{ sender_id: { in: users } }, { recipient_id: { in: users } }] } })
   await db.friend_requests.deleteMany({ where: { sender_id: { in: users } } })
   await db.event_rsvps.deleteMany({ where: { user_id: { in: users } } })
   await db.event_favorites.deleteMany({ where: { user_id: { in: users } } })
@@ -254,6 +255,16 @@ async function refusedEverywhereAsMinor(who: { id: string; token: string }) {
     })
   )
   expect(await mayJoinCrews(who.id)).toBe(false)
+  // Accepting an adult's earlier message request would open a conversation.
+  const earlier = await db.message_requests.create({
+    data: { sender_id: other.id, recipient_id: who.id, message: "hi from before", status: "pending" },
+  })
+  await refusedAsMinor(
+    await respond.POST(req(`/api/mobile/message-requests/${earlier.id}/respond`, who.token, "POST", { action: "accept" }), {
+      params: Promise.resolve({ requestId: earlier.id }),
+    })
+  )
+  expect(await db.message_requests.findUniqueOrThrow({ where: { id: earlier.id }, select: { status: true } })).toEqual({ status: "pending" })
 
   // Nothing was written by any of them.
   expect(await db.event_rsvps.count({ where: { user_id: who.id } })).toBe(0)

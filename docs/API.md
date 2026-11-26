@@ -4227,10 +4227,11 @@ Five consequences worth knowing about:
   and over." to a profile that is neither onboarded nor of a known adult age
   (SCRUM-331), so the hold above is not only the app's. Viewing events is not
   gated; neither are replies to a message request (decline and block are
-  safety actions). An onboarded profile with no age keeps taking part.
+  safety actions), except that accepting one is refused for an account known
+  to be under 18 (below). An onboarded profile with no age keeps taking part.
 - **An account known to be under 18 takes part nowhere** (SCRUM-1169, D-026):
   a derived age under 18, or `profiles.under_18_since` set, onboarded or not.
-  The same routes answer **403** with `errorCode` and `reasonCode` both
+  The same routes, and accepting a message request, answer **403** with `errorCode` and `reasonCode` both
   `AGE_RESTRICTED` and “Blend’n is for people 18 and over. If your date of birth is wrong, write to grievance@blendn.app.” The
   stamp is set by `scripts/under-18-accounts.ts --apply`, which lists stamped
   accounts for deletion 14 days on; staff clear it with `--correct` on a
