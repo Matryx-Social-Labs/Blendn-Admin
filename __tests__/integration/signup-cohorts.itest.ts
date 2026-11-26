@@ -189,12 +189,70 @@ describe("who receives it", () => {
     await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
 
     session = { user: { id: admin, role: "app_admin" } }
-    expect(await getDashboardOverview()).toHaveProperty("cohorts.weeks")
+    const staff = await getDashboardOverview()
+    expect(staff).toHaveProperty("cohorts.weeks")
+    expect(staff).toHaveProperty("cohorts.steps")
     for (const [id, role] of [[organizer, "organizer"], [owner, "venue_owner"]] as const) {
       session = { user: { id, role } }
       const overview = await getDashboardOverview()
       expect(overview.role).toBe(role)
       expect(overview).not.toHaveProperty("cohorts")
     }
+  })
+})
+
+describe("where onboarding stopped (SCRUM-1283)", () => {
+  // Monday 19 Oct 2020, 12:00 IST; two weeks: 12 Oct and 19 Oct. Everybody joins on Tue 13 Oct.
+  const NOW3 = new Date("2020-10-19T12:00:00+05:30")
+  const joined = ist("2020-10-13T10:00")
+  const dob = new Date("1995-06-15")
+  let category = ""
+
+  afterAll(async () => {
+    if (category) await db.categories.deleteMany({ where: { id: category } })
+  })
+
+  /** An account as sign-up leaves it (a profile with the name, `onboarded` false), then whatever its steps wrote. */
+  async function starter(label: string, profile: Record<string, unknown> | null, at: Date = joined) {
+    const id = await makeUser(testId(label))
+    users.push(id)
+    await db.user.update({ where: { id }, data: { createdAt: at } })
+    if (profile) await db.profiles.create({ data: { id, name: `Test ${label}`, onboarded: false, ...profile } })
+    return id
+  }
+
+  it("counts each unfinished account at the furthest step it filled, finished ones apart, and adds up to the sign-ups", async () => {
+    category = (await db.categories.create({ data: { name: testId("ob-cat"), slug: testId("ob-cat") } })).id
+
+    await starter("ob-signup", {}) // the name is sign-up's, not the basics step's
+    await starter("ob-bare", null) // no profile row at all
+    await starter("ob-basics", { date_of_birth: dob })
+    await starter("ob-intent", { date_of_birth: dob, intent_default: ["networking"] })
+    await starter("ob-reveal", { date_of_birth: dob, reveal_by_default: true })
+    await starter("ob-bio", { date_of_birth: dob, bio: "Ask me about trains" }) // bio but no photos
+    const graph = await starter("ob-graph", { date_of_birth: dob })
+    await db.user_interests.create({ data: { user_id: graph, category_id: category } })
+    // All but location: sharing left on, which is also the column's default.
+    await starter("ob-media", { date_of_birth: dob, gender: "woman", intent_default: ["friendship"], bio: "Hi", photos: ["https://x.invalid/p.jpg"] })
+    await starter("ob-skipped", { date_of_birth: dob, photos: ["https://x.invalid/q.jpg"] }) // preferences and details skipped
+    await starter("ob-location", { date_of_birth: dob, photos: ["https://x.invalid/r.jpg"], share_location: false })
+    await starter("ob-done", { onboarded: true })
+    const gone = await starter("ob-gone", { date_of_birth: dob })
+    await db.user.update({ where: { id: gone }, data: { deletedAt: ist("2020-10-14T10:00") } })
+    await starter("ob-before", { date_of_birth: dob }, ist("2020-10-11T23:00")) // the week before the two
+
+    const result = await signupCohorts(2, NOW3)
+    expect(result.steps).toEqual([
+      { step: "none", people: 2 },
+      { step: "basics", people: 1 },
+      { step: "preferences", people: 2 },
+      { step: "details", people: 2 },
+      { step: "media", people: 2 },
+      { step: "location", people: 1 },
+      { step: "finished", people: 1 },
+    ])
+    const signedUp = result.weeks.reduce((n, w) => n + w.signedUp, 0)
+    expect(result.steps.reduce((n, s) => n + s.people, 0)).toBe(signedUp)
+    expect(signedUp).toBe(11)
   })
 })
