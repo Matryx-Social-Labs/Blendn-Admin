@@ -110,7 +110,7 @@ it("every keyword is one word, and matches itself as that word", () => {
   expect([...CHAT_KEYWORDS].filter((k) => !checkKeywords(k)?.matched?.includes(k) || /\s/.test(k))).toEqual([])
 })
 
-it("a review-only word spelled out says nothing, in leetspeak it is the same word; a slur spelled out is still flagged", () => {
+it("review words are matched as words (leetspeak folded); a slur with separators between its letters is flagged", () => {
   expect(checkKeywords("c.h.o.d yaar")).toBeNull()
   expect(checkKeywords("sh@la")).toMatchObject({ action: "flag", matched: ["shala"] })
   expect(checkKeywords("b.h.e.n.c.h.o.d")).toMatchObject({ action: "flag", matched: ["bhenchod"] })
