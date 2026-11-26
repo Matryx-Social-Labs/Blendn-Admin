@@ -3952,7 +3952,7 @@ and only the second is worth blocking.
 | kind | who | media |
 |---|---|---|
 | `announcement` | `canEdit` — the organising org, or an `app_admin`. **Not** the venue owner | no |
-| `sponsored` | one organisation holding `may_sponsor` **and** an approved placement at this event, or an `app_admin` | **yes** |
+| `sponsored` | one organisation holding `may_sponsor` **and** an approved placement at this event, or an `app_admin` | not yet: refused with 400 (nothing stores it) |
 | `system` | `app_admin` only — it speaks as Blend'n | no |
 
 **This route used to compare two user ids.** `event.organizer_id !== caller.id`,
@@ -3973,8 +3973,9 @@ announces as one.
 everyone who can announce can also mark a message sponsored, the label stops
 meaning anything and becomes a styling choice — an organizer could dress an
 advertisement as an announcement or the reverse, and a reader has no way to tell
-which they are looking at. `organisations.may_sponsor` is off for every row and
-granted by an admin, because the word is only worth having if it is scarce.
+which they are looking at. `organisations.may_sponsor` is off by default and
+turned on only by an admin (the Organisations toggle, or approving a sponsor's
+application), because the word is only worth having if it is scarce.
 
 It is an **organisation** flag rather than a role: the permission belongs to the
 company with the commercial agreement, not to whichever of its staff is logged
