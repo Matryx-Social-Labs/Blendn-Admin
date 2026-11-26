@@ -549,8 +549,11 @@ Do step 1, then the first of steps 2 to 6 that matches.
    Do not wait for an alert: the production uptime monitors are off (below).
    `railway deployment list` shows the deployments and their times;
    `railway logs --deployment --lines 200` (a flag, no value) shows the running one.
-2. **Data exposed.** Do not restart or redeploy (it destroys the evidence); revoke the
-   exposed credential where it was issued, and the owner decides the rest.
+   Logs can hold personal data: quote the error, never paste lines into the ticket or a reply.
+2. **Data exposed.** Call the owner. Contain it: revoke an exposed credential where it
+   was issued; for a leaking route the owner decides whether to take the service down.
+   Do not restart or redeploy before the logs are read (a restart loses the process's
+   state). Whether anyone must be notified is the owner's call.
 3. **Crashed or hung.** The console shows the deployment Crashed (Railway restarts a crash
    at most 3 times, then leaves it down), or health times out while it shows Active
    (Railway does not restart that: its healthcheck runs only during a deploy). Restart:
@@ -565,8 +568,8 @@ Do step 1, then the first of steps 2 to 6 that matches.
    stop and call the owner. How long a rollback takes is not measured yet.
 5. **A client build caused it.** Ship a fixed build (Hotfix path, below). Only once it is
    live in both stores, set `MOBILE_MIN_APP_VERSION` (console: Blendn-Admin, production,
-   Variables; a plain version like `1.0.3`; saving redeploys): every older build that
-   sends its version then gets 426 "update required".
+   Variables; a plain version like `1.0.3`, checked twice; saving redeploys): every
+   older build that sends its version then gets 426 "update required".
 6. **Data lost.** There is no tested restore yet: the backups and restore section will
    be written by the backups task and **does not exist yet**. Change nothing more and
    call the owner.
@@ -635,4 +638,5 @@ by a user. An alert that names `staging` is not a production incident.
 | 6408883 | alert: monitors (uptime, error spike, mobile p95) → team email | a monitor's issue opens or reopens | all | enabled |
 
 Railway's own graphs (CPU, memory, HTTP) are on the service's Metrics tab;
-`/api/health` (above) reports the pool, event-loop delay and sockets.
+`/api/health` reports the pool, event-loop delay and sockets only to a request with
+the `HEALTH_METRICS_TOKEN` header (see Health Check, above).
