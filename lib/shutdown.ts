@@ -26,19 +26,14 @@ const capped = (work: Promise<unknown>, ms: number) => {
   return Promise.race([work, cap]).finally(() => clearTimeout(timer))
 }
 
-// A step that throws synchronously is a rejected step, not a shutdown that never exits.
-const attempt = (step: () => Promise<unknown>) => Promise.resolve().then(step)
-
 export async function drainAndExit(steps: ShutdownSteps): Promise<void> {
   const forced = setTimeout(() => {
     console.error(`[${new Date().toISOString()}] > Forced shutdown after timeout`)
     steps.exit(1)
   }, FORCED_EXIT_MS)
 
-  const db = Promise.allSettled([attempt(steps.flush), capped(attempt(steps.inFlight), IN_FLIGHT_CAP_MS)]).then(() =>
-    attempt(steps.closeDb)
-  )
-  await Promise.allSettled([db, attempt(steps.closeIo)])
+  const db = Promise.allSettled([steps.flush(), capped(steps.inFlight(), IN_FLIGHT_CAP_MS)]).then(() => steps.closeDb())
+  await Promise.allSettled([db, steps.closeIo()])
 
   clearTimeout(forced)
   steps.exit(0)

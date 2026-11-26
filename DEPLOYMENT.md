@@ -499,11 +499,12 @@ Returns:
   "database": "connected",
   "pool": { "total": 6, "idle": 5, "waiting": 0 },
   "eventLoopDelayMs": { "p50": 10, "p99": 12, "max": 14 },
-  "sockets": 42
+  "sockets": 42,
+  "loops": { "stale": [] }
 }
 ```
 
-`pool`, `eventLoopDelayMs` and `sockets` are counts about this process (SCRUM-1221), present only with `Authorization: Bearer $HEALTH_METRICS_TOKEN` (or anywhere but Railway production while the token is unset); the monitor that alerts on them must send that header. `pool` is `null` before the first query; `sockets` is `null` where Socket.io is not attached. `eventLoopDelayMs` is the last full minute, rotated inside the process and never reset by a read (the endpoint is public), `null` for the first minute; the 10 ms resolution of `monitorEventLoopDelay` is its floor. A rising `eventLoopDelayMs.p99` is the one process saturating, and `pool.waiting` above 0 is requests queued for a connection; the alert thresholds are kept with the other monitor settings (see Monitoring under [Operating production](#operating-production)).
+`pool`, `eventLoopDelayMs` and `sockets` are counts about this process (SCRUM-1221), present only with `Authorization: Bearer $HEALTH_METRICS_TOKEN` (or anywhere but Railway production while the token is unset); the monitor that alerts on them must send that header. `pool` is `null` before the first query; `sockets` is `null` where Socket.io is not attached. `eventLoopDelayMs` is the last full minute, rotated inside the process and never reset by a read (the endpoint is public), `null` for the first minute; the 10 ms resolution of `monitorEventLoopDelay` is its floor. A rising `eventLoopDelayMs.p99` is the one process saturating, and `pool.waiting` above 0 is requests queued for a connection; the alert thresholds are kept with the other monitor settings (see Monitoring under [Operating production](#operating-production)). `loops.stale` (SCRUM-1228) names the background loops that have not finished a pass in three of their intervals ([A background loop stalled](#a-background-loop-stalled)); it never changes `status` or the 200, so the Railway healthcheck never restarts the service for it.
 
 ## Troubleshooting
 
@@ -613,7 +614,9 @@ both environments on 2026-11-25), then the service stays down until someone acts
 not be two processes either: `.railway/railway.ts` sets `overlapSeconds: 0` (the
 old process stops when the new one is healthy) and `drainingSeconds: 15` (15 s from
 SIGTERM to SIGKILL, over `server.ts`'s own 10 s force-exit, so the shutdown gets to
-flush, close the pool and print "Socket.io closed" and "HTTP server closed"). **Those
+finish the reminder pass in flight (up to 8 s), flush, close the pool and print
+"Database pool closed", "Socket.io and HTTP server closed" and "Exiting (0)";
+"Forced shutdown after timeout" means a drain hung and the process exited 1). **Those
 two are not applied yet:** the file reaches Railway only through `railway config
 apply` ([The deploy settings are on the Railway service](#the-deploy-settings-are-on-the-railway-service));
 staging after 2026-11-29, production with the production promotion. Until then
@@ -655,5 +658,40 @@ two `curl`s, `railway deployment list` shows the new deployment SUCCESS,
 and the project's Issues for that environment show nothing new since the deploy.
 
 Railway's own graphs (CPU, memory, HTTP) are on the service's Metrics tab;
-`/api/health` reports the pool, event-loop delay and sockets only to a request with
+`/api/health` reports the pool, event-loop delay, sockets and stale loops only to a request with
 the `HEALTH_METRICS_TOKEN` header (see Health Check, above).
+
+#### A background loop stalled
+
+The sweepers run inside the web process (`lib/background.ts`, and the sponsored
+scheduler in `lib/socket-server.ts`). Each one beats when it starts and after
+every pass that worked (`lib/heartbeat.ts`); once a minute a watchdog logs
+**`Background loop stalled`** (`logger.error`, so it reaches Sentry as one issue
+and the new-issue rule mails the team) for a loop whose last beat is older than
+three of its intervals, and **`Background loop recovered`** when it beats again.
+The error carries `loop`, `lastBeatAt` and `intervalMs`. A stalled loop is
+either a dead timer or every pass failing: the loop's own error line
+(`Presence sweep failed`, `Reminder sweep failed`, …) in the same logs says which.
+
+| `loop` | What stops with it | Interval |
+|---|---|---|
+| `presence` | checking people out; occupancy climbs for ever | 5 min |
+| `go-live-expiry` | Go Live windows ending | 30 s |
+| `reminders` | the hour-before reminder, rating requests, push receipts, results mails | 5 min |
+| `chat-lifecycle` | rooms closing; Lobby and gesture retention | 15 min |
+| `notification-retention` | the bell and `product_events` retention | 6 h |
+| `sentiment` | the live screen's mood and categories | 1 min |
+| `issues` | host alerts in `event_issues` | 1 min |
+| `staff-alert` | new reports and severe flags told to staff | 1 min |
+| `moderation-recheck` | room lines OpenAI could not check when sent | 1 min |
+| `photo-moderation` | profile photos the vendor missed | 10 min |
+| `photo-orphans` | unreferenced profile photos | 1 h |
+| `sponsored` | sponsored messages into rooms | 1 min |
+| `ticket-holds`, `ticket-reconcile`, `payout-release` | only while `TICKETING` is on; otherwise they never start and never stall | 1 / 5 / 5 min |
+
+What to do: read the loop's own error line and `GET /api/health` with the
+token (`loops.stale`). A failing query or a dropped connection usually clears on
+its own; if it does not within three intervals, or the loop has no error line at
+all (a dead timer), redeploy the running deployment (`railway redeploy`): the
+loops start again with the process. A loop that stalls again after a redeploy is
+a code defect: a Jira ticket, label `incident`.
