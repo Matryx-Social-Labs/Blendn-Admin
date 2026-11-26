@@ -690,7 +690,6 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
           venue: { select: { name: true } },
           max_capacity: true,
           status: true,
-          organizer_id: true,
           organizer_org_id: true,
         },
         orderBy: { start_time: "asc" },

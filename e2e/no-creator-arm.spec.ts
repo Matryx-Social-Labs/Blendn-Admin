@@ -80,6 +80,16 @@ test("the organizer's Events and Reports are their organisations' events, never 
   const res = await page.request.get("/api/reports/events?range=custom&from=2000-01-01&to=2099-12-31")
   expect(res.status()).toBe(200)
   const csv = await res.text()
+  // Control: an event an organisation they own or administer runs is in it, so the absence below is not an empty file.
+  const ownRun = await db.events.findFirstOrThrow({
+    where: {
+      deleted_at: null,
+      kind: "event",
+      organizer_org: { members: { some: { user_id: organizer.id, role: { in: ["owner", "admin"] } } } },
+    },
+    select: { id: true },
+  })
+  expect(csv).toContain(ownRun.id)
   expect(csv).not.toContain(legacyId)
   expect(csv).not.toContain(LEGACY_TITLE)
 

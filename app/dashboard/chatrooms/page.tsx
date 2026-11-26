@@ -76,7 +76,6 @@ export default async function ChatroomsPage() {
       organizer_org: { select: { display_name: true } },
       kind: true,
       curated_at: true,
-      organizer_id: true,
       organizer_org_id: true,
       chat_group: { select: { id: true } },
     },

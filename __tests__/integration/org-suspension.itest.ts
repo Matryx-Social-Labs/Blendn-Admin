@@ -78,7 +78,7 @@ async function fixture() {
   await db.organisation_members.create({ data: { org_id: org.id, user_id: host, role: "owner" } })
 
   // Two published events of the org (one upcoming with an RSVP, one live with
-  // someone in the room), one the host created before organisations existed,
+  // someone in the room), one the host created with no organisation (listed to nobody but an admin),
   // one cancelled by an admin.
   const upcoming = await makeEvent(host)
   const live = await makeEvent(host)

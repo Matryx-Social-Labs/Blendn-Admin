@@ -14,10 +14,9 @@ export const ORGANISER_SUSPENDED = "ORGANISER_SUSPENDED" as const
 /**
  * The host is not suspended (SCRUM-8). A suspended organisation's published
  * events are flipped to `draft`, so every attendee surface already hides
- * them; this fragment is for the ONE dashboard clause that reads by creator
- * rather than by status — the `organizer_id` fallback in `visibleEventsWhere`
- * and its twins — so a member of a suspended org does not see a list full of
- * rows that do not open. A legacy event with no org passes.
+ * them; this fragment is for the public share pages (`lib/share-public.ts`),
+ * which read a row by its link rather than by status. An event with no org
+ * passes.
  */
 export const hostNotSuspended = {
   OR: [{ organizer_org_id: null }, { organizer_org: { status: { not: "suspended" as const } } }],

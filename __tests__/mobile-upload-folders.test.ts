@@ -14,7 +14,7 @@ process.env.TIGRIS_ACCESS_KEY = "ak"
 process.env.TIGRIS_SECRET_KEY = "sk"
 
 const USER = "user-1"
-const mockDeleteFile = jest.fn(async () => undefined)
+const mockDeleteFile = jest.fn(async (key: string) => key)
 
 jest.mock("@/lib/mobile-auth", () => ({ getAuthenticatedUser: async () => ({ userId: "user-1" }) }))
 jest.mock("@/lib/rate-limit", () => ({ rateLimit: async () => null, userLimit: () => ({}) }))
