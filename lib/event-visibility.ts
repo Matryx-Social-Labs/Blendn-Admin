@@ -61,7 +61,8 @@ export async function visibleEventsScope(user: {
    *
    * Never who created the row (SCRUM-942, SCRUM-1250): every non-admin create
    * writes an organisation, so a creator arm only re-opened rows the resolver
-   * refuses. No organisation is `OR: []`, which Prisma reads as no rows.
+   * refuses. No organisation, no events: an empty `id IN`, never `OR: []`,
+   * which Prisma reads as no filter at all (every event on the platform).
    */
   where.OR = actor.orgIds.length
     ? [
@@ -71,7 +72,7 @@ export async function visibleEventsScope(user: {
         // that, so the list shows exactly that.
         ...(await claimedVenueEventsWhere(actor.orgIds)),
       ]
-    : []
+    : [{ id: { in: [] } }]
   return { where, actor: { id: user.id, orgIds: actor.orgIds } }
 }
 

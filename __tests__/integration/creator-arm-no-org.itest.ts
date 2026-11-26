@@ -69,7 +69,7 @@ describe("an organizer and the events they created", () => {
   })
 })
 
-it("lists nothing to an organizer in no organisation, not even their own event (Prisma reads `OR: []` as false)", async () => {
+it("lists nothing to an organizer in no organisation, not even their own event (an empty `OR` would be no filter at all)", async () => {
   const lonely = await makeUser(testId("arm-lonely"), "organizer")
   users.push(lonely)
   const own = await makeEvent(lonely)

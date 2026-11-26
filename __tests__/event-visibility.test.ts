@@ -111,14 +111,18 @@ describe("visibleEventsWhere", () => {
      * The creator arm (`organizer_id = me AND organizer_org_id IS NULL`) was
      * kept for events from before organisations. Production is rebuilt from
      * migrations and every non-admin create writes an organisation, so it only
-     * ever re-opened a row `eventPermissions` refuses. Prisma reads `OR: []`
-     * as false: an empty list, never an unscoped one.
+     * ever re-opened a row `eventPermissions` refuses.
+     *
+     * Not `OR: []`: Prisma reads an empty OR as no filter at all, so somebody
+     * in no organisation would have listed every event on the platform. The
+     * integration test caught that (creator-arm-no-org.itest.ts); the scope
+     * is the repo's "no rows" idiom, an empty `id IN`.
      */
     mockActorFor.mockResolvedValue({ id: "lonely-1", role: "organizer", orgIds: [], editOrgIds: [] })
 
     const where = await visibleEventsWhere({ id: "lonely-1", role: "organizer" })
 
-    expect(where.OR).toEqual([])
+    expect(where.OR).toEqual([{ id: { in: [] } }])
     expect(JSON.stringify(where)).not.toContain("organizer_id")
   })
 
