@@ -11,9 +11,9 @@ import { CancelAnalytics, CheckoutProvider, VenueProBuy } from "./checkout"
  * A venue owner's Plan page (plan v2 §9.1b, audit §6.2): every venue the
  * organisation owns, Listed or on Venue Pro, and what Pro adds.
  *
- * Nothing is charged until a venue has four weeks of venue-day data; each
+ * Nothing is charged until a venue has three months of venue-day data; each
  * venue's row says how far along it is (the screen's memorable detail: "19 of
- * 28 days of data"), and Buy appears only when it is past it, payments are on
+ * 90 days of data"), and Buy appears only when it is past it, payments are on
  * and the person may buy. The plan itself is read from the server's own rows;
  * `?status=pending` only holds Buy back while the webhook is awaited.
  */
@@ -63,7 +63,7 @@ export function VenuePlan({ view, pending }: { view: VenuePlanPage; pending: boo
           </p>
         </div>
         <p className="text-[0.8125rem] text-muted-foreground">
-          Nothing is charged until a venue has {VENUE_DATA_DAYS / 7} weeks of data from people going live there.
+          Nothing is charged until a venue has three months of data from people going live there.
         </p>
       </PlanCard>
     </div>
@@ -176,7 +176,7 @@ function VenueRow({ venue, paymentsOn, pending }: { venue: VenuePlanRow; payment
 }
 
 /**
- * The no-charge rule, said as a count: days of venue-day data out of the 28
+ * The no-charge rule, said as a count: days of venue-day data out of the 90
  * that must pass before a venue can be charged.
  */
 function DataMeter({ venue }: { venue: VenuePlanRow }) {

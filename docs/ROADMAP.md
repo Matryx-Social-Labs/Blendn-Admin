@@ -87,8 +87,8 @@ to verify, not research. The dashboard shows prices including GST.
   ₹2,359 and ₹23,588 with GST (`lib/billing-plans.ts`, the one price table). The paywall starts 90 days after the
   organisation's first event with at least 8 people checked in (SCRUM-1269). Founding grant: 6
   months of Analytics.
-- **Venues pay nothing until venue days are live and a venue has 4 weeks of
-  data.** Listed is free, with 30 days of aggregate insights. **Venue Pro**
+- **Venues pay nothing until venue days are live and a venue has three months
+  (90 days) of data** (SCRUM-1320). Listed is free, with 30 days of aggregate insights. **Venue Pro**
   ₹2,999/mo per venue. Venue Max is deferred. Promoted nights are sold à la
   carte at ₹699–999 a night; Pro includes 4. Founding grant: 3 months of Pro per
   claimed Bengaluru venue.

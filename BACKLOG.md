@@ -125,7 +125,7 @@ list-and-scan workaround around it.
 - **Priority**: Critical (was)
 - **Category**: Broken Logic / Backend-API
 - **File(s)**: `lib/socket-server.ts` — `guardJoin()` (~line 302) plus `canJoinChat`/`canJoinEvent`/`canJoinConversation`, called from the `join:chat`/`join:event`/`join:conversation` handlers.
-- **Resolved (verified 2026-09-10)**: every `join:*` handler now awaits a DB-backed membership check via `guardJoin()` before calling `socket.join()`, and denies with a `FORBIDDEN` error event (fail-closed, including on a thrown/malformed-ID check). Also independently confirmed as "Verified clean" in `SECURITY_RELIABILITY_BACKLOG.md`. This entry was stale — kept for history; do not re-open without re-reading the current code.
+- **Resolved (verified 2026-09-10)**: every `join:*` handler now awaits a DB-backed membership check via `guardJoin()` before calling `socket.join()`, and denies with a `FORBIDDEN` error event (fail-closed, including on a thrown/malformed-ID check). This entry was stale — kept for history; do not re-open without re-reading the current code.
 
 ### 2.2 Socket.io CORS allows wildcard origin
 - **Priority**: High

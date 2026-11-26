@@ -2733,6 +2733,12 @@
       "mutation": "(M6) the sweeper stops calling checkPushReceipts; (N4) the push upkeep moved after the reminder steps.",
       "observed": "M6: 1 of 1 failing. N4: 1 of 3 failing (the rating step throws, receipts never read). Restored; 3 of 3.",
       "date": "2026-11-26"
+    },
+    "venue-three-months.test.ts": {
+      "guards": "SCRUM-1320: a venue is chargeable VENUE_DATA_DAYS (90) after its first venue-day check-in: not on day 89 nor a millisecond before day 90, from day 90; the meter caps at 90. lib/venue-plan.ts, lib/billing-actions.ts, the venue Plan page and /pricing never say 'four weeks'; the venue Plan page never divides VENUE_DATA_DAYS (90 / 7 printed 12.857142857142858 weeks); the card, /pricing and both buy refusals say three months. Its companions: venue-plan-row.test.tsx (90 of 90 when chargeable; 40 of 90 with the no-charge date and no Buy), venue-plans.itest.ts (the refusal text with first check-in + 90 days, real Postgres) and e2e/venue-three-months.spec.ts (the drive with the read-back).",
+      "mutation": "(C1) the two unit files run on dev abbe1844, before the change; (M1) VENUE_DATA_DAYS back to 28; (M2) chargeable `now > chargeableFrom`; (M3) the meter's Math.min cap removed; (M4) the card back to `{VENUE_DATA_DAYS / 7} weeks`; (M5) the dated refusal back to 'four weeks after people first went live here'.",
+      "observed": "C1: venue-three-months 10 of 10 failing, venue-plan-row 7 of 8. M1: 11 of 18 failing. M2: 1 of 18 (day 90). M3: 1 of 18 (day 400 read 400). M4: 3 of 18. M5: 2 of 18. Restored each; 18 of 18.",
+      "date": "2026-11-26"
     }
   },
   "grandfathered": [

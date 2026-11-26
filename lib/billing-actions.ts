@@ -319,7 +319,7 @@ export async function startAnalyticsCheckout(period: "monthly" | "yearly"): Prom
 /**
  * Start (or resume) a Venue Pro subscription for one venue (plan v2 §9.1b).
  *
- * Refused until the venue has four weeks of venue-day data (the owner's
+ * Refused until the venue has three months of venue-day data (the owner's
  * no-charge rule, `lib/venue-plan.ts`), and while Pro is already live on it —
  * a founding grant included: subscribe when it ends, never a charge on top of
  * a gift.
@@ -332,8 +332,8 @@ export async function startVenueProCheckout(venueId: string, period: "monthly" |
   if (!ready.chargeable) {
     throw new Refusal(
       ready.chargeableFrom
-        ? `Venue Pro can be bought from ${GRANT_DAY.format(ready.chargeableFrom)}: four weeks after people first went live here.`
-        : "Venue Pro can be bought four weeks after people first go live at this venue."
+        ? `Venue Pro can be bought from ${GRANT_DAY.format(ready.chargeableFrom)}: three months after people first went live here.`
+        : "Venue Pro can be bought three months after people first go live at this venue."
     )
   }
   const live = await liveEntitlement({ kind: "venue", id }, "venue_pro")
