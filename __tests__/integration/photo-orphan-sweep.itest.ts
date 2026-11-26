@@ -400,6 +400,8 @@ describe("the unsent chat upload sweep", () => {
     const legacy = `chat/${uid}/1790641297767-cfg6ta-sealed`
     putChat(sealed)
     putChat(legacy)
+    // The reference read skips sealed/ in any case, so the judge must too.
+    putChat("chat/Sealed/1790641297767-cfg6ta-photo.jpg")
     expect(await chatPass()).toMatchObject({ judged: 0, deleted: 0 })
     expect(deleted).toEqual([])
   })
@@ -572,5 +574,16 @@ describe("the unsent chat upload sweep", () => {
       await db.$executeRawUnsafe(`ALTER TABLE retained_report_media RENAME COLUMN itest_object_key TO object_key`)
     }
     expect(chatBucket.has(rawKey(uid))).toBe(true)
+  })
+
+  it("reads every chat/ in a string, also one nested in or run into another", async () => {
+    const uid = await sender()
+    const [nested, second, quoted] = [rawKey(uid, "nested.jpg"), rawKey(uid, "second.jpg"), rawKey(uid, "quoted.jpg")]
+    await dm(uid, `${privateHost}/chat/zzz/${nested}`)
+    await dm(uid, `${privateHost}/${rawKey(uid, "first.jpg")}${second}`)
+    // JSON inside a JSON string: the key is followed by an escaped quote.
+    await roomMessage(uid, { payload: JSON.stringify({ url: quoted }) })
+    for (const k of [nested, second, quoted]) putChat(k)
+    await keepsAllBut(uid)
   })
 })

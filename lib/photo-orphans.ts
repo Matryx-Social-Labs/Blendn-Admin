@@ -227,7 +227,7 @@ const profileTarget: Target = {
  */
 const chatOwnerOf = (key: string): string | null => {
   const m = /^chat\/([A-Za-z0-9_-]+)\/([A-Za-z0-9._-]+)$/.exec(key)
-  return m && m[1] !== "sealed" && !m[2].endsWith("-sealed") ? m[1] : null
+  return m && m[1].toLowerCase() !== "sealed" && !m[2].endsWith("-sealed") ? m[1] : null
 }
 
 /**
@@ -236,15 +236,18 @@ const chatOwnerOf = (key: string): string | null => {
  * needs decoding, because the alphabet `chatOwnerOf` judges is never
  * percent-encoded. Every `chat/` then runs to the first character outside that
  * alphabet and `/`. A `%` or `\` there is an encoding left over, so the string
- * is unreadable; any other character ends it. `chat/<seg>/<name>` names a key
+ * is unreadable (unless it escapes a quote or a control character); any other
+ * character ends it. `chat/<seg>/<name>` names a key
  * (and, ending a sentence, the same without its trailing dots); a bare
  * `chat/<id>`, such as a deep link, names none.
  */
 function chatKeysIn(ref: string): string[] | null {
   const text = ref.replace(/\\+\//g, "/").replace(/%(?:25)*2f/gi, "/")
   const keys: string[] = []
-  for (const m of text.matchAll(/chat\/([A-Za-z0-9._/-]*)(.?)/g)) {
-    if (m[2] === "%" || m[2] === "\\") return null
+  // Zero-width, so a `chat/` inside or right after another is read on its own.
+  for (const m of text.matchAll(/(?=chat\/([A-Za-z0-9._/-]*)(.?)(.?))/g)) {
+    // An escaped quote or control character (JSON inside a string) ends a key; any other escape may hide one.
+    if (m[2] === "%" || (m[2] === "\\" && !/["nrt]/.test(m[3]))) return null
     const [seg, name] = m[1].split("/")
     if (seg && name) keys.push(`chat/${seg}/${name}`, `chat/${seg}/${name.replace(/\.+$/, "")}`)
   }
