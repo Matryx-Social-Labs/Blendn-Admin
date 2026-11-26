@@ -15,6 +15,11 @@ import { cleanup, closeDb, db, testId } from "./helpers"
 const route = require("@/app/api/email/unsubscribe/route") as typeof import("@/app/api/email/unsubscribe/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
+process.env.NEXTAUTH_SECRET ??= "itest-results-mail-secret-of-forty-chars!!"
+
+/** A network this run alone uses: the limiter's counters may outlive one run. */
+const net = () => `198.51.100.${Math.floor(Math.random() * 250) + 1}`
+
 /** 10:00 IST on a day no other suite's fixture ends near. */
 const NOW = new Date("2031-03-14T04:30:00Z")
 const LAST_NIGHT = new Date("2031-03-13T17:30:00Z")
@@ -22,7 +27,8 @@ const LAST_NIGHT = new Date("2031-03-13T17:30:00Z")
 const users: { id: string; email: string }[] = []
 const orgs: string[] = []
 const events: string[] = []
-const mails: { to: string; subject: string }[] = []
+const mails: { to: string; subject: string; text: string }[] = []
+let resendStatus = 200
 let realFetch: typeof fetch
 
 async function person(label: string) {
@@ -41,7 +47,7 @@ async function org(members: [{ id: string }, "owner" | "admin" | "staff"][]) {
   return o.id
 }
 
-async function night(orgId: string, o: { endedAt?: Date; status?: "published" | "completed" | "cancelled"; came?: number } = {}) {
+async function night(orgId: string | null, o: { endedAt?: Date; status?: "published" | "completed" | "cancelled"; came?: number } = {}) {
   const end = o.endedAt ?? LAST_NIGHT
   const host = users[0]
   const event = await db.events.create({
@@ -77,9 +83,9 @@ beforeAll(() => {
   process.env.EMAIL_FROM = "Blend'n <hello@blendn.app>"
   realFetch = global.fetch
   global.fetch = (async (_url: string, init: { body: string }) => {
-    const body = JSON.parse(init.body) as { to: string[]; subject: string }
-    mails.push({ to: body.to[0], subject: body.subject })
-    return new Response(JSON.stringify({ id: randomUUID() }), { status: 200 })
+    const body = JSON.parse(init.body) as { to: string[]; subject: string; text: string }
+    if (resendStatus === 200) mails.push({ to: body.to[0], subject: body.subject, text: body.text })
+    return new Response(JSON.stringify({ id: randomUUID() }), { status: resendStatus })
   }) as unknown as typeof fetch
 })
 
@@ -97,8 +103,9 @@ afterAll(async () => {
 
 describe("the sweep", () => {
   it("mails each owner and admin once, nobody else, and a second pass mails nobody", async () => {
-    const [owner1, owner2, admin, staff, left] = [await person("owner1"), await person("owner2"), await person("admin"), await person("staff"), await person("left")]
-    const orgId = await org([[owner1, "owner"], [owner2, "owner"], [admin, "admin"], [staff, "staff"], [left, "admin"]])
+    const [owner1, owner2, admin, staff, left, suspended] = [await person("owner1"), await person("owner2"), await person("admin"), await person("staff"), await person("left"), await person("suspended")]
+    const orgId = await org([[owner1, "owner"], [owner2, "owner"], [admin, "admin"], [staff, "staff"], [left, "admin"], [suspended, "owner"]])
+    await db.user.update({ where: { id: suspended.id }, data: { suspended_at: new Date() } })
     // A member who left: their membership row is gone.
     await db.organisation_members.deleteMany({ where: { org_id: orgId, user_id: left.id } })
     const id = await night(orgId)
@@ -108,7 +115,12 @@ describe("the sweep", () => {
     expect(mailedTo([owner1, owner2, admin, staff, left])).toEqual([])
 
     await sendResultsMails(NOW)
-    expect(mailedTo([owner1, owner2, admin, staff, left])).toEqual([admin.email, owner1.email, owner2.email].sort())
+    expect(mailedTo([owner1, owner2, admin, staff, left, suspended])).toEqual([admin.email, owner1.email, owner2.email].sort())
+    // The figures as Postgres gives them: six people (the real distinct count), fewer than 5 raters, no mood rows.
+    const body = mails.find((m) => m.to === owner1.email)!
+    expect(body.subject).toBe("Results night: your night in numbers")
+    expect(body.text).toContain("6 people checked in on Blend’n.")
+    expect(body.text).toContain(`/dashboard/events/${id}\n`)
     expect((await db.events.findUnique({ where: { id }, select: { results_mailed_at: true } }))?.results_mailed_at).toEqual(NOW)
 
     await sendResultsMails(new Date(NOW.getTime() + 5 * 60_000))
@@ -123,7 +135,41 @@ describe("the sweep", () => {
     expect(mailedTo([a, b])).toEqual([a.email, b.email].sort())
   })
 
-  it("never mails a night older than 34 h, a cancelled one, or an event with no organization", async () => {
+  it("a completed night is mailed; a night with no organization never is", async () => {
+    const owner = await person("owner-completed")
+    const orgId = await org([[owner, "owner"]])
+    const done = await night(orgId, { status: "completed" })
+    const orphan = await night(null)
+    await sendResultsMails(NOW)
+    expect(mailedTo([owner])).toEqual([owner.email])
+    const rows = await db.events.findMany({ where: { id: { in: [done, orphan] } }, select: { id: true, results_mailed_at: true } })
+    expect(rows.find((r) => r.id === orphan)?.results_mailed_at).toBeNull()
+  })
+
+  it("zero check-ins: the org's first mailed night gets the help mail, its next zero night nothing", async () => {
+    const owner = await person("owner-zero")
+    const orgId = await org([[owner, "owner"]])
+    await night(orgId, { came: 0, endedAt: new Date(LAST_NIGHT.getTime() - 24 * 3600_000) })
+    await sendResultsMails(new Date(NOW.getTime() - 24 * 3600_000))
+    expect(mails.filter((m) => m.to === owner.email).map((m) => m.subject)).toEqual(["Results night: no check-ins on Blend’n"])
+    await night(orgId, { came: 0 })
+    await sendResultsMails(NOW)
+    expect(mails.filter((m) => m.to === owner.email)).toHaveLength(1)
+  })
+
+  it("a night nobody got because Resend failed is given back, and the next pass sends it", async () => {
+    const owner = await person("owner-retry")
+    const orgId = await org([[owner, "owner"]])
+    const id = await night(orgId)
+    resendStatus = 422
+    await sendResultsMails(NOW)
+    resendStatus = 200
+    expect((await db.events.findUnique({ where: { id }, select: { results_mailed_at: true } }))?.results_mailed_at).toBeNull()
+    await sendResultsMails(new Date(NOW.getTime() + 5 * 60_000))
+    expect(mailedTo([owner])).toEqual([owner.email])
+  })
+
+  it("never mails a night older than 34 h or a cancelled one", async () => {
     const owner = await person("owner-old")
     const orgId = await org([[owner, "owner"]])
     const old = await night(orgId, { endedAt: new Date(NOW.getTime() - 35 * 3600_000) })
@@ -157,14 +203,14 @@ describe("POST /api/email/unsubscribe", () => {
 
   it("one-click writes one unsubscribe row; a repeat stays one row", async () => {
     const u = await person("oneclick")
-    expect((await post(unsubscribeToken(u), "203.0.113.41")).status).toBe(200)
-    expect((await post(unsubscribeToken(u), "203.0.113.41")).status).toBe(200)
+    expect((await post(unsubscribeToken(u), net())).status).toBe(200)
+    expect((await post(unsubscribeToken(u), net())).status).toBe(200)
     expect(await rows(u.email)).toEqual([{ reason: "unsubscribe" }])
   })
 
   it("the confirm page's form is sent back to the page", async () => {
     const u = await person("formpost")
-    const res = await post(unsubscribeToken(u), "203.0.113.42", "&from=page")
+    const res = await post(unsubscribeToken(u), net(), "&from=page")
     expect(res.status).toBe(303)
     expect(res.headers.get("location")).toBe("/unsubscribe?done=1")
     expect(await rows(u.email)).toEqual([{ reason: "unsubscribe" }])
@@ -173,7 +219,7 @@ describe("POST /api/email/unsubscribe", () => {
   it("never downgrades a bounce or a complaint", async () => {
     const u = await person("bounced")
     await db.email_suppressions.create({ data: { email: u.email, reason: "bounce" } })
-    expect((await post(unsubscribeToken(u), "203.0.113.43")).status).toBe(200)
+    expect((await post(unsubscribeToken(u), net())).status).toBe(200)
     expect(await rows(u.email)).toEqual([{ reason: "bounce" }])
   })
 
@@ -191,7 +237,7 @@ describe("POST /api/email/unsubscribe", () => {
       `${good}.extra`,
       `../../etc.${good.split(".")[1]}`,
     ]
-    for (const t of bad) expect((await post(t, "203.0.113.44")).status).toBe(400)
+    for (const t of bad) expect((await post(t, net())).status).toBe(400)
     expect(await rows(u.email)).toEqual([])
     expect(await rows(other.email)).toEqual([])
   })
@@ -199,14 +245,22 @@ describe("POST /api/email/unsubscribe", () => {
   it("a deleted account's link is 400", async () => {
     const u = await person("deleted")
     await db.user.update({ where: { id: u.id }, data: { deletedAt: new Date() } })
-    expect((await post(unsubscribeToken(u), "203.0.113.46")).status).toBe(400)
+    expect((await post(unsubscribeToken(u), net())).status).toBe(400)
     expect(await rows(u.email)).toEqual([])
   })
 
-  it("is rate-limited per network", async () => {
+  it("is rate-limited per network: 120 a minute, then 429", async () => {
+    const ip = net()
     const statuses: number[] = []
-    for (let i = 0; i < 25; i++) statuses.push((await post("x.y", "203.0.113.45")).status)
-    expect(statuses).toContain(429)
+    for (let i = 0; i < 121; i++) statuses.push((await post("x.y", ip)).status)
+    expect(statuses.slice(0, 120).every((s) => s === 400)).toBe(true)
+    expect(statuses[120]).toBe(429)
+  })
+
+  it("a bad token from the confirm page goes back to the page, which says the link does not work", async () => {
+    const res = await post("x.y", net(), "&from=page")
+    expect(res.status).toBe(303)
+    expect(res.headers.get("location")).toBe("/unsubscribe?t=x.y")
   })
 })
 
@@ -218,5 +272,10 @@ describe("GET /api/email/unsubscribe", () => {
     expect(res.status).toBe(303)
     expect(res.headers.get("location")).toBe(`/unsubscribe?t=${encodeURIComponent(t)}`)
     expect(await db.email_suppressions.findMany({ where: { email: u.email } })).toEqual([])
+  })
+
+  it("without a token goes to the page, which says the link does not work", async () => {
+    const res = await route.GET(new NextRequest("http://localhost/api/email/unsubscribe"))
+    expect(res.headers.get("location")).toBe("/unsubscribe?t=")
   })
 })

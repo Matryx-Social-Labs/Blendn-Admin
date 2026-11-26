@@ -51,10 +51,16 @@ export async function sendResultsMails(now: Date = new Date()): Promise<number> 
       if (claimed === 0) continue
       // ponytail: claimed before the send, so a crash between the two loses this night's mail rather than sending it
       // twice; an outbox would recover it, add one if a lost morning mail is ever seen.
-      sent += await mailResults(event).catch((error) => {
+      const result = await mailResults(event).catch((error: unknown) => {
         logger.error("Results mail failed", { eventId: event.id, error: error instanceof Error ? error.message : String(error) })
-        return 0
+        return { sent: 0, failed: 1 }
       })
+      sent += result.sent
+      // Nothing reached anybody and the provider (or our side) failed: give the night back, so a later pass inside the
+      // 34 h retries it. Not after a partial send, which would mail the ones who got it twice.
+      if (result.sent === 0 && result.failed > 0) {
+        await db.events.updateMany({ where: { id: event.id, results_mailed_at: now }, data: { results_mailed_at: null } })
+      }
     }
   } catch (error) {
     logger.error("Results mail sweep failed", { error: error instanceof Error ? error.message : String(error) })
@@ -62,8 +68,9 @@ export async function sendResultsMails(now: Date = new Date()): Promise<number> 
   return sent
 }
 
-async function mailResults(event: MailedEvent): Promise<number> {
-  const orgId = event.organizer_org_id!
+async function mailResults(event: MailedEvent): Promise<{ sent: number; failed: number }> {
+  const orgId = event.organizer_org_id
+  if (!orgId) return { sent: 0, failed: 0 }
   const [members, checkIns, ratingGroups, moodMessages] = await Promise.all([
     // Organization membership, never `events.organizer_id`: a member who left gets nothing (CLAUDE.md RBAC).
     db.organisation_members.findMany({
@@ -79,7 +86,11 @@ async function mailResults(event: MailedEvent): Promise<number> {
 
   const attended = distinctAttendees(checkIns)
   // The org's first mailed night only (Fable advisor, 2026-11-26); this event is already claimed, so it is excluded.
-  if (attended === 0 && (await db.events.count({ where: { organizer_org_id: orgId, id: { not: event.id }, results_mailed_at: { not: null } } })) > 0) return 0
+  // ponytail: two zero nights of one org claimed in the same instant by two replicas each see the other and both stay
+  // silent; the help mail is a nicety, so the race is accepted.
+  if (attended === 0 && (await db.events.count({ where: { organizer_org_id: orgId, id: { not: event.id }, results_mailed_at: { not: null } } })) > 0) {
+    return { sent: 0, failed: 0 }
+  }
 
   const stars = discloseStars(spreadsByEventId(ratingGroups).get(event.id) ?? [0, 0, 0, 0, 0])
   const base = dashboardUrl()
@@ -87,6 +98,7 @@ async function mailResults(event: MailedEvent): Promise<number> {
   const replyTo = emailReplyTo()
 
   let sent = 0
+  let failed = 0
   for (const { user } of members) {
     const unsubscribe = unsubscribeUrl(user)
     const mail =
@@ -114,7 +126,8 @@ async function mailResults(event: MailedEvent): Promise<number> {
       },
     })
     if (result.sent) sent++
+    else if (result.reason === "provider_error") failed++
   }
-  logger.info("Results mail sent", { eventId: event.id, recipients: members.length, sent })
-  return sent
+  logger[failed ? "warn" : "info"]("Results mail sent", { eventId: event.id, recipients: members.length, sent, failed })
+  return { sent, failed }
 }

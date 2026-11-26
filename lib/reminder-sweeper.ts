@@ -34,6 +34,11 @@ let running = false
 async function pass(): Promise<void> {
   await pushUpkeep()
 
+  // The host's morning results (SCRUM-1282), the night's figures to the organization's owners and admins. Second, and
+  // never throws, so a reminder step that does cannot cost a host their morning mail.
+  const mailed = await sendResultsMails()
+  if (mailed > 0) logger.info("Results mails sent", { mailed })
+
   // 60 minutes, matching the cron route's argument. The client schedules no local reminder: this is the only one.
   const notified = await sendEventReminders(60)
   if (notified > 0) logger.info("Event reminders sent", { notified })
@@ -46,10 +51,6 @@ async function pass(): Promise<void> {
    */
   const asked = await sendRatingRequests()
   if (asked > 0) logger.info("Rating requests sent", { asked })
-
-  // The host's half of the same morning (SCRUM-1282): the night's results to the organization's owners and admins.
-  const mailed = await sendResultsMails()
-  if (mailed > 0) logger.info("Results mails sent", { mailed })
 
   const pruned = await cleanupExpiredTokens()
   if (pruned > 0) logger.info("Expired refresh tokens pruned", { pruned })

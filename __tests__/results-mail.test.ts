@@ -19,7 +19,7 @@ jest.mock("@/lib/rating-batches", () => ({ publishedRatingGroups: (...a: unknown
 
 import { sendResultsMails } from "@/lib/results-mail"
 import { RATING_REQUEST_ENDED_WITHIN_MS } from "@/lib/services/event-notifications.service"
-import { verifyUnsubscribeToken } from "@/lib/unsubscribe"
+import { unsubscribeToken, verifyUnsubscribeToken } from "@/lib/unsubscribe"
 
 const ORG = "0a000000-0000-4000-8000-000000000001"
 /** Ended 23:00 IST Thu 2026-11-26: mailed at 10:00 IST Fri 2026-11-27 (04:30Z). */
@@ -132,7 +132,7 @@ describe("who", () => {
   it("reads owners and admins from organisation membership, never events.organizer_id", async () => {
     await sendResultsMails(TEN_IST)
     const { where } = mockDb.organisation_members.findMany.mock.calls[0][0]
-    expect(where).toMatchObject({ org_id: ORG, role: { in: ["owner", "admin"] }, user: { deletedAt: null } })
+    expect(where).toMatchObject({ org_id: ORG, role: { in: ["owner", "admin"] }, user: { deletedAt: null, suspended_at: null } })
   })
 
   it("skips a suppressed owner and still mails the other", async () => {
@@ -157,7 +157,87 @@ describe("who", () => {
   })
 })
 
+/** Two events in one pass, with the claim kept per event as the database would (a release is a claim set back). */
+function twoEvents(a: typeof EVENT, b: typeof EVENT) {
+  const claims = new Map<string, Date | null>()
+  mockDb.events.findMany.mockImplementation(async () => [a, b].filter((e) => !claims.get(e.id)))
+  mockDb.events.updateMany.mockImplementation(async ({ where, data }: { where: { id: string; results_mailed_at: Date | null }; data: { results_mailed_at: Date | null } }) => {
+    if ((claims.get(where.id) ?? null) !== where.results_mailed_at) return { count: 0 }
+    claims.set(where.id, data.results_mailed_at)
+    return { count: 1 }
+  })
+  return claims
+}
+
+describe("each event on its own", () => {
+  const LATER = { ...EVENT, id: "e0000000-0000-4000-8000-000000000002", end_time: new Date("2026-11-27T02:00:00Z") }
+
+  it("an event not yet at its 10:00 is skipped, not the end of the pass", async () => {
+    // Sorted by end_time: the Toronto night ended first but its 10:00 is hours away; the IST night after it is due.
+    const toronto = { ...EVENT, id: "e0000000-0000-4000-8000-000000000003", end_time: new Date("2026-11-26T17:00:00Z"), timezone: "America/Toronto" }
+    const claims = twoEvents(toronto, EVENT)
+    expect(await sendResultsMails(TEN_IST)).toBe(2)
+    expect(claims.get(EVENT.id)).toEqual(TEN_IST)
+    expect(claims.has(toronto.id)).toBe(false)
+  })
+
+  it("one event that throws is given back, and the next event is still mailed", async () => {
+    const claims = twoEvents(EVENT, LATER)
+    mockDb.organisation_members.findMany.mockRejectedValueOnce(new Error("pool timeout"))
+    expect(await sendResultsMails(new Date("2026-11-27T05:00:00Z"))).toBe(2)
+    expect(claims.get(EVENT.id)).toBeNull()
+    expect(claims.get(LATER.id)).toEqual(new Date("2026-11-27T05:00:00Z"))
+  })
+
+  it("a night nobody got because the provider failed is given back for the next pass", async () => {
+    const claims = twoEvents(EVENT, LATER)
+    fetchStatus = () => 422
+    expect(await sendResultsMails(TEN_IST)).toBe(0)
+    expect(claims.get(EVENT.id)).toBeNull()
+    fetchStatus = () => 200
+    // Both nights are due by now (LATER ended 07:30 IST), and both owners get each: 2 x 2.
+    expect(await sendResultsMails(new Date(TEN_IST.getTime() + 5 * 60_000))).toBe(4)
+    expect(claims.get(EVENT.id)).toEqual(new Date(TEN_IST.getTime() + 5 * 60_000))
+  })
+
+  it("a partial send keeps the claim: the owner who got it is not mailed twice", async () => {
+    fetchStatus = (to) => (to === "owner@blendn.app" ? 422 : 200)
+    await sendResultsMails(TEN_IST)
+    expect(mailedAt).toEqual(TEN_IST)
+    expect(mockDb.events.updateMany).toHaveBeenCalledTimes(1)
+  })
+
+  it("a suppressed-only org keeps the claim: nobody to retry for", async () => {
+    mockDb.email_suppressions.findUnique.mockResolvedValue({ reason: "unsubscribe" })
+    expect(await sendResultsMails(TEN_IST)).toBe(0)
+    expect(mailedAt).toEqual(TEN_IST)
+  })
+})
+
 describe("what", () => {
+  it("counts people, not rows: a second check-in and staff are not more people", async () => {
+    world({ attendees: 6 })
+    mockDb.event_check_ins.findMany.mockResolvedValue([
+      ...Array.from({ length: 6 }, (_, i) => ({ user_id: `a${i}`, kind: "attendee" })),
+      { user_id: "a0", kind: "attendee" },
+      { user_id: "s1", kind: "staff" },
+    ])
+    await sendResultsMails(TEN_IST)
+    expect(sent[0].text).toContain("6 people checked in on Blend’n.")
+    expect(mockDb.event_check_ins.findMany.mock.calls[0][0].where).toEqual({ event_id: EVENT.id, check_in_time: { not: null } })
+    // No mood messages: no mood line.
+    expect(sent[0].text).not.toContain("room messages")
+  })
+
+  it("escapes the title in the HTML and links the footer's unsubscribe", async () => {
+    mockDb.events.findMany.mockImplementation(async () => (mailedAt ? [] : [{ ...EVENT, title: `<b>Rock & "Roll"</b>` }]))
+    await sendResultsMails(TEN_IST)
+    expect(sent[0].html).toContain("&lt;b&gt;Rock &amp; &quot;Roll&quot;&lt;/b&gt;")
+    expect(sent[0].html).not.toContain("<b>Rock")
+    expect(sent[0].html).toMatch(/<a href="https:\/\/dashboard\.blendn\.app\/api\/email\/unsubscribe\?t=[^"]+"[^>]*>Unsubscribe from these mails<\/a>/)
+    expect(sent[0].html).not.toContain("transactional email")
+  })
+
   it("12,480 checked in, a long title, the rating once 5 rated, the mood count; one button to the Overview", async () => {
     const title = "Thiruvananthapuram Indie Night: Third Edition Rooftop Session"
     world({ attendees: 12480, raters: [0, 1, 2, 4, 5], feedback: 318 })
@@ -185,7 +265,7 @@ describe("what", () => {
     expect(mail.text).not.toMatch(/\b3 people/)
     // Two raters: no average, and the count is not said either.
     expect(mail.text).not.toMatch(/average rating from/)
-    expect(mail.text).toContain("The average rating shows on the Overview once 5 people have rated")
+    expect(mail.text).toContain("Guests are asked to rate the night today. The average shows on the Overview once 5 people have rated")
     expect(mail.text).toContain("“fewer than 5”, so nobody can be picked out")
     expect(mail.html).toContain("Fewer than 5 people")
   })
@@ -206,6 +286,15 @@ describe("what", () => {
     process.env.EMAIL_REPLY_TO = "hello@blendn.app"
     await sendResultsMails(TEN_IST)
     expect(sent[0].headers["List-Unsubscribe"]).toMatch(/^<https:[^>]+>, <mailto:hello@blendn\.app\?subject=unsubscribe>$/)
+  })
+
+  it("the token is over the canonical address, under this key only", () => {
+    const token = unsubscribeToken({ id: "u1", email: " Admin@Blendn.app " })
+    expect(verifyUnsubscribeToken(token, { id: "u1", email: "admin@blendn.app" })).toBe(true)
+    const secret = process.env.NEXTAUTH_SECRET
+    process.env.NEXTAUTH_SECRET = "y".repeat(40)
+    expect(verifyUnsubscribeToken(token, { id: "u1", email: "admin@blendn.app" })).toBe(false)
+    process.env.NEXTAUTH_SECRET = secret
   })
 
   it("each recipient's link is their own token, over their canonical address", async () => {

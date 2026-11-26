@@ -497,7 +497,7 @@ export function resultsEmail(r: NightResults) {
   const lines = [
     r.checkedIn === null ? "Fewer than 5 people checked in on Blend’n." : `${count(r.checkedIn)} people checked in on Blend’n.`,
     r.averageRating === null
-      ? "The average rating shows on the Overview once 5 people have rated."
+      ? "Guests are asked to rate the night today. The average shows on the Overview once 5 people have rated."
       : `${r.averageRating.toFixed(1)} average rating from ${count(r.ratingCount)} people.`,
     ...(r.moodMessages > 0 ? [`${count(r.moodMessages)} room messages read for the night’s mood.`] : []),
   ]

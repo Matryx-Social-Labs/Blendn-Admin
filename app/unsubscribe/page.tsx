@@ -10,20 +10,23 @@ export const metadata: Metadata = { title: "Unsubscribe · Blend’n", robots: {
 /**
  * Where a mail's unsubscribe link lands (SCRUM-1282): one sentence and one button. Opening it changes nothing — link
  * scanners open every link — and the button POSTs to /api/email/unsubscribe, which sends the person back here, done.
- * The token is checked before the button is shown, so a broken link says so instead of offering a button that 400s.
+ * The token is checked before the button is shown, so a broken link says so instead of offering a button that fails.
+ *
+ * The copy covers what the row stops: the whole lifecycle stream (the morning results and the next-night nudges),
+ * never invites or account mail (`blocks` in lib/email.ts).
  */
-export default async function UnsubscribePage({ searchParams }: { searchParams: Promise<{ t?: string; done?: string }> }) {
+export default async function UnsubscribePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { t, done } = await searchParams
   if (done) {
     return (
-      <AuthFrame title="You’re unsubscribed" sub="No more results mails the morning after your nights.">
+      <AuthFrame title="You’re unsubscribed" sub="No more morning-after results or nudges about your next night.">
         <p className="text-[0.8125rem] leading-6 text-muted-foreground">Invites and account mail still come.</p>
       </AuthFrame>
     )
   }
 
-  const valid = (await unsubscribeTarget(t)) !== null
-  if (!valid) {
+  const token = typeof t === "string" ? t : null
+  if (!token || !(await unsubscribeTarget(token))) {
     return (
       <AuthFrame title="This link doesn’t work" sub="Use the unsubscribe link in your newest Blend’n mail, exactly as sent.">
         <p className="text-[0.8125rem] leading-6 text-muted-foreground">Nothing has changed.</p>
@@ -32,8 +35,8 @@ export default async function UnsubscribePage({ searchParams }: { searchParams: 
   }
 
   return (
-    <AuthFrame title="Stop the results mails?" sub="You won’t get your night’s numbers the morning after. Invites and account mail still come.">
-      <form method="post" action={`/api/email/unsubscribe?t=${encodeURIComponent(t!)}&from=page`}>
+    <AuthFrame title="Stop these emails?" sub="No more morning-after results or nudges about your next night. Invites and account mail still come.">
+      <form method="post" action={`/api/email/unsubscribe?t=${encodeURIComponent(token)}&from=page`}>
         <Button type="submit" size="lg" className="w-full">
           Unsubscribe
         </Button>
