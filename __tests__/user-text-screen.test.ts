@@ -53,6 +53,12 @@ describe("screenUserText", () => {
     expect(screenUserText("u1", "profile", { bio: "you randi" })).toBeNull()
   })
 
+  it.each(["message_request", "tonight_answer"] as const)("lets banter through on %s and records it for review (SCRUM-1167)", (surface) => {
+    expect(screenUserText("u1", surface, { message: "chod yaar, see you there" })).toBeNull()
+    const entry = (auditLog as jest.Mock).mock.calls[0][0]
+    expect(entry).toMatchObject({ action: "moderation.text_flagged", details: { surface, field: "message", source: "keyword", matched: ["chod"] } })
+  })
+
   it("skips empty and absent fields, and records nothing when all pass", () => {
     expect(screenUserText("u1", "profile", { name: "Asha", bio: null, occupation: undefined, education: "" })).toBeNull()
     expect(auditLog).not.toHaveBeenCalled()
