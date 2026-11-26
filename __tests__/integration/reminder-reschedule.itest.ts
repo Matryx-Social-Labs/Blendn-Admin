@@ -99,12 +99,42 @@ afterAll(async () => {
   await db.notifications.deleteMany({ where: { user_id: { in: users } } })
   await db.push_tokens.deleteMany({ where: { user_id: { in: users } } })
   await db.event_rsvps.deleteMany({ where: { event_id: { in: events } } })
+  await db.event_favorites.deleteMany({ where: { event_id: { in: events } } })
   await db.event_occurrences.deleteMany({ where: { event_id: { in: events } } })
   await cleanup(users, events)
   await db.organisation_members.deleteMany({ where: { org_id: { in: orgs } } })
   await db.organisations.deleteMany({ where: { id: { in: orgs } } })
   await closeDb()
 }, 60_000)
+
+describe("who is reminded (SCRUM-1274)", () => {
+  it("going and maybe, in about an hour; not the waitlisted, not saved-only", async () => {
+    const event = await eventInWindow()
+    const others: Record<string, string> = {}
+    for (const who of ["maybe", "waitlisted", "saved"] as const) {
+      const id = await makeUser(testId(`rem-${who}`))
+      users.push(id)
+      await onboard(id)
+      await db.push_tokens.create({ data: { user_id: id, token: `ExponentPushToken[${id}]`, platform: "android" } })
+      if (who === "saved") await db.event_favorites.create({ data: { event_id: event.id, user_id: id } })
+      else await db.event_rsvps.create({ data: { event_id: event.id, user_id: id, status: who } })
+      others[who] = id
+    }
+
+    await sendEventReminders(REMINDER_LEAD_MINUTES)
+
+    const rows = await db.notifications.findMany({
+      where: { kind: "event_update", data: { path: ["eventId"], equals: event.id } },
+      select: { user_id: true, body: true },
+    })
+    expect(rows).toHaveLength(2)
+    expect(rows.map((r) => r.user_id)).toContain(others.maybe)
+    expect(rows.map((r) => r.user_id)).not.toContain(others.waitlisted)
+    expect(rows.map((r) => r.user_id)).not.toContain(others.saved)
+    for (const r of rows) expect(r.body).toBe("Starting in about an hour at The Old Room")
+    expect(reminderPushes()).toHaveLength(2)
+  })
+})
 
 describe("reminder after a reschedule (SCRUM-770)", () => {
   it("an already-reminded event that is rescheduled is reminded again for the new window, exactly once", async () => {
