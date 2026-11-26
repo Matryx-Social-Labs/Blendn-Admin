@@ -266,8 +266,8 @@ describe("the host resolver is actually wired to something", () => {
   const service = code("lib/services/events.service.ts")
 
   it("the mobile payload resolves the host rather than passing the creator through", () => {
-    expect(service).toMatch(/import \{ eventHost \} from "@\/lib\/event-host"/)
-    expect(service).toMatch(/eventHost\(event\)/)
+    expect(service).toMatch(/import \{ eventHostSelect, hostPayload \} from "@\/lib\/event-host"/)
+    expect(service).toMatch(/organizer: hostPayload\(event\)/)
     // The producer, not just the consumer: pinning only `organizer:` would pass
     // against a version that assigned `event.organizer` straight back.
     expect(service).not.toMatch(/organizer: event\.organizer,/)
@@ -278,18 +278,15 @@ describe("the host resolver is actually wired to something", () => {
     // through, so `EventDetailScreen` showed the curating admin's real name
     // on every curated event. Found by reading one event through both routes.
     const detail = code("app/api/mobile/events/[eventId]/route.ts")
-    expect(detail).toMatch(/import \{ eventHost \} from "@\/lib\/event-host"/)
-    expect(detail).toMatch(/eventHost\(event\)/)
+    expect(detail).toMatch(/import \{ hostPayload \} from "@\/lib\/event-host"/)
+    expect(detail).toMatch(/organizer: hostPayload\(event\)/)
     expect(detail).not.toMatch(/organizer: event\.organizer,/)
     expect(detail).toMatch(/organizer_org: \{ select: \{ display_name: true \} \}/)
   })
 
   it("selects the columns the resolver needs", () => {
-    // `...eventHostSelect` cannot be spread here -- it claims `organizer` too,
-    // with a narrower shape, and would silently drop `id`/`image`. So the
-    // columns are named, and they have to stay named.
-    expect(service).toMatch(/curated_at: true/)
-    expect(service).toMatch(/organizer_org: \{ select: \{ display_name: true \} \}/)
+    // The list spreads the resolver's own fragment, now that nothing else in it claims `organizer`.
+    expect(service).toMatch(/\.\.\.eventHostSelect,/)
   })
 
   it("never shows the curating admin", () => {
