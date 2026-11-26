@@ -25,7 +25,7 @@ export function suspendedMessageFor(suspensionReason: string | null): string {
  * is the generic one, so no refusal tells anyone else why an account was
  * suspended.
  */
-export function accountRefusal(reason: "suspended" | "staff", owner?: { suspension_reason: string | null }) {
+export function accountRefusal(reason: "suspended" | "staff", owner?: { suspension_reason: string | null } | null) {
   if (reason === "staff") return errorResponse(STAFF_MESSAGE, 403, ErrorCode.FORBIDDEN, ErrorCode.ACCOUNT_STAFF)
   const message = owner ? suspendedMessageFor(owner.suspension_reason) : SUSPENDED_MESSAGE
   return errorResponse(message, 403, ErrorCode.FORBIDDEN, ErrorCode.ACCOUNT_SUSPENDED)

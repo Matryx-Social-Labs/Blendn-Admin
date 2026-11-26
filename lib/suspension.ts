@@ -101,7 +101,7 @@ export const SUSPENSION_CATEGORIES = {
   community_guidelines: "breaking our community guidelines",
 } as const
 
-export type SuspensionCategory = keyof typeof SUSPENSION_CATEGORIES
+type SuspensionCategory = keyof typeof SUSPENSION_CATEGORIES
 
 /** A report's reason (free text on most report tables) as one of the categories. */
 export function suspensionCategory(reason: string | null | undefined): SuspensionCategory {

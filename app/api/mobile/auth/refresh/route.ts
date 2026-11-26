@@ -34,7 +34,7 @@ async function refusedRefresh(token: string) {
     // Verified there: our signature, unexpired, its row this user's and revoked by the suspension.
     const { userId } = jwt.decode(token) as { userId: string }
     const owner = await db.user.findUnique({ where: { id: userId }, select: { suspension_reason: true } })
-    return accountRefusal("suspended", owner ?? undefined)
+    return accountRefusal("suspended", owner)
   }
   if (reason) return errorResponse("Invalid or expired refresh token", 401, reason, reason)
   return errorResponse("Invalid or expired refresh token", 401, ErrorCode.UNAUTHORIZED)
@@ -43,7 +43,7 @@ async function refusedRefresh(token: string) {
 /** `owner`: the account the verified token belongs to (`accountRefusal`). */
 function accountBlockedResponse(reason: "deleted" | "suspended" | "staff", owner?: { suspension_reason: string | null } | null) {
   if (reason === "deleted") return errorResponse("User not found", 401, ErrorCode.ACCOUNT_DELETED, ErrorCode.ACCOUNT_DELETED)
-  return accountRefusal(reason, owner ?? undefined)
+  return accountRefusal(reason, owner)
 }
 
 export async function POST(request: NextRequest) {

@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
     })
 
     const blocked = accountBlockReason(user)
-    if (blocked === "suspended" || blocked === "staff") return accountRefusal(blocked, user ?? undefined)
+    if (blocked === "suspended" || blocked === "staff") return accountRefusal(blocked, user)
     // `!user` is already covered by `blocked === "deleted"`; naming it again is
     // what narrows the type for everything below.
     if (blocked || !user) return errorResponse("Account not found", 401, ErrorCode.ACCOUNT_DELETED, ErrorCode.ACCOUNT_DELETED)
