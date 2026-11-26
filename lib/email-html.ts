@@ -323,7 +323,7 @@ export function approvedHtml(
   const signIn = `${appUrl()}/login`
   // The sign-in address is monospaced: it is the one thing in this email the
   // reader has to type exactly. No password travels here (SCRUM-134).
-  const account = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="dm-codebox dm-border" style="margin:22px 0 6px;background-color:#F7F4F3;border:1px solid #E2DAD7;border-radius:10px;"><tr><td style="padding:16px 18px;font-family:'SF Mono',Consolas,Menlo,monospace;font-size:13px;line-height:22px;color:${INK};" class="dm-text"><span style="color:${MUTED};">Email</span><br>${esc(email)}</td></tr></table>`
+  const account = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="dm-codebox dm-border" style="margin:22px 0 6px;background-color:#F7F4F3;border:1px solid #E2DAD7;border-radius:10px;"><tr><td style="padding:16px 18px;font-family:'SF Mono',Consolas,Menlo,monospace;font-size:13px;line-height:22px;color:${INK};word-break:break-all;" class="dm-text"><span style="color:${MUTED};">Email</span><br>${esc(email)}</td></tr></table>`
 
   return shell({
     title: "Your Blend’n host account is ready",

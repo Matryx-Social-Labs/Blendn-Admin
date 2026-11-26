@@ -302,6 +302,8 @@ describe("the approval email’s account block", () => {
     expect(html).toContain(`href="${link}"`)
     expect(html).toMatch(/Set your password/)
     expect(html).not.toMatch(/>Password</)
+    // A long address wraps inside the box rather than pushing a 390 px screen sideways (SCRUM-1342 render).
+    expect(html).toMatch(/word-break:break-all;" class="dm-text"><span[^>]*>Email<\/span><br>asha@byg\.in/)
   })
 })
 
