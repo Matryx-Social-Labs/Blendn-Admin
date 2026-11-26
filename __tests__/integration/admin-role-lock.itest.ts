@@ -62,6 +62,12 @@ const stateOf = (id: string) =>
   db.user.findUniqueOrThrow({ where: { id }, select: { role: true, admin_requested_by: true, admin_requested_at: true } })
 const NO_REQUEST = { role: "attendee", admin_requested_by: null, admin_requested_at: null }
 const HOUR = 60 * 60 * 1000
+/** A request recorded by `by` just now: `new Date()`, because some cases mock Date.now. */
+async function expectFreshRequest(id: string, by: string) {
+  const state = await stateOf(id)
+  expect(state).toMatchObject({ role: "attendee", admin_requested_by: by })
+  expect(Math.abs(state.admin_requested_at!.getTime() - new Date().getTime())).toBeLessThan(60_000)
+}
 
 describe("making someone an admin", () => {
   it("refuses an address off the company domain, and writes nothing", async () => {
@@ -234,7 +240,7 @@ describe("a second admin", () => {
 
     await expect(updateUserRole(id, "app_admin")).resolves.toEqual({ success: true, pending: true })
 
-    expect(await stateOf(id)).toMatchObject({ role: "attendee", admin_requested_by: a })
+    await expectFreshRequest(id, a)
     expect(await roleChanges(id)).toEqual([])
   })
 
@@ -259,7 +265,7 @@ describe("a second admin", () => {
       jest.spyOn(Date, "now").mockReturnValue(at.getTime() + 24 * HOUR)
 
       await expect(updateUserRole(id, "app_admin")).resolves.toEqual({ success: true, pending: true })
-      expect(await stateOf(id)).toMatchObject({ role: "attendee", admin_requested_by: a })
+      await expectFreshRequest(id, a)
     })
   })
 
@@ -276,7 +282,7 @@ describe("a second admin", () => {
 
       await expect(updateUserRole(id, "app_admin")).resolves.toEqual({ success: true, pending: true })
 
-      expect(await stateOf(id)).toMatchObject({ role: "attendee", admin_requested_by: a })
+      await expectFreshRequest(id, a)
       expect(await roleChanges(id)).toEqual([])
     })
   })
@@ -385,7 +391,7 @@ describe("a second admin", () => {
     expect(await auditRows(id)).toEqual([])
   })
 
-  it("demotion needs no second admin, and clears nothing but its own row's request", async () => {
+  it("demotion needs no second admin, and leaves a request on another row alone", async () => {
     const a = await signedInAdmin()
     const b = await anotherAdmin()
     const pending = await requested(b, new Date())
