@@ -35,6 +35,7 @@ import {
 } from "@/lib/email"
 import type { org_role } from "@prisma/client"
 import { activeMembership } from "@/lib/org-membership"
+import { hit } from "@/lib/rate-limit-store"
 
 /**
  * An organisation managing itself: members, invites, domains, join requests.
@@ -243,6 +244,12 @@ export async function getOrgMembers(orgId: string): Promise<{
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
+/** Invites one person may create, per window, across every organisation (SCRUM-1245). */
+const INVITES_PER_HOUR = { max: 20, windowMs: 60 * 60 * 1000 }
+const INVITES_PER_DAY = { max: 50, windowMs: 24 * 60 * 60 * 1000 }
+/** Unanswered invites one organisation may have out at once. */
+const MAX_PENDING_INVITES = 50
+
 /** What the invitee is told they are being invited as. */
 const ROLE_LABELS: Record<org_role, string> = {
   owner: "an owner",
@@ -328,6 +335,29 @@ export async function inviteMember(
     select: { id: true },
   })
   if (outstanding) return { ok: false, message: "They already have an invite outstanding." }
+
+  // ponytail: count then create, not atomic; concurrent sends can pass 50 by a
+  // few, bounded by the per-user window. A transaction with an org row lock if
+  // the cap ever has to be exact.
+  const pending = await db.organisation_invites.count({
+    where: { org_id: orgId, accepted_at: null, revoked_at: null, expires_at: { gt: new Date() } },
+  })
+  if (pending >= MAX_PENDING_INVITES) {
+    return {
+      ok: false,
+      message: `${MAX_PENDING_INVITES} invites are still waiting for an answer. Revoke old ones before sending more.`,
+    }
+  }
+
+  // Counted here, just before the create, not at the top as billing's admin
+  // limit is: an outside-domain invite is two calls by design (needsReason, then
+  // the reason), and the refusals above send nothing. Every mail is counted.
+  if ((await hit(`org-invite:hour:${user.id}`, INVITES_PER_HOUR.windowMs)).count > INVITES_PER_HOUR.max) {
+    return { ok: false, message: `That’s ${INVITES_PER_HOUR.max} invites in an hour. Try again in an hour.` }
+  }
+  if ((await hit(`org-invite:day:${user.id}`, INVITES_PER_DAY.windowMs)).count > INVITES_PER_DAY.max) {
+    return { ok: false, message: `That’s ${INVITES_PER_DAY.max} invites today. Try again tomorrow.` }
+  }
 
   const token = newInviteToken()
   const invite = await db.organisation_invites.create({

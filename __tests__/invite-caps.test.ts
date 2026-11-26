@@ -58,9 +58,6 @@ const pending = (n: number, org = ORG): Row[] =>
 let seq = 0
 /** One invite by the signed-in owner, to a fresh in-domain address. */
 async function invite(email = `person${++seq}@blendn.app`, reason?: string) {
-  mockDb.organisation_members.findFirst
-    .mockResolvedValueOnce({ role: "owner" }) // requireOrgRole
-    .mockResolvedValueOnce(null) // not already a member
   return inviteMember(ORG, email, "staff", reason)
 }
 
@@ -70,6 +67,10 @@ beforeEach(() => {
   resetMemoryStore()
   table = []
   mockAuth.mockResolvedValue({ user: { id: "u1", name: "Arjun", role: "organizer" } })
+  // The caller's own membership is an owner's; the invitee is never already a member.
+  mockDb.organisation_members.findFirst.mockImplementation(async ({ where }: { where: { user_id?: string } }) =>
+    where.user_id ? { role: "owner" } : null
+  )
   mockDb.organisations.findUniqueOrThrow.mockResolvedValue({
     may_sponsor: false,
     _count: { venues: 0 },
