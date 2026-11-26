@@ -1,7 +1,7 @@
 import type { DashboardRole } from "@/lib/dashboard-types"
 
 let session: { user: { id: string; role: DashboardRole } } | null = null
-jest.mock("@/lib/auth", () => ({ getAuth: async () => (session?.user ? { ...session, user: { signedInAt: 0, ...session.user } } : session) }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => (session?.user ? { ...session, user: { signedInAt: Date.now(), ...session.user } } : session) }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { NextRequest } from "next/server"

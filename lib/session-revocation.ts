@@ -11,6 +11,7 @@
  * No database import: the caller reads the account and passes it in, so a
  * read that fails is the caller's error, never an account that looks fine.
  */
+import type { user_role } from "@prisma/client"
 
 export interface SessionClaims {
   sub?: string | null
@@ -19,12 +20,21 @@ export interface SessionClaims {
 }
 
 export interface AccountState {
+  /** Required, so a caller that does not select it fails typecheck: the 12 hours below depend on it. */
+  role: user_role
   deletedAt: Date | null
   suspended_at: Date | null
   password_changed_at: Date | null
   /** Settings' "End dashboard sessions" (SCRUM-603). */
   sessions_revoked_at: Date | null
 }
+
+/**
+ * How long an `app_admin` session lasts after it proved the password (SCRUM-1238,
+ * launch gate 10). NextAuth v4's `session.maxAge` is one value for everyone, so
+ * the admins' shorter one is this rule; everyone else keeps the 30-day default.
+ */
+export const ADMIN_SESSION_MS = 12 * 60 * 60 * 1000
 
 const isTime = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value)
 
@@ -45,8 +55,9 @@ export function provenAt(claims: SessionClaims): number | null {
 
 /**
  * Ended when: there is no user, or no account; the account is deleted or
- * suspended; the session cannot say when it signed in; or, at or after that
- * moment, the password changed or the account ended every dashboard session.
+ * suspended; the session cannot say when it signed in; it is an admin's and
+ * more than `ADMIN_SESSION_MS` old; or, at or after that moment, the password
+ * changed or the account ended every dashboard session.
  * A tie goes to the change — the same millisecond, or for an `iat` the same
  * second, cannot say which came first.
  */
@@ -55,6 +66,9 @@ export function isRevoked(claims: SessionClaims, account: AccountState | null): 
   if (account.deletedAt !== null || account.suspended_at !== null) return true
   const proven = provenAt(claims)
   if (proven === null) return true
+  // No role is a read that forgot to select it, which cannot say whether the 12 hours apply: ended.
+  if (typeof account.role !== "string") return true
+  if (account.role === "app_admin" && Date.now() - proven > ADMIN_SESSION_MS) return true
   return [account.password_changed_at, account.sessions_revoked_at].some(
     // Not a date is a read that forgot to select it: ended, not waved through.
     (at) => at !== null && (!(at instanceof Date) || proven <= at.getTime())
