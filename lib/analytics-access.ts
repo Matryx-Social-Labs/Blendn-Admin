@@ -1,5 +1,4 @@
-import "server-only"
-
+// Relative imports and no "server-only": the reminder sweeper reaches `freeWindow` from server.ts (SCRUM-1421).
 import { distinctAttendeeCounts } from "./attendee-counts"
 import { MIN_ATTENDEES } from "./connection-metrics"
 import { db } from "./db"
@@ -108,9 +107,10 @@ async function firstQualifyingEvent(orgId: string, now: Date): Promise<{ id: str
 /**
  * The organisation's free window, from its row once written; otherwise found
  * now and written once (a concurrent first read writes the same answer, and
- * only the first write lands).
+ * only the first write lands). The one writer of the window: `analyticsAccess`
+ * on a view, and the free-window mail's pass for a host who never opened one.
  */
-async function freeWindow(orgId: string, now: Date): Promise<{ until: Date; eventId: string } | null> {
+export async function freeWindow(orgId: string, now: Date): Promise<{ until: Date; eventId: string } | null> {
   const org = await db.organisations.findUnique({
     where: { id: orgId },
     select: { analytics_free_until: true, first_free_event_id: true },
