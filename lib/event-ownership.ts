@@ -85,9 +85,8 @@ export async function owningOrgFor(user: {
   if (user.role === "app_admin") return null
 
   const membership = await homeMembershipFor(user)
-  const orgId = membership?.org_id ?? null
 
-  if (!orgId) {
+  if (!membership) {
     /*
      * Loud, not null.
      *
@@ -102,11 +101,11 @@ export async function owningOrgFor(user: {
     )
   }
 
-  if (membership && !mayCreateIn(membership.role)) {
+  if (!mayCreateIn(membership.role)) {
     throw new Error("Only an owner or admin of your organisation can create its events. Ask one of them to create it, or to make you an admin.")
   }
 
-  return orgId
+  return membership.org_id
 }
 
 /**
