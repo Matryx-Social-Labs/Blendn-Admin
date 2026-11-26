@@ -53,20 +53,39 @@ it("says null, not zero, for a pool not built yet or a process without Socket.io
   expect(body.sockets).toBeNull()
 })
 
-it("the event-loop delay is per read: a stall shows once, then the next read starts afresh", async () => {
-  await health()
-  // Node's histogram skips the first tick after a reset; a probe is seconds apart, so let the loop turn first.
-  await new Promise((r) => setTimeout(r, 30))
-  const stallUntil = Date.now() + 150
-  while (Date.now() < stallUntil) {
-    // a 150 ms synchronous block: the event loop cannot turn
+it("the event-loop delay is the last full minute, and a read never resets it (the endpoint is public)", async () => {
+  // Only the minute timer is fake: the histogram, the stall and the waits are real.
+  jest.useFakeTimers({
+    doNotFake: ["Date", "hrtime", "nextTick", "performance", "queueMicrotask", "setImmediate", "clearImmediate", "setTimeout", "clearTimeout"],
+  })
+  try {
+    let route: typeof import("@/app/api/health/route") | undefined
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      route = require("@/app/api/health/route")
+    })
+    const read = async () => (await (await route!.GET()).json()).eventLoopDelayMs
+
+    // Node's histogram skips the first tick after enable/reset; let the loop turn first.
+    await new Promise((r) => setTimeout(r, 30))
+    const stallUntil = Date.now() + 150
+    while (Date.now() < stallUntil) {
+      // a 150 ms synchronous block: the event loop cannot turn
+    }
+    await new Promise((r) => setTimeout(r, 30))
+    expect((await read()).max).toBe(0) // the first minute is not over yet
+
+    jest.advanceTimersByTime(60_000)
+    const stalled = await read()
+    expect(stalled.max).toBeGreaterThanOrEqual(100)
+    expect(await read()).toEqual(stalled) // a second caller sees the same minute
+
+    await new Promise((r) => setTimeout(r, 50))
+    jest.advanceTimersByTime(60_000)
+    expect((await read()).max).toBeLessThan(100)
+  } finally {
+    jest.useRealTimers()
   }
-  await new Promise((r) => setTimeout(r, 30))
-  const stalled = (await (await health()).json()).eventLoopDelayMs
-  expect(stalled.max).toBeGreaterThanOrEqual(100)
-  await new Promise((r) => setTimeout(r, 50))
-  const after = (await (await health()).json()).eventLoopDelayMs
-  expect(after.max).toBeLessThan(100)
 })
 
 it.each([

@@ -479,7 +479,7 @@ Returns:
 }
 ```
 
-`pool`, `eventLoopDelayMs` and `sockets` are counts about this process (SCRUM-1221). `pool` is `null` before the first query; `sockets` is `null` where Socket.io is not attached. `eventLoopDelayMs` covers the time since the previous read (reset on each read; the 10 ms resolution of `monitorEventLoopDelay` is its floor). Alert on `eventLoopDelayMs.p99 > 100` (the one process saturating) and on `pool.waiting > 0` (requests queued for a connection).
+`pool`, `eventLoopDelayMs` and `sockets` are counts about this process (SCRUM-1221). `pool` is `null` before the first query; `sockets` is `null` where Socket.io is not attached. `eventLoopDelayMs` is the last full minute, rotated inside the process and never reset by a read (the endpoint is public), zeros for the first minute; the 10 ms resolution of `monitorEventLoopDelay` is its floor. Alert on `eventLoopDelayMs.p99 > 100` (the one process saturating) and on `pool.waiting > 0` (requests queued for a connection).
 
 ## Troubleshooting
 

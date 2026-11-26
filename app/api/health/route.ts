@@ -6,23 +6,26 @@ import { db, poolStats } from "@/lib/db"
 export const dynamic = "force-dynamic"
 
 /*
- * How late the event loop ran since the previous read (SCRUM-1221). The one
+ * How late the event loop ran over the last full minute (SCRUM-1221). The one
  * process saturating is what breaks first under a full room, and `SELECT 1`
- * never shows it; ops/07 alerts on `p99 > 100` and on `pool.waiting`. Reset on
- * every read, so a value covers the time since the last probe (or since this
- * module loaded, for the first).
+ * never shows it; ops/07 alerts on `p99 > 100` and on `pool.waiting`.
+ *
+ * A fixed window rotated by this module, never reset by a read: the endpoint is
+ * public, so a read that reset it would let any caller (or a second monitor)
+ * wipe a spike before the alerting probe saw it. Zeros until the first minute
+ * after this module loads (the first /api/health request) has passed.
  */
-const loopDelay = monitorEventLoopDelay()
-loopDelay.enable()
-
+const LOOP_WINDOW_MS = 60_000
 const NS_PER_MS = 1e6
 const ms = (ns: number) => Math.round(ns / NS_PER_MS)
 
-function readLoopDelay(): { p50: number; p99: number; max: number } {
-  const read = { p50: ms(loopDelay.percentile(50)), p99: ms(loopDelay.percentile(99)), max: ms(loopDelay.max) }
+const loopDelay = monitorEventLoopDelay()
+loopDelay.enable()
+let lastLoopWindow = { p50: 0, p99: 0, max: 0 }
+setInterval(() => {
+  lastLoopWindow = { p50: ms(loopDelay.percentile(50)), p99: ms(loopDelay.percentile(99)), max: ms(loopDelay.max) }
   loopDelay.reset()
-  return read
-}
+}, LOOP_WINDOW_MS).unref()
 
 /**
  * Health check endpoint for Railway deployment
@@ -61,7 +64,7 @@ export async function GET() {
     version: process.env.npm_package_version || "0.1.0",
     database: "unknown",
     pool: null,
-    eventLoopDelayMs: readLoopDelay(),
+    eventLoopDelayMs: lastLoopWindow,
     sockets: globalThis.__blendnSocketIo?.engine.clientsCount ?? null,
   }
 
