@@ -32,6 +32,8 @@ const QUIET_MS = 4 * OPS_INTERVAL_MS
 type Seen = {
   status: unknown
   snapshots: number
+  // Times the line went up: it can come and go between two polls.
+  lines: number
   unmount: () => void
   client: Socket
 }
@@ -47,8 +49,10 @@ jest.mock("react", () => ({
     return [
       initial,
       (value: unknown) => {
-        if (isStatus) seen.status = value
-        else seen.snapshots++
+        if (isStatus) {
+          if (value === "error" && seen.status !== "error") seen.lines++
+          seen.status = value
+        } else seen.snapshots++
       },
     ]
   },
@@ -170,7 +174,7 @@ type Ops = ReturnType<typeof opsServer>
 /** The Live tab opened on this server: the hook's effect run once, its setters recorded. */
 function openScreen(server: Ops): Seen {
   mockUrl = `http://127.0.0.1:${server.world.port}`
-  mockSeen = { status: undefined, snapshots: 0, unmount: () => {}, client: undefined as unknown as Socket }
+  mockSeen = { status: undefined, snapshots: 0, lines: 0, unmount: () => {}, client: undefined as unknown as Socket }
   mockSlot = 0
   const seen = mockSeen
   // React is stood in for above, so the hook runs outside a component on purpose.
@@ -368,7 +372,7 @@ describe("useOpsSnapshot against a real Socket.io server (SCRUM-1444)", () => {
     server.world.answers = ["silent"]
     const seen = openScreen(server)
 
-    await waitFor("the line", () => seen.status === "error", QUIET_MS + 2_000)
+    await waitFor("the line", () => seen.lines > 0, QUIET_MS + 2_000)
     await recovers(seen, 0, 5_000)
     expect(server.world.joins).toBe(2)
 
