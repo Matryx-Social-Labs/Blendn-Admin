@@ -27,6 +27,7 @@ const users: string[] = []
 const events: string[] = []
 const orgs: string[] = []
 const leads: string[] = []
+const venues: string[] = []
 
 beforeEach(() => jest.mocked(auditInTx).mockClear())
 
@@ -34,6 +35,7 @@ afterAll(async () => {
   await db.audit_logs.deleteMany({ where: { user_id: { in: users } } })
   await db.leads.deleteMany({ where: { id: { in: leads } } })
   await cleanup(users, events)
+  await db.venues.deleteMany({ where: { id: { in: venues } } })
   await db.organisation_members.deleteMany({ where: { org_id: { in: orgs } } })
   await db.organisations.deleteMany({ where: { id: { in: orgs } } })
   await closeDb()
@@ -82,6 +84,18 @@ describe("a lead note", () => {
     await expect(addLeadNote(leadId, "Called again, keen.")).rejects.toThrow(FAIL.message)
 
     expect(auditInTx).toHaveBeenCalled()
+    expect(await db.lead_notes.count({ where: { lead_id: leadId } })).toBe(0)
+    expect(await auditRows("lead.note_added", leadId)).toEqual([])
+  })
+
+  it("is refused to anyone but an admin, and nothing is written", async () => {
+    const leadId = await lead()
+    const host = await makeUser("art-lead-host", "organizer")
+    users.push(host)
+    session = { user: { id: host, role: "organizer" } }
+
+    await expect(addLeadNote(leadId, "Called, no answer.")).rejects.toThrow("Forbidden")
+
     expect(await db.lead_notes.count({ where: { lead_id: leadId } })).toBe(0)
     expect(await auditRows("lead.note_added", leadId)).toEqual([])
   })
@@ -136,6 +150,38 @@ describe("acknowledging an event's issue", () => {
     expect((await auditRows("event.issue_acknowledged", f.eventId)).map((r) => r.user_id)).toEqual([f.host])
   })
 
+  it("is refused to someone who cannot operate the event, and nothing is written", async () => {
+    const f = await fixture()
+    const outsider = await makeUser("art-outsider", "organizer")
+    users.push(outsider)
+    session = { user: { id: outsider, role: "organizer" } }
+
+    await expect(acknowledgeIssue(f.issueId)).rejects.toThrow("Not authorised")
+
+    const issue = await db.event_issues.findUniqueOrThrow({ where: { id: f.issueId }, select: { acknowledged_at: true } })
+    expect(issue.acknowledged_at).toBeNull()
+    expect(await auditRows("event.issue_acknowledged", f.eventId)).toEqual([])
+  })
+
+  it("by the venue's side is recorded, but in no organisation's log: a host never reads what another organisation's people did", async () => {
+    const f = await fixture()
+    const venueStaff = await makeUser("art-venue", "organizer")
+    users.push(venueStaff)
+    const venueOrg = await db.organisations.create({ data: { display_name: testId("Venue Org"), status: "verified" } })
+    orgs.push(venueOrg.id)
+    await db.organisation_members.create({ data: { org_id: venueOrg.id, user_id: venueStaff, role: "owner" } })
+    const venue = await db.venues.create({ data: { name: testId("art-venue"), city: "Bengaluru", owner_org_id: venueOrg.id, claimed_at: new Date(Date.now() - 24 * 3_600_000) }, select: { id: true } })
+    venues.push(venue.id)
+    await db.events.update({ where: { id: f.eventId }, data: { venue_id: venue.id, venue_link_status: "auto_linked" } })
+    session = { user: { id: venueStaff, role: "organizer" } }
+
+    await acknowledgeIssue(f.issueId)
+
+    expect(await auditRows("event.issue_acknowledged", f.eventId)).toEqual([
+      { action: "event.issue_acknowledged", resource: "event", resource_id: f.eventId, user_id: venueStaff, org_id: null, details: { issueId: f.issueId, kind: "over_capacity" } },
+    ])
+  })
+
   it("is not acknowledged when its audit row cannot be written", async () => {
     const f = await fixture()
     session = { user: { id: f.host, role: "organizer" } }
@@ -180,6 +226,50 @@ describe("an organisation's status change", () => {
     expect(await auditRows("organisation.verified", f.org)).toEqual([
       { action: "organisation.verified", resource: "organisation", resource_id: f.org, user_id: admin, org_id: f.org, details: { from: "suspended", reason: null, eventsHidden: 0, eventsRestored: 1 } },
     ])
+  })
+
+  it("records the status it changed from even while another admin's change is still committing", async () => {
+    await signedInAdmin()
+    const f = await fixture()
+    await db.organisations.update({ where: { id: f.org }, data: { status: "pending" } })
+
+    // Another admin verifies it and has not committed yet.
+    let commit!: () => void
+    let locked!: () => void
+    const held = new Promise<void>((resolve) => { commit = resolve })
+    const isLocked = new Promise<void>((resolve) => { locked = resolve })
+    const other = db.$transaction(async (tx) => {
+      await tx.organisations.update({ where: { id: f.org }, data: { status: "verified" } })
+      locked()
+      await held
+    }, { timeout: 30_000 })
+    await isLocked
+
+    const suspending = setOrganisationStatus(f.org, "suspended", "Repeated safety reports at their events.")
+    // Until it waits on the other admin's row lock, whichever statement that is.
+    for (let i = 0; i < 300; i++) {
+      const [{ n }] = await db.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%organisations%' AND datname = current_database()`
+      if (n > 0) break
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    commit()
+    await other
+    await suspending
+
+    expect((await auditRows("organisation.suspended", f.org)).map((r) => (r.details as { from: string }).from)).toEqual(["verified"])
+  })
+
+  it("is refused to anyone but an admin, and nothing is written", async () => {
+    const f = await fixture()
+    const host = await makeUser("art-org-outsider", "organizer")
+    users.push(host)
+    session = { user: { id: host, role: "organizer" } }
+    const before = await stateOf(f.org, f.eventId)
+
+    await expect(setOrganisationStatus(f.org, "suspended", "Repeated safety reports at their events.")).rejects.toThrow("Forbidden")
+
+    expect(await stateOf(f.org, f.eventId)).toEqual(before)
+    expect(await auditRows("organisation.suspended", f.org)).toEqual([])
   })
 
   it("is not suspended, and hides nothing, when its audit row cannot be written", async () => {

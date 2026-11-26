@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache"
 
 import { auditInTx } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
+import { isUuid } from "@/lib/api-input"
 import { db } from "@/lib/db"
 import { actorFor } from "@/lib/org-membership"
 import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
@@ -19,6 +20,7 @@ import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
 export async function acknowledgeIssue(issueId: string) {
   const session = await getAuth()
   if (!session?.user) throw new Refusal("Not authorised")
+  if (!isUuid(issueId)) throw new Refusal("Issue not found")
 
   const issue = await db.event_issues.findUnique({
     where: { id: issueId },
@@ -50,7 +52,7 @@ export async function acknowledgeIssue(issueId: string) {
   const userId = session.user.id
   await db.$transaction(async (tx) => {
     const { count } = await tx.event_issues.updateMany({
-      where: { id: issueId, acknowledged_at: null },
+      where: { id: issue.id, acknowledged_at: null },
       data: { acknowledged_at: new Date(), acknowledged_by: userId },
     })
     if (count === 0) return
