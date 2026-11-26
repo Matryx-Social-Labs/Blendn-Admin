@@ -16,7 +16,6 @@ import { unsubscribeUrl } from "./unsubscribe"
  * at 10:00 on the event's clock the morning after it ends — the same morning and the same lookback as the rating
  * request, so the first pass after a deploy mails only the nights that ended in the last 34 h, never the archive.
  */
-export const RESULTS_MAIL_ENDED_WITHIN_MS = RATING_REQUEST_ENDED_WITHIN_MS
 const BATCH = 50
 
 type MailedEvent = { id: string; title: string; end_time: Date; timezone: string; organizer_org_id: string | null }
@@ -37,7 +36,7 @@ export async function sendResultsMails(now: Date = new Date()): Promise<number> 
         status: { in: ["published", "completed"] },
         deleted_at: null,
         results_mailed_at: null,
-        end_time: { lte: now, gt: new Date(now.getTime() - RESULTS_MAIL_ENDED_WITHIN_MS) },
+        end_time: { lte: now, gt: new Date(now.getTime() - RATING_REQUEST_ENDED_WITHIN_MS) },
       },
       select: { id: true, title: true, end_time: true, timezone: true, organizer_org_id: true },
       orderBy: { end_time: "asc" },

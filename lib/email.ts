@@ -486,7 +486,11 @@ export interface NightResults {
 }
 
 const NEXT_LABEL = "List your next night"
-const UNSUBSCRIBE_LINE = "Unsubscribe from these mails:"
+const footer = (unsubscribeUrl: string) => [
+  "—",
+  "You get this the morning after each night your organization runs on Blend’n. Invites and account mail still come.",
+  `Unsubscribe from these mails: ${unsubscribeUrl}`,
+]
 const count = (n: number) => n.toLocaleString("en-US")
 
 export function resultsEmail(r: NightResults) {
@@ -513,9 +517,7 @@ export function resultsEmail(r: NightResults) {
       r.nextUrl,
       ...(note ? ["", note] : []),
       "",
-      "—",
-      "You get this the morning after each night your organization runs on Blend’n. Invites and account mail still come.",
-      `${UNSUBSCRIBE_LINE} ${r.unsubscribeUrl}`,
+      ...footer(r.unsubscribeUrl),
     ].join("\n"),
     html: resultsHtml({
       title: subject,
@@ -548,9 +550,7 @@ export function noCheckInsEmail(r: { title: string; nextUrl: string; unsubscribe
       `${NEXT_LABEL}:`,
       r.nextUrl,
       "",
-      "—",
-      "You get this the morning after each night your organization runs on Blend’n. Invites and account mail still come.",
-      `${UNSUBSCRIBE_LINE} ${r.unsubscribeUrl}`,
+      ...footer(r.unsubscribeUrl),
     ].join("\n"),
     html: resultsHtml({
       title: subject,

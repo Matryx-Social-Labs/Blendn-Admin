@@ -17,7 +17,8 @@ jest.mock("@/lib/db", () => ({ db: mockDb }))
 const mockRatingGroups = jest.fn()
 jest.mock("@/lib/rating-batches", () => ({ publishedRatingGroups: (...a: unknown[]) => mockRatingGroups(...a) }))
 
-import { RESULTS_MAIL_ENDED_WITHIN_MS, sendResultsMails } from "@/lib/results-mail"
+import { sendResultsMails } from "@/lib/results-mail"
+import { RATING_REQUEST_ENDED_WITHIN_MS } from "@/lib/services/event-notifications.service"
 import { verifyUnsubscribeToken } from "@/lib/unsubscribe"
 
 const ORG = "0a000000-0000-4000-8000-000000000001"
@@ -121,9 +122,9 @@ describe("when", () => {
       status: { in: ["published", "completed"] },
       deleted_at: null,
       results_mailed_at: null,
-      end_time: { lte: TEN_IST, gt: new Date(TEN_IST.getTime() - RESULTS_MAIL_ENDED_WITHIN_MS) },
+      end_time: { lte: TEN_IST, gt: new Date(TEN_IST.getTime() - RATING_REQUEST_ENDED_WITHIN_MS) },
     })
-    expect(RESULTS_MAIL_ENDED_WITHIN_MS).toBe(34 * 3600_000)
+    expect(RATING_REQUEST_ENDED_WITHIN_MS).toBe(34 * 3600_000)
   })
 })
 
