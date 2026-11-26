@@ -811,10 +811,9 @@ async function removeInvalidPushToken(token: string): Promise<void> {
  * The app shows everything on open. `conversationId` in `data` is what gets
  * them there in one tap.
  *
- * Existing senders are deliberately untouched. `notifyPrivateMessage` uses the
- * *resolved* display name (see `lib/conversation-identity.ts`), which is a
- * pseudonym until someone reveals; changing it to carry nothing at all is a
- * separate call.
+ * `notifyPrivateMessage` uses the *resolved* display name (see
+ * `lib/conversation-identity.ts`), which is a pseudonym until both swap, and
+ * carries nothing at all in a conversation that began as a request.
  */
 
 /** A mutual like. Sent to the EARLIER liker only — see below. */
@@ -996,8 +995,11 @@ export function clip(text: string, max: number): string {
  * push carries the conversation's `collapseId`, so the lock screen shows one
  * notification for it, updated, rather than a column.
  *
- * The body is still the message on the first alert. Whether a lock screen
- * should carry what somebody wrote is a product decision this does not make.
+ * The body is still the message on the first alert, except in a conversation
+ * that began as a message request (`fromRequest`, from `beganAsRequest`): that
+ * one shows real names for good, so its push is "New message" with neither the
+ * name nor the words (launch gate 7, SCRUM-1266). A match keeps the name its
+ * caller resolved, which is a pseudonym until both swap.
  *
  * ponytail: two sends committing within the same few milliseconds can each
  * count one unread and both ring; they share a `collapseId`, so the phone shows
@@ -1009,14 +1011,16 @@ export async function notifyPrivateMessage(dm: {
   preview: string
   conversationId: string
   unread: number
+  fromRequest: boolean
 }): Promise<boolean> {
   const fresh = await firstInWindow(`push:dm:${dm.conversationId}:${dm.recipientId}`, DM_PUSH_WINDOW_MS)
   if (dm.unread > 1 && !fresh) return false
 
   return sendPushNotification({
     userId: dm.recipientId,
-    title: dm.senderName,
-    body: dm.unread > 1 ? `${dm.unread} new messages` : clip(dm.preview, 100),
+    title: dm.fromRequest ? "New message" : dm.senderName,
+    body:
+      dm.unread > 1 ? `${dm.unread} new messages` : dm.fromRequest ? "Open Blend’n to read it" : clip(dm.preview, 100),
     data: { type: "private_message", conversationId: dm.conversationId },
   })
 }

@@ -77,14 +77,16 @@ describe("POST /message-requests/:id/respond", () => {
     expect(await bellFor(sender)).toHaveLength(0)
   })
 
-  it("accept still tells the sender, by name", async () => {
+  it("accept still tells the sender, naming nobody (SCRUM-1266)", async () => {
     const { sender, requestId, token } = await pending()
     ;(sendPushNotification as jest.Mock).mockClear()
 
     expect((await answer(requestId, token, "accept")).status).toBe(200)
     await settle()
 
-    expect(sendPushNotification).toHaveBeenCalledWith(expect.objectContaining({ userId: sender, title: expect.stringMatching(/accepted/i) }))
+    expect(sendPushNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: sender, title: "Message request accepted", body: "Your message request was accepted" })
+    )
     const rows = await bellFor(sender)
     expect(rows).toHaveLength(1)
     expect(rows[0].title).toMatch(/accepted/i)

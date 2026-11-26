@@ -212,6 +212,20 @@ export function isPseudonymous(conversation: {
   return conversation.user1_pseudonym !== null || conversation.user2_pseudonym !== null
 }
 
+/**
+ * An accepted message request's conversation: never pseudonymous, and not one
+ * two friends opened from the friends list (`origin_friendship` is set only
+ * when the row is created, so a request-born pair who become friends stay
+ * request-born). Its pushes name nobody and quote nothing (SCRUM-1266).
+ */
+export function beganAsRequest(conversation: {
+  user1_pseudonym: string | null
+  user2_pseudonym: string | null
+  origin_friendship: boolean
+}): boolean {
+  return !conversation.origin_friendship && !isPseudonymous(conversation)
+}
+
 /** What the match rule reads of a conversation. Lives here, not in lib/friends.ts, so lib/identity.ts (reached by the socket server) can use it. */
 export const matchSelect = {
   user1_id: true,
