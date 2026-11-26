@@ -111,7 +111,10 @@ export interface HostPayload {
  * send that user's id and picture beside the host's name, and the saved list sent the user row whole. This is the one
  * place the payload is built, so no route can send the creator again.
  */
-export function hostPayload(event: HostSource & { organizer_org_id: string | null }): HostPayload {
+export function hostPayload(
+  // Required, not optional as in `HostSource`: a select that forgot one would quietly turn an org event into a person's.
+  event: HostSource & Required<Pick<HostSource, "kind" | "organizer_org">> & { organizer_org_id: string | null }
+): HostPayload {
   const host = eventHost(event)
   if (host.kind === "org") return { id: event.organizer_org_id, name: host.name, image: null, kind: "org" }
   return { id: null, name: host.kind === "person" ? null : host.name, image: null, kind: host.kind }

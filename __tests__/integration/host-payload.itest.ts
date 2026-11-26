@@ -12,12 +12,16 @@ import { cleanupWorld, eventParams, person, req, routes, world } from "./go-live
 import { closeDb, db, testId } from "./helpers"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
+const listRoute = require("@/app/api/mobile/events/route") as typeof import("@/app/api/mobile/events/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const favoritesRoute = require("@/app/api/mobile/users/[userId]/favorites/route") as typeof import("@/app/api/mobile/users/[userId]/favorites/route")
 
 const HOUR = 3_600_000
 const CREATOR_NAME = "Itest Creator Realname"
 const CREATOR_IMAGE = "https://cdn.itest.invalid/creator.jpg"
 const events: string[] = []
+/** One word in every fixture title, so `GET /events?search=` finds only ours. */
+const WORD = `Hostpayload${Math.random().toString(36).slice(2, 8).replace(/\d/g, "")}`
 
 afterAll(async () => {
   await db.event_favorites.deleteMany({ where: { event_id: { in: events } } })
@@ -31,7 +35,7 @@ async function publishedEvent(label: string, creator: string, data: { organizer_
   const row = await db.events.create({
     data: {
       slug: testId(label),
-      title: `${label} ${testId("t")}`,
+      title: `${WORD} ${label}`,
       description: "integration fixture",
       start_time: start,
       end_time: new Date(start.getTime() + 3 * HOUR),
@@ -59,6 +63,7 @@ describe("organizer on the app's event reads is the org, never the creating user
   let curated = ""
   let orgEvent = ""
   let personal = ""
+  let blankOrg = ""
 
   beforeAll(async () => {
     me = await person("hp_me")
@@ -66,20 +71,29 @@ describe("organizer on the app's event reads is the org, never the creating user
     await db.user.update({ where: { id: creator }, data: { name: CREATOR_NAME, image: CREATOR_IMAGE } })
     orgName = `HP Org ${testId("o")}`
     orgId = (await db.organisations.create({ data: { display_name: orgName, status: "verified" } })).id
-    world.orgs.push(orgId)
-    ;[curated, orgEvent, personal] = await Promise.all([
+    // An org with no public name yet: the payload falls to `person`, and still carries nothing of the creator.
+    const unnamed = (await db.organisations.create({ data: { display_name: "  ", status: "verified" } })).id
+    world.orgs.push(orgId, unnamed)
+    ;[curated, orgEvent, personal, blankOrg] = await Promise.all([
       publishedEvent("hp_curated", creator, { curated_at: new Date() }),
       publishedEvent("hp_org", creator, { organizer_org_id: orgId }),
       publishedEvent("hp_person", creator, {}),
+      publishedEvent("hp_blank_org", creator, { organizer_org_id: unnamed }),
     ])
-    for (const id of [curated, orgEvent, personal]) await db.event_favorites.create({ data: { event_id: id, user_id: me.id } })
+    for (const id of [curated, orgEvent, personal, blankOrg]) await db.event_favorites.create({ data: { event_id: id, user_id: me.id } })
   })
 
   const expected = () => ({
     [curated]: { id: null, name: "Blendn", image: null, kind: "platform" },
     [orgEvent]: { id: orgId, name: orgName, image: null, kind: "org" },
     [personal]: { id: null, name: null, image: null, kind: "person" },
+    [blankOrg]: { id: null, name: null, image: null, kind: "person" },
   })
+
+  const noLeak = (body: unknown) => {
+    const text = JSON.stringify(body)
+    for (const leak of [creator, CREATOR_NAME, CREATOR_IMAGE]) expect(text).not.toContain(leak)
+  }
 
   it("/users/:id/favorites", async () => {
     const res = await favoritesRoute.GET(
@@ -90,16 +104,22 @@ describe("organizer on the app's event reads is the org, never the creating user
     const body = await res.json()
     const rows = Object.fromEntries(body.data.events.map((e: { id: string; organizer: unknown }) => [e.id, e.organizer]))
     expect(rows).toEqual(expected())
-    const text = JSON.stringify(body)
-    for (const leak of [creator, CREATOR_NAME, CREATOR_IMAGE]) expect(text).not.toContain(leak)
+    noLeak(body)
   })
 
   it("/events rows (transformEvents)", async () => {
-    const rows = await db.events.findMany({ where: { id: { in: [curated, orgEvent, personal] } }, select: eventListSelect })
+    const rows = await db.events.findMany({ where: { id: { in: [curated, orgEvent, personal, blankOrg] } }, select: eventListSelect })
     const out = await transformEvents(rows, { favoriteEventIds: new Set() })
     expect(Object.fromEntries(out.map((e) => [e.id, e.organizer]))).toEqual(expected())
-    const text = JSON.stringify(out)
-    for (const leak of [creator, CREATOR_NAME, CREATOR_IMAGE]) expect(text).not.toContain(leak)
+    noLeak(out)
+  })
+
+  it("GET /events, through the route's own select", async () => {
+    const res = await listRoute.GET(req(`/api/mobile/events?search=${WORD}&limit=50`, me.token))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(Object.fromEntries(body.data.events.map((e: { id: string; organizer: unknown }) => [e.id, e.organizer]))).toEqual(expected())
+    noLeak(body)
   })
 
   it("/events/:id", async () => {
@@ -108,8 +128,7 @@ describe("organizer on the app's event reads is the org, never the creating user
       expect(res.status).toBe(200)
       const body = await res.json()
       expect(body.data.organizer).toEqual(organizer)
-      const text = JSON.stringify(body)
-      for (const leak of [creator, CREATOR_NAME, CREATOR_IMAGE]) expect(text).not.toContain(leak)
+      noLeak(body)
     }
   })
 })
