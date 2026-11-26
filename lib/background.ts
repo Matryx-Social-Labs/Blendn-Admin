@@ -11,6 +11,7 @@ import {
 } from "./notification-retention"
 import { startIssueSweeper, stopIssueSweeper } from "./event-issues"
 import { startModerationRecheckSweeper, stopModerationRecheckSweeper } from "./moderation-recheck"
+import { startStaffAlertSweeper, stopStaffAlertSweeper } from "./staff-alert"
 import { startOrphanPhotoSweeper, stopOrphanPhotoSweeper } from "./photo-orphans"
 import { startPhotoModerationSweeper, stopPhotoModerationSweeper } from "./photo-sweeper"
 import { startPresenceSweeper, stopPresenceSweeper } from "./presence-sweeper"
@@ -78,6 +79,8 @@ export function startBackgroundWork(): void {
   startOrphanPhotoSweeper()
   // Room lines OpenAI could not check when they were sent (moderation-degraded policy).
   startModerationRecheckSweeper()
+  // New reports and severe flags, told to staff once a minute (SCRUM-1161).
+  startStaffAlertSweeper()
   // Ticket holds nobody paid for, given back each minute (SCRUM-1010). Starts nothing while TICKETING is off.
   startTicketHoldSweeper()
   // Ticket payments, refunds and payouts nobody confirmed, every five minutes (SCRUM-1011). Same flag.
@@ -98,6 +101,7 @@ export function startBackgroundWork(): void {
       "photo-moderation",
       "photo-orphans",
       "moderation-recheck",
+      "staff-alert",
       // Only when TICKETING is on; listed so the log still says what was asked for.
       "ticket-holds",
       "ticket-reconcile",
@@ -123,6 +127,7 @@ export function stopBackgroundWork(): void {
   stopPhotoModerationSweeper()
   stopOrphanPhotoSweeper()
   stopModerationRecheckSweeper()
+  stopStaffAlertSweeper()
   stopTicketHoldSweeper()
   stopTicketReconciler()
   stopPayoutReleaser()

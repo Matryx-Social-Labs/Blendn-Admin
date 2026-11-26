@@ -55,6 +55,12 @@ const envSchema = z.object({
   /// A Slack (or Discord-compatible) incoming webhook. This is a bearer
   /// secret: anyone holding the URL can post to that channel.
   LEADS_SLACK_WEBHOOK_URL: z.string().url().optional(),
+  /// Where staff hear about new reports and severe flags (`lib/staff-alert.ts`,
+  /// every minute; counts and a link only). Same two free channels as the lead
+  /// alert, both optional: unset means an info log, never a throw. The webhook
+  /// URL is a bearer secret and is never logged.
+  STAFF_ALERT_SLACK_WEBHOOK_URL: z.string().url().optional(),
+  STAFF_ALERT_EMAIL: z.string().email().optional(),
 
   // Two names for one deployment: the dashboard is served on one host and the
   // mobile API on the other. Both optional, and the rule only applies when
