@@ -147,7 +147,7 @@ describe("a door code at the check-in door", () => {
     expect(res.status).toBe(400)
     expect(await res.json()).toMatchObject({
       errorCode: "DOOR_CODE_WRONG",
-      error: "That code didn't match. Check the host's screen; it may have just changed.",
+      error: "That code didn’t match. Check the host’s screen; it may have just changed.",
     })
     expect((await refusals(e.id, p.id)).map((r) => r.reason)).toEqual(["door_code_wrong"])
     expect(await checkInRow(e.id, p.id)).toBeNull()
@@ -159,7 +159,7 @@ describe("a door code at the check-in door", () => {
     await midStep()
     const res = await checkIn(p.token, e.id, { ...fix(NEAR, 30), doorCode: code(e, 3) })
     expect(res.status).toBe(400)
-    expect(await res.json()).toMatchObject({ errorCode: "DOOR_CODE_CHANGED", error: "That code just changed. Read the new one on the host's screen." })
+    expect(await res.json()).toMatchObject({ errorCode: "DOOR_CODE_CHANGED", error: "That code just changed. Read the new one on the host’s screen." })
     expect(await store.peek(`entry-fail:${e.occurrence}:${p.id}`)).toBe(0)
     expect(await store.peek(`entry-wrong:${e.occurrence}`)).toBe(0)
   })
@@ -317,7 +317,7 @@ describe("a door code at the check-in door", () => {
     jest.spyOn(store, "hit").mockImplementation(down(hit))
     const res = await checkIn(p.token, e.id, { ...fix(NEAR, 30), doorCode: code(e) })
     expect(res.status).toBe(503)
-    expect(await res.json()).toMatchObject({ errorCode: "DOOR_CODE_UNAVAILABLE", error: "The door code isn't available right now. Try GPS." })
+    expect(await res.json()).toMatchObject({ errorCode: "DOOR_CODE_UNAVAILABLE", error: "The door code isn’t available right now. Try GPS." })
     // SPEC §3's refusal reasons have none for an outage: nothing is recorded, by design.
     await new Promise((r) => setTimeout(r, 300))
     expect(await db.check_in_refusals.count({ where: { event_id: e.id, user_id: p.id } })).toBe(0)

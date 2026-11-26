@@ -6,7 +6,7 @@ import { toast } from "sonner"
 
 import { Callout, Panel } from "@/components/dashboard/kit"
 import { Button } from "@/components/ui/button"
-import { formatNumber } from "@/lib/dashboard-format"
+import { clockTime, formatNumber } from "@/lib/dashboard-format"
 import { useOpsSnapshot } from "@/lib/use-ops-snapshot"
 import { cn } from "@/lib/utils"
 
@@ -212,7 +212,7 @@ function ArrivalRow({ arrival, timezone, fresh, onRemove }: { arrival: DoorArriv
         {fresh ? <span className="text-[0.8125rem] font-medium text-foreground dark:text-success"> · just now</span> : null}
       </span>
       <time dateTime={arrival.at} className="shrink-0 text-[0.9375rem] tabular-nums text-muted-foreground">
-        {new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: timezone }).format(at)}
+        {clockTime(at, timezone)}
       </time>
       <Button variant="ghost" size="sm" onClick={onRemove} aria-label={`Remove ${arrival.pseudonym} from the room`} className="shrink-0 text-muted-foreground pointer-coarse:h-11">
         Remove

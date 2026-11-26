@@ -27,7 +27,10 @@ const pass = rotatingCode("blendn door-pass v1")
 export const passCode = (sendId: string, step: number): string => pass.code(sendId, step)
 
 /** What the pass shows now, and when it turns. */
-export const currentPass = (sendId: string, now: Date): { code: string; rotatesAt: string } => pass.current(sendId, now)
+export function currentPass(sendId: string, now: Date): { code: string; rotatesAt: string } {
+  const step = codeStep(now)
+  return { code: passCode(sendId, step), rotatesAt: new Date((step + 1) * CODE_STEP_MS).toISOString() }
+}
 
 /** Does this code match the pass now, or as it was a step ago (a code read out as it turns)? */
 export function codeMatches(sendId: string, code: string, now: Date): boolean {

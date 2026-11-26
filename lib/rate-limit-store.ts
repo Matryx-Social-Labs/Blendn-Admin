@@ -353,7 +353,7 @@ export async function release(key: string): Promise<void> {
       )
       return
     } catch (error) {
-      logger.warn("Rate limit Redis release failed", { key, error: error instanceof Error ? error.message : String(error) })
+      logger.warn("Rate limit Redis release failed", { namespace: key.split(":")[0], error: error instanceof Error ? error.message : String(error) })
     }
   }
   const existing = memory.get(key)
@@ -415,7 +415,7 @@ export async function forget(key: string, opts: StoreOptions = {}): Promise<void
     await bounded((redis as unknown as { del(k: string): Promise<unknown> }).del(key))
   } catch (error) {
     logger.warn("Rate limit Redis delete failed", {
-      key,
+      namespace: key.split(":")[0],
       error: error instanceof Error ? error.message : String(error),
     })
     if (opts.failClosed) throw new StoreUnavailable("rate limit store unavailable")

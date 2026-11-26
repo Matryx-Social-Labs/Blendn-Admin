@@ -1743,7 +1743,7 @@ feature is worth. Rows cascade on account deletion.
 
 ### The door code (gate 13)
 
-A guest whose GPS cannot place them types the code on the host's screen. The
+A guest whose GPS cannot place them types the code on the host’s screen. The
 code changes every 30 seconds, is per event occurrence, and is never returned
 by any mobile endpoint: only the host's dashboard Door shows it.
 
@@ -1766,9 +1766,9 @@ by any mobile endpoint: only the host's dashboard Door shows it.
 | `DOOR_CODE_LOCKED` | 429 | Too many tries. Try again at 10:52 PM, or step outside and use GPS. (5 wrong in 10 minutes; the time is on the event's clock) |
 | `DOOR_CODE_LOCKED` | 429 | Too many tries tonight. Step outside and use GPS. (10 wrong in the night, or removed from the room by the host) |
 | `DOOR_CODE_FAR` | 400 | You need to be at the venue to use the door code. (no accuracy, over 1000 m, a mocked fix, or more than 1 km short) |
-| `DOOR_CODE_CHANGED` | 400 | That code just changed. Read the new one on the host's screen. (not counted as a guess) |
-| `DOOR_CODE_WRONG` | 400 | That code didn't match. Check the host's screen; it may have just changed. |
-| `DOOR_CODE_UNAVAILABLE` | 503 | The door code isn't available right now. Try GPS. (the counters cannot be read; GPS is unaffected) |
+| `DOOR_CODE_CHANGED` | 400 | That code just changed. Read the new one on the host’s screen. (not counted as a guess) |
+| `DOOR_CODE_WRONG` | 400 | That code didn’t match. Check the host’s screen; it may have just changed. |
+| `DOOR_CODE_UNAVAILABLE` | 503 | The door code isn’t available right now. Try GPS. (the counters cannot be read; GPS is unaffected) |
 
 A valid code checks in exactly as GPS does, same response; the row records
 `method: door_code`. An App Review account at a `review_demo` event ignores the

@@ -37,7 +37,7 @@ export function normaliseCode(typed: string): string | null {
   return code.length === CODE_LENGTH && [...code].every((c) => ALPHABET.includes(c)) ? code : null
 }
 
-/** One label's codes: the code for a subject in a step, the current one, and how many steps back a typed one is. */
+/** One label's codes: the code for a subject in a step, and how many steps back a typed one is. */
 export function rotatingCode(label: string) {
   const code = (subject: string, step: number): string => {
     const mac = createHmac("sha256", keyFor(label)).update(`${subject}:${step}`).digest()
@@ -48,11 +48,6 @@ export function rotatingCode(label: string) {
 
   return {
     code,
-    /** What the screen shows now, and when it turns. */
-    current(subject: string, now: Date): { code: string; rotatesAt: string } {
-      const step = codeStep(now)
-      return { code: code(subject, step), rotatesAt: new Date((step + 1) * CODE_STEP_MS).toISOString() }
-    },
     /**
      * How many steps back (0 to `depth`) the normalised code is, or null. Every
      * step is compared, each timing-safe, whatever matches first; `fold` maps

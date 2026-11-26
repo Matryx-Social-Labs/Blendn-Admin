@@ -315,9 +315,9 @@ registry.registerPath({
     "429 `DOOR_CODE_LOCKED` (5 wrong in 10 minutes: \"Too many tries. Try again at 10:52 PM, or step outside and use GPS.\"; 10 wrong in the " +
     "night or removed from the room by the host: \"Too many tries tonight. Step outside and use GPS.\"); 400 `DOOR_CODE_FAR` (no accuracy, " +
     "over 1000 m, mocked, or more than 1 km short: \"You need to be at the venue to use the door code.\"); 400 `DOOR_CODE_CHANGED` (the code " +
-    "from just before the last three steps, not counted: \"That code just changed. Read the new one on the host's screen.\"); 400 " +
-    "`DOOR_CODE_WRONG` (\"That code didn't match. Check the host's screen; it may have just changed.\"); 503 `DOOR_CODE_UNAVAILABLE` when " +
-    "the counters cannot be read (\"The door code isn't available right now. Try GPS.\"; GPS is unaffected). Every other gate runs first, " +
+    "from just before the last three steps, not counted: \"That code just changed. Read the new one on the host’s screen.\"); 400 " +
+    "`DOOR_CODE_WRONG` (\"That code didn’t match. Check the host’s screen; it may have just changed.\"); 503 `DOOR_CODE_UNAVAILABLE` when " +
+    "the counters cannot be read (\"The door code isn’t available right now. Try GPS.\"; GPS is unaffected). Every other gate runs first, " +
     "unchanged. A valid code checks in as on GPS; the row records `method: door_code`.",
   security: bearerAuth,
   request: {
