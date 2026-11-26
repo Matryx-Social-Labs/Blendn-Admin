@@ -35,6 +35,12 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "report-scope-staff.test.ts": {
+      "guards": "SCRUM-1244 + SCRUM-1246: an org's staff report on none of its events; an organizer-role member of a venue-owning org gets the venue's arm in reportScope; the per-guest scope (eventScopeFor, the org audience) and the Attendees export read the hosted arm, never a venue's arms.",
+      "mutation": "(1) eventScopeFor returns reportScope(...).all; (2) the Attendees case's hostNights reads `scope` (scopes.all) instead of scopes.hosted.",
+      "observed": "2 of 6 failing (the eventScopeFor row and the Attendees source row). Restored; 6 of 6.",
+      "date": "2026-11-26"
+    },
     "live-tab-stale.test.tsx": {
       "guards": "With a snapshot and status error the Live tab shows 'Connection lost at <time>. These figures are from then; reconnecting.' in a status region rendered before it is filled, drops '· live' from the hero on the host and venue copies, keeps the last alerts, and says 'Nothing needed attention at <time>.' rather than the present-tense all-clear (SCRUM-1348)",
       "mutation": "A: replace the `stale ? <Callout … /> : null` child of the role=status div in components/dashboard/live-tab.tsx with `null`. B: delete the `stale={stale}` line passed to OccupancyHero. E: change the Alerts empty line's `{stale ? (` to `{false ? (`",
