@@ -547,7 +547,10 @@ The chat sweeper hard-deletes room and Lobby content 180 days after a room
 closes, on every pass from boot (`lib/lobby-retention.ts`, `docs/RETENTION.md`).
 There is no environment variable that makes it a dry run or turns it off, so a
 deploy that carries it deletes. Production takes it only once the privacy
-policy's retention section is live (SCRUM-1138).
+policy's retention section is live (SCRUM-1138). To stop it in an emergency,
+roll back to a deployment from before it: there the purge is a dry run, unless
+the service has `LOBBY_PURGE=delete` set. A pass that has already started
+finishes its batch.
 
 ## Operating production
 
