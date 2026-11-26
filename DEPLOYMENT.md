@@ -541,6 +541,14 @@ npm run build
 npm start
 ```
 
+## Retention purges have no switch
+
+The chat sweeper hard-deletes room and Lobby content 180 days after a room
+closes, on every pass from boot (`lib/lobby-retention.ts`, `docs/RETENTION.md`).
+There is no environment variable that makes it a dry run or turns it off, so a
+deploy that carries it deletes. Production takes it only once the privacy
+policy's retention section is live (SCRUM-1138).
+
 ## Operating production
 
 What to do when production breaks. One replica, no over-the-air updates, and a

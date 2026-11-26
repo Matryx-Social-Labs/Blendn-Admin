@@ -2753,10 +2753,10 @@
       "date": "2026-11-06"
     },
     "lobby-retention.itest.ts": {
-      "guards": "SCRUM-1026: the 180-day purge deletes closed content past its time and holds removed or reported content 180 days from removal (a pending report until decided); a dry run deletes nothing.",
-      "mutation": "(a) the post select's COALESCE removed; (b) the post's pending-report hold inverted (NOT EXISTS -> EXISTS).",
-      "observed": "(a) 3 of 10 failing: no post was ever purged, because NOT NULL drops every unmoderated row (the bug this test's first run found); (b) 4 of 10. Restored; 10/10.",
-      "date": "2026-11-06"
+      "guards": "SCRUM-1026: the 180-day purge deletes closed content past its time and holds removed or reported content 180 days from removal (a pending report until decided). SCRUM-1227: the pass as the sweeper calls it (no mode, nothing in the environment) deletes; a closed room of five messages with one under an open report keeps that one and the room.",
+      "mutation": "(a) the post select's COALESCE removed; (b) the post's pending-report hold inverted (NOT EXISTS -> EXISTS); (c, SCRUM-1227) the message select's message_reports NOT EXISTS removed. RED (SCRUM-1227) was the unchanged origin/dev cb562bf6, whose default pass is a dry run.",
+      "observed": "(a) 3 of 10 failing: no post was ever purged, because NOT NULL drops every unmoderated row (the bug this test's first run found); (b) 4 of 10. Restored; 10/10. SCRUM-1227: RED 6 of 11 on origin/dev (nothing deleted by default); (c) 2 of 11 (the pending-report hold and the five-message room); restored, 11/11.",
+      "date": "2026-11-27"
     },
     "feedback-retention.itest.ts": {
       "guards": "SCRUM-1026 (owner, 2026-11-06), with lobby-retention.itest.ts: the purge keeps chat_group_members rows and blanks anonymous_name once the person has no message left in a room past its time (a held message keeps its author's name; a room inside the window keeps every name); 'came back' and a person's rooms are unchanged; a dismissed report's description goes with its excerpt 180 days after the dismissal, and a recent dismissal, an upheld and a pending report keep both.",
