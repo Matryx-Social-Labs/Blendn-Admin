@@ -398,7 +398,7 @@ export async function startEventPassCheckout(eventId: string): Promise<OrderChec
       }
       // Nothing to sell while it is open anyway: the free window, or the first
       // event that cleared the floor (lib/analytics-access.ts).
-      const access = await analyticsAccess(org.orgId, now)
+      const access = await analyticsAccess(org, now)
       if (access.org) throw new Refusal("Every event’s analytics are free for now, so there’s nothing to buy yet.")
       if (mayOpenEvent(access, id)) throw new Refusal("That event’s analytics are already open to you.")
       // Never a deliverable the buyer cannot receive (SCRUM-1363): the list

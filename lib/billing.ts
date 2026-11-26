@@ -1,6 +1,7 @@
 import "server-only"
 
 import type { org_role, user_role } from "@prisma/client"
+import { cache } from "react"
 
 import { analyticsAccess, mayOpenEvent, worthAPass, type AccessReason } from "./analytics-access"
 import { BILLING_PLANS, isBillingPlanKey, rupees } from "./billing-plans"
@@ -32,6 +33,13 @@ import { mayManageBilling } from "./rbac"
  * are. Elsewhere nothing is for sale, whoever is asking.
  */
 
+/**
+ * `mayBuyHere` once per request (React `cache`, as lib/dashboard-record-titles.ts): the dashboard layout's plan card
+ * and the page's `billingOrgFor` ask it for the same home organisation. The same rule, not a second one; outside a
+ * request (jest, the sweeper) it simply runs.
+ */
+export const mayBuyHereThisRequest = cache(mayBuyHere)
+
 export interface BillingOrg {
   orgId: string
   orgName: string
@@ -53,7 +61,7 @@ export async function billingOrgFor(user: { id: string; role: user_role }): Prom
     orgName: membership.org.display_name,
     memberRole: membership.role,
     mayBuy: mayManageBilling(membership.role),
-    mayBuyHere: await mayBuyHere(membership.org.id),
+    mayBuyHere: await mayBuyHereThisRequest(membership.org.id),
   }
 }
 
@@ -201,7 +209,7 @@ function subscriptionState(s: {
 
 export async function planPageData(org: BillingOrg, now: Date = new Date()): Promise<PlanPageData> {
   const [access, analytics, subscriptionRows, events, paid] = await Promise.all([
-    analyticsAccess(org.orgId, now),
+    analyticsAccess(org, now),
     liveEntitlement({ kind: "org", id: org.orgId }, "analytics", now),
     db.billing_checkouts.findMany({
       where: { org_id: org.orgId, venue_id: null, kind: "subscription", status: { in: [...OPEN_SUBSCRIPTION_STATUSES] } },
