@@ -121,8 +121,8 @@ describe("entitlements are read and written in one place", () => {
   })
 
   it("the QA scale seed writes a comp for a throwaway and nothing paid: source grant, its own reference, only qa.* addresses", () => {
-    // lib/entitlements.ts cannot load under tsx (`server-only`), so the seed writes the one row the Users-page
-    // grant writes (`grantEntitlement`) itself; this pins it to that row and to the throwaways.
+    // The seed writes the one row the Users-page grant writes (`grantEntitlement`) itself (from when
+    // lib/entitlements.ts could not load under tsx); this pins it to that row and to the throwaways.
     const code = files.find((f) => f.rel === QA_SCALE_SEED)?.code ?? ""
     expect(code).toMatch(/source:\s*"grant"/)
     expect(code).toContain("PLUS_REF_PREFIX")

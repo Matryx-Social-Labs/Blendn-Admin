@@ -102,7 +102,7 @@ to verify, not research. The dashboard shows prices including GST.
 
 
 **Leaving a match.** Reviewed twice by `/plan-eng-review` and Codex; the second
-pass found a live exploit path rather than a gap.
+pass found an exploit path (T17, below), closed in #197.
 
 | # | What | State |
 |---|---|---|

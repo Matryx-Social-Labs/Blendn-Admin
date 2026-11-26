@@ -4,7 +4,6 @@ import { logger } from "./logger"
  * https://docs.expo.dev/push-notifications/sending-notifications/
  */
 
-import { captureMessage } from "@sentry/nextjs"
 import { Expo, ExpoPushMessage } from "expo-server-sdk"
 import { db } from "./db"
 import { hit } from "./rate-limit-store"
@@ -913,7 +912,6 @@ export async function checkPushReceipts(now = Date.now()): Promise<ReceiptPass> 
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       logger.error("Push receipt request failed", { tickets: ids.length, error: message })
-      captureMessage("Push receipt request failed", { level: "error", fingerprint: ["push-receipt-request"], extra: { tickets: ids.length, error: message } })
       continue
     }
     // An id Expo leaves out is not ready yet: its ticket waits for the next pass.
@@ -955,16 +953,10 @@ interface ReceiptError {
   message: string
 }
 
-/** One log line and one Sentry event per code and platform, so a bad FCM key and a bad APNs key are separate issues. */
+/** One log line, and so one Sentry event, per code and platform: a bad FCM key and a bad APNs key are separate issues. */
 function reportReceiptErrors(errors: Iterable<ReceiptError>): void {
   for (const { error, platform, count, message } of errors) {
-    logger.error("Push receipt errors", { error, platform, count, message })
-    captureMessage(`Push receipt errors: ${error} (${platform})`, {
-      level: "error",
-      tags: { push_error: error, platform },
-      fingerprint: ["push-receipt", error, platform],
-      extra: { count, message },
-    })
+    logger.error(`Push receipt errors: ${error} (${platform})`, { error, platform, count, message }, { push_error: error, platform })
   }
 }
 
