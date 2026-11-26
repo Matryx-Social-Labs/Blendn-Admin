@@ -25,7 +25,7 @@ Dashboard → Account & Settings → Business website details.
    ```
 
    It prints the email and the ids, never the password. It refuses, writing
-   nothing, if `razorpay.review@blendn.app` already belongs to an account it did
+   nothing, if the review address (`REVIEW_EMAIL` in the script) already belongs to an account it did
    not create, or one an admin has suspended or changed the role of. Sign in once at
    https://dashboard.blendn.app/login with them to check.
 4. Get a sample invoice from Razorpay (Invoices → create one in test mode under
@@ -45,7 +45,7 @@ Dashboard → Account & Settings → Business website details.
 | Shipping / delivery policy | `https://dashboard.blendn.app/shipping` |
 | Sample invoice | the PDF from step 4 |
 | Does your website require login from user to complete payment? | **Yes** |
-| Test username | `razorpay.review@blendn.app` |
+| Test username | the review address: `REVIEW_EMAIL` in `scripts/seed-razorpay-review.ts`, also printed by step 2 |
 | Test password | the password from step 2 (from your password manager; never in a ticket, a chat or this file) |
 
 **Business description** (paste as is):

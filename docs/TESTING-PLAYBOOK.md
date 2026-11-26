@@ -320,9 +320,9 @@ every table header — under AA on nearly every screen.
 
 | Seeded | Why it is there |
 |---|---|
-| `admin@`, `organizer@`, `venue.owner@`, `sponsor@blendn.app` (from `scripts/test-accounts.ts`), 3 named admins, the no-org organizer, attendees | the 5 × 38 route matrix |
-| `teen.tester@blendn.app`, under 18 | the age gate has something to refuse |
-| `rhea.kapoor@blendn.app`, sponsor, org with no brand | a brand claim the admin can approve: the pending Third Wave claim is hers (sponsor@'s org owns Blue Tokai and may not file one) |
+| The four dashboard role accounts (admin, organizer, venue owner, sponsor: `TEST_ACCOUNTS` in `scripts/test-accounts.ts`), 3 named admins, the no-org organizer, attendees | the 5 × 38 route matrix |
+| The under-18 test account (`scripts/seed-qa.ts`) | the age gate has something to refuse |
+| A second sponsor, org with no brand (`scripts/seed-qa.ts`) | a brand claim the admin can approve: the pending Third Wave claim is hers (the sponsor test account's org owns Blue Tokai and may not file one) |
 | 3 curated events — open / dead / claimed, **5 refusals on the dead one** | curation health, and the only refusal data in the product |
 | Multi-day `design-week-bengaluru` | occurrences, and the person-days-vs-people trap |
 | `saarbruecken-language-exchange` | a second country — the switch banner and the resume policy |
@@ -692,6 +692,11 @@ nobody watched work.
 
 ## 5 · The local loop
 
+First pick a local seed password and keep it for signing in: run
+`read -rsp 'seed password: ' SEED_PASSWORD; export SEED_PASSWORD` on its own and
+type one (12+ characters, not an obvious word, not the account's own address:
+`lib/password.ts`). Then:
+
 ```bash
 docker start blendn-pg17     # or the run line in docs/MERGE-RUNBOOK.md — port 55433, Postgres 17
 export DATABASE_URL="postgresql://postgres:postgres@localhost:55433/blendn_test"
@@ -699,14 +704,16 @@ export MOBILE_JWT_SECRET="local-integration-secret-at-least-32-chars-long"
 export NEXTAUTH_SECRET="local-nextauth-secret-at-least-32-characters"
 export NEXTAUTH_URL="http://localhost:3100" PORT=3100
 npm run db:migrate
-SEED_PASSWORD='Blendn-Local-2026!' npm run seed:qa -- --apply
+npm run seed:qa -- --apply   # uses the SEED_PASSWORD you exported above
 npx tsx scripts/seed-categories.ts
 npm run dev                  # 3100, so it never collides with anything on 3000
 ```
 
-Sign in as `admin@blendn.app`, `organizer@blendn.app`, `venue.owner@blendn.app`
-or `sponsor@blendn.app`, with the `SEED_PASSWORD` above. On staging it is the
-Railway variable of the same name.
+Sign in as any of the four dashboard role accounts (admin, organizer, venue
+owner, sponsor: their addresses are `TEST_ACCOUNTS` in
+`scripts/test-accounts.ts`, and `seed:qa` prints them), with the
+`SEED_PASSWORD` you set above. On staging it is the Railway variable of the
+same name.
 
 Three traps that have each cost time:
 
