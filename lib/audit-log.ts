@@ -1,4 +1,5 @@
-import { clientIpFrom } from "@/lib/client-ip"
+// Relative: the sexual image hold (lib/moderation/sexual-image-hold.ts) writes from the photo sweeper, which server.ts reaches.
+import { clientIpFrom } from "./client-ip"
 import { logger } from "./logger"
 import { db } from "./db"
 import { Prisma } from "@prisma/client"
