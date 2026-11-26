@@ -1,0 +1,129 @@
+import { NextRequest } from "next/server"
+
+/*
+ * A suspended person's email or Google account cannot sign up again
+ * (SCRUM-1172). The refusal is the suspended sentence every sign-in gives.
+ */
+jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
+jest.mock("@/lib/mobile-auth", () => ({ ...jest.requireActual("@/lib/mobile-auth"), verifyGoogleIdToken: jest.fn(), verifyAppleIdToken: jest.fn() }))
+import { SUSPENDED_MESSAGE, verifyAppleIdToken, verifyGoogleIdToken } from "@/lib/mobile-auth"
+import { cleanup, closeDb, db, testId } from "./helpers"
+/* eslint-disable @typescript-eslint/no-require-imports */
+const signupRoute = require("@/app/api/mobile/auth/signup/route") as typeof import("@/app/api/mobile/auth/signup/route")
+const googleRoute = require("@/app/api/mobile/auth/google/route") as typeof import("@/app/api/mobile/auth/google/route")
+const appleRoute = require("@/app/api/mobile/auth/apple/route") as typeof import("@/app/api/mobile/auth/apple/route")
+/* eslint-enable @typescript-eslint/no-require-imports */
+
+const PASSWORD = "orchard-lantern-quiet-42"
+const users: string[] = []
+afterAll(async () => {
+  await db.user_oauth_accounts.deleteMany({ where: { user_id: { in: users } } })
+  await cleanup(users, [])
+  await closeDb()
+})
+
+let ip = 0
+const post = (path: string, body: unknown) =>
+  new NextRequest(`http://localhost${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-real-ip": `10.33.8.${++ip}` },
+    body: JSON.stringify(body),
+  })
+const signup = (email: string) =>
+  signupRoute.POST(post("/api/mobile/auth/signup", { email, password: PASSWORD, name: "Again", age: 30 }))
+const google = (sub: string, email: string) => {
+  jest.mocked(verifyGoogleIdToken).mockResolvedValueOnce({
+    sub, email, email_verified: true, aud: "a", iss: "i", exp: 0, iat: 0,
+  })
+  return googleRoute.POST(post("/api/mobile/auth/google", { idToken: "t" }))
+}
+const apple = (sub: string, email: string) => {
+  jest.mocked(verifyAppleIdToken).mockResolvedValueOnce({ sub, email, aud: "a", iss: "i", exp: 0, iat: 0 })
+  return appleRoute.POST(post("/api/mobile/auth/apple", { identityToken: "t" }))
+}
+
+async function suspended(email: string, googleSub?: string) {
+  const user = await db.user.create({
+    data: {
+      email,
+      name: "Suspended",
+      suspended_at: new Date(),
+      ...(googleSub && { oauth_accounts: { create: { provider: "google", provider_id: googleSub, email } } }),
+    },
+    select: { id: true },
+  })
+  users.push(user.id)
+  return user.id
+}
+
+async function expectSuspendedRefusal(res: Response) {
+  expect(res.status).toBe(403)
+  expect(await res.json()).toMatchObject({
+    success: false,
+    error: SUSPENDED_MESSAGE,
+    errorCode: "FORBIDDEN",
+    reasonCode: "ACCOUNT_SUSPENDED",
+  })
+}
+
+/** `itest_x_abc` → `it.est_x_abc`: the same Gmail inbox, the dots moved. */
+const dotsMoved = (local: string) => `${local.slice(0, 2)}.${local.slice(2)}`
+
+describe("sign-up", () => {
+  it("refuses a suspended Gmail inbox with a +tag and the dots moved, and writes no row", async () => {
+    const local = testId("sus-gmail")
+    await suspended(`${local}@gmail.com`)
+    const again = `${dotsMoved(local)}+again@GMAIL.com`
+
+    await expectSuspendedRefusal(await signup(again))
+    expect(await db.user.count({ where: { email: again.toLowerCase() } })).toBe(0)
+  })
+
+  it("refuses a suspended address on another domain with a +tag", async () => {
+    const local = testId("sus-work")
+    await suspended(`${local}@blendn.test`)
+    await expectSuspendedRefusal(await signup(`${local}+2@blendn.test`))
+  })
+
+  it("lets a fresh email sign up (negative control)", async () => {
+    const fresh = `${testId("fresh")}@gmail.com`
+    const res = await signup(fresh)
+    expect(res.status).toBe(201)
+    users.push((await db.user.findUniqueOrThrow({ where: { email: fresh }, select: { id: true } })).id)
+  })
+})
+
+describe("Google", () => {
+  it("refuses a Google account whose sub is a suspended user's", async () => {
+    const sub = testId("gsub")
+    const email = `${testId("sus-gsub")}@gmail.com`
+    await suspended(email, sub)
+    await expectSuspendedRefusal(await google(sub, email))
+  })
+
+  it("refuses to create an account for a suspended person's Gmail inbox under a new sub, and writes no row", async () => {
+    const local = testId("sus-gnew")
+    await suspended(`${dotsMoved(local)}@gmail.com`)
+
+    await expectSuspendedRefusal(await google(testId("gsub"), `${local}@gmail.com`))
+    expect(await db.user.count({ where: { email: `${local}@gmail.com` } })).toBe(0)
+  })
+
+  it("creates a fresh Google account (negative control)", async () => {
+    const email = `${testId("gfresh")}@gmail.com`
+    const res = await google(testId("gsub"), email)
+    expect(res.status).toBe(201)
+    users.push((await db.user.findUniqueOrThrow({ where: { email }, select: { id: true } })).id)
+  })
+})
+
+describe("Apple", () => {
+  it("refuses to create an account for a suspended person's address with a +tag, and writes no row", async () => {
+    const local = testId("sus-apple")
+    await suspended(`${local}@icloud.test`)
+    const again = `${local}+x@icloud.test`
+
+    await expectSuspendedRefusal(await apple(testId("asub"), again))
+    expect(await db.user.count({ where: { email: again } })).toBe(0)
+  })
+})
