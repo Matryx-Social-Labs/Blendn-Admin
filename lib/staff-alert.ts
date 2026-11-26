@@ -49,10 +49,9 @@ export type StaffNotice = "sent" | "unconfigured" | "failed"
 export async function notifyStaff(text: string): Promise<StaffNotice> {
   const channels = channelsFrom("STAFF_ALERT_SLACK_WEBHOOK_URL", "STAFF_ALERT_EMAIL")
   if (!channels) {
-    // Quiet where no channel is the plan (staging, local); in production nobody being told is an error.
+    // An error in production, an info line elsewhere.
     const log = process.env.RAILWAY_ENVIRONMENT_NAME === "production" ? logger.error : logger.info
     log("Staff alert not sent, no channel configured", {
-      text,
       hint: "set STAFF_ALERT_SLACK_WEBHOOK_URL, or STAFF_ALERT_EMAIL with RESEND_API_KEY and EMAIL_FROM",
     })
     return "unconfigured"
