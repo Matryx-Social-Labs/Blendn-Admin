@@ -89,8 +89,8 @@ the organisation. One open subscription per venue
 (`billing_checkouts_one_open_subscription_per_venue`); an organisation's own
 Analytics keeps its own index.
 
-- **No charge before four weeks of venue-day data.** Checkout refuses until 28
-  days after the first person went live at the venue (`lib/venue-plan.ts`);
+- **No charge before three months of venue-day data.** Checkout refuses until 90
+  days (`VENUE_DATA_DAYS`) after the first person went live at the venue (`lib/venue-plan.ts`);
   the Plan page shows each venue's days of data. Nothing to do by hand.
 - **Founding grant: 3 months per claimed Bengaluru venue.** An admin gives it
   from the venue's page (Venue Pro panel), with a reason; it is audited on the

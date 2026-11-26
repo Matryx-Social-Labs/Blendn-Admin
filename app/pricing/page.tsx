@@ -98,7 +98,7 @@ export default function PricingPage() {
       <h2>Venues</h2>
       <PriceTable caption="Plans for venues" rows={VENUES} />
       <p className="mt-3 text-[0.8125rem]">
-        Listing a venue on Blend&apos;n is free. Venue Pro can be bought once the venue has four weeks of data.
+        Listing a venue on Blend&apos;n is free. Venue Pro can be bought once the venue has three months of data.
       </p>
 
       <h2>Sponsors</h2>

@@ -12,18 +12,19 @@ import { mayManageVenueBilling } from "./rbac"
 /**
  * A venue's plan: Listed (free) or Venue Pro (plan v2 §9.1b, audit §6.2).
  *
- * ## No charge before four weeks of venue-day data
+ * ## No charge before three months of venue-day data
  *
  * The owner ruled it: nothing is charged until venue days are live AND the
- * venue has at least four weeks of data. Venue days are the venue's own live
- * room (lib/venue-day.ts); "data" starts with the first person who went live
- * there. So a venue becomes chargeable 28 days after its first venue-day
- * check-in, and before that the Plan page says when, and the checkout action
+ * venue has three months of data, the same three months free as organisers
+ * (DECISIONS 2026-11-25 night). Venue days are the venue's own live room
+ * (lib/venue-day.ts); "data" starts with the first person who went live
+ * there. So a venue becomes chargeable `VENUE_DATA_DAYS` after its first
+ * venue-day check-in, and before that the Plan page says when, and the checkout action
  * refuses (`lib/billing-actions.ts`). A founding grant (3 months of Pro) is
  * not a charge and is open at any time.
  */
 
-export const VENUE_DATA_DAYS = 28
+export const VENUE_DATA_DAYS = 90
 const DAY_MS = 24 * 60 * 60 * 1000
 
 export interface VenueReadiness {
