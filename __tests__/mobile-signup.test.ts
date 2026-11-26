@@ -18,7 +18,7 @@ jest.mock("jose", () => ({
 }))
 
 const mockDb = {
-  user: { findUnique: jest.fn(), create: jest.fn() },
+  user: { findUnique: jest.fn(), findMany: jest.fn(), create: jest.fn() },
   profiles: { create: jest.fn() },
   mobile_refresh_tokens: { create: jest.fn() },
   $transaction: jest.fn(),
@@ -56,6 +56,7 @@ function req(body: Record<string, unknown>) {
 beforeEach(() => {
   jest.clearAllMocks()
   mockDb.user.findUnique.mockResolvedValue(null)
+  mockDb.user.findMany.mockResolvedValue([])
   mockDb.user.create.mockResolvedValue({ id: "u1", email: "a@b.com", name: "A" })
   mockDb.profiles.create.mockResolvedValue({ id: "u1", name: "A", onboarded: false, location: null })
   mockDb.mobile_refresh_tokens.create.mockResolvedValue({})

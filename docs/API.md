@@ -87,6 +87,15 @@ the response is the lowercase form. A second signup in another case gets the
 same **409** as any taken address. `signin`, Google, Apple, the dashboard and
 password reset all lowercase what they are given too (SCRUM-328).
 
+**A suspended person cannot sign up again** (SCRUM-1172). An address is compared
+as one inbox: lower case, without a `+tag`, and for Gmail without dots
+(`googlemail.com` is `gmail.com`). One that matches a suspended account gets the
+same **409** `CONFLICT` "Email already registered" as a taken address, and no
+account is written — the same answer whether the address is taken or suspended,
+so sign-up never says which addresses are suspended. Google and Apple, which
+prove the inbox, answer a new account for such an address with the suspended
+**403** below.
+
 **Password rules.** At least **12 characters**, and rejected if it is an obvious
 choice (`password1234` is twelve characters and fails) or built from the local
 part of the address. This is `checkPassword` in `lib/password.ts`, the same
@@ -147,7 +156,9 @@ failure: a silent refusal to sign in is indistinguishable from a bug.
 ```
 
 On `signin` it is checked **after** the password, so the response cannot be used
-to discover which addresses are suspended.
+to discover which addresses are suspended. `google` and `apple` also answer it
+when they would create an account for the same inbox as a suspended one (see
+`POST /auth/signup`).
 
 On `refresh` it is answered even for the token the suspension **revoked** — which
 is every live token, since suspending revokes them all. A token we signed, not

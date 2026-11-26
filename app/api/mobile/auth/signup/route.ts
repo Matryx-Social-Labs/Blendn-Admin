@@ -22,7 +22,6 @@ import { checkPassword } from "@/lib/password"
 import { normalizeLocationToCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
 import { screenUserText, textNotAllowedResponse } from "@/lib/moderation/user-text"
-import { accountRefusal } from "@/lib/account-refusal"
 import { isSuspendedIdentity } from "@/lib/suspended-identity"
 
 export async function POST(request: NextRequest) {
@@ -64,17 +63,20 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check if user already exists
-    const existingUser = await db.user.findUnique({
-      where: { email },
-    })
+    /*
+     * Taken, or the same inbox as a suspended account under a +tag or moved
+     * dots (SCRUM-1172): one answer for both, and both reads always run, so
+     * sign-up never says which addresses are suspended (sign-in says so only
+     * after the password).
+     */
+    const [existingUser, suspended] = await Promise.all([
+      db.user.findUnique({ where: { email }, select: { id: true } }),
+      isSuspendedIdentity(email),
+    ])
 
-    if (existingUser) {
+    if (existingUser || suspended) {
       return conflictResponse("Email already registered")
     }
-
-    // The same inbox under a +tag or moved dots is the same person, and a suspended one gets the sign-in refusal.
-    if (await isSuspendedIdentity(email)) return accountRefusal("suspended")
 
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 12)

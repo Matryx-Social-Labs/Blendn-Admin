@@ -2,7 +2,9 @@ import { NextRequest } from "next/server"
 
 /*
  * A suspended person's email or Google account cannot sign up again
- * (SCRUM-1172). The refusal is the suspended sentence every sign-in gives.
+ * (SCRUM-1172). Google and Apple, which prove the inbox, answer the suspended
+ * sentence every sign-in gives; password sign-up answers exactly what a taken
+ * address gets, so it never says who is suspended.
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("@/lib/mobile-auth", () => ({ ...jest.requireActual("@/lib/mobile-auth"), verifyGoogleIdToken: jest.fn(), verifyAppleIdToken: jest.fn() }))
@@ -70,19 +72,30 @@ async function expectSuspendedRefusal(res: Response) {
 const dotsMoved = (local: string) => `${local.slice(0, 2)}.${local.slice(2)}`
 
 describe("sign-up", () => {
-  it("refuses a suspended Gmail inbox with a +tag and the dots moved, and writes no row", async () => {
+  /** What a taken address gets: the answer a suspended identity must be indistinguishable from. */
+  async function takenAnswer() {
+    const email = `${testId("taken")}@blendn.test`
+    users.push((await db.user.create({ data: { email, name: "Taken" }, select: { id: true } })).id)
+    const res = await signup(email)
+    return { status: res.status, body: await res.json() }
+  }
+
+  it("answers a suspended Gmail inbox with a +tag and the dots moved as a taken address, and writes no row", async () => {
     const local = testId("sus-gmail")
     await suspended(`${local}@gmail.com`)
     const again = `${dotsMoved(local)}+again@GMAIL.com`
 
-    await expectSuspendedRefusal(await signup(again))
+    const res = await signup(again)
+    expect({ status: res.status, body: await res.json() }).toEqual(await takenAnswer())
+    expect(res.status).toBe(409)
     expect(await db.user.count({ where: { email: again.toLowerCase() } })).toBe(0)
   })
 
-  it("refuses a suspended address on another domain with a +tag", async () => {
+  it("answers a suspended address on another domain with a +tag as a taken address", async () => {
     const local = testId("sus-work")
     await suspended(`${local}@blendn.test`)
-    await expectSuspendedRefusal(await signup(`${local}+2@blendn.test`))
+    const res = await signup(`${local}+2@blendn.test`)
+    expect({ status: res.status, body: await res.json() }).toEqual(await takenAnswer())
   })
 
   it("lets a fresh email sign up (negative control)", async () => {

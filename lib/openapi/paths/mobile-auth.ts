@@ -24,6 +24,8 @@ registry.registerPath({
     "and is additionally checked against obvious choices and against the local part of the " +
     "address — the same rule `/api/auth/reset-password` enforces, so a password accepted here " +
     "can always be reset to something similar. Returns the created profile alongside the user. " +
+    "409 `CONFLICT` \"Email already registered\" for a taken address, and for the same inbox as a " +
+    "suspended account (lower case, no `+tag`, Gmail dots ignored); no account is written. " +
     "Rate limited: 3 requests per hour.",
   request: {
     body: {
@@ -79,7 +81,8 @@ registry.registerPath({
   summary: "Sign in or register with Google",
   description:
     "Authenticate using a Google ID token. Creates account if new. Rate limited: 10 requests per 15 minutes. " +
-    "403 `FORBIDDEN` + `reasonCode` `ACCOUNT_SUSPENDED` / `ACCOUNT_STAFF`; 401 `ACCOUNT_DELETED` (\"Account not found\"). The Apple route answers the same.",
+    "403 `FORBIDDEN` + `reasonCode` `ACCOUNT_SUSPENDED` / `ACCOUNT_STAFF` (`ACCOUNT_SUSPENDED` also when a new " +
+    "account would be the same inbox as a suspended one); 401 `ACCOUNT_DELETED` (\"Account not found\"). The Apple route answers the same.",
   request: {
     body: {
       content: { "application/json": { schema: GoogleAuthRequestSchema } },
