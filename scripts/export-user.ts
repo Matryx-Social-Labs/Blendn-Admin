@@ -45,7 +45,7 @@ import { PrismaPg } from "@prisma/adapter-pg"
  */
 
 /** Table → the document key it is exported under, or "not exported: <why>". */
-export const EXPORT_CHECKLIST: Record<string, string> = {
+export const EXPORT_CHECKLIST: Record<string, keyof UserExport | `not exported: ${string}`> = {
   user: "account",
   profiles: "profile",
   user_interests: "interests",
@@ -70,6 +70,11 @@ export const EXPORT_CHECKLIST: Record<string, string> = {
   friendships: "friends",
   friend_requests: "friend_requests",
   referrals: "referral",
+  entitlements: "entitlements",
+  ticket_orders: "ticket_orders",
+  ticket_order_lines: "ticket_orders",
+  audit_logs: "audit_log",
+  deleted_account_records: "not exported: written only once the account is erased, when nobody can ask from its address",
   event_waves: "waves",
   event_likes: "likes_sent",
   crews: "crews",
@@ -100,27 +105,40 @@ export const EXPORT_CHECKLIST: Record<string, string> = {
 const WITHHELD =
   "Messages and requests written by other people are withheld as their personal information; other people appear as person-N or a pseudonym."
 
-// ponytail: one transaction holds every read; a person with very many rows (product_events) is what raises this.
+// ponytail: every row in memory, one transaction; a person with very many product_events is what raises this (then page).
 const EXPORT_TIMEOUT_MS = 120_000
 
 type Tx = Prisma.TransactionClient
+export type UserExport = Awaited<ReturnType<typeof collect>>
 
-/** The person's data. Reads only, inside a READ ONLY transaction. */
-export async function exportUser(db: PrismaClient, userId: string): Promise<Record<string, unknown>> {
+/** `run` inside a transaction the database itself keeps from writing, at one consistent moment. */
+export function readOnly<T>(db: PrismaClient, run: (tx: Tx) => Promise<T>): Promise<T> {
   return db.$transaction(
     async (tx) => {
       await tx.$executeRaw`SET TRANSACTION READ ONLY`
-      return collect(tx, userId)
+      return run(tx)
     },
-    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: EXPORT_TIMEOUT_MS }
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: EXPORT_TIMEOUT_MS, maxWait: 10_000 }
   )
 }
 
-async function collect(tx: Tx, id: string): Promise<Record<string, unknown>> {
+/** The person's data. Reads only. */
+export function exportUser(db: PrismaClient, userId: string): Promise<UserExport> {
+  return readOnly(db, (tx) => collect(tx, userId))
+}
+
+/*
+ * Full rows (`omit`, or none) only where every column is the person's own;
+ * everything that can carry somebody else is an allow-list (`select`).
+ */
+async function collect(tx: Tx, id: string) {
   const refs = new Map<string, string>()
   const person = (otherId: string) => {
-    if (!refs.has(otherId)) refs.set(otherId, `person-${refs.size + 1}`)
-    return refs.get(otherId)!
+    const known = refs.get(otherId)
+    if (known) return known
+    const ref = `person-${refs.size + 1}`
+    refs.set(otherId, ref)
+    return ref
   }
   const mine = { where: { user_id: id } }
   const oldestFirst = { orderBy: { created_at: "asc" as const } }
@@ -164,7 +182,11 @@ async function collect(tx: Tx, id: string): Promise<Record<string, unknown>> {
   })
 
   const friendships = await tx.friendships.findMany({ where: { OR: [{ user1_id: id }, { user2_id: id }] }, ...oldestFirst })
-  const friendRequests = await tx.friend_requests.findMany({ where: { OR: [{ sender_id: id }, { recipient_id: id }] }, ...oldestFirst })
+  // Received: only what the app delivered. A held request was never shown; a withdrawn one was taken back.
+  const friendRequests = await tx.friend_requests.findMany({
+    where: { OR: [{ sender_id: id }, { recipient_id: id, held_at: null, withdrawn_at: null }] },
+    ...oldestFirst,
+  })
   const waves = await tx.event_waves.findMany({ where: { OR: [{ from_id: id }, { to_id: id }] }, ...oldestFirst })
   const messageRequests = await tx.message_requests.findMany({ where: { OR: [{ sender_id: id }, { recipient_id: id }] }, ...oldestFirst })
   const referral = await tx.referrals.findUnique({ where: { invitee_id: id }, select: { inviter_id: true, created_at: true } })
@@ -255,7 +277,34 @@ async function collect(tx: Tx, id: string): Promise<Record<string, unknown>> {
       dismissed_at: r.dismissed_at,
       withdrawn_at: r.withdrawn_at,
     })),
-    referral: referral && { invited_by: person(referral.inviter_id), created_at: referral.created_at },
+    referral: {
+      invited_by: referral && person(referral.inviter_id),
+      joined_at: referral?.created_at ?? null,
+      people_invited: await tx.referrals.count({ where: { inviter_id: id } }),
+    },
+    entitlements: await tx.entitlements.findMany({
+      where: { subject_kind: "user", subject_id: id },
+      ...oldestFirst,
+      select: { product: true, source: true, event_id: true, starts_at: true, expires_at: true, created_at: true },
+    }),
+    // What they did, and when. Not the resource ids or details: a host's actions name other people.
+    audit_log: await tx.audit_logs.findMany({ ...mine, ...oldestFirst, select: { action: true, resource: true, created_at: true } }),
+    ticket_orders: await tx.ticket_orders.findMany({
+      where: { buyer_id: id },
+      ...oldestFirst,
+      select: {
+        id: true,
+        event_id: true,
+        status: true,
+        currency: true,
+        total_minor: true,
+        paid_at: true,
+        refunded_minor: true,
+        refunded_at: true,
+        created_at: true,
+        lines: { select: { ticket_type_id: true, quantity: true, unit_price_minor: true } },
+      },
+    }),
     waves: waves.map((w) => ({
       direction: w.from_id === id ? "sent" : "received",
       person: person(w.from_id === id ? w.to_id : w.from_id),
@@ -318,14 +367,17 @@ export function runRefusal(databaseUrl: string | undefined, args: string[]): str
   if (!target || args.some((a) => a.startsWith("--") && a !== "--allow-remote")) {
     return "usage: export-user.ts <email|userId> [--allow-remote]"
   }
-  let host: string
+  let hosts: string[]
   try {
-    host = new URL(databaseUrl ?? "").hostname
+    const url = new URL(databaseUrl ?? "")
+    // pg lets `?host=` (the last one) override the URL's host, so every host named must be local (review, PR #1120).
+    hosts = [url.hostname, ...url.searchParams.getAll("host")]
   } catch {
     return "DATABASE_URL is not set or not a URL"
   }
-  if (!LOCAL_HOSTS.has(host) && !args.includes("--allow-remote")) {
-    return `${host} is not a local database; pass --allow-remote (platform staff only, see the runbook at the top of this file)`
+  const remote = hosts.find((h) => !LOCAL_HOSTS.has(h))
+  if (remote !== undefined && !args.includes("--allow-remote")) {
+    return `${remote || "(no host)"} is not a local database; pass --allow-remote (platform staff only, see the runbook at the top of this file)`
   }
   return null
 }
@@ -333,8 +385,8 @@ export function runRefusal(databaseUrl: string | undefined, args: string[]): str
 async function main() {
   const args = process.argv.slice(2)
   const refused = runRefusal(process.env.DATABASE_URL, args)
-  if (refused) throw new Error(refused)
-  const target = args.find((a) => !a.startsWith("--"))!
+  const target = args.find((a) => !a.startsWith("--"))
+  if (refused || !target) throw new Error(refused ?? "usage: export-user.ts <email|userId> [--allow-remote]")
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) })
   try {
     const user = await db.user.findUnique({
