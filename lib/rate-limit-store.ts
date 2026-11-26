@@ -364,21 +364,10 @@ export async function release(key: string): Promise<void> {
  * A plain value kept in Redis with no expiry: a sweeper's "last run" mark that
  * should outlive a restart (the staff alert's). Null without Redis or on any
  * failure, and a failed write is a warning: the caller keeps its own copy in
- * memory and falls back to it, so this is best-effort by design. Bounded: a
- * plain command on a connection that drops after `isReady` waits in the offline
- * queue, and a sweeper awaiting it would stop for good, silently.
+ * memory and falls back to it, so this is best-effort by design. Bounded like
+ * every command here (`bounded`): a sweeper awaiting a stalled Redis would stop
+ * for good, silently.
  */
-const MARK_TIMEOUT_MS = 1_000
-
-function bounded<T>(command: Promise<T>): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("Redis mark timed out")), MARK_TIMEOUT_MS)
-    timer.unref()
-  })
-  return Promise.race([command, timeout]).finally(() => clearTimeout(timer))
-}
-
 export async function readMark(key: string): Promise<string | null> {
   const redis = await getRedis()
   if (!redis) return null
