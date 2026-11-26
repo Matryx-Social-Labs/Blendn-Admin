@@ -47,7 +47,7 @@ function report(message: string, meta?: Record<string, unknown>, tags?: Record<s
     }
   } catch (err) {
     // Never into the caller, and never through logger.error (that would report again).
-    console.error("Sentry report failed", err instanceof Error ? err.message : String(err))
+    console.error("Sentry report failed", { for: message, error: err instanceof Error ? (err.stack ?? err.message) : String(err) })
   }
 }
 
@@ -57,7 +57,11 @@ export const logger = {
   warn: (message: string, meta?: Record<string, unknown>) => write("warn", message, meta),
   /** `tags` are Sentry tags, for a call site that splits its issues (push receipts by code and platform). */
   error: (message: string, meta?: Record<string, unknown>, tags?: Record<string, string>) => {
-    write("error", message, meta)
-    report(message, meta, tags)
+    try {
+      write("error", message, meta)
+    } finally {
+      // A context the console line cannot stringify (circular) still reaches Sentry, which normalises it.
+      report(message, meta, tags)
+    }
   },
 }

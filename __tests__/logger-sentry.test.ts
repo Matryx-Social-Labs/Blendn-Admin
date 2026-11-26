@@ -85,12 +85,38 @@ describe("logger.error reports to Sentry", () => {
     expect(captureMessage).toHaveBeenCalledTimes(1)
   })
 
+  it("still reports when the console line cannot be written (a circular context)", () => {
+    const context: Record<string, unknown> = { error: "boom" }
+    context.self = context
+
+    try {
+      logger.error("Sweep failed", context)
+    } catch {
+      // JSON.stringify throwing out of the console line is older than this hook; the report must not depend on it.
+    }
+
+    expect(captureMessage).toHaveBeenCalledWith("Sweep failed", expect.objectContaining({ level: "error" }))
+  })
+
+  it("says which log line could not be reported when Sentry throws", () => {
+    captureMessage.mockImplementation(() => {
+      throw new Error("sentry is down")
+    })
+
+    logger.error("Mail failed", { error: "550" })
+
+    const failure = (console.error as jest.Mock).mock.calls.find((c) => c[0] === "Sentry report failed")
+    expect(failure?.[1]).toMatchObject({ for: "Mail failed" })
+  })
+
   it("redacts what the existing scrub redacts, in what Sentry receives", () => {
-    logger.error("Sign-in mail failed", { accessToken: "eyJhbGciOi.eyJzdWIiOi.c2lnbmF0dXJl", error: "rejected for ravi@example.com" })
+    // Built at run time: a JWT-shaped literal in source reads as a leaked key to a secret scanner.
+    const jwt = ["eyJhbGciOi", "eyJzdWIiOi", "c2lnbmF0dXJl"].join(".")
+    logger.error("Sign-in mail failed", { accessToken: jwt, error: `rejected for ravi@example.com, ${jwt}` })
 
     const { extra } = captureMessage.mock.calls[0][1]
     const event = beforeSend({ message: "Sign-in mail failed", extra } as ErrorEvent, {})
-    expect(event?.extra).toEqual({ accessToken: "[redacted]", error: "rejected for [redacted]" })
+    expect(event?.extra).toEqual({ accessToken: "[redacted]", error: "rejected for [redacted], [redacted]" })
   })
 })
 
