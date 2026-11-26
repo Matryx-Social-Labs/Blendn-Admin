@@ -12,6 +12,7 @@ import { isRoomMuted } from "./room-mute"
 import { badgeCountsFor } from "./badge-count"
 import { characters, clipCharacters } from "./utils"
 import { beganAsRequest } from "./conversation-identity"
+import { quietHolds } from "./quiet-hours"
 
 // Create a new Expo SDK client
 const expo = new Expo()
@@ -495,7 +496,8 @@ async function recordNotification(
   userId: string,
   title: string,
   body: string,
-  data?: NotificationData
+  data?: NotificationData,
+  heldUntil: Date | null = null
 ): Promise<string | null> {
   /*
    * No `data.type` means no row, rather than a row under a guessed kind.
@@ -518,6 +520,7 @@ async function recordNotification(
         title,
         body: storedBodyFor(data.type, body),
         data: data as object,
+        held_until: heldUntil,
       },
       select: { id: true },
     })
@@ -559,13 +562,26 @@ async function badgesFor(userIds: string[]): Promise<Map<string, number>> {
   }
 }
 
+/**
+ * Quiet hours (`lib/quiet-hours.ts`, SCRUM-1276): a push held at night writes its bell row with `held_until` and is
+ * not sent; `releaseHeldNotifications` rings it at 09:00. A kind the bell does not show is dropped instead: it is read
+ * in the Lobby.
+ */
 export async function sendPushNotification(options: SendNotificationOptions): Promise<boolean> {
-  const { userId, title, subtitle, body, data, sound = "default" } = options
+  const { userId, title, body, data } = options
+  const heldUntil = (await quietHolds([userId], data)).get(userId) ?? null
+  if (heldUntil && data?.type && NOT_IN_THE_BELL.includes(data.type)) return false
 
   // First, and outside the try: the centre records what was *sent*, not what
   // was successfully delivered. See `recordNotification`.
-  const notificationId = await recordNotification(userId, title, body, data)
+  const notificationId = await recordNotification(userId, title, body, data, heldUntil)
+  if (heldUntil) return false
+  return pushToDevices(options, notificationId)
+}
 
+/** The push itself, with no bell row and no quiet hours: `sendPushNotification`'s second half, and the 09:00 release. */
+async function pushToDevices(options: SendNotificationOptions, notificationId: string | null): Promise<boolean> {
+  const { userId, title, subtitle, body, data, sound = "default" } = options
   try {
     const pushTokens = await getUserPushTokens(userId, data)
 
@@ -630,7 +646,8 @@ async function recordBulk(
   userIds: readonly string[],
   title: string,
   body: string,
-  payload: NotificationData
+  payload: NotificationData,
+  holds: ReadonlyMap<string, Date>
 ): Promise<Map<string, string>> {
   const rowIds = new Map<string, string>()
   const recorded: string[] = []
@@ -644,6 +661,7 @@ async function recordBulk(
           title,
           body: storedBodyFor(payload.type, body),
           data: payload as object,
+          held_until: holds.get(userId) ?? null,
         })),
         select: { id: true, user_id: true },
       })
@@ -691,13 +709,16 @@ export async function sendBulkPushNotifications(
    * same reason the single sender's is — a failed insert must not fail the
    * announcement.
    */
+  // Quiet hours, one batch for everybody (`sendPushNotification`): held rows wait in the bell, held people get no push.
+  const holds = await quietHolds(userIds, data)
   // Each recipient's own row id, for `data.notificationId` on their push.
   const rowIds =
     data?.type && !NOT_IN_THE_BELL.includes(data.type) && userIds.length > 0
-      ? await recordBulk(userIds, title, body, data)
+      ? await recordBulk(userIds, title, body, data, holds)
       : new Map<string, string>()
 
-  const tokenMap = await getBulkUserPushTokens(userIds, data)
+  const ringing = holds.size > 0 ? userIds.filter((id) => !holds.has(id)) : userIds
+  const tokenMap = await getBulkUserPushTokens(ringing, data)
   // One count for everybody with a device, after their rows are in; never a query per person.
   const badges = options.badge === undefined && tokenMap.size > 0 ? await badgesFor([...tokenMap.keys()]) : new Map<string, number>()
   const messages: ExpoPushMessage[] = []
@@ -724,15 +745,66 @@ export async function sendBulkPushNotifications(
   }
 
   // People, not devices: no valid token the gates let through (none, push off, or malformed).
-  const noDevice = new Set(userIds).size - reached.size
+  const noDevice = new Set(ringing).size - reached.size
   if (messages.length === 0) {
     return { sent: 0, failed: 0, noDevice }
   }
 
   const platformOf = new Map([...tokenMap.values()].flat().map((t) => [t.token, t.platform]))
   const { sent, failed } = await sendChunks(messages, platformOf)
-  logger.info("Bulk push notifications complete", { sent, failed, noDevice })
+  logger.info("Bulk push notifications complete", { sent, failed, noDevice, held: holds.size })
   return { sent, failed, noDevice }
+}
+
+/**
+ * The night's held pushes, at 09:00 on each recipient's clock (`held_until`, SCRUM-1276). Every due row is claimed in
+ * one statement (`held_until` back to null), so a second pass or replica finds nothing to send twice. Per person, ONE
+ * push: the newest held row still unread, as itself (its kind, title, body and `notificationId`, so installed builds
+ * open it). Somebody who read them overnight gets none. Never held again, and through the same device gates as a
+ * fresh send (`pushToDevices`).
+ *
+ * Passed over, but cleared all the same (lane advisor, 2026-11-26): a row about a conversation that closed overnight
+ * (an unmatch, or a block, which closes it), so a blocked person's pseudonym never reaches the lock screen at 09:00;
+ * and a row about an event that has already started, so a reminder never says "in about an hour" after the doors.
+ *
+ * ponytail: one send per person, in turn; fine for a launch cluster. Batch by kind if a night's audience grows large.
+ */
+export async function releaseHeldNotifications(now = new Date()): Promise<{ released: number; pushed: number }> {
+  const rows = await db.notifications.updateManyAndReturn({
+    where: { held_until: { lte: now } },
+    data: { held_until: null },
+    select: { id: true, user_id: true, title: true, body: true, data: true, read_at: true, created_at: true },
+  })
+  const unread = rows.filter((r) => r.read_at === null)
+  const stale = await staleRows(unread.map((r) => r.data as NotificationData | null), now)
+  const newest = new Map<string, (typeof rows)[number]>()
+  for (const row of unread) {
+    const data = row.data as NotificationData | null
+    if (data?.conversationId && stale.conversations.has(data.conversationId)) continue
+    if (data?.eventId && stale.events.has(data.eventId)) continue
+    const kept = newest.get(row.user_id)
+    if (!kept || row.created_at > kept.created_at) newest.set(row.user_id, row)
+  }
+
+  let pushed = 0
+  for (const row of newest.values()) {
+    const data = row.data as NotificationData
+    if (await pushToDevices({ userId: row.user_id, title: row.title, body: row.body, data }, row.id)) pushed++
+  }
+  return { released: rows.length, pushed }
+}
+
+/** Conversations that closed and events that started, of those the held rows name: two reads at most. */
+async function staleRows(data: Array<NotificationData | null>, now: Date): Promise<{ conversations: Set<string>; events: Set<string> }> {
+  const conversationIds = [...new Set(data.flatMap((d) => (d?.conversationId ? [d.conversationId] : [])))]
+  const eventIds = [...new Set(data.flatMap((d) => (d?.eventId ? [d.eventId] : [])))]
+  const [closed, started] = await Promise.all([
+    conversationIds.length > 0
+      ? db.private_conversations.findMany({ where: { id: { in: conversationIds }, closed_at: { not: null } }, select: { id: true } })
+      : [],
+    eventIds.length > 0 ? db.events.findMany({ where: { id: { in: eventIds }, start_time: { lte: now } }, select: { id: true } }) : [],
+  ])
+  return { conversations: new Set(closed.map((c) => c.id)), events: new Set(started.map((e) => e.id)) }
 }
 
 /**

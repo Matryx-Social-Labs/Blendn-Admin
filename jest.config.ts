@@ -14,6 +14,10 @@ import type { Config } from "jest"
  */
 process.env.TZ = "UTC"
 
+// Quiet hours (lib/quiet-hours.ts) read the real clock: off for every suite, so one run at 01:00 IST rings like one at
+// noon. The suites that test quiet hours turn them back on.
+process.env.PUSH_QUIET_HOURS = "off"
+
 const config: Config = {
   preset: "ts-jest",
   testEnvironment: "node",
