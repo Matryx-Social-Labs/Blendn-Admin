@@ -60,8 +60,9 @@ async function postToWebhook(url: string, body: Record<string, unknown>): Promis
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      // A hanging webhook must not hold the caller open.
+      // A hanging webhook must not hold the caller open, and a redirect must not carry the body elsewhere.
       signal: AbortSignal.timeout(8_000),
+      redirect: "error",
     })
   } catch (error) {
     // The error's own message can quote the URL ("Failed to parse URL from …"): the name only.
