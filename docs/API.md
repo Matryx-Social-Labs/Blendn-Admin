@@ -2575,7 +2575,7 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 3. **OpenAI Moderation** (pre-emit, 1s timeout) — AI content analysis → hides before broadcast
 
 If caught, response returns `{ moderation_hidden: true, content: null }`. The message is never emitted via socket.
-If OpenAI times out (>1s), message is broadcast and moderation falls back to async (socket delete event).
+If OpenAI has not answered within 1s, the message is broadcast and moderation falls back to async (socket delete event), except in a busy event room, which waits for the verdict (below).
 
 **While OpenAI is down** (5 consecutive failed calls open a 30 s breaker per server process): a room of 200 or fewer inside, and every room that is not an event's, still delivers the line, and a sweeper re-checks every `unchecked` room message from the last 24 h each minute, hiding or flagging late through the usual actions. A **busy event room (more than 200 inside now) refuses instead**: when the 1 s race has no verdict the route waits for the call in flight (its own 8 s deadline); with still none it deletes the row it just wrote (nothing was emitted) and answers `503 MODERATION_UNAVAILABLE`, `retryAfter: 5` in the body and `Retry-After`, error "This room is busy and messages can’t be checked right now. Try again in a few seconds." With the breaker already open the refusal comes before anything is written. Resend with the same `clientId`. A missing `OPENAI_API_KEY` is not an outage and never refuses.
 
@@ -4465,7 +4465,7 @@ Returns: `{ flags: [...], stats: { pending, autoHidden, total }, pagination }`
 Messages go through a **pre-emit** pipeline — moderation runs before the message is broadcast to other users:
 1. **Spam check** (sync, blocks before save) — burst rate (5 msgs/10s), duplicate detection, link density (max 2)
 2. **Keyword filter** (sync, before save, <1ms) — Exact-match wordlists for English + 8 Indian languages. If matched, message saved as hidden and never broadcast.
-3. **OpenAI Moderation API** (pre-emit, 1s timeout) — Multilingual AI detection for hate, harassment, sexual, violence, self-harm. If caught within 1s, message hidden before broadcast. If timeout, emitted and falls back to async.
+3. **OpenAI Moderation API** (pre-emit, 1s timeout) — Multilingual AI detection for hate, harassment, sexual, violence, self-harm. If caught within 1s, message hidden before broadcast. If timeout, emitted and falls back to async, except in an event room with more than 200 checked in, which waits for the verdict (up to 8s) and refuses the send (`503 MODERATION_UNAVAILABLE`) without one.
 4. **Image moderation** (async, if applicable) — OpenAI omni-moderation for images
 
 Thresholds: `>=0.70` confidence → auto-hide, `>=0.40` → flag for review. Auto-mute after 3 hidden abusive messages in 1 hour (a message hidden only for a contact detail does not count). Auto-unmute after 1 hour with no new violations (checked on next send attempt).

@@ -82,7 +82,9 @@ Run a single test file: `npx jest __tests__/socket-auth.test.ts`
   See `docs/SOCKET_EVENTS.md`.
 - **`lib/moderation/`** — keyword filter, then OpenAI text and image moderation.
   Text is checked before broadcast with a 1s timeout; on timeout the message
-  goes out and moderation continues asynchronously, hiding it if needed.
+  goes out and moderation continues asynchronously, hiding it if needed. An
+  event room with more than 200 checked in waits for the verdict instead (up
+  to 8s) and refuses the send without one (`lib/moderation/degraded-room.ts`).
 - **`lib/tigris.ts`** — S3-compatible object storage. Uploads are silently
   disabled if the `TIGRIS_*` vars are unset.
 

@@ -478,7 +478,7 @@ In an event room with more than 200 people checked in, the send waits for the ve
 User sends a message in a big event room
   → Spam, keyword and contact checks pass → message saved
   → OpenAI has not answered within 1s → message held from readers; the send keeps waiting, up to 8s in all
-  → Verdict hide → success response { moderation_hidden: true, content: null }; never broadcast
+  → Verdict hide → success response with moderation_hidden: true, content: null; never broadcast
   → Verdict pass → message emitted via Socket.io; normal success response
   → No verdict   → message deleted, never broadcast; the send answers HTTP 503:
        Retry-After: 5
@@ -494,7 +494,7 @@ In every other room, the message is not held:
 User sends problematic content
   → Spam, keyword and contact checks pass → message saved
   → OpenAI has not answered within 1s → message emitted via Socket.io; normal success response
-  → The same check finishes afterwards (no verdict yet: recorded `unchecked` and checked again later)
+  → The same check finishes afterwards (still no verdict, after one more try if the call failed: recorded `unchecked` and checked again later)
   → Verdict hide → Socket emits "chat:messageDeleted" { chatGroupId, messageId, moderation: true, userId }
        (`userId` is the sender as each recipient's copy named them; the sender gets their own id)
   → OTHER users: message removed from UI
