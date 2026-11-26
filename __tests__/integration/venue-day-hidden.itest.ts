@@ -21,6 +21,7 @@ import { signAccessToken } from "@/lib/mobile-auth"
 import { actorFor } from "@/lib/org-membership"
 import { sendEventReminders, sendRatingRequests } from "@/lib/services/event-notifications.service"
 import { venueDayFor } from "@/lib/venue-day"
+import { nextLocalTime } from "@/lib/event-wall-clock"
 import { unlinkEventVenue } from "@/lib/venue-link-actions"
 
 import { closeDb, db, makeUser, onboard, testId } from "./helpers"
@@ -322,7 +323,8 @@ describe("a venue day never reaches a host's or the platform's numbers (PL-I16)"
 
     const endedDay = await venueDayAt(new Date(now.getTime() - 24 * HOUR), new Date(now.getTime() - 10 * MIN))
     const endedEvent = await realEvent({ start: new Date(now.getTime() - 3 * HOUR), end: new Date(now.getTime() - 10 * MIN) })
-    await sendRatingRequests(now)
+    // Asked at 10:00 on the event's clock the morning after (SCRUM-1274), so the pass runs then.
+    await sendRatingRequests(nextLocalTime(now, "Asia/Kolkata", 10))
     const asked = await db.events.findMany({ where: { id: { in: [endedDay, endedEvent] } }, select: { id: true, rating_requested_at: true } })
     expect(asked.find((e) => e.id === endedEvent)?.rating_requested_at).not.toBeNull()
     expect(asked.find((e) => e.id === endedDay)?.rating_requested_at).toBeNull()

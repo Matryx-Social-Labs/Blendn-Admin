@@ -83,7 +83,7 @@ to verify, not research. The dashboard shows prices including GST.
 
 - **Organizers run events free, forever.** Everything already shipped stays
   free; Analytics sells only what is new (step 16). **Event Pass** ₹499 per
-  event; **Analytics** ₹1,999/mo or ₹19,990/yr — shown and charged as ₹589,
+  event, sold only for a night that has ended with at least 5 people checked in (SCRUM-1363); **Analytics** ₹1,999/mo or ₹19,990/yr — shown and charged as ₹589,
   ₹2,359 and ₹23,588 with GST (`lib/billing-plans.ts`, the one price table). The paywall starts 90 days after the
   organisation's first event with at least 8 people checked in (SCRUM-1269). Founding grant: 6
   months of Analytics.

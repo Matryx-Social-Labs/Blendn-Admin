@@ -827,7 +827,7 @@ event's change and a report's outcome have no switch here. Stored as
   accepted, declined, dismissed, withdrawn or gone; absent on every other kind.
 - **`data.reason`** on `event_update` and `event_changed`: `cancelled`, `time` or
   `venue`, the most important when several moved (`data.changed` has them all,
-  comma-joined). A reminder ("starts in an hour") carries none.
+  comma-joined). A reminder ("Starting in about an hour") carries none.
 
 **Reading the bell as an older build.** A build that does not know `event_changed`
 has no tap for it, so the feed is served to it the way its push is (`channelSet`
@@ -5037,7 +5037,8 @@ them any more. Rows written before that are hidden, and retention removes them.
 | A room message | **Nobody** | — |
 | A reply to your room message | Its author, if still in the room and not in a block with the sender; at most once per room every 3 minutes. `data: { type: "group_message", chatGroupId, senderId, kind }` — `kind` is the room's: `event` (a venue day's room too), `crew` (with `crewId`), `blend` (with `blendId`) or `board_post`; open the tap as that room | `room:{chatGroupId}`, replaced in place |
 | A check-in | **Nobody** — the live roster carries arrivals | — |
-| An event you RSVP'd to or saved changes time or place, is cancelled, or starts in an hour | Going (`event_changed`: time, place, cancel), and maybe, waitlisted and saved (`event_update`) | `event:{eventId}`, replaced in place: only the latest state is true |
+| An event you RSVP'd to or saved changes time or place, or is cancelled | Going (`event_changed`: time, place, cancel), and maybe, waitlisted and saved (`event_update`) | `event:{eventId}`, replaced in place: only the latest state is true |
+| An event you are going or maybe to starts in about an hour | Going and maybe only, not waitlisted or saved, once per event, 60–75 minutes ahead: `event_update`, "Starting in about an hour at {venue}" (no venue: "Starting in about an hour"), no `reason` | `event:{eventId}`, replaced in place |
 | An event you are checked in to is cancelled (SV7) | Everyone who was checked in at that moment, once, in batches of 500: `data: { type: "event_cancelled", eventId }`, "This event has been cancelled. You are no longer checked in." Their check-in is already cancelled and their presence closed. They are not sent the going/saved line above as well, so somebody inside and going hears it once. A build that has not declared channel set 2 is sent `event_update` instead (it opens the event), push and bell row alike, as for `event_changed` | `event:{eventId}` on `events`, replaced in place; one bell row of kind `event_cancelled` |
 | An organizer announcement | Everyone in the room | Stacked with its event, never replaced |
 | Friend request / accepted, match, reveal, Lobby, message request | The person it is about, immediately | One each |
@@ -5045,10 +5046,26 @@ them any more. Rows written before that are hidden, and retention removes them.
 | "Going together" | Every other crew member who has not muted the crew chat or blocked the planner (`crew_here`, `kind: "crew_plan"`, `crewId`, `chatGroupId`), once per crew per night; "Priya wants to go together. Open the crew to see the night." — no place | One each |
 | "We're here" / "With {crew}" at the hold | Every other crew member who has not muted the crew chat or blocked the tapper (`crew_here`, `crewId`, `chatGroupId`, `occurrenceId`, `count`), once per person per night; "Priya and Arjun are in. Hold to Blend’n when you get there." — who is in by first name, never who is not, no place | One each |
 | A Mix | Everyone the Mix room lets in, but the person whose like made it (`blend`, `blendId`, `chatGroupId`); no name, nothing about who liked first | One each |
-| An event you checked in to ends | Everyone with a check-in row, once per event, within ~5 minutes of the end (only events that ended in the last 6 hours). `data: { type: "rating_request", eventId }` → the app opens `/rate/[eventId]`. People with a mutual like to rate (blocks excluded) get "rate the people you met"; the rest "rate the night"; somebody who already rated and has nobody to rate is skipped | `rate:{eventId}` on `events`, replaced in place |
+| An event you checked in to ends | Everyone with a check-in row, once per event, at 10:00 on the event's clock the morning after it ends (the first 10:00 after `end_time`: a night ending at 01:00 is asked at 10:00 that day, one ending at 18:00 at 10:00 the next; only events that ended in the last 34 hours; an unknown time zone reads as UTC). `data: { type: "rating_request", eventId }` → the app opens `/rate/[eventId]`. People with a mutual like to rate (blocks excluded) get "rate the people you met"; the rest "rate the night"; somebody who already rated and has nobody to rate is skipped | `rate:{eventId}` on `events`, replaced in place |
 
 A room you muted (`POST /chat/groups/:id/mute`) sends you neither the reply push
 nor announcements.
+
+**Quiet hours, 23:00–09:00 on the recipient's clock (SCRUM-1276).** The clock is
+the event's zone when the push names an event, else the home city's, else
+Asia/Kolkata. In those hours a push is **held, not dropped**: its bell row is
+written as above, with `held_until` (not served) set to the next 09:00, and no push
+goes out. At 09:00 (within the reminder loop's 5 minutes) a person with held rows
+still unread gets **one** push, the newest of them as itself (its kind, title, body
+and `data.notificationId`); somebody who read them overnight gets none. A held row
+about a conversation that has since closed (an unmatch or a block) or an event that
+has already started is passed over. The Lobby's opt-in alerts (`board_match`,
+`board_host_post`) have no bell row, so in quiet hours they are dropped; the Lobby
+shows them. **Always sent, at any hour:** a DM, a reply to your room message, a
+message request and its answer, a crew's "We're here" and "Going together", a
+report's outcome, a Lobby post taken down; anything about an event you are going
+to or have a check-in row at; and **everything**, any kind, while you have an open
+check-in anywhere, so a night out is never muted.
 
 Every push carries an Android `channelId` the app creates — `messages`,
 `rooms`, `events` or `offers` ("Offers from venues", a venue's offer only) —

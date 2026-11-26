@@ -110,12 +110,9 @@ export default function PricingPage() {
       <h2>How you pay</h2>
       <p>
         Plans are bought on the dashboard&apos;s Plan page, by the organisation&apos;s owner or an admin, and paid
-        through Razorpay&apos;s checkout. Monthly and yearly plans renew automatically until cancelled; an Event
-        Pass is a single payment. Every payment is listed on the Plan page with its Razorpay payment reference.
+        through Razorpay&apos;s checkout. Monthly and yearly plans renew automatically until cancelled; Event
+        Insights is a single payment. Every payment is listed on the Plan page with its Razorpay payment reference.
       </p>
-
-      <h2>Not sold here</h2>
-      <p>Blend&apos;n+ for attendees is bought inside the Blend&apos;n app, through the App Store or Google Play.</p>
     </PolicyPage>
   )
 }

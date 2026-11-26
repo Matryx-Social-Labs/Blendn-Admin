@@ -1489,6 +1489,10 @@ model notifications {
   /// boolean back into a time is not possible.
   read_at    DateTime? @db.Timestamptz(6)
   created_at DateTime  @default(now()) @db.Timestamptz(6)
+  /// Quiet hours (SCRUM-1276): the push was held at night and rings at this time, the next 09:00 on the recipient's
+  /// clock (`lib/quiet-hours.ts`); null once released, or for a push that rang at once. The row is in the bell either
+  /// way. Its partial index (`held_until IS NOT NULL`, what the release reads) lives in migration SQL only.
+  held_until DateTime? @db.Timestamptz(6)
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
