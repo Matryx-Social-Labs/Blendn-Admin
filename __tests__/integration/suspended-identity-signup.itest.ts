@@ -18,7 +18,10 @@ const appleRoute = require("@/app/api/mobile/auth/apple/route") as typeof import
 
 const PASSWORD = "orchard-lantern-quiet-42"
 const users: string[] = []
+/** Every address a test asked to create: a regression that writes a row must not leave it behind. */
+const attempted: string[] = []
 afterAll(async () => {
+  users.push(...(await db.user.findMany({ where: { email: { in: attempted.map((e) => e.toLowerCase()) } }, select: { id: true } })).map((u) => u.id))
   await db.user_oauth_accounts.deleteMany({ where: { user_id: { in: users } } })
   await cleanup(users, [])
   await closeDb()
@@ -31,15 +34,19 @@ const post = (path: string, body: unknown) =>
     headers: { "content-type": "application/json", "x-real-ip": `10.33.8.${++ip}` },
     body: JSON.stringify(body),
   })
-const signup = (email: string) =>
-  signupRoute.POST(post("/api/mobile/auth/signup", { email, password: PASSWORD, name: "Again", age: 30 }))
+const signup = (email: string) => {
+  attempted.push(email)
+  return signupRoute.POST(post("/api/mobile/auth/signup", { email, password: PASSWORD, name: "Again", age: 30 }))
+}
 const google = (sub: string, email: string) => {
+  attempted.push(email)
   jest.mocked(verifyGoogleIdToken).mockResolvedValueOnce({
     sub, email, email_verified: true, aud: "a", iss: "i", exp: 0, iat: 0,
   })
   return googleRoute.POST(post("/api/mobile/auth/google", { idToken: "t" }))
 }
 const apple = (sub: string, email: string) => {
+  attempted.push(email)
   jest.mocked(verifyAppleIdToken).mockResolvedValueOnce({ sub, email, aud: "a", iss: "i", exp: 0, iat: 0 })
   return appleRoute.POST(post("/api/mobile/auth/apple", { identityToken: "t" }))
 }
@@ -162,6 +169,13 @@ describe("Google", () => {
     expect(await db.user.count({ where: { email: `${local}@gmail.com` } })).toBe(0)
   })
 
+  it("still creates an account when only an active account holds the inbox under another spelling", async () => {
+    const local = testId("active-g")
+    users.push((await db.user.create({ data: { email: `${local}@gmail.com`, name: "Active" }, select: { id: true } })).id)
+    const res = await google(testId("gsub"), `${dotsMoved(local)}@gmail.com`)
+    expect(res.status).toBe(201)
+  })
+
   it("creates a fresh Google account (negative control)", async () => {
     const email = `${testId("gfresh")}@gmail.com`
     const res = await google(testId("gsub"), email)
@@ -178,5 +192,10 @@ describe("Apple", () => {
 
     await expectSuspendedRefusal(await apple(testId("asub"), again))
     expect(await db.user.count({ where: { email: again } })).toBe(0)
+  })
+
+  it("creates a fresh Apple account (negative control)", async () => {
+    const res = await apple(testId("asub"), `${testId("afresh")}@icloud.test`)
+    expect(res.status).toBe(201)
   })
 })
