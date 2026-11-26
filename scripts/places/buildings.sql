@@ -8,7 +8,8 @@
 --
 -- This only pre-filters: every building within about 50 m of a venue's pin. Which one becomes the fence is
 -- `fenceFromCandidates` in the script, which is `pickBuilding`'s rule (lib/outline.ts), so the two cannot disagree.
--- One city per run: the box read from S3 is that city's venues, so a run reads one city's buildings, not a country's.
+-- One city per run: the files read are those the release's STAC index puts under that city's box (Bengaluru: one
+-- file, 1.3M buildings, 80 s), not all 512 of the planet's.
 
 .bail on
 INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial;
@@ -42,10 +43,18 @@ SET VARIABLE xmax = (SELECT max(lng) + 0.001 FROM points);
 SET VARIABLE ymin = (SELECT min(lat) - 0.001 FROM points);
 SET VARIABLE ymax = (SELECT max(lat) + 0.001 FROM points);
 
+-- Only the files whose box meets the city's, from the release's STAC index: one or two files a city, not all 512.
+SET VARIABLE files = (
+  SELECT list(replace(assets.aws.href, 'https://overturemaps-us-west-2.s3.us-west-2.amazonaws.com/', 's3://overturemaps-us-west-2/'))
+  FROM read_parquet('https://stac.overturemaps.org/' || getvariable('release') || '/collections.parquet')
+  WHERE collection = 'building'
+    AND bbox.xmin < getvariable('xmax') AND bbox.xmax > getvariable('xmin')
+    AND bbox.ymin < getvariable('ymax') AND bbox.ymax > getvariable('ymin')
+);
+
 CREATE TABLE buildings AS
 SELECT id, sources[1].dataset AS dataset, class AS cls, geometry
-FROM read_parquet('s3://overturemaps-us-west-2/release/' || getvariable('release') || '/theme=buildings/type=building/*',
-                  hive_partitioning = 1)
+FROM read_parquet(getvariable('files'))
 WHERE bbox.xmin < getvariable('xmax') AND bbox.xmax > getvariable('xmin')
   AND bbox.ymin < getvariable('ymax') AND bbox.ymax > getvariable('ymin')
   AND NOT coalesce(is_underground, false);
