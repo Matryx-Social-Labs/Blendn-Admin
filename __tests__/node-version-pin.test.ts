@@ -28,6 +28,7 @@ test("package.json engines.node has the major every workflow's node-version uses
     )
 
   expect(ciMajors.length).toBeGreaterThan(0)
-  expect(engines).toBeDefined()
+  // One major, any minor: a range like ">=22" lets Railpack resolve the newest Node.
+  expect(pkg.engines?.node).toMatch(/^\d+\.x$/)
   expect(ciMajors).toEqual(ciMajors.map(([f]) => [f, engines]))
 })
