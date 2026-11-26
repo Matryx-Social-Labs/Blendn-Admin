@@ -19,29 +19,64 @@ jest.mock("@/lib/entitlements", () => ({ liveEntitlement: async () => null, even
  */
 const DAY = 86_400_000
 const now = new Date("2026-10-03T12:00:00Z")
+const INDIA = { orgId: "org", mayBuyHere: true }
+const CANADA = { orgId: "org", mayBuyHere: false }
 
 describe("decideAccess", () => {
   it("is open while no event has cleared the floor: the clock has not started", () => {
-    expect(decideAccess({ entitled: null, freeUntil: null, now })).toEqual({ org: true, reason: "free_window", freeUntil: null })
+    expect(decideAccess({ mayBuyHere: true, entitled: null, freeUntil: null, now })).toEqual({ org: true, reason: "free_window", freeUntil: null })
   })
 
   it("is open until the window's end and locked from it", () => {
-    expect(decideAccess({ entitled: null, freeUntil: new Date("2026-10-03T12:00:01Z"), now })).toMatchObject({ org: true, reason: "free_window" })
-    expect(decideAccess({ entitled: null, freeUntil: new Date("2026-10-03T12:00:00Z"), now })).toMatchObject({ org: false, reason: "free" })
-    expect(decideAccess({ entitled: null, freeUntil: new Date("2026-09-01T00:00:00Z"), now })).toMatchObject({ org: false, reason: "free" })
+    expect(decideAccess({ mayBuyHere: true, entitled: null, freeUntil: new Date("2026-10-03T12:00:01Z"), now })).toMatchObject({ org: true, reason: "free_window" })
+    expect(decideAccess({ mayBuyHere: true, entitled: null, freeUntil: new Date("2026-10-03T12:00:00Z"), now })).toMatchObject({ org: false, reason: "free" })
+    expect(decideAccess({ mayBuyHere: true, entitled: null, freeUntil: new Date("2026-09-01T00:00:00Z"), now })).toMatchObject({ org: false, reason: "free" })
   })
 
   it("is open with Analytics or a grant, whatever the window", () => {
-    expect(decideAccess({ entitled: "analytics", freeUntil: new Date(now.getTime() - 400 * DAY), now })).toMatchObject({ org: true, reason: "analytics" })
-    expect(decideAccess({ entitled: "grant", freeUntil: new Date(now.getTime() - 400 * DAY), now })).toMatchObject({ org: true, reason: "grant" })
+    expect(decideAccess({ mayBuyHere: true, entitled: "analytics", freeUntil: new Date(now.getTime() - 400 * DAY), now })).toMatchObject({ org: true, reason: "analytics" })
+    expect(decideAccess({ mayBuyHere: true, entitled: "grant", freeUntil: new Date(now.getTime() - 400 * DAY), now })).toMatchObject({ org: true, reason: "grant" })
   })
 
   it("is locked when a subscription expired or halted: no live entitlement is no entitlement", () => {
-    expect(decideAccess({ entitled: null, freeUntil: new Date(now.getTime() - DAY), now }).org).toBe(false)
+    expect(decideAccess({ mayBuyHere: true, entitled: null, freeUntil: new Date(now.getTime() - DAY), now }).org).toBe(false)
   })
 
   it("names a 90-day window: three months free (DECISIONS 2026-11-25)", () => {
     expect(FREE_WINDOW_DAYS).toBe(90)
+  })
+})
+
+/*
+ * SCRUM-1277: where plans are not sold (`mayBuyHere` false: an organisation
+ * running anything in Canada), nothing can be bought, so nothing is locked:
+ * the organisation-wide open state with reason "market" and no end date,
+ * whatever the window says.
+ */
+describe("decideAccess where plans are not sold (SCRUM-1277)", () => {
+  const market = { org: true, reason: "market", freeUntil: null }
+
+  it("stays open past the window's end, with no end date", () => {
+    expect(decideAccess({ mayBuyHere: false, entitled: null, freeUntil: new Date("2026-09-01T00:00:00Z"), now })).toEqual(market)
+    expect(decideAccess({ mayBuyHere: false, entitled: null, freeUntil: new Date(now.getTime() - 400 * DAY), now })).toEqual(market)
+  })
+
+  it("says market inside the window and before any window: no date to count down to", () => {
+    expect(decideAccess({ mayBuyHere: false, entitled: null, freeUntil: new Date("2026-12-01T00:00:00Z"), now })).toEqual(market)
+    expect(decideAccess({ mayBuyHere: false, entitled: null, freeUntil: null, now })).toEqual(market)
+  })
+
+  it("keeps a live Analytics or grant's own reason", () => {
+    expect(decideAccess({ mayBuyHere: false, entitled: "grant", freeUntil: null, now })).toMatchObject({ org: true, reason: "grant" })
+    expect(decideAccess({ mayBuyHere: false, entitled: "analytics", freeUntil: null, now })).toMatchObject({ org: true, reason: "analytics" })
+  })
+
+  it("locks an Indian organisation past its window, as before", () => {
+    expect(decideAccess({ mayBuyHere: true, entitled: null, freeUntil: new Date("2026-09-01T00:00:00Z"), now })).toEqual({
+      org: false,
+      reason: "free",
+      freeUntil: new Date("2026-09-01T00:00:00Z"),
+    })
   })
 })
 
@@ -58,7 +93,7 @@ describe("the first event that starts the clock (SCRUM-1269)", () => {
   })
 
   it("is the first night with 8 people checked in; a night of 7 does not start it", async () => {
-    const access = await analyticsAccess("org", now)
+    const access = await analyticsAccess(INDIA, now)
     expect(access.firstFreeEventId).toBe("eight")
     // Literal: 20 Aug 22:00 + 90 days.
     expect(access.freeUntil).toEqual(new Date("2026-11-18T22:00:00Z"))
@@ -70,7 +105,7 @@ describe("the first event that starts the clock (SCRUM-1269)", () => {
 
   it("keeps a window already written, whatever that night's count, and never re-derives it", async () => {
     mockDb.organisations.findUnique.mockResolvedValue({ analytics_free_until: new Date("2026-12-01T00:00:00Z"), first_free_event_id: "six" })
-    const access = await analyticsAccess("org", now)
+    const access = await analyticsAccess(INDIA, now)
     expect(access).toMatchObject({ freeUntil: new Date("2026-12-01T00:00:00Z"), firstFreeEventId: "six", reason: "free_window" })
     expect(mockDb.events.findMany).not.toHaveBeenCalled()
     expect(mockDb.organisations.updateMany).not.toHaveBeenCalled()
@@ -78,9 +113,17 @@ describe("the first event that starts the clock (SCRUM-1269)", () => {
 
   it("has not started while every night had fewer than 8", async () => {
     mockCounts.mockResolvedValue(new Map([["seven", 7], ["eight", 7]]))
-    const access = await analyticsAccess("org", now)
+    const access = await analyticsAccess(INDIA, now)
     expect(access).toMatchObject({ freeUntil: null, firstFreeEventId: null, org: true, reason: "free_window" })
     expect(mockDb.organisations.updateMany).not.toHaveBeenCalled()
+  })
+
+  it("neither reads nor writes the window where plans are not sold (SCRUM-1277)", async () => {
+    const access = await analyticsAccess(CANADA, now)
+    expect(access).toMatchObject({ org: true, reason: "market", freeUntil: null, firstFreeEventId: null, passEventIds: [] })
+    expect(mockDb.organisations.findUnique).not.toHaveBeenCalled()
+    expect(mockDb.organisations.updateMany).not.toHaveBeenCalled()
+    expect(mockDb.events.findMany).not.toHaveBeenCalled()
   })
 })
 

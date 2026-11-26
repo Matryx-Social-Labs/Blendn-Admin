@@ -23,6 +23,7 @@ jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 import { randomUUID } from "crypto"
 
 import { analyticsAccess } from "@/lib/analytics-access"
+import { billingOrgFor } from "@/lib/billing"
 import { grantEntitlement } from "@/lib/entitlements"
 import { analyticsPage, eventAnalytics, orgAnalytics } from "@/lib/org-analytics"
 import { db as appDb } from "@/lib/db"
@@ -45,6 +46,8 @@ let orgId = ""
 let firstEventId = ""
 let canaryEventId = ""
 let smallEventId = ""
+/** The fixture organisation as the pages pass it: its events have no city, so it may buy here (India). */
+let INDIA = { orgId: "", mayBuyHere: true }
 
 async function event(label: string, start: Date, hours = 3) {
   const end = new Date(start.getTime() + hours * 60 * MIN)
@@ -93,6 +96,7 @@ beforeAll(async () => {
   users.push(owner)
   const org = await db.organisations.create({ data: { kind: "company", display_name: testId("an-org"), status: "verified" } })
   orgId = org.id
+  INDIA = { orgId, mayBuyHere: true }
   orgs.push(orgId)
   await db.organisation_members.create({ data: { org_id: orgId, user_id: owner, role: "owner" } })
   const people: string[] = []
@@ -156,7 +160,7 @@ const CANARY = ['"p50Min":173', '"medianStayMin":173', '"viewers":10']
 
 describe("the paywall's clock", () => {
   it("has started and ended: the first event with 8 people ended 120 days ago", async () => {
-    const access = await analyticsAccess(orgId, now)
+    const access = await analyticsAccess(INDIA, now)
     expect(access).toMatchObject({ org: false, reason: "free", firstFreeEventId: firstEventId, passEventIds: [] })
     expect(access.freeUntil!.getTime()).toBeLessThan(now.getTime())
   })
@@ -164,7 +168,7 @@ describe("the paywall's clock", () => {
 
 describe("a free organisation's page carries none of its paid figures (MN-I12)", () => {
   it("computes nothing paid: the cross-event views and the locked event are null", async () => {
-    const view = await analyticsPage(orgId, { range: "90d", eventId: canaryEventId }, now)
+    const view = await analyticsPage(INDIA, { range: "90d", eventId: canaryEventId }, now)
     expect(view.org).toBeNull()
     expect(view.selected).toMatchObject({ id: canaryEventId, open: false, data: null })
     const json = JSON.stringify(view)
@@ -179,7 +183,7 @@ describe("a free organisation's page carries none of its paid figures (MN-I12)",
   })
 
   it("keeps the first event that cleared the floor open, for good", async () => {
-    const view = await analyticsPage(orgId, { range: "90d", eventId: firstEventId }, now)
+    const view = await analyticsPage(INDIA, { range: "90d", eventId: firstEventId }, now)
     expect(view.selected).toMatchObject({ id: firstEventId, open: true })
     expect(view.selected?.data?.stay?.p50Min).toBe(95)
   })
@@ -187,7 +191,7 @@ describe("a free organisation's page carries none of its paid figures (MN-I12)",
 
 describe("the server refuses, not the component (DK-I01)", () => {
   it("returns null before its first query when the access decision says no", async () => {
-    const access = await analyticsAccess(orgId, now)
+    const access = await analyticsAccess(INDIA, now)
     // Every database access from here on is recorded: `lib/db` resolves its
     // client from globalThis.prisma on each use.
     await appDb.$queryRaw`SELECT 1`
@@ -211,7 +215,7 @@ describe("the server refuses, not the component (DK-I01)", () => {
   })
 
   it("and the same probe does see the database when access is open (the positive control)", async () => {
-    const access = { ...(await analyticsAccess(orgId, now)), org: true }
+    const access = { ...(await analyticsAccess(INDIA, now)), org: true }
     await appDb.$queryRaw`SELECT 1`
     const real = globalThis.prisma!
     const touched: string[] = []
@@ -232,14 +236,14 @@ describe("the server refuses, not the component (DK-I01)", () => {
 
 describe("floors on every new figure", () => {
   it("holds back an event of four: no stay, no first-time split, no arrivals", async () => {
-    const access = { ...(await analyticsAccess(orgId, now)), org: true }
+    const access = { ...(await analyticsAccess(INDIA, now)), org: true }
     const small = await eventAnalytics(access, smallEventId)
     expect(small).toMatchObject({ people: null, stay: null, firstTimers: null, returning: null })
     expect(small!.arrivals).toEqual([])
   })
 
   it("shows the canary's figures, each through its floor, once open", async () => {
-    const access = { ...(await analyticsAccess(orgId, now)), org: true }
+    const access = { ...(await analyticsAccess(INDIA, now)), org: true }
     const canary = await eventAnalytics(access, canaryEventId)
     expect(canary!.people).toBe(7)
     // Seven stays: the median, never the quartiles (they need eight).
@@ -262,12 +266,12 @@ describe("an Event Pass opens exactly one event (G2)", () => {
     await db.entitlements.create({
       data: { subject_kind: "org", subject_id: orgId, product: "event_pass", event_id: canaryEventId, source: "razorpay", external_ref: `order_${randomUUID()}`, starts_at: new Date(now.getTime() - 60_000) },
     })
-    const view = await analyticsPage(orgId, { range: "90d", eventId: canaryEventId }, now)
+    const view = await analyticsPage(INDIA, { range: "90d", eventId: canaryEventId }, now)
     expect(view.org).toBeNull()
     expect(view.selected).toMatchObject({ id: canaryEventId, open: true })
     expect(view.selected?.data?.stay?.p50Min).toBe(173)
     expect(view.events.find((e) => e.id === smallEventId)?.open).toBe(false)
-    const other = await analyticsPage(orgId, { range: "90d", eventId: smallEventId }, now)
+    const other = await analyticsPage(INDIA, { range: "90d", eventId: smallEventId }, now)
     expect(other.selected).toMatchObject({ id: smallEventId, open: false, data: null })
   })
 })
@@ -279,7 +283,7 @@ describe("Analytics, granted, opens the same figures (the positive control)", ()
 
   it("carries the canary once the organisation may see it", async () => {
     await db.$transaction((tx) => grantEntitlement(tx, { subject: { kind: "org", id: orgId }, product: "analytics", months: 6 }))
-    const view = await analyticsPage(orgId, { range: "90d", eventId: canaryEventId }, new Date())
+    const view = await analyticsPage(INDIA, { range: "90d", eventId: canaryEventId }, new Date())
     expect(view.access.reason).toBe("grant")
     expect(view.org?.comparison.find((r) => r.eventId === canaryEventId)?.medianStayMin).toBe(173)
     const tree = await renderedTree({ event: canaryEventId })
@@ -307,5 +311,109 @@ describe("an Event Pass is not sold for what is already open", () => {
     } finally {
       fetchSpy.mockRestore()
     }
+  })
+})
+
+/*
+ * SCRUM-1277: where plans are not sold (an event in Toronto, a CA city in the
+ * catalogue's migration rows: `mayBuyHere`, lib/plan-market.ts), nothing can
+ * be bought, so nothing is locked: every view open, reason "market", no end
+ * date, and the read writes nothing to the window. The day the organisation
+ * may buy again, the ordinary rule applies from its stored date, which can
+ * mean locked at once. The organisation is read the way the page reads it,
+ * through billingOrgFor.
+ */
+describe("where plans are not sold, Analytics stays open (SCRUM-1277)", () => {
+  const LINE = "Free while we launch in your city."
+  const NOTHING_TO_BUY = /See plans|₹|Open until|\(locked\)|upgrade/i
+  const windowOf = async (id: string) =>
+    db.$queryRaw<{ analytics_free_until: Date | null; first_free_event_id: string | null }[]>`
+      SELECT analytics_free_until, first_free_event_id FROM organisations WHERE id = ${id}::uuid`
+  const orgOf = async (user: string) => (await billingOrgFor({ id: user, role: "organizer" }))!
+
+  afterAll(async () => {
+    await db.events.updateMany({ where: { id: canaryEventId }, data: { city: null } })
+    mockGetAuth.mockResolvedValue({ user: { id: owner, role: "organizer" } })
+  })
+
+  it("a Toronto organisation past its window sees its own figures and the launch line; the read writes nothing", async () => {
+    await db.events.update({ where: { id: canaryEventId }, data: { city: "Toronto" } })
+    const before = await windowOf(orgId)
+    expect(before[0].analytics_free_until!.getTime()).toBeLessThan(now.getTime())
+    const org = await orgOf(owner)
+    expect(org.mayBuyHere).toBe(false)
+
+    expect(await analyticsAccess(org, now)).toMatchObject({ org: true, reason: "market", freeUntil: null, passEventIds: [] })
+    const view = await analyticsPage(org, { range: "90d", eventId: canaryEventId }, now)
+    expect(view.access).toMatchObject({ org: true, reason: "market", freeUntil: null })
+    expect(view.org?.comparison.find((r) => r.eventId === canaryEventId)?.medianStayMin).toBe(173)
+    expect(view.events.every((e) => e.open)).toBe(true)
+    const tree = await renderedTree({ event: canaryEventId })
+    for (const c of CANARY) expect(tree).toContain(c)
+    expect(tree).toContain(LINE)
+    expect(tree).not.toMatch(NOTHING_TO_BUY)
+    expect(tree).not.toContain("Sample: Rooftop social")
+
+    expect(await windowOf(orgId)).toEqual(before)
+  })
+
+  it("moved to Bengaluru, the same organisation is locked at once from its stored date, and the read writes nothing", async () => {
+    await db.events.update({ where: { id: canaryEventId }, data: { city: "Bengaluru" } })
+    const before = await windowOf(orgId)
+    const org = await orgOf(owner)
+    expect(org.mayBuyHere).toBe(true)
+
+    expect(await analyticsAccess(org, now)).toMatchObject({ org: false, reason: "free", freeUntil: before[0].analytics_free_until })
+    const tree = await renderedTree({ event: canaryEventId })
+    for (const c of CANARY) expect(tree).not.toContain(c)
+    expect(tree).toContain("Sample: Rooftop social")
+    expect(tree).not.toContain(LINE)
+
+    expect(await windowOf(orgId)).toEqual(before)
+  })
+
+  it("a Toronto organisation with no window written keeps none: its reads write nothing; in India it is found and locks at once", async () => {
+    const caOwner = await makeUser(testId("an-ca-owner"), "organizer")
+    users.push(caOwner)
+    const caOrg = (await db.organisations.create({ data: { kind: "company", display_name: testId("an-ca-org"), status: "verified" } })).id
+    orgs.push(caOrg)
+    await db.organisation_members.create({ data: { org_id: caOrg, user_id: caOwner, role: "owner" } })
+    const start = new Date(now.getTime() - 120 * DAY)
+    const night = await db.events.create({
+      data: {
+        slug: testId("an-ca-night"),
+        title: "Analytics Toronto night",
+        description: "fixture",
+        start_time: start,
+        end_time: new Date(start.getTime() + 3 * 60 * MIN),
+        timezone: "America/Toronto",
+        status: "published",
+        city: "Toronto",
+        organizer_id: caOwner,
+        organizer_org_id: caOrg,
+      },
+    })
+    events.push(night.id)
+    const occ = await db.event_occurrences.create({
+      data: { event_id: night.id, occurs_on: new Date(start.toISOString().slice(0, 10)), start_time: start, end_time: night.end_time },
+    })
+    for (let i = 0; i < 8; i++) {
+      const user_id = await makeUser(testId(`an-ca-p${i}`))
+      users.push(user_id)
+      await db.event_check_ins.create({ data: { event_id: night.id, occurrence_id: occ.id, user_id, status: "checked_out", check_in_time: start } })
+    }
+    mockGetAuth.mockResolvedValue({ user: { id: caOwner, role: "organizer" } })
+
+    const org = await orgOf(caOwner)
+    expect(org.mayBuyHere).toBe(false)
+    expect(await analyticsAccess(org, now)).toMatchObject({ org: true, reason: "market", freeUntil: null, firstFreeEventId: null })
+    expect(await renderedTree()).toContain(LINE)
+    expect(await windowOf(caOrg)).toEqual([{ analytics_free_until: null, first_free_event_id: null }])
+
+    await db.events.update({ where: { id: night.id }, data: { city: "Bengaluru" } })
+    const india = await orgOf(caOwner)
+    expect(await analyticsAccess(india, now)).toMatchObject({ org: false, reason: "free", firstFreeEventId: night.id })
+    const [written] = await windowOf(caOrg)
+    expect(written.analytics_free_until!.getTime()).toBe(night.end_time.getTime() + 90 * DAY)
   })
 })
