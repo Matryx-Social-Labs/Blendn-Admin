@@ -25,9 +25,12 @@ import { BATCH_SIZE, classifyMessages } from "./sentiment/classify"
  *   - **It touches nothing on the send path.** The chat POST routes already do
  *     spam, keywords, a persist and a 1 s moderation race. Adding an enqueue
  *     call to both of them is two more things to keep in sync.
- *   - **It retries by construction.** A message whose classification failed has
- *     no `event_feedback` row, so the next pass finds it again. No dead-letter
- *     handling, no retry counter.
+ *   - **A failed write is retried by construction.** The write is one statement,
+ *     so when it fails no message got a row and the next pass finds them all again.
+ *     A failed *classification* is not: `classifyMessages` falls back to the
+ *     lexicon's guess, written with `source: "lexicon"` and never revisited. The
+ *     model call retries a 429, a 5xx or a timeout once (lib/sentiment/classify.ts),
+ *     and a failure that stays is a Sentry issue.
  *
  * The `feedback event_feedback?` back-relation plus the unique `message_id`
  * make "not yet classified" a single indexed predicate.
