@@ -24,8 +24,9 @@ function fakeSocket(me: Person, rooms: string[] = [], roomSize = 2) {
   const sent: { to: string; event: string; payload: unknown }[] = []
   const peer = { id: "sock-peer", data: { userId: "peer" }, emit: (event: string, payload: unknown) => sent.push({ to: "peer", event, payload }) }
   const chatRoom = { except: () => chatRoom, fetchSockets: async () => [peer] }
+  // `socket.to(room)` and its `.except(…)` / `.volatile` chain: what reaches `room` is recorded.
   const target = (to: string) => {
-    const operator = { emit: (event: string, payload: unknown) => sent.push({ to, event, payload }), volatile: {} as { emit: unknown } }
+    const operator = { emit: (event: string, payload: unknown) => sent.push({ to, event, payload }), except: () => operator, volatile: {} as unknown }
     operator.volatile = operator
     return operator
   }
@@ -57,7 +58,10 @@ describe("a private conversation's typing and read receipts", () => {
     expect(await reads(() => emitPrivateTyping(s.socket, id, true))).toBeGreaterThan(0)
     expect(await reads(() => emitPrivateTyping(s.socket, id, true))).toBe(0)
     // A room id that could never be one is keyed like any other: no read for its repeat.
-    expect(await reads(() => emitChatTyping(s.socket, id, true))).toBeGreaterThan(0)
+    const inRoom = fakeSocket(me, [`chat:${id}`])
+    expect(await reads(() => emitChatTyping(inRoom.socket, id, true))).toBeGreaterThan(0)
+    expect(await reads(() => emitChatTyping(inRoom.socket, id, true))).toBe(0)
+    // A socket that never joined the room reads nothing at all (SCRUM-1309).
     expect(await reads(() => emitChatTyping(s.socket, id, true))).toBe(0)
     expect(s.sent.map((m) => m.event)).toEqual(["private:typing"])
   })

@@ -127,11 +127,17 @@ relayed only when it ends a start that was. Send one start per burst of typing.
 **Above 50 sockets in a room, typing has no names** (SCRUM-1309): when more than
 50 sockets are in `chat:{chatGroupId}`, a start reads nothing and the room gets
 one `typing:several` (`{ chatGroupId }`: no name, no count, no ids) at most once
-every 5 seconds, whoever is typing. No stop is sent: show "Several people are
-typing" for a few seconds and let it expire. A stop in such a room is dropped. At
+every 5 seconds, whoever is typing, to everyone in the room but the typist's own
+devices. No stop is sent: show "Several people are typing" for a few seconds and
+let it expire. A stop in such a room is dropped. Nothing is read for it, so a
+muted member's typing counts too (a ban takes their sockets out of the room). At
 50 or fewer, `chat:typing` is unchanged. Both are sent volatile: a client that
-cannot take one at that moment loses it rather than receiving it late. An app
-that does not know `typing:several` ignores it.
+cannot take one at that moment loses it rather than receiving it late, so
+expire a named typer on your own too (the app does after 3 s). An app that does
+not know `typing:several` ignores it.
+
+A typing start or stop counts only from a socket that has joined the room
+(`join:chat`); from any other it is dropped before anything is read.
 
 `chat:startTyping`/`chat:stopTyping` are silently dropped for members who are
 `muted` or `banned`, so a member banned mid-session stops broadcasting typing

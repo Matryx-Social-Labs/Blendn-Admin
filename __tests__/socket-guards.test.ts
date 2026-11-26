@@ -371,7 +371,7 @@ describe("emitChatTyping", () => {
 describe("emitChatTyping above TYPING_ROOM_CAP (SCRUM-1309)", () => {
   // Each test its own room: the 5 s window is per room and process-wide.
   let n = 0
-  const room = () => `33333333-3333-4333-8333-${String(++n).padStart(12, "0")}`
+  const room = () => `abcdef33-3333-4333-8333-${String(++n).padStart(12, "0")}`
   const reads = () =>
     mockDb.chat_group_members.findUnique.mock.calls.length +
     mockDb.blocked_users.findMany.mock.calls.length +
@@ -399,13 +399,15 @@ describe("emitChatTyping above TYPING_ROOM_CAP (SCRUM-1309)", () => {
 
   it("above it reads nothing and sends one room-level typing:several, no names", async () => {
     const id = room()
-    const { socket, raw, roomEmit, volatileRoomEmit } = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id })
+    const { socket, raw, roomEmit, volatileRoomEmit, except } = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id })
 
     await emitChatTyping(socket, id, true)
 
     expect(reads()).toBe(0)
     expect(raw.nsp.in).not.toHaveBeenCalled()
     expect(raw.to).toHaveBeenCalledWith(`chat:${id}`)
+    // Nameless, so the app cannot drop its own: the typist's other devices are left out here.
+    expect(except).toHaveBeenCalledWith(`user:${USER}`)
     expect(volatileRoomEmit).toHaveBeenCalledTimes(1)
     expect(volatileRoomEmit).toHaveBeenCalledWith("typing:several", { chatGroupId: id })
     expect(roomEmit).not.toHaveBeenCalled()
@@ -441,14 +443,44 @@ describe("emitChatTyping above TYPING_ROOM_CAP (SCRUM-1309)", () => {
     expect(reads()).toBe(0)
   })
 
-  it("says nothing for a socket that is not in the room", async () => {
-    // The join was the door; a socket that never passed it, or was taken out, types into nothing.
+  it("reads nothing and says nothing for a socket that is not in the room, at any size", async () => {
+    // The join is the door; a socket that never passed it, or was taken out, types into nothing.
     const id = room()
-    const { socket, volatileRoomEmit } = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id, inRoom: false })
+    const outsider = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id, inRoom: false })
+    mockDb.chat_group_members.findUnique.mockResolvedValue(member("Cosmic Panda", "active"))
+    const small = makeSocket({ roomSize: 3, inRoom: false })
+
+    await emitChatTyping(outsider.socket, id, true)
+    await emitChatTyping(small.socket, CHAT_ID, true)
+
+    expect(outsider.volatileRoomEmit).not.toHaveBeenCalled()
+    expect(small.roomEmit).not.toHaveBeenCalled()
+    expect(reads()).toBe(0)
+    // And an outsider does not spend the room's 5 s: a member right after is heard.
+    const member_ = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id })
+    await emitChatTyping(member_.socket, id, true)
+    expect(member_.volatileRoomEmit).toHaveBeenCalledTimes(1)
+  })
+
+  it("names the room in lower case, as every broadcast does: an upper-case spelling is still a big room", async () => {
+    const id = room()
+    const { socket, volatileRoomEmit } = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id })
+
+    await emitChatTyping(socket, id.toUpperCase(), true)
+
+    expect(reads()).toBe(0)
+    expect(volatileRoomEmit).toHaveBeenCalledTimes(1)
+  })
+
+  it("a muted member above the cap still says typing:several: nothing names them", async () => {
+    // A mute is read nowhere on this path, by design; a ban takes the socket out of the room.
+    mockDb.chat_group_members.findUnique.mockResolvedValue(member("Cosmic Panda", "muted"))
+    const id = room()
+    const { socket, volatileRoomEmit } = makeSocket({ roomSize: TYPING_ROOM_CAP + 1, chatId: id })
 
     await emitChatTyping(socket, id, true)
 
-    expect(volatileRoomEmit).not.toHaveBeenCalled()
+    expect(volatileRoomEmit).toHaveBeenCalledTimes(1)
     expect(reads()).toBe(0)
   })
 })

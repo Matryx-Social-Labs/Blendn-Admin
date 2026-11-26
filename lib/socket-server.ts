@@ -55,6 +55,8 @@ declare global {
 }
 const shared = globalThis as typeof globalThis & {
   __blendnSocketIo?: Server<ClientToServerEvents, ServerToClientEvents> | null
+  /** When each room above `TYPING_ROOM_CAP` was last told `typing:several`. */
+  __blendnTypingSeveralAt?: Map<string, number>
 }
 function currentIo(): Server<ClientToServerEvents, ServerToClientEvents> | null {
   return shared.__blendnSocketIo ?? null
@@ -601,12 +603,11 @@ async function readTypingMembership(userId: string, chatGroupId: string) {
 /** Above this many sockets in a room, typing is one nameless `typing:several` (SCRUM-1309). */
 export const TYPING_ROOM_CAP = 50
 /** At most one `typing:several` per room in this window. */
-export const TYPING_SEVERAL_MS = 5_000
+const TYPING_SEVERAL_MS = 5_000
 
-// On `globalThis`: Next bundles a second copy of this module (see `__blendnSocketIo`).
-const typingShared = globalThis as typeof globalThis & { __blendnTypingSeveralAt?: Map<string, number> }
+// On `shared` (`globalThis`), like the server: Next bundles a second copy of this module.
 // ponytail: one entry per room that has ever been above the cap in this process, never pruned; prune when there are thousands of those.
-const severalSentAt = (typingShared.__blendnTypingSeveralAt ??= new Map<string, number>())
+const severalSentAt = (shared.__blendnTypingSeveralAt ??= new Map<string, number>())
 
 /**
  * Broadcast a typing indicator to a chat room, under the sender's anonymous name.
@@ -614,12 +615,16 @@ const severalSentAt = (typingShared.__blendnTypingSeveralAt ??= new Map<string, 
  * No-ops for muted or banned members. The join guard can't cover this on its
  * own: a member banned *after* joining stays in the room until they disconnect.
  *
+ * The join is the door: a socket not in the room types to nobody and costs no
+ * read. The room is named in lower case, as every broadcast names it.
+ *
  * Above `TYPING_ROOM_CAP` sockets a start costs no read: per-person typing in a
  * room of thousands is reads and packets enough to take the room down before
- * its messages do. The room hears one `typing:several` every 5 s at most, from
- * a socket the join let in; no names, so no block, mute or naming read is
- * needed, and no stop (the app lets it expire). The size is this process's
- * adapter: right at one replica (DECISIONS 2026-11-25).
+ * its messages do. The room hears one `typing:several` every 5 s at most; no
+ * names, so no block, mute or naming read is needed (a muted member counts too;
+ * a ban takes the socket out of the room), and no stop: the app lets it expire,
+ * as it forgets a named typer 3 s after the last `chat:typing`. The size is this
+ * process's adapter: right at one replica (DECISIONS 2026-11-25).
  */
 export async function emitChatTyping(
   socket: AuthenticatedSocket,
@@ -627,13 +632,16 @@ export async function emitChatTyping(
   isTyping: boolean
 ): Promise<void> {
   if (!mayEmitTyping(socket, "chat", chatGroupId, isTyping)) return
-  const chatRoom = `chat:${chatGroupId}`
+  // `mayEmitTyping` let only a uuid through.
+  const chatRoom = `chat:${chatGroupId.toLowerCase()}`
+  if (!socket.rooms.has(chatRoom)) return
   if ((socket.nsp.adapter.rooms.get(chatRoom)?.size ?? 0) > TYPING_ROOM_CAP) {
-    if (!isTyping || !socket.rooms.has(chatRoom)) return
+    if (!isTyping) return
     const now = Date.now()
     if (now - (severalSentAt.get(chatRoom) ?? -Infinity) < TYPING_SEVERAL_MS) return
     severalSentAt.set(chatRoom, now)
-    socket.to(chatRoom).volatile.emit("typing:several", { chatGroupId })
+    // Nameless, so the app cannot drop its own: the typist's other devices are left out here.
+    socket.to(chatRoom).except(`user:${socket.data.userId}`).volatile.emit("typing:several", { chatGroupId })
     return
   }
   try {

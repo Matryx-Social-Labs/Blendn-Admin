@@ -639,6 +639,9 @@ describe("typing in a room the door has closed reaches nobody", () => {
     const pending = await online(w.people.pending)
     const accepted = await online(w.people.accepted)
     expect(await joins(author, w.groupId)).toBe(true)
+    // Typing is heard only from a socket in the room, as the app always is (SCRUM-1309).
+    expect(await joins(accepted, w.groupId)).toBe(true)
+    expect(await joins(pending, w.groupId)).toBe(false)
 
     pending.socket.emit("chat:startTyping", w.groupId)
     accepted.socket.emit("chat:startTyping", w.groupId)
@@ -649,6 +652,7 @@ describe("typing in a room the door has closed reaches nobody", () => {
     // The event's room: typing reaches it, until the event is hidden.
     const sameEvent = await online(w.people.sameEvent)
     expect(await joins(author, w.eventRoomId)).toBe(true)
+    expect(await joins(sameEvent, w.eventRoomId)).toBe(true)
     sameEvent.socket.emit("chat:startTyping", w.eventRoomId)
     expect(await until(() => author.heard.typing.length > 1)).toBe(true)
     await db.events.update({ where: { id: w.eventId }, data: { status: "draft" } })
