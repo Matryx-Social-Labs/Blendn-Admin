@@ -56,7 +56,7 @@ declare global {
  * likely mechanism behind the timeouts the mobile client built a request queue
  * to work around.
  *
- * Twelve background loops (`lib/background.ts`), Socket.io and every request
+ * Every background loop (`lib/background.ts`), Socket.io and every request
  * handler share this pool.
  * Env-overridable because the right ceiling is a property of the Postgres plan,
  * not of the code.
