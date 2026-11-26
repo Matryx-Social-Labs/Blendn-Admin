@@ -46,7 +46,7 @@ if (!dev) {
     }
     // Fatal on Railway production (validateEnv); everywhere else say so once.
     if (!process.env.OPENAI_API_KEY?.trim()) {
-      console.warn(`[${new Date().toISOString()}] ⚠ OPENAI_API_KEY unset — moderation is the keyword list alone (Railway production refuses to boot without it)`)
+      console.warn(`[${new Date().toISOString()}] ⚠ OPENAI_API_KEY unset — the moderation model checks are off (Railway production refuses to boot without it)`)
     }
     // Same shape, same reason: a half-configured Google client set breaks
     // sign-in for every mobile user while the health check stays green.
