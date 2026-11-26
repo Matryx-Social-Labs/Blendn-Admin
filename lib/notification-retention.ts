@@ -102,7 +102,7 @@ export async function pruneProductEvents(now: Date = new Date()): Promise<number
   return count
 }
 
-async function runSweep(): Promise<void> {
+export async function runSweep(): Promise<void> {
   try {
     const deleted = await pruneNotifications()
     if (deleted > 0) {
