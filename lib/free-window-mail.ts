@@ -1,13 +1,17 @@
 // Relative imports: reached from server.ts through lib/reminder-sweeper.ts (build:server is plain tsc).
+import { FREE_WINDOW_DAYS, freeWindow } from "./analytics-access"
 import { db } from "./db"
-import { freeWindowEndingEmail, sendEmail } from "./email"
+import { emailConfigured, freeWindowEndingEmail, sendEmail } from "./email"
 import { liveEntitlement } from "./entitlements"
+import { realEventsWhere } from "./event-kind"
 import { logger } from "./logger"
 import { mayBuyHere } from "./plan-market"
 
 /** How long before `analytics_free_until` the mail goes (DECISIONS 2026-11-25: "one email 14 days before it ends"). */
 const FREE_WINDOW_NOTICE_DAYS = 14
 const DAY_MS = 24 * 60 * 60 * 1000
+/** Windows the pass writes at most, for hosts who never opened Plan or Analytics (SCRUM-1421). */
+const WINDOW_WRITES_PER_PASS = 25
 
 /**
  * One mail per organisation per free window (SCRUM-1275), to its owners and
@@ -24,6 +28,10 @@ const DAY_MS = 24 * 60 * 60 * 1000
  * Returns how many organisations it mailed.
  */
 export async function sendFreeWindowEndingMail(now: Date = new Date()): Promise<number> {
+  // Before anything is claimed (SCRUM-1421): an unset key would claim every organisation due and mail none of them.
+  if (!emailConfigured()) return 0
+  await writeMissingWindows(now)
+
   // ponytail: unbounded, but only organisations whose window ends in the next 14 days and that are unmailed; the
   // entitled and the not-in-market among them are re-read every pass. Add a batch if that ever runs to thousands.
   const due = await db.organisations.findMany({
@@ -80,4 +88,49 @@ async function mailOwnersAndAdmins(orgId: string, mail: { subject: string; text:
     })
   }
   return unsent.length < members.length
+}
+
+/**
+ * The window is otherwise written only when somebody opens Plan or Analytics
+ * (`analyticsAccess`), so a host who never did would never be picked above
+ * (SCRUM-1421). Written here through the same `freeWindow`, for organisations
+ * with a real night that ended 76 to 90 days ago: the nights whose window
+ * could end within the notice. An older first night gives a window already
+ * past, written and not mailed; a newer one is written when it reaches day 76.
+ * Nothing is read for an organisation that has its window.
+ *
+ * ponytail: 25 a pass, oldest organisation first. A night under 8 is recounted
+ * every pass while it is in the 14-day band (one events page and one count per
+ * organisation); more than 25 such organisations in one band would starve the
+ * newer ones: then remember who was counted. A sweeper down for over 14 days
+ * lets a night leave the band unmailed; its window is still written on first view.
+ */
+async function writeMissingWindows(now: Date): Promise<void> {
+  const daysAgo = (days: number) => new Date(now.getTime() - days * DAY_MS)
+  const orgs = await db.organisations.findMany({
+    where: {
+      analytics_free_until: null,
+      events: {
+        some: {
+          ...realEventsWhere,
+          deleted_at: null,
+          end_time: { gt: daysAgo(FREE_WINDOW_DAYS), lte: daysAgo(FREE_WINDOW_DAYS - FREE_WINDOW_NOTICE_DAYS) },
+        },
+      },
+    },
+    select: { id: true },
+    orderBy: [{ created_at: "asc" }, { id: "asc" }],
+    take: WINDOW_WRITES_PER_PASS,
+  })
+  for (const org of orgs) {
+    try {
+      await freeWindow(org.id, now)
+    } catch (error) {
+      // Asked again next pass; one organisation never holds back the rest, or the mail.
+      logger.warn("Free window not written this pass", {
+        orgId: org.id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
 }

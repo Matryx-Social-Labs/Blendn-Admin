@@ -195,7 +195,11 @@ export function resetProductEventCache(): void {
  * buffer at SIGTERM is one window of signals lost for no reason.
  */
 export async function flushProductEvents(): Promise<number> {
-  if (flushing) return flushing
+  // That flush took its batch before this call: wait for it, then write what was recorded since (SCRUM-1419).
+  if (flushing) {
+    await flushing
+    return flushProductEvents()
+  }
   if (buffer.length === 0) return 0
 
   clearFlushTimer()
