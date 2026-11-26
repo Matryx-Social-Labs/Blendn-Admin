@@ -130,19 +130,6 @@ const ALL_KEYWORDS: Set<string>[] = [
   GUJARATI_KEYWORDS,
 ]
 
-/** Is `needle` a contiguous run inside `haystack`? For multi-word keywords. */
-function containsRun(haystack: string[], needle: string[]): boolean {
-  if (needle.length === 0 || needle.length > haystack.length) return false
-  for (let i = 0; i + needle.length <= haystack.length; i++) {
-    let hit = true
-    for (let j = 0; j < needle.length; j++) {
-      if (haystack[i + j] !== needle[j]) { hit = false; break }
-    }
-    if (hit) return true
-  }
-  return false
-}
-
 /**
  * Words that are abuse in one mouth and banter, a name or an ordinary word in
  * another ("chod" = leave it, "shala" = brother-in-law, "magane" = O son). A
@@ -190,21 +177,16 @@ const REVIEW_ONLY_KEYWORDS = new Set([
  */
 export function checkKeywords(content: string): ModerationResult | null {
   const aggressive = normalizeAggressive(content)
-  const words = normalizeWords(content)
-  const wordSet = new Set(words)
+  const wordSet = new Set(normalizeWords(content))
+  // Every keyword is one word (`keyword-banter.test.ts`): a whole-word hit is one lookup.
+  const isWord = (keyword: string) => wordSet.has(normalizeWords(keyword)[0])
 
   const exact: string[] = []
   const evasive: string[] = []
 
   for (const keywords of ALL_KEYWORDS) {
     for (const keyword of keywords) {
-      const asWords = normalizeWords(keyword)
-      // A whole-word hit. Multi-word keywords match as a contiguous run.
-      const isExact =
-        asWords.length === 1
-          ? wordSet.has(asWords[0])
-          : containsRun(words, asWords)
-      if (isExact) {
+      if (isWord(keyword)) {
         exact.push(keyword)
       } else if (aggressive.includes(normalizeAggressive(keyword))) {
         evasive.push(keyword)
@@ -212,9 +194,9 @@ export function checkKeywords(content: string): ModerationResult | null {
     }
   }
 
-  const review = [...REVIEW_ONLY_KEYWORDS].filter((keyword) => wordSet.has(normalizeWords(keyword)[0]))
-
-  if (exact.length === 0 && evasive.length === 0 && review.length === 0) return null
+  const review = [...REVIEW_ONLY_KEYWORDS].filter(isWord)
+  const matched = exact.length > 0 ? exact : [...review, ...evasive]
+  if (matched.length === 0) return null
 
   /*
    * A whole-word slur is enough on its own to hide. A match that exists only
@@ -225,8 +207,6 @@ export function checkKeywords(content: string): ModerationResult | null {
    */
   const confidence =
     exact.length > 0 ? Math.min(1, 0.85 + exact.length * 0.05) : 0.5
-
-  const matched = exact.length > 0 ? exact : [...review, ...evasive]
 
   return {
     action: confidence >= AUTO_HIDE_THRESHOLD ? "hide" : "flag",

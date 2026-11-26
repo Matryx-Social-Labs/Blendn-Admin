@@ -37,7 +37,6 @@ import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { answerRoomRetry, findRoomSend, replayRoomRetry } from "@/lib/room-retry"
 import { claimAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam, preSaveCheck, inlineFlags } from "@/lib/moderation"
-import { checkKeywords } from "@/lib/moderation/keyword-filter"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { idForViewer } from "@/lib/room-handle"
 import { roomMuteState } from "@/lib/room-mute"
@@ -798,8 +797,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // --- Pre-save moderation: keywords and contact details (sync, <1ms) ---
-    const keyword = checkKeywords(content)
-    const preSave = preSaveCheck(content, keyword)
+    const { hide: preSave, keyword } = preSaveCheck(content)
     if (preSave) {
       // Save but immediately mark as hidden — never emitted to other users
       let message

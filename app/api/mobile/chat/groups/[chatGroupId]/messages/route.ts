@@ -11,7 +11,6 @@ import { idForViewer } from "@/lib/room-handle"
 import { crewMemberImages, namesInRoom } from "@/lib/identity"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { moderateMessage, checkSpam, preSaveCheck, inlineFlags } from "@/lib/moderation"
-import { checkKeywords } from "@/lib/moderation/keyword-filter"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
 import { notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 import { textCheckFor } from "@/lib/moderation/staging-override"
@@ -505,8 +504,7 @@ export async function POST(
     }
 
     // --- Pre-save moderation: keywords and contact details (sync, <1ms) ---
-    const keyword = checkKeywords(content)
-    const preSave = preSaveCheck(content, keyword)
+    const { hide: preSave, keyword } = preSaveCheck(content)
     if (preSave) {
       // Save the message but immediately mark it as hidden
       let message

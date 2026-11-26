@@ -1,4 +1,4 @@
-import { checkKeywords } from "@/lib/moderation/keyword-filter"
+import { CHAT_KEYWORDS, checkKeywords } from "@/lib/moderation/keyword-filter"
 
 /*
  * Banter between friends at an event is the product (SCRUM-1167).
@@ -104,4 +104,8 @@ it("knows nothing of mc or bc any more", () => {
 
 it("a real slur beside banter still hides, and names only the slur", () => {
   expect(checkKeywords("chod yaar, bhenchod")).toMatchObject({ action: "hide", matched: ["bhenchod"] })
+})
+
+it("every keyword is one word, and matches itself as that word", () => {
+  expect([...CHAT_KEYWORDS].filter((k) => !checkKeywords(k)?.matched?.includes(k) || /\s/.test(k))).toEqual([])
 })

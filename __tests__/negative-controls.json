@@ -2557,7 +2557,7 @@
     "keyword-banter.test.ts": {
       "guards": "SCRUM-1167: 30 lines of ordinary banter (chod yaar, bc the MC is late, BC and Ontario, boli maga, shala, magane, harami, Sunni, gandu hudga, हरामी, साले, ...) never hide (null or a flag for a human); 30 abusive lines in Latin and native scripts hide; a review-only word matches as a whole word only (football, imagine, tunnel, symbolic say nothing); mc and bc are not keywords; a slur beside banter still hides and names only the slur.",
       "mutation": "M1167a: the review-only hits pushed into the hide list again (`exact.push(...review)` in checkKeywords).",
-      "observed": "Red before the fix: 43 of 65 failing. M1167a: 26 of 65 failing (every banter line hides again). Reverted; 65 of 65.",
+      "observed": "Red before the fix: 43 of 65 failing. M1167a: 26 of 65 failing (every banter line hides again). Reverted; 65 of 65 (66 with the one-word invariant added in review, M1167a 26 of 66).",
       "date": "2026-11-26"
     },
     "inline-flag-recorded.itest.ts": {
