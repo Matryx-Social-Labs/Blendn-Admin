@@ -80,9 +80,7 @@ deletes their account:
   report was filed before the deletion and is still pending waits on a pointer (`retained_report_media`: account id, object key,
   message id) until the report is decided, and for at most 15 days past the purge (`REPORT_HOLD_DAYS`, the grievance period of
   IT Rules 2021 r.3(2)(a)(i)); the sweep warns in the last 5. The record, profile media and photo checks go on schedule. A flag
-  nobody cleared loses its image at 180 days. Nothing in the product records a legal hold. Images sent since SCRUM-427 are in the private bucket and served
-  only through signed URLs. Known gaps: images from before SCRUM-427 that are
-  kept stay in the public bucket until then. A report filed after the deletion
+  nobody cleared loses its image at 180 days. Nothing in the product records a legal hold. A report filed after the deletion
   finds the image already gone, and the reports screen says so with the date.
 - **Profile photos** (SCRUM-479): a photo moderation pulls, and the blur of a
   pulled primary, are recorded `photo_checks.hidden` and moved from the public

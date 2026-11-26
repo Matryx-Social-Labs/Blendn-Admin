@@ -30,7 +30,7 @@ export async function notifyClaimant(d: ClaimDecision): Promise<boolean> {
     return false
   }
   const result = await sendEmail({ to: d.to, ...claimDecisionEmail(d.name ?? "there", d.what, d.outcome, d.reason, d.link) })
-  if (!result.sent) logger.error("Claim decision email failed", { what: d.what, reason: result.reason })
+  if (!result.sent && result.reason !== "suppressed") logger.error("Claim decision email failed", { what: d.what, reason: result.reason })
   return result.sent
 }
 

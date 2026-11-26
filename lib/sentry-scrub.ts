@@ -31,12 +31,18 @@ const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w.]+/g
 const JWT_RE = /\beyJ[\w-]+\.[\w-]+\.[\w-]+/g
 // Presigned URL signatures leak the request credential.
 const PRESIGN_RE = /([?&])(X-Amz-Signature|X-Amz-Credential|Signature)=[^&\s]+/gi
+// An Expo receipt's message can name the device's push token.
+const PUSH_TOKEN_RE = /\bExp(?:onent|o)PushToken\[[^\]]*\]/g
+// A Prisma validation error prints the whole query, values and all, as a block from a bare `{` line to a bare `}` line.
+const PRISMA_ARGS_RE = /^\{$[\s\S]*?^\}$/gm
 
 export function scrubString(value: string): string {
   return value
     .replace(EMAIL_RE, REDACTED)
     .replace(JWT_RE, REDACTED)
     .replace(PRESIGN_RE, `$1$2=${REDACTED}`)
+    .replace(PUSH_TOKEN_RE, REDACTED)
+    .replace(PRISMA_ARGS_RE, `{ ${REDACTED} }`)
 }
 
 function scrubRecord(record: Record<string, unknown>): Record<string, unknown> {
@@ -141,6 +147,8 @@ export function beforeSend(event: ErrorEvent, hint: EventHint): ErrorEvent | nul
   }
 
   if (event.message) event.message = scrubString(event.message)
+  // logger.error groups by its message (lib/logger.ts), so the fingerprint is a copy of it.
+  if (event.fingerprint) event.fingerprint = event.fingerprint.map(scrubString)
 
   return event
 }

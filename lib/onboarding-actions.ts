@@ -366,7 +366,7 @@ export async function approveOnboardingRequest(
       ...approvedEmail(request.contact_name, request.display_name, request.contact_email, setPasswordLink || null),
     })
     emailSent = result.sent
-    if (!result.sent) {
+    if (!result.sent && result.reason !== "suppressed") {
       logger.error("Approval email failed", { requestId, reason: result.reason })
     }
   }
@@ -421,7 +421,7 @@ export async function declineOnboardingRequest(requestId: string, reason: string
       to: request.contact_email,
       ...declinedEmail(request.contact_name, trimmed),
     })
-    if (!result.sent) logger.error("Decline email failed", { requestId, reason: result.reason })
+    if (!result.sent && result.reason !== "suppressed") logger.error("Decline email failed", { requestId, reason: result.reason })
   }
 
   revalidatePath("/dashboard/onboarding")
