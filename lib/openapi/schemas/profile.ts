@@ -177,6 +177,13 @@ export const UpdateProfileRequestSchema = z
     sign_system: z.enum(["western", "rashi"]).optional().nullable().describe("Which calendar the sign is in: `western` or `rashi`."),
     shows_up_badge: z.boolean().optional().describe("Show \"Shows up\" on your card. Off unless turned on."),
     show_badges: z.boolean().optional().describe("Show the badges your check-ins earned on your card. On unless turned off."),
+    source: z
+      .string()
+      .optional()
+      .describe(
+        "Where the account came from: `door`, `link`, `invite`, `web` or `share` (SCRUM-1273). The first one sent is kept; later ones " +
+          "are ignored, as are unknown values (never refused). Never read back in a response."
+      ),
   })
   .openapi("UpdateProfileRequest")
 

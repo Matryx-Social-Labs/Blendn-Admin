@@ -78,7 +78,7 @@ test("the organiser walks every tab under one header, and the QR & link tab hand
     await main(page).getByRole("link", { name: "QR code" }).click()
     await expect(page).toHaveURL(new RegExp(`/dashboard/events/${id}\\?tab=share$`), { timeout: 30_000 })
     await expect(tabs(page).getByRole("link", { name: "QR & link" })).toHaveAttribute("aria-current", "page")
-    await expect(main(page).getByRole("textbox", { name: "Event link" })).toHaveValue(`https://www.blendn.app/event/${id}`)
+    await expect(main(page).getByRole("textbox", { name: "Event link" })).toHaveValue(`https://www.blendn.app/event/${id}?s=link`)
     await expect(main(page).getByRole("img", { name: "QR code for Sunset Sessions at The Humming Tree" }).first()).toBeVisible()
     for (const action of ["Copy", "Download PNG", "Download SVG", "Full-screen slide", "Print for the door"]) {
       await expect(main(page).getByRole("button", { name: action })).toBeVisible()
@@ -105,7 +105,8 @@ test("the organiser walks every tab under one header, and the QR & link tab hand
       const jsQR = typeof lib === "function" ? lib : lib.default
       return { width: image.naturalWidth, height: image.naturalHeight, data: jsQR(data.data, data.width, data.height)?.data ?? null }
     }, bytes)
-    expect(read).toEqual({ width: 1024, height: 1024, data: `https://www.blendn.app/event/${id}` })
+    // The downloaded PNG scans to the door's address, the copied link to the link's (SCRUM-1273).
+    expect(read).toEqual({ width: 1024, height: 1024, data: `https://www.blendn.app/event/${id}?s=door` })
 
     // The link is live (SCRUM-537): the tab says what a scan does on each
     // phone, Android opening a web page first until its next store build.
@@ -122,7 +123,7 @@ test("the organiser walks every tab under one header, and the QR & link tab hand
     await expect(main(page)).toBeHidden()
     await expect(slide.getByRole("img", { name: "QR code for Sunset Sessions at The Humming Tree" })).toHaveCount(1)
     await expect(slide).toContainText("Scan to check in with Blend'n")
-    await expect(slide).toContainText(`https://www.blendn.app/event/${id}`)
+    await expect(slide).toContainText(`https://www.blendn.app/event/${id}?s=door`)
     await expect(slide).not.toContainText("find this event by its name")
     await page.emulateMedia({ media: "screen" })
     await expect(slide).toBeHidden()

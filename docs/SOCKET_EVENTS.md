@@ -15,12 +15,15 @@ On connect, server emits:
 ## Rooms
 
 - `user:{userId}` — personal room, auto-joined on connect
-- `chat:{chatGroupId}` — chat rooms of every kind (joined via `join:chat`): an event's room, a Lobby post's, a crew's and a Mix's (step 8)
+- `user:{userId}:{principal}` — auto-joined on connect, `principal` being `mobile` or `dashboard`. Nothing is emitted to it: it lets the server disconnect one kind of session and leave the other
+- `chat:{chatGroupId}` — chat rooms of every kind (joined via `join:chat`): an event's room, a Lobby post's, a crew's and a Blend's (chat group kind `blend`)
 - `event:{eventId}` — event-level updates (joined via `join:event`)
+- `event:room:{eventId}` — the roster room, checked-in attendees only (joined via `join:event:room`)
+- `event:{eventId}:ops` and `event:{eventId}:ops:venue` — the dashboard's Live tab, host and venue copies (joined via `join:eventOps`; dashboard sessions only)
 - `conversation:{conversationId}` — private conversations (joined via `join:conversation`)
 
-Only `user:{userId}` is automatic. The other three require an explicit join,
-and every join is authorization-checked server-side — see below.
+Only the two `user:` rooms are automatic. Every other room requires an explicit
+join, and every join is authorization-checked server-side — see below.
 
 ## Room authorization
 
@@ -29,7 +32,7 @@ the database before the socket is added to the room (`lib/socket-auth.ts`):
 
 | Room | Who may join |
 |------|--------------|
-| `chat:{chatGroupId}` | Members of the chat group, excluding `banned` and anyone who left by choice — **and** whoever the room's owner admits (`lib/room-kind.ts`, step 7). An event's room: as before. A Lobby post's: its author, or an asker the author accepted and not in a block with the author either way; a member row alone is not enough. Closed with its post, its event, and 12 h after the event ends. A crew's: its members now — not suspended, the crew not dissolved; a member who leaves or is removed is taken out at once. A Mix's: the people checked in on either side when it matched (its member rows, a snapshot — a late arrival has none) still on their side, or the matched person — never somebody kept apart (a block or a closed conversation) from anyone on the other side: that pair is taken out at once and the room goes on for the rest; closed 12 h after the occurrence ends, or early when a side's crew dissolves or is hidden, which empties its sockets. Names: first names in a crew's room, tonight's event-room pseudonyms in a Mix's (`namesInRoom`). An unknown kind or a missing owner: nobody |
+| `chat:{chatGroupId}` | Members of the chat group, excluding `banned` and anyone who left by choice — **and** whoever the room's owner admits (`lib/room-kind.ts`, step 7). An event's room: as before. A Lobby post's: its author, or an asker the author accepted and not in a block with the author either way; a member row alone is not enough. Closed with its post, its event, and 12 h after the event ends. A crew's: its members now — not suspended, the crew not dissolved; a member who leaves or is removed is taken out at once. A Blend's: the people checked in on either side when it matched (its member rows, a snapshot — a late arrival has none) still on their side, or the matched person — never somebody kept apart (a block or a closed conversation) from anyone on the other side: that pair is taken out at once and the room goes on for the rest; closed 12 h after the occurrence ends, or early when a side's crew dissolves or is hidden, which empties its sockets. Names: first names in a crew's room, tonight's event-room pseudonyms in a Blend's (`namesInRoom`). An unknown kind or a missing owner: nobody |
 | `conversation:{conversationId}` | The two participants only |
 | `event:{eventId}` | Anyone, for `public`/`unlisted` events. For `private`: the organizer, or a user with an RSVP |
 
@@ -120,7 +123,7 @@ person's **room handle** for the event: `rh_` + an opaque string
 - **A handle belongs to one room, of one kind** (step 7). An event's room is
   scoped by its event, exactly as before, so every handle a client already
   holds still resolves. A room of another kind (a Lobby post's, a crew's or a
-  Mix's) is scoped by its own id and its kind, so a handle from it is
+  Blend's) is scoped by its own id and its kind, so a handle from it is
   refused in every other room, an event's included, and names nobody on the
   profile, friend or block routes. Treat it as opaque, as now.
 - Compare with your own id exactly as before: your bubbles, your own check-in
@@ -132,14 +135,17 @@ person's **room handle** for the event: `rh_` + an opaque string
 
 Because the payload now differs per reader, room events are sent **per socket**
 (`fetchSockets()` on the room, then one emit each) rather than as one broadcast.
-`private:*` events are unchanged: a conversation is between two people who
-already know each other's ids.
+`private:*` events are not sent per socket. In a pseudonymous conversation (a
+match's or a Lobby post's), the ones that name somebody (`private:message`,
+`private:typing`, `private:read`) name the other person by that conversation's
+own handle and go to `user:` rooms, not the conversation room; otherwise they
+carry real ids.
 
 ### Chat Events (room: `chat:{chatGroupId}`)
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `chat:message` | `{ id, chatGroupId, userId, userName, userImage, content, type, parentId, createdAt, metadata? }` | New message in chat. `metadata` on a crew chat's `type: "system"` line only, as the history has it (`crew_waved`, `crew_here`, `crew_plan`, `crew_like`, `crew_wave`; SCRUM-1110). A `crew_waved` from a crew is not sent to a member who hid that crew. |
+| `chat:message` | `{ chatGroupId, message: { id, content, type, kind?, pollId?, userId, userName, userImage?, createdAt, parentId?, metadata? } }` | New message in chat; the message is nested under `message`, not flat. `message.kind: "sponsored"` marks a sponsored send (its `type` stays the media kind); `message.pollId` is on a `type: "poll"` message. `message.userImage` only in a crew's room. `message.metadata` on a crew chat's `type: "system"` line only, as the history has it (`crew_waved`, `crew_here`, `crew_plan`, `crew_like`, `crew_wave`; SCRUM-1110). A `crew_waved` from a crew is not sent to a member who hid that crew. |
 | `chat:typing` | `{ chatGroupId, userId, userName, isTyping }` | Typing state changed. `userName` is the sender's anonymous name, never their real identity. |
 | `chat:reaction` | `{ chatGroupId, messageId, tally: [{ emoji, count }] }` | Reactions changed on a message. **Counts only — never who reacted**, which the room must not disclose. The whole tally rather than a delta, so two reactions in the same tick cannot race and a dropped packet self-corrects. `mine` is per-viewer and absent by design: a client knows its own reaction from its own request. |
 | `chat:messageDeleted` | `{ chatGroupId, messageId, moderation?, userId? }` | Message deleted. When `moderation: true`, it was auto-hidden by moderation — `userId` identifies the sender (their real id to them, a handle to everyone else) so the sender's client can show a placeholder instead of removing. |
@@ -160,7 +166,7 @@ already know each other's ids.
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `ops:snapshot` | `LiveSnapshot` (host) or `VenueLiveSnapshot` (venue), `lib/live-metrics.ts` | The Live tab, every 5 s while somebody watches. Aggregates only. Whoever may edit the event gets the exact figures; a venue gets every count of people as a range and the alerts without numbers (SCRUM-516). The host's copy carries `social` ("Meeting tonight", SCRUM-1051): the share who met someone and the pairs by the first way they met (waves, Lobby, requests, held under 8 guests), conversations opened, Lobby posts by kind, Tonight's question answered, and `crews` ("Crews tonight", SCRUM-1101): crews here, the people in them and their share of the guests here, the day's peak and when (to ten minutes), and Mixes made; `"nearly_all"` when the guests in no crew are a few. Counts under 5 are `"few"`, never a number, and a total beside a hidden part is `{ atLeast }` (`discloseGroup`), never exact. It is read once a minute, one read shared by the loop and every join, so it moves by the minute; a room only a venue watches never reads it, and a venue's copy has no `social`. The host's copy also carries `topics` ("Talking about"): what the last 30 minutes' positive messages liked, as labels (`people`, `music`, `program`, `food_drink`, `place`) with the number of distinct people, five or more, or not sent; a venue's copy has none. |
+| `ops:snapshot` | `LiveSnapshot` (host) or `VenueLiveSnapshot` (venue), `lib/live-metrics.ts` | The Live tab, every 5 s while somebody watches. Aggregates only. Whoever may edit the event gets the exact figures; a venue gets every count of people as a range and the alerts without numbers (SCRUM-516). The host's copy carries `social` ("Meeting tonight", SCRUM-1051): the share who met someone and the pairs by the first way they met (waves, Lobby, requests, held under 8 guests), conversations opened, Lobby posts by kind, Tonight's question answered, and `crews` ("Crews tonight", SCRUM-1101): crews here, the people in them and their share of the guests here, the day's peak and when (to ten minutes), and Blends made (the key is still `mixes`); `"nearly_all"` when the guests in no crew are a few. Counts under 5 are `"few"`, never a number, and a total beside a hidden part is `{ atLeast }` (`discloseGroup`), never exact. It is read once a minute, one read shared by the loop and every join, so it moves by the minute; a room only a venue watches never reads it, and a venue's copy has no `social`. The host's copy also carries `topics` ("Talking about"): what the last 30 minutes' positive messages liked, as labels (`people`, `music`, `program`, `food_drink`, `place`) with the number of distinct people, five or more, or not sent; a venue's copy has none. |
 
 The Door tab (gate 13, `app/dashboard/events/[id]/door`) joins the same room and takes each `ops:snapshot` as its cue to re-ask the `readDoor` server action (counts by method, the code arrivals as pseudonyms, the pause), which re-checks `canOperate` every time. The snapshot's payload is not read and nothing was added to it; no guest-facing event carries how anyone checked in (`event:room:checkin` is unchanged).
 
@@ -176,15 +182,15 @@ The Door tab (gate 13, `app/dashboard/events/[id]/door`) joins the same room and
 |-------|---------|-------------|
 | `room:friends` | `{ eventId }` | Your **Friends here** changed: refetch `GET /events/:id/friends-here`. Content-free, to `user:{id}` rooms only (never the room): sent to a person's friends who are checked in at the same event when an opted-in friend checks in or out, flips "Friends can see I'm here" or "Show online status", or when a friendship is made or ended. A hidden friend's movements fire nothing. |
 | `room:match` | `{ eventId, otherUserId, conversationId, name }` | Two waves (or a wave and a like) became mutual: "You both waved". `otherUserId` is the other person's handle in `eventId` — the same string the roster and deck show. |
-| `room:crew_wave` | `{ eventId, fromCrewId, fromName }` | A crew here waved at you (crews 5-A, `POST /events/:id/waves` with `asCrewId`). `fromName` is the crew's name; who tapped is never said. Only when stored and not mutual (a Mix is its own push). Its own event, so a build reading `room:wave` as a person never draws a crew. Recorded on `GET /events/:eventId/waves` → `crewWaves`. |
+| `room:crew_wave` | `{ eventId, fromCrewId, fromName }` | A crew here waved at you (crews 5-A, `POST /events/:id/waves` with `asCrewId`). `fromName` is the crew's name; who tapped is never said. Only when stored and not mutual (a Blend is its own push). Its own event, so a build reading `room:wave` as a person never draws a crew. Recorded on `GET /events/:eventId/waves` → `crewWaves`. |
 | `room:wave` | `{ eventId, fromUserId, fromName }` | Somebody waved at you (recorded, SCRUM-1042). `fromUserId` is their handle in `eventId`; `fromName` the roster's name. Also sent for a wave back after either of you left the room. Not sent on a mutual: `room:match` is. The wave stays on `GET /events/:eventId/waves`, so a missed ping is not a missed wave. Folding a burst into one toast (L-B) is the client's. |
 
 ### Private Message Events
 
 | Event | Room | Payload |
 |-------|------|---------|
-| `private:message` | `conversation:{id}` & `user:{recipientId}` | `{ id, conversationId, senderId, senderName, senderImage, messageText, mediaUrl, mediaType, createdAt }` |
-| `private:typing` | `conversation:{id}` | `{ conversationId, userId, userName }` |
+| `private:message` | `conversation:{id}`, `user:{recipientId}` and `user:{senderId}` (the sender's other devices) in one emit; in a pseudonymous conversation (one that began with pseudonyms, as a match's or a Lobby post's does), `user:{recipientId}` and `user:{senderId}` only, each with its own copy | `{ conversationId, message: { id, conversationId, senderId, sender: { id, name, image }, text, mediaUrl, mediaType, isRead, deliveredAt, replyTo, clientId, createdAt } }`: the message is nested under `message`, not flat, the same object `POST /conversations/:id/messages` returns as its `data`. In a pseudonymous conversation `senderId` and `sender.id` on the recipient's copy are the sender's handle in that conversation (`rh_…`), revealed or not; `mediaUrl` is signed when the media is private |
+| `private:typing` | `conversation:{id}`, except the typing socket itself (the typist's other devices in the room get it); in a pseudonymous conversation the other participant's `user:{id}` only | `{ conversationId, userId, userName, isTyping }` |
 | `private:read` | `conversation:{id}` | `{ conversationId, messageIds, readBy }`. From the reader's socket, opening the thread (messages GET) or Mark all read; not sent when the reader has read receipts off (then the newly delivered ids go out as `private:delivered`). A read also sets `delivered_at`. It also reaches the reader's own other devices in the room: the app's thread screen drops it when `readBy` is the signed-in user (`app/private-chat/[conversationId].tsx`), not `lib/socketClient.ts`, which forwards it to every subscriber |
 | `private:delivered` | `conversation:{id}` | `{ conversationId, messageIds }`. The recipient's app has these messages (✓✓ delivered). Sent whatever the read-receipt setting |
 
