@@ -140,12 +140,12 @@ export async function recordImpressions(eventId: string, userIds: string[]): Pro
   try {
     const redis = await getRedis()
     if (redis) {
+      // Sent together, one round trip: commands on one connection run in order.
       await bounded(
         Promise.all(
-          userIds.map(async (id) => {
+          userIds.flatMap((id) => {
             const key = keyFor(eventId, id)
-            await redis.incrBy(key, 1)
-            await redis.pExpire(key, TTL_MS)
+            return [redis.incrBy(key, 1), redis.pExpire(key, TTL_MS)]
           })
         )
       )

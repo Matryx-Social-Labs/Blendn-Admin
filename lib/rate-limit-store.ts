@@ -77,7 +77,12 @@ const CONNECT_GRACE_MS = 250
 const COMMAND_BOUND_MS = 500
 /** After a command overruns the bound, how long Redis is left alone before it is asked again. */
 const STALL_BACKOFF_MS = 5_000
-/** A PING this often, so a connection the path dropped is written to, noticed and reconnected. */
+/**
+ * A PING this often, so an idle connection the path has dropped is written to
+ * and fails (reset, or the retransmit timeout) and reconnects, rather than
+ * looking healthy. It does not end a stall: a PING that overruns node-redis's
+ * 5 s command timeout only emits 'error' (logged below). The bound does that.
+ */
 const PING_INTERVAL_MS = 10_000
 
 let client: (RedisLike & { isReady: boolean }) | null = null
