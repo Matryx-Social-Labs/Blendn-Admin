@@ -65,18 +65,21 @@ describe("pool acquire timeout", () => {
     try {
       await waitForHold()
       const started = Date.now()
+      let giveUp: NodeJS.Timeout | undefined
       const outcome = await Promise.race([
         db.$queryRaw`SELECT 1 AS second`.then(
           () => "resolved",
           (e: unknown) => e,
         ),
-        new Promise((r) => setTimeout(() => r("still pending at 6.5 s"), 6_500)),
+        // The hold ends at 10 s, so anything that waits it out is still pending here.
+        new Promise((r) => (giveUp = setTimeout(() => r("still pending at 8 s"), 8_000))),
       ])
+      clearTimeout(giveUp)
       const waited = Date.now() - started
 
       expect(failureText(outcome)).toMatch(/timeout exceeded when trying to connect/)
       expect(waited).toBeGreaterThanOrEqual(4_500)
-      expect(waited).toBeLessThan(6_500)
+      expect(waited).toBeLessThan(8_000)
     } finally {
       await cancelHold()
       await hold
@@ -102,8 +105,12 @@ describe("statement timeout", () => {
     }
   })
 
-  it("without the variable (scripts, seeds, backfills) there is no cap and the same statement completes", async () => {
-    const { db, closeDb } = freshDb({ DATABASE_POOL_MAX: undefined, DATABASE_STATEMENT_TIMEOUT_MS: undefined })
+  it.each([
+    ["unset (scripts, seeds, backfills)", undefined],
+    ["empty", ""],
+    ["0, the explicit off", "0"],
+  ])("%s: no cap, and the same statement completes", async (_case, value) => {
+    const { db, closeDb } = freshDb({ DATABASE_POOL_MAX: undefined, DATABASE_STATEMENT_TIMEOUT_MS: value })
     try {
       const [{ statement_timeout }] = await db.$queryRaw<{ statement_timeout: string }[]>`SHOW statement_timeout`
       expect(statement_timeout).toBe("0")
@@ -125,16 +132,16 @@ describe("statement timeout", () => {
 })
 
 describe("pool gauge", () => {
-  it("poolStats reads the pool every module copy shares, through globalThis", async () => {
+  it("every module copy reads and closes the one pool, through globalThis", async () => {
     const first = freshDb({ DATABASE_POOL_MAX: "3", DATABASE_STATEMENT_TIMEOUT_MS: undefined })
-    try {
-      await first.db.$queryRaw`SELECT 1`
-      // A second copy of the module, as Next bundles one per layer while server.ts built the client.
-      const second = freshDb({})
-      expect(second.poolStats()).toEqual({ total: 1, idle: 1, waiting: 0 })
-    } finally {
-      await first.closeDb()
-    }
+    await first.db.$queryRaw`SELECT 1`
+    const pool = globalThis.prismaPool!
+    // A second copy of the module, as Next bundles one per layer while server.ts built the client.
+    const second = freshDb({})
+    expect(second.poolStats()).toMatchObject({ total: 1, waiting: 0 })
+
+    await second.closeDb()
+    expect(pool.ended).toBe(true)
     expect(first.poolStats()).toBeNull()
   })
 })

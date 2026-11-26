@@ -1,7 +1,9 @@
+import { timingSafeEqual } from "node:crypto"
 import { monitorEventLoopDelay } from "node:perf_hooks"
 import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { db, poolStats } from "@/lib/db"
+import { healthMetricsToken } from "@/lib/env"
 
 export const dynamic = "force-dynamic"
 
@@ -12,7 +14,7 @@ export const dynamic = "force-dynamic"
  *
  * A fixed window rotated by this module, never reset by a read: the endpoint is
  * public, so a read that reset it would let any caller (or a second monitor)
- * wipe a spike before the alerting probe saw it. Zeros until the first minute
+ * wipe a spike before the alerting probe saw it. `null` until the first minute
  * after this module loads (the first /api/health request) has passed.
  */
 const LOOP_WINDOW_MS = 60_000
@@ -21,11 +23,28 @@ const ms = (ns: number) => Math.round(ns / NS_PER_MS)
 
 const loopDelay = monitorEventLoopDelay()
 loopDelay.enable()
-let lastLoopWindow = { p50: 0, p99: 0, max: 0 }
+let lastLoopWindow: { p50: number; p99: number; max: number } | null = null
 setInterval(() => {
   lastLoopWindow = { p50: ms(loopDelay.percentile(50)), p99: ms(loopDelay.percentile(99)), max: ms(loopDelay.max) }
   loopDelay.reset()
 }, LOOP_WINDOW_MS).unref()
+
+/*
+ * The gauges are for the monitor, not the public: a live socket count is how
+ * many people use Blendn right now, and `pool.waiting` with the loop delay is a
+ * free feedback signal for anyone tuning a burst. They need
+ * `Authorization: Bearer $HEALTH_METRICS_TOKEN`; without it the plain payload
+ * still answers 200, so Railway's healthcheck is unchanged. With no token
+ * configured they are omitted on Railway production and shown elsewhere.
+ */
+function mayReadGauges(request?: Request): boolean {
+  const token = healthMetricsToken()
+  if (!token) return process.env.RAILWAY_ENVIRONMENT_NAME !== "production"
+  const want = Buffer.from(`Bearer ${token}`)
+  const have = Buffer.from(request?.headers.get("authorization") ?? "")
+  // Length first: timingSafeEqual throws on a mismatch, and the length is not the secret.
+  return have.length === want.length && timingSafeEqual(have, want)
+}
 
 /**
  * Health check endpoint for Railway deployment
@@ -51,21 +70,19 @@ setInterval(() => {
  * matters is the share of people who actually turned up who have enough
  * structured interests to be ranked at all.
  *
- * ## Counts only
+ * ## Process gauges, for the monitor only
  *
- * `pool`, `eventLoopDelayMs` and `sockets` are numbers about this process,
- * nothing about a person; they are what ops/07 alerts on.
+ * `pool`, `eventLoopDelayMs` and `sockets` are counts about this process,
+ * nothing about a person, behind a token (`mayReadGauges`); they are what
+ * ops/07 alerts on.
  */
-export async function GET() {
+export async function GET(request?: Request) {
   const health: Record<string, unknown> = {
     status: "ok",
     timestamp: new Date().toISOString(),
     service: "blendn-admin",
     version: process.env.npm_package_version || "0.1.0",
     database: "unknown",
-    pool: null,
-    eventLoopDelayMs: lastLoopWindow,
-    sockets: globalThis.__blendnSocketIo?.engine.clientsCount ?? null,
   }
 
   try {
@@ -78,8 +95,12 @@ export async function GET() {
     logger.error("Health check - Database error", { error: error instanceof Error ? error.message : String(error) })
   }
 
-  // After the query, so the pool exists on a fresh process.
-  health.pool = poolStats()
+  // After the query, so the pool exists on a fresh process; reported when the query failed too, which is when it matters.
+  if (mayReadGauges(request)) {
+    health.pool = poolStats()
+    health.eventLoopDelayMs = lastLoopWindow
+    health.sockets = globalThis.__blendnSocketIo?.engine.clientsCount ?? null
+  }
 
   const statusCode = health.status === "ok" ? 200 : 503
 

@@ -91,7 +91,7 @@ const POOL_ACQUIRE_TIMEOUT_MS = 5_000
  * in Postgres. Anything else is refused loudly rather than ignored, because a
  * typo would otherwise switch the cap off without a word.
  */
-function statementTimeoutMs(): number | undefined {
+export function statementTimeoutMs(): number | undefined {
   const raw = process.env.DATABASE_STATEMENT_TIMEOUT_MS?.trim()
   if (!raw) return undefined
   if (!/^\d+$/.test(raw)) {

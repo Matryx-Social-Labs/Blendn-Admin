@@ -6,7 +6,7 @@ import { flushProductEvents } from "./lib/product-events"
 import { stopSponsoredScheduler } from "./lib/sponsored-scheduler"
 // #265's import, kept deliberately: the naive resolution drops it and
 // `$disconnect()` on shutdown breaks. See docs/MERGE-RUNBOOK.md.
-import { closeDb } from "./lib/db"
+import { closeDb, statementTimeoutMs } from "./lib/db"
 // The four sweepers are started and stopped as one unit now (#276). Importing
 // them individually here is what coupled them to Socket.io in the first place.
 import { startBackgroundWork, stopBackgroundWork } from "./lib/background"
@@ -28,8 +28,9 @@ console.log(`[${new Date().toISOString()}] > HOSTNAME: ${hostname}`)
  * The server's statements are capped; scripts that import lib/db are not (SCRUM-1221). Set here, before anything
  * connects: lib/db reads it when it builds the pool, on the first query. `0` turns the cap off.
  */
-process.env.DATABASE_STATEMENT_TIMEOUT_MS ||= "8000"
-console.log(`[${new Date().toISOString()}] > DATABASE_STATEMENT_TIMEOUT_MS: ${process.env.DATABASE_STATEMENT_TIMEOUT_MS}`)
+process.env.DATABASE_STATEMENT_TIMEOUT_MS = process.env.DATABASE_STATEMENT_TIMEOUT_MS?.trim() || "8000"
+// Checked here so a bad value stops the boot instead of failing every query after the port is bound.
+console.log(`[${new Date().toISOString()}] > statement_timeout: ${statementTimeoutMs()} ms`)
 
 // Validate critical environment variables in production (presence AND shape,
 // e.g. secrets must meet their minimum length - not just "is set")

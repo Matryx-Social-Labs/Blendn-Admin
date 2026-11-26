@@ -35,6 +35,12 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "server-statement-cap.test.ts": {
+      "guards": "SCRUM-1221: server.ts sets DATABASE_STATEMENT_TIMEOUT_MS to 8000 when unset or blank, and checks it with statementTimeoutMs(), before app.prepare, initSocketServer and startBackgroundWork can open a connection; scripts that import lib/db never set it and keep no cap.",
+      "mutation": "M2268 the default line deleted from server.ts; M2269 the default line moved to after startBackgroundWork().",
+      "observed": "M2268: 1 of 1 failing (setDefault -1). M2269: 1 of 1 failing (the check now precedes the default). Restored.",
+      "date": "2026-11-26"
+    },
     "media-fit.test.ts": {
       "guards": "SCRUM-1106: the dashboard's per-card preview draws the app's five cards at their sizes, agrees with docs/MEDIA.md, and fits by rule B exactly as the app's fitFor (exactly 15% off still crops).",
       "mutation": "lib/media-fit.ts: (1) Venue hero width 393 -> 374; (2) fitFor's `<=` -> `<`.",

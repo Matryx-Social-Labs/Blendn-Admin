@@ -7,8 +7,9 @@ const mockCurrentUser = jest.fn()
 const mockCoverage = jest.fn()
 jest.mock("@/lib/current-user", () => ({ currentUser: () => mockCurrentUser() }))
 const mockPoolStats = jest.fn()
+const mockQuery = jest.fn()
 jest.mock("@/lib/db", () => ({
-  db: { $queryRaw: jest.fn().mockResolvedValue([{ "?column?": 1 }]) },
+  db: { $queryRaw: () => mockQuery() },
   poolStats: () => mockPoolStats(),
 }))
 jest.mock("@/lib/interest-coverage", () => ({ MIN_INTERESTS_TO_RANK: 3, interestCoverage: () => mockCoverage() }))
@@ -21,7 +22,10 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockCoverage.mockResolvedValue({ status: "ok", attendees: 10, rankable: 9, minInterestsToRank: 3 })
   mockPoolStats.mockReturnValue({ total: 4, idle: 1, waiting: 2 })
+  mockQuery.mockResolvedValue([{ "?column?": 1 }])
   globalThis.__blendnSocketIo = undefined
+  delete process.env.HEALTH_METRICS_TOKEN
+  delete process.env.RAILWAY_ENVIRONMENT_NAME
 })
 
 it("the public health body is infrastructure only: no matching coverage, and the query is never run", async () => {
@@ -42,8 +46,53 @@ it("reports the pool, the event-loop delay and the socket count, as numbers", as
   const body = await (await health()).json()
   expect(body.pool).toEqual({ total: 4, idle: 1, waiting: 2 })
   expect(body.sockets).toBe(7)
-  expect(Object.keys(body.eventLoopDelayMs).sort()).toEqual(["max", "p50", "p99"])
-  for (const value of Object.values(body.eventLoopDelayMs)) expect(typeof value).toBe("number")
+  expect(body).toHaveProperty("eventLoopDelayMs")
+})
+
+it("a saturated pool still reports its numbers: SELECT 1 timed out, so 503, and pool.waiting is in the body", async () => {
+  mockQuery.mockRejectedValue(new Error("timeout exceeded when trying to connect"))
+  const res = await health()
+  expect(res.status).toBe(503)
+  const body = await res.json()
+  expect(body).toMatchObject({ status: "degraded", database: "disconnected", pool: { total: 4, idle: 1, waiting: 2 } })
+})
+
+it("reads the pool after the query, so a fresh process reports the pool that query built", async () => {
+  mockPoolStats.mockReturnValue(null)
+  mockQuery.mockImplementation(async () => {
+    mockPoolStats.mockReturnValue({ total: 1, idle: 1, waiting: 0 })
+    return [{ "?column?": 1 }]
+  })
+  expect((await (await health()).json()).pool).toEqual({ total: 1, idle: 1, waiting: 0 })
+})
+
+describe("the gauges are for the monitor: a bearer token, never a refusal", () => {
+  const TOKEN = "t".repeat(40)
+  const withAuth = (value?: string) =>
+    new Request("http://localhost/api/health", value ? { headers: { authorization: value } } : undefined)
+  const gauges = ["eventLoopDelayMs", "pool", "sockets"]
+
+  it("production with no token configured: plain payload, 200, no gauges (fail closed)", async () => {
+    process.env.RAILWAY_ENVIRONMENT_NAME = "production"
+    const res = await health(withAuth())
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    for (const key of gauges) expect(body).not.toHaveProperty(key)
+    expect(body).toMatchObject({ status: "ok", database: "connected" })
+  })
+
+  it("a token configured: the right bearer reads the gauges, a wrong or missing one gets the plain 200", async () => {
+    process.env.RAILWAY_ENVIRONMENT_NAME = "staging"
+    process.env.HEALTH_METRICS_TOKEN = TOKEN
+    const right = await (await health(withAuth(`Bearer ${TOKEN}`))).json()
+    for (const key of gauges) expect(right).toHaveProperty(key)
+    for (const wrong of [undefined, `Bearer ${"x".repeat(40)}`, `Bearer ${TOKEN}x`, TOKEN]) {
+      const res = await health(withAuth(wrong))
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      for (const key of gauges) expect(body).not.toHaveProperty(key)
+    }
+  })
 })
 
 it("says null, not zero, for a pool not built yet or a process without Socket.io", async () => {
@@ -73,7 +122,7 @@ it("the event-loop delay is the last full minute, and a read never resets it (th
       // a 150 ms synchronous block: the event loop cannot turn
     }
     await new Promise((r) => setTimeout(r, 30))
-    expect((await read()).max).toBe(0) // the first minute is not over yet
+    expect(await read()).toBeNull() // the first minute is not over yet: no data, not "healthy"
 
     jest.advanceTimersByTime(60_000)
     const stalled = await read()
@@ -82,7 +131,8 @@ it("the event-loop delay is the last full minute, and a read never resets it (th
 
     await new Promise((r) => setTimeout(r, 50))
     jest.advanceTimersByTime(60_000)
-    expect((await read()).max).toBeLessThan(100)
+    // A new minute without the stall: lower than the stalled one (not "< 100", which a loaded runner can break).
+    expect((await read()).max).toBeLessThan(stalled.max)
   } finally {
     jest.useRealTimers()
   }
