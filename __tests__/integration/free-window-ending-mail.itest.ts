@@ -342,3 +342,44 @@ describe("mail not configured (SCRUM-1421)", () => {
     expect(mailedFor(waiting)).toEqual([])
   })
 })
+
+describe("more organisations in the band than one pass takes (SCRUM-1421)", () => {
+  it("take turns: a newer organisation with a night of 8 behind 25 older ones without is reached within a few passes", async () => {
+    const host = await makeUser(testId("fw-crowd-host"), "organizer")
+    users.push(host)
+    const end = new Date(now.getTime() - 80 * DAY)
+    for (let i = 0; i < 25; i++) {
+      const org = await db.organisations.create({ data: { kind: "company", display_name: testId(`fw-crowd${i}`), status: "verified" } })
+      orgs.push(org.id)
+      const e = await db.events.create({
+        data: {
+          slug: testId(`fw-crowd${i}`),
+          title: `Empty night ${i}`,
+          description: "fixture",
+          start_time: new Date(end.getTime() - 3 * 60 * 60 * 1000),
+          end_time: end,
+          timezone: "Asia/Kolkata",
+          city: "Bengaluru",
+          status: "completed",
+          organizer_id: host,
+          organizer_org_id: org.id,
+        },
+      })
+      events.push(e.id)
+    }
+    const late = await neverVisited("late", [{ endedDaysAgo: 77, people: 8 }])
+    for (let pass = 1; pass <= 4; pass++) await sendFreeWindowEndingMail(new Date(now.getTime() + pass * 5 * 60_000))
+    expect((await windowOf(late.id)).first_free_event_id).toBe(late.nights[0].id)
+  })
+})
+
+describe("a window pick that throws (SCRUM-1421)", () => {
+  it("still mails the organisations that have their window, and says so at warn", async () => {
+    const due = await orgEndingIn(9 * DAY, BLR, "pickfails")
+    const warn = jest.spyOn(logger, "warn")
+    jest.spyOn(appDb.organisations, "findMany").mockImplementationOnce((() => Promise.reject(new Error("statement timeout"))) as never)
+    await sendFreeWindowEndingMail(now)
+    expect(warn).toHaveBeenCalledWith("Free windows not written this pass", { error: "statement timeout" })
+    expect(mailedFor(due)).toEqual([due.owner, due.admin].sort())
+  })
+})

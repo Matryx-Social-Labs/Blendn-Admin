@@ -12,6 +12,9 @@ const FREE_WINDOW_NOTICE_DAYS = 14
 const DAY_MS = 24 * 60 * 60 * 1000
 /** Windows the pass writes at most, for hosts who never opened Plan or Analytics (SCRUM-1421). */
 const WINDOW_WRITES_PER_PASS = 25
+/** Where the last pass's pick stopped, so a band of more than 25 takes turns (per process; a restart starts over). */
+let windowPickOffset = 0
+let warnedUnconfigured = false
 
 /**
  * One mail per organisation per free window (SCRUM-1275), to its owners and
@@ -29,8 +32,15 @@ const WINDOW_WRITES_PER_PASS = 25
  */
 export async function sendFreeWindowEndingMail(now: Date = new Date()): Promise<number> {
   // Before anything is claimed (SCRUM-1421): an unset key would claim every organisation due and mail none of them.
-  if (!emailConfigured()) return 0
-  await writeMissingWindows(now)
+  if (!emailConfigured()) {
+    if (!warnedUnconfigured) logger.warn("Free-window ending mail off: RESEND_API_KEY or EMAIL_FROM unset")
+    warnedUnconfigured = true
+    return 0
+  }
+  // Its own catch: a failed window write never holds back the mail to organisations that have theirs.
+  await writeMissingWindows(now).catch((error: unknown) =>
+    logger.warn("Free windows not written this pass", { error: error instanceof Error ? error.message : String(error) })
+  )
 
   // ponytail: unbounded, but only organisations whose window ends in the next 14 days and that are unmailed; the
   // entitled and the not-in-market among them are re-read every pass. Add a batch if that ever runs to thousands.
@@ -99,11 +109,12 @@ async function mailOwnersAndAdmins(orgId: string, mail: { subject: string; text:
  * past, written and not mailed; a newer one is written when it reaches day 76.
  * Nothing is read for an organisation that has its window.
  *
- * ponytail: 25 a pass, oldest organisation first. A night under 8 is recounted
- * every pass while it is in the 14-day band (one events page and one count per
- * organisation); more than 25 such organisations in one band would starve the
- * newer ones: then remember who was counted. A sweeper down for over 14 days
- * lets a night leave the band unmailed; its window is still written on first view.
+ * ponytail: 25 a pass, oldest organisation first, the next 25 on the next
+ * pass. A night under 8 is recounted each turn while it is in the 14-day band
+ * (about 3 indexed queries per organisation); remember who was counted if
+ * that grows. The pick reads the whole (status, end_time) index on events;
+ * a partial index on end_time once events pass ~500k rows. A sweeper down for
+ * over 14 days lets a night leave the band unmailed (written on first view).
  */
 async function writeMissingWindows(now: Date): Promise<void> {
   const daysAgo = (days: number) => new Date(now.getTime() - days * DAY_MS)
@@ -120,8 +131,10 @@ async function writeMissingWindows(now: Date): Promise<void> {
     },
     select: { id: true },
     orderBy: [{ created_at: "asc" }, { id: "asc" }],
+    skip: windowPickOffset,
     take: WINDOW_WRITES_PER_PASS,
   })
+  windowPickOffset = orgs.length < WINDOW_WRITES_PER_PASS ? 0 : windowPickOffset + orgs.length
   for (const org of orgs) {
     try {
       await freeWindow(org.id, now)
