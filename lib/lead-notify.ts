@@ -1,6 +1,7 @@
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
-import { appUrl, emailConfigured, sendEmail } from "@/lib/email"
+import { appUrl } from "@/lib/email"
+import { channelsFrom, sendToChannels } from "@/lib/notify-channels"
 
 /**
  * Telling someone a lead arrived.
@@ -24,7 +25,8 @@ import { appUrl, emailConfigured, sendEmail } from "@/lib/email"
  * visitor sees as failure.
  *
  * Both channels are attempted even if the first fails, for the same reason — a
- * Slack outage should not also cost you the email.
+ * Slack outage should not also cost you the email. The sending is
+ * `lib/notify-channels.ts`, shared with the staff alert.
  */
 
 interface LeadSummary {
@@ -41,11 +43,8 @@ interface LeadSummary {
 }
 
 export async function notifyNewLead(leadId: string): Promise<void> {
-  const slackUrl = process.env.LEADS_SLACK_WEBHOOK_URL
-  const emailTo = process.env.LEADS_NOTIFY_EMAIL
-  const canEmail = !!emailTo && emailConfigured()
-
-  if (!slackUrl && !canEmail) {
+  const channels = channelsFrom("LEADS_SLACK_WEBHOOK_URL", "LEADS_NOTIFY_EMAIL")
+  if (!channels) {
     logger.info("Lead notification skipped — no channel configured", {
       leadId,
       hint: "set LEADS_SLACK_WEBHOOK_URL or LEADS_NOTIFY_EMAIL",
@@ -86,19 +85,12 @@ export async function notifyNewLead(leadId: string): Promise<void> {
     link: `${appUrl()}/dashboard/leads?lead=${lead.id}`,
   }
 
-  // Settled, not raced: one failing channel must not cancel the other.
-  const results = await Promise.allSettled([
-    slackUrl ? postToSlack(slackUrl, summary) : Promise.resolve(),
-    canEmail ? sendLeadEmail(emailTo!, summary) : Promise.resolve(),
-  ])
-  for (const r of results) {
-    if (r.status === "rejected") {
-      logger.error("Lead notification channel failed", {
-        leadId,
-        error: r.reason instanceof Error ? r.reason.message : String(r.reason),
-      })
-    }
-  }
+  const org = summary.organization ? ` (${summary.organization})` : ""
+  await sendToChannels(
+    channels,
+    { subject: `Demo request — ${who(summary)}${org}`, text: emailText(summary), slack: slackBody(summary) },
+    { leadId }
+  )
 }
 
 function who(lead: LeadSummary): string {
@@ -112,11 +104,8 @@ function who(lead: LeadSummary): string {
  * "already applied" answer is readable at a glance in a busy channel. Falls
  * back to `text` for any client that ignores blocks — Discord's Slack-compatible
  * endpoint, for one.
- *
- * The URL is a bearer secret: anyone holding it can post to that channel. It
- * lives in Railway env vars and is never logged.
  */
-async function postToSlack(webhookUrl: string, lead: LeadSummary): Promise<void> {
+function slackBody(lead: LeadSummary): Record<string, unknown> {
   const org = lead.organization ? ` · ${lead.organization}` : ""
   const facts = [
     lead.city ? `*City* ${lead.city}` : null,
@@ -128,54 +117,41 @@ async function postToSlack(webhookUrl: string, lead: LeadSummary): Promise<void>
     ? `:white_check_mark: Already applied — application is *${lead.applicationStatus}*`
     : ":new: No application from this address yet"
 
-  const res = await fetch(webhookUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    // Plain text too — a notification that renders as "[no preview]" on a phone
-    // defeats the point of sending it immediately.
-    body: JSON.stringify({
-      text: `Demo request — ${who(lead)}${org}`,
-      blocks: [
-        {
-          type: "section",
-          text: { type: "mrkdwn", text: `*Demo request* — ${who(lead)}${org}` },
-        },
-        {
-          type: "section",
-          fields: [
-            { type: "mrkdwn", text: `*Email*\n${lead.email}` },
-            ...facts.map((f) => ({ type: "mrkdwn", text: f! })),
-          ],
-        },
-        { type: "context", elements: [{ type: "mrkdwn", text: applied }] },
-        {
-          type: "actions",
-          elements: [
-            {
-              type: "button",
-              text: { type: "plain_text", text: "Open in dashboard" },
-              url: lead.link,
-              style: "primary",
-            },
-          ],
-        },
-      ],
-    }),
-    // A hanging webhook must not hold the request open. The lead is stored
-    // either way.
-    signal: AbortSignal.timeout(8_000),
-  })
-
-  if (!res.ok) {
-    // Slack returns the reason as plain text ("invalid_token", "channel_not_found").
-    const detail = await res.text().catch(() => "")
-    throw new Error(`Slack webhook ${res.status} ${detail.slice(0, 120)}`)
+  // Plain text too — a notification that renders as "[no preview]" on a phone
+  // defeats the point of sending it immediately.
+  return {
+    text: `Demo request — ${who(lead)}${org}`,
+    blocks: [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: `*Demo request* — ${who(lead)}${org}` },
+      },
+      {
+        type: "section",
+        fields: [
+          { type: "mrkdwn", text: `*Email*\n${lead.email}` },
+          ...facts.map((f) => ({ type: "mrkdwn", text: f! })),
+        ],
+      },
+      { type: "context", elements: [{ type: "mrkdwn", text: applied }] },
+      {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: { type: "plain_text", text: "Open in dashboard" },
+            url: lead.link,
+            style: "primary",
+          },
+        ],
+      },
+    ],
   }
 }
 
-async function sendLeadEmail(to: string, lead: LeadSummary): Promise<void> {
+function emailText(lead: LeadSummary): string {
   const org = lead.organization ? ` (${lead.organization})` : ""
-  const lines = [
+  return [
     `${who(lead)}${org} asked for a demo.`,
     "",
     `Email:       ${lead.email}`,
@@ -187,11 +163,7 @@ async function sendLeadEmail(to: string, lead: LeadSummary): Promise<void> {
       : "No application from this address yet.",
     "",
     lead.link,
-  ].filter(Boolean)
-
-  await sendEmail({
-    to,
-    subject: `Demo request — ${who(lead)}${org}`,
-    text: lines.join("\n"),
-  })
+  ]
+    .filter(Boolean)
+    .join("\n")
 }

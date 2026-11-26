@@ -37,7 +37,7 @@ beforeEach(() => {
   mockDb.leads.findUnique.mockResolvedValue(LEAD)
   mockDb.organiser_onboarding_requests.findFirst.mockResolvedValue(null)
   mockEmailConfigured.mockReturnValue(true)
-  mockSendEmail.mockResolvedValue({ ok: true })
+  mockSendEmail.mockResolvedValue({ sent: true })
   fetchMock = jest.fn().mockResolvedValue({ ok: true, text: async () => "ok" })
   global.fetch = fetchMock as unknown as typeof fetch
 })
