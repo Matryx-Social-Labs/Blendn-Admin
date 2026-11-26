@@ -26,14 +26,13 @@ export interface AccessLineCopy {
 
 /**
  * One case per `AccessReason`; a new reason without its words fails the build
- * (the `never` below). Where plans are not sold ("market", SCRUM-1277) the
+ * (TS2366: the switch no longer returns on every path). Where plans are not sold ("market", SCRUM-1277) the
  * line is design/05's sentence and says no date, price or plan.
  */
 export function analyticsAccessLine(access: AnalyticsPageView["access"], day: (iso: string) => string): AccessLineCopy {
   const first = access.firstFreeEvent
   const dated = access.date ? `${access.date.word} ${day(access.date.at)}` : null
-  const reason = access.reason
-  switch (reason) {
+  switch (access.reason) {
     case "grant":
       return {
         headline: dated ? `Founding grant, ${dated}` : "Founding grant",
@@ -61,9 +60,5 @@ export function analyticsAccessLine(access: AnalyticsPageView["access"], day: (i
           ? `${first.title} stays open for good. Event Insights opens another event; Analytics opens everything.`
           : "Event Insights opens one event; Analytics opens everything.",
       }
-    default: {
-      const unhandled: never = reason
-      throw new Error(`No access line for ${String(unhandled)}`)
-    }
   }
 }
