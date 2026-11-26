@@ -291,29 +291,40 @@ export function publishedRaters(raters: number): number {
   return raters < MIN_CELL ? raters : MIN_CELL + Math.floor((raters - MIN_CELL) / RATING_BATCH) * RATING_BATCH
 }
 
+/**
+ * No reason: a host is never told why a count is held back. "Everyone raised this" (completeness) or "mostly one
+ * person" (dominance) singles people out as surely as the number would (SCRUM-1285). The reason stays on
+ * `discloseFigure`, for tests and logs.
+ */
 export interface DisclosedCategory {
   category: string
   /** Null when held back. The category is still listed. */
   count: number | null
   suppressed: boolean
-  suppressionReason: SuppressionReason | null
 }
 
 /**
  * Complaint categories as a host may read them. A category stays listed so a host knows it was raised; its number goes
  * below the floor, because "1 safety_conduct" in a room of six is a sentence with an author. Shared by the digest and
  * the live snapshot (SCRUM-890).
+ *
+ * Categories count messages but floor on people, so five people clear the floor while one of them wrote 20 of 25.
+ * `topMessages` holds that back too (`MAX_DOMINANCE`, SCRUM-1285), and it then reads exactly as a category under the
+ * floor. Without it (a tally frozen before it was recorded) dominance is not applied, as before.
  */
 export function discloseCategories(
   counts: ReadonlyMap<string, number>,
   /** Distinct people per category (`tallyFeedback`). */
   contributors: ReadonlyMap<string, number>,
-  population: number
+  population: number,
+  /** The largest single person's messages per category (`tallyFeedback`). */
+  topMessages?: ReadonlyMap<string, number>
 ): DisclosedCategory[] {
   return Array.from(counts.entries())
     .map(([category, count]) => {
-      const disclosure = discloseFigure({ count, contributors: contributors.get(category) ?? 0, population })
-      return { category, count: disclosure.value, suppressed: disclosure.suppressed, suppressionReason: disclosure.reason }
+      const top = topMessages?.get(category)
+      const disclosure = discloseFigure({ count, contributors: contributors.get(category) ?? 0, population, topContributorShare: top === undefined ? undefined : top / count })
+      return { category, count: disclosure.value, suppressed: disclosure.suppressed }
     })
     .sort((a, b) => (b.count ?? 0) - (a.count ?? 0))
 }
@@ -350,39 +361,6 @@ export function spreadsByEventId(rows: RatingGroupRow[]): Map<string, StarSpread
     byEvent.set(row.event_id, spread)
   }
   return byEvent
-}
-
-/**
- * May this *text* be shown, attributed to a pseudonym?
- *
- * Stricter than a count, and the register's sharpest finding is why: the
- * feedback digest hands an organiser verbatim message text with a **room-stable**
- * pseudonym and an exact timestamp, with no minimum cell at all. In a six-person
- * room, one `safety_conduct` message names its author to somebody who has seen
- * that pseudonym all night — and a safety concern is the one thing an attendee
- * most needs not to be identified for raising.
- *
- * A quote cannot be partially suppressed, so this is a boolean rather than a
- * figure. It applies the same population rules: a room too small, or a category
- * everybody contributed to, and the text stays out.
- *
- * Deliberately not `discloseFigure` with `count: 1`. The question is different —
- * publishing *a sentence somebody wrote* is not publishing a number they are
- * inside — and collapsing them would make the digest's rule invisible.
- */
-export function mayQuote(input: {
-  /** Distinct people who said something in this category. */
-  contributors: number
-  /** People in the room. */
-  population: number
-  floor?: number
-}): boolean {
-  return !discloseFigure({
-    count: 1,
-    contributors: input.contributors,
-    population: input.population,
-    floor: input.floor,
-  }).suppressed
 }
 
 /* -------------------------------------------------------------------------- */

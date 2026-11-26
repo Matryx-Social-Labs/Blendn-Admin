@@ -1,6 +1,6 @@
 import { readFileSync } from "fs"
 import { join } from "path"
-import { discloseFigure, mayQuote, MIN_CELL } from "@/lib/disclosure"
+import { discloseFigure, MIN_CELL } from "@/lib/disclosure"
 
 /**
  * What a host may learn about the people in their room.
@@ -94,10 +94,6 @@ describe("the four parts", () => {
 })
 
 describe("W41 — the feedback digest stops naming whoever raised a concern", () => {
-  it("refuses to quote from a category too few people raised", () => {
-    expect(mayQuote({ contributors: 1, population: 6 })).toBe(false)
-    expect(mayQuote({ contributors: 8, population: 60 })).toBe(true)
-  })
 
   it("counts distinct people per category, not messages", () => {
     /*
@@ -106,8 +102,9 @@ describe("W41 — the feedback digest stops naming whoever raised a concern", ()
      */
     const src = code("lib/feedback-digest.ts")
     // One rule (`tallyFeedback`) for the digest, the live screen and the purge's frozen tally (2026-11-06).
-    expect(src).toMatch(/const people = new Map<string, Set<string>>\(\)/)
-    expect(src).toMatch(/if \(row\.userId\) who\.add\(row\.userId\)/)
+    expect(src).toMatch(/const people = new Map<string, Map<string, number>>\(\)/)
+    expect(src).toMatch(/if \(row\.userId\) who\.set\(row\.userId, \(who\.get\(row\.userId\) \?\? 0\) \+ 1\)/)
+    expect(src).toMatch(/new Map\(\[\.\.\.people\]\.map\(\(\[category, who\]\) => \[category, who\.size\]\)\)/)
     expect(src).toMatch(/userId: row\.message\?\.user_id \?\? null/)
   })
 
@@ -123,8 +120,8 @@ describe("W41 — the feedback digest stops naming whoever raised a concern", ()
      */
     const src = code("lib/feedback-digest.ts")
     // Since the quotes are paged (SCRUM-1051): the quotable categories come from the rule, and only
-    // their rows are read.
-    expect(src).toMatch(/const quotable = \[\.\.\.categoryContributors\]\s*\.filter\(\(\[, contributors\]\) => mayQuote\(\{ contributors, population \}\)\)/)
+    // their rows are read. Since SCRUM-1285 the rule is the categories' own: a held-back count is never quoted.
+    expect(src).toMatch(/const quotable = categories\.filter\(\(c\) => !c\.suppressed\)/)
     expect(src).toMatch(/category: \{ in: quotable \}, message_id: \{ not: null \}/)
   })
 
@@ -137,7 +134,7 @@ describe("W41 — the feedback digest stops naming whoever raised a concern", ()
   it("suppresses the category count without hiding the category", () => {
     // An organiser still needs to know a safety concern was raised.
     // Shared with the live snapshot since SCRUM-890.
-    expect(code("lib/feedback-digest.ts")).toMatch(/discloseCategories\(categoryCounts, categoryContributors, population\)/)
+    expect(code("lib/feedback-digest.ts")).toMatch(/discloseCategories\(categoryCounts, categoryContributors, population, categoryTop\)/)
     const src = code("lib/disclosure.ts")
     expect(src).toMatch(/count: disclosure\.value/)
     expect(src).toMatch(/suppressed: disclosure\.suppressed/)
