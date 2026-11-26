@@ -6,7 +6,11 @@
 const mockCurrentUser = jest.fn()
 const mockCoverage = jest.fn()
 jest.mock("@/lib/current-user", () => ({ currentUser: () => mockCurrentUser() }))
-jest.mock("@/lib/db", () => ({ db: { $queryRaw: jest.fn().mockResolvedValue([{ "?column?": 1 }]) } }))
+const mockPoolStats = jest.fn()
+jest.mock("@/lib/db", () => ({
+  db: { $queryRaw: jest.fn().mockResolvedValue([{ "?column?": 1 }]) },
+  poolStats: () => mockPoolStats(),
+}))
 jest.mock("@/lib/interest-coverage", () => ({ MIN_INTERESTS_TO_RANK: 3, interestCoverage: () => mockCoverage() }))
 jest.mock("@/lib/logger", () => ({ logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } }))
 
@@ -16,6 +20,8 @@ import { GET as matching } from "@/app/api/health/matching/route"
 beforeEach(() => {
   jest.clearAllMocks()
   mockCoverage.mockResolvedValue({ status: "ok", attendees: 10, rankable: 9, minInterestsToRank: 3 })
+  mockPoolStats.mockReturnValue({ total: 4, idle: 1, waiting: 2 })
+  globalThis.__blendnSocketIo = undefined
 })
 
 it("the public health body is infrastructure only: no matching coverage, and the query is never run", async () => {
@@ -25,6 +31,40 @@ it("the public health body is infrastructure only: no matching coverage, and the
   expect(body).toMatchObject({ status: "ok", database: "connected" })
   expect(body).not.toHaveProperty("matching")
   expect(mockCoverage).not.toHaveBeenCalled()
+})
+
+/*
+ * SCRUM-1221: the numbers ops/07 alerts on, as counts only (the endpoint is public). `pool.waiting` > 0 is requests
+ * queued for a connection; `eventLoopDelayMs.p99` > 100 is the one process saturating, which `SELECT 1` never shows.
+ */
+it("reports the pool, the event-loop delay and the socket count, as numbers", async () => {
+  globalThis.__blendnSocketIo = { engine: { clientsCount: 7 } } as unknown as typeof globalThis.__blendnSocketIo
+  const body = await (await health()).json()
+  expect(body.pool).toEqual({ total: 4, idle: 1, waiting: 2 })
+  expect(body.sockets).toBe(7)
+  expect(Object.keys(body.eventLoopDelayMs).sort()).toEqual(["max", "p50", "p99"])
+  for (const value of Object.values(body.eventLoopDelayMs)) expect(typeof value).toBe("number")
+})
+
+it("says null, not zero, for a pool not built yet or a process without Socket.io", async () => {
+  mockPoolStats.mockReturnValue(null)
+  const body = await (await health()).json()
+  expect(body.pool).toBeNull()
+  expect(body.sockets).toBeNull()
+})
+
+it("the event-loop delay is per read: a stall shows once, then the next read starts afresh", async () => {
+  await health()
+  const stallUntil = Date.now() + 150
+  while (Date.now() < stallUntil) {
+    // a 150 ms synchronous block: the event loop cannot turn
+  }
+  await new Promise((r) => setTimeout(r, 30))
+  const stalled = (await (await health()).json()).eventLoopDelayMs
+  expect(stalled.max).toBeGreaterThanOrEqual(100)
+  await new Promise((r) => setTimeout(r, 50))
+  const after = (await (await health()).json()).eventLoopDelayMs
+  expect(after.max).toBeLessThan(100)
 })
 
 it.each([
