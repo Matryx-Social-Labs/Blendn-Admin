@@ -22,6 +22,10 @@ SET memory_limit = '2GB';
 -- fences and rollback files, so a fence's release is on record without a column or a Json key.
 SET VARIABLE release = coalesce(nullif(getenv('OVERTURE_RELEASE'), ''), '2026-11-18.0');
 SET VARIABLE dir = getenv('FENCES_DIR');
+-- The release's STAC index: which file holds which box. STAC_INDEX names a local copy for runs over several cities
+-- (stac.overturemaps.org answers 429 to a read per city in quick succession).
+SET VARIABLE stac_index = coalesce(nullif(getenv('STAC_INDEX'), ''),
+                                   'https://stac.overturemaps.org/' || getvariable('release') || '/collections.parquet');
 SET VARIABLE city = getenv('CITY');
 
 CREATE TABLE points AS
@@ -46,7 +50,7 @@ SET VARIABLE ymax = (SELECT max(lat) + 0.001 FROM points);
 -- Only the files whose box meets the city's, from the release's STAC index: one or two files a city, not all 512.
 SET VARIABLE files = (
   SELECT list(replace(assets.aws.href, 'https://overturemaps-us-west-2.s3.us-west-2.amazonaws.com/', 's3://overturemaps-us-west-2/'))
-  FROM read_parquet('https://stac.overturemaps.org/' || getvariable('release') || '/collections.parquet')
+  FROM read_parquet(getvariable('stac_index'))
   WHERE collection = 'building'
     AND bbox.xmin < getvariable('xmax') AND bbox.xmax > getvariable('xmin')
     AND bbox.ymin < getvariable('ymax') AND bbox.ymax > getvariable('ymin')
