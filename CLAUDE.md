@@ -111,7 +111,7 @@ The API:
 | `eventPermissionSelect` | The `select` fragment `eventPermissions` needs. Spread it rather than hand-picking columns; a select missing `venue` reads as "no venue" and silently denies a venue owner. |
 | `canBroadcast(actor, event, kind, maySponsor)` | Who may put a non-user message in a room. |
 | `broadcastMayCarryMedia(kind)` | Whether a broadcast kind may carry an image. |
-| `canAccessDashboard(role)` | Dashboard entry. Read by `middleware.ts`. |
+| `canAccessDashboard(role)` | Dashboard entry. Read by `middleware.ts`. The `role` it is handed is the session's claim, which is derived, not `User.role`: `dashboardRoleFor` (`lib/org-membership.ts`) gives `app_admin` from the row and anyone else their home organisation's kind (sponsor, venue owner, organizer), or `attendee` with no live membership. Every session read (`sessionAccount`: the jwt callback, `currentUser`, the dashboard socket) derives it in one SQL statement. |
 | `mayManageBilling(memberRole)`, `mayManageVenueBilling(memberRole)`, `maySendVenueOffers(memberRole)` | The org's `owner`/`admin`, from the membership the caller already holds in the paying or venue-owning org; never `User.role`. Door redemption at a venue is any active member of its owning org (the lookup in `redeemPass`). |
 
 Build the actor with `actorFor(user)` from `lib/org-membership.ts` — it loads memberships, and `PermissionActor.orgIds` and `editOrgIds` (the owner/admin subset) are required precisely so a bare session user cannot typecheck into the resolver and silently deny everyone.

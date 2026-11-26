@@ -12,9 +12,10 @@ const mockFindUnique = jest.fn()
 jest.mock("@/lib/db", () => ({ db: { user: { findUnique: (...a: unknown[]) => mockFindUnique(...a) } } }))
 jest.mock("@/lib/logger", () => ({ logger: { debug: jest.fn(), warn: jest.fn(), error: jest.fn(), info: jest.fn() } }))
 jest.mock("@/lib/rbac", () => ({ eventPermissions: jest.fn(), canAccessDashboard: (role: string) => role !== "attendee" }))
-jest.mock("@/lib/org-membership", () => ({ actorFor: jest.fn() }))
+jest.mock("@/lib/org-membership", () => ({ actorFor: jest.fn(), sessionAccount: () => mockSessionAccount(mockFindUnique()) }))
 
 import { authenticateDashboardSocket } from "@/lib/socket-ops-auth"
+import { mockSessionAccount } from "./support/session-account"
 
 const COOKIE = "next-auth.session-token=signed-session"
 const SIGNED_IN = Date.parse("2026-10-01T10:00:00Z")
@@ -36,9 +37,8 @@ it("lets a live dashboard account through, with the role read from the row", asy
     email: "host@example.com",
     role: "organizer",
   })
-  expect(mockFindUnique).toHaveBeenCalledWith(
-    expect.objectContaining({ select: expect.objectContaining({ deletedAt: true, suspended_at: true }) })
-  )
+  // The one statement the pages' session read is too (`sessionAccount`, SCRUM-1247).
+  expect(mockFindUnique).toHaveBeenCalledTimes(1)
 })
 
 it("refuses a deleted account whose cookie is still live", async () => {

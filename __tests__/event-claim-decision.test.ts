@@ -11,6 +11,7 @@
  * claim's, at filing and again here.
  */
 const mockDb = {
+  $queryRaw: jest.fn((): Promise<Record<string, unknown>[]> => mockSessionRows(mockDb.user.findUnique())),
   // requireAdmin reads the role from the database (lib/current-user.ts): an admin's row.
   user: { findUnique: jest.fn().mockResolvedValue({ role: "app_admin", suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null }) },
   event_claims: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
@@ -43,6 +44,7 @@ jest.mock("@/lib/email", () => {
 import { decideEventClaim, fileEventClaim } from "@/lib/event-claim-actions"
 import { getAuth } from "@/lib/auth"
 import { owningOrgFor, StaffMayNotCreate } from "@/lib/event-ownership"
+import { mockSessionRows } from "./support/session-account"
 
 /*
  * A mock that honours `select`, so a wrong column list is a wrong answer here

@@ -111,6 +111,8 @@ const PERSONA_ORGS = {
   live: "Sunday Supper Club",
   suspended: "Retired Rooms Co",
   secondVenue: "Koramangala Social House",
+  // The negative control's own, empty organisation (SCRUM-1247: a dashboard is a membership).
+  outsider: "Quiet Corner Collective",
 } as const
 
 const ACCOUNTS = [
@@ -147,12 +149,14 @@ const ACCOUNTS = [
     role: "organizer" as user_role,
     /**
      * The negative control, and the account most likely to be mistaken for a
-     * bug. It has a dashboard role and no organisation, so every event denies
-     * it. That is correct behaviour and there must be an account that proves it
-     * — otherwise "organiser can edit" passes without anyone checking that
-     * "some other organiser cannot".
+     * bug. It owns an organisation of its own with nothing in it, so every
+     * other organisation's event denies it. That is correct behaviour and there
+     * must be an account that proves it — otherwise "organiser can edit" passes
+     * without anyone checking that "some other organiser cannot". An org of its
+     * own, not none: since SCRUM-1247 a dashboard is a membership, and an
+     * account with none cannot sign in to prove anything.
      */
-    note: "NEGATIVE CONTROL. Dashboard role, no org — must be denied on every event.",
+    note: `NEGATIVE CONTROL. Owner of ${PERSONA_ORGS.outsider}, empty — must be denied on every other org's event.`,
   },
   {
     key: "claimant",
@@ -189,7 +193,7 @@ const ACCOUNTS = [
     email: "omar.suspended@blendn.app",
     name: "Omar Siddiqui",
     role: "organizer" as user_role,
-    note: `Organiser only in ${PERSONA_ORGS.suspended} (suspended). The card still names it; no Create event.`,
+    note: `Organiser only in ${PERSONA_ORGS.suspended} (suspended). A suspended org grants no dashboard (SCRUM-1247): refused at sign-in.`,
   },
   {
     key: "secondVenueOwner",
@@ -1281,8 +1285,9 @@ async function main() {
       data: { name: "Third Wave", name_key: normaliseSponsorName("Third Wave"), org_id: null, created_by: users.admin },
     })
   }
-  // Filed by an organisation with no brand, as the product would let it be (SCRUM-465).
-  const claimantOrg = await upsertOrg(db, CLAIMANT_ORG)
+  // Filed by an organisation with no brand, as the product would let it be (SCRUM-465). Approved as a sponsor, so it
+  // holds `may_sponsor` as approval sets it: that, with no brand yet, is what makes its members sponsors (SCRUM-1247).
+  const claimantOrg = await db.organisations.update({ where: { id: (await upsertOrg(db, CLAIMANT_ORG)).id }, data: { may_sponsor: true } })
   await db.organisation_members.upsert({
     where: { org_id_user_id: { org_id: claimantOrg.id, user_id: users.claimant } },
     update: { role: "owner" },
@@ -1303,12 +1308,13 @@ async function main() {
           },
         })
   }
-  const [older, newer, live, suspendedOrg, secondVenue] = await Promise.all([
+  const [older, newer, live, suspendedOrg, secondVenue, outsiderOrg] = await Promise.all([
     personaOrg(PERSONA_ORGS.older, "verified"),
     personaOrg(PERSONA_ORGS.newer, "verified"),
     personaOrg(PERSONA_ORGS.live, "verified"),
     personaOrg(PERSONA_ORGS.suspended, "suspended"),
     personaOrg(PERSONA_ORGS.secondVenue, "verified"),
+    personaOrg(PERSONA_ORGS.outsider, "verified"),
   ])
   // created_at is set, not left to the clock: which membership is oldest is the
   // thing under test, and two upserts a millisecond apart would decide it.
@@ -1319,6 +1325,7 @@ async function main() {
     { user: users.partSuspended, org: suspendedOrg.id, joined: hoursFromNow(-24 * 120) },
     { user: users.onlySuspended, org: suspendedOrg.id, joined: hoursFromNow(-24 * 30) },
     { user: users.secondVenueOwner, org: secondVenue.id, joined: hoursFromNow(-24 * 45) },
+    { user: users.outsider, org: outsiderOrg.id, joined: hoursFromNow(-24 * 20) },
   ]
   for (const m of PERSONA_MEMBERSHIPS) {
     await db.organisation_members.upsert({

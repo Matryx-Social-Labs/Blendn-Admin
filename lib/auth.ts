@@ -8,6 +8,7 @@ import { auditLog } from "./audit-log"
 import { DUMMY_HASH, MAX_EMAIL_LENGTH, refuseOverSigninLimits, settleSigninSuccess, signinIp, signinKeys } from "./dashboard-signin-limits"
 import { KNOWN_DEVICE_MAX_AGE_SECONDS, isKnownDevice, knownDeviceCookie } from "./known-device"
 import { logger } from "./logger"
+import { sessionAccount, signinAccount } from "./org-membership"
 import { APP_ONLY_SIGNIN, canAccessDashboard } from "./rbac"
 import { SessionEnded, isRevoked, provenAt } from "./session-revocation"
 import type { user_role } from "@prisma/client"
@@ -78,7 +79,7 @@ export const authOptions: NextAuthOptions = {
         const keys = signinKeys(email, req?.headers)
         const knownDevice = isKnownDevice(email, req?.headers?.cookie)
         await refuseOverSigninLimits(keys, knownDevice)
-        const user = await db.user.findUnique({ where: { email } })
+        const user = await signinAccount(email)
 
         const isValid = await bcrypt.compare(credentials.password, user?.password ?? DUMMY_HASH)
         if (!user?.password || !isValid) {
@@ -111,7 +112,9 @@ export const authOptions: NextAuthOptions = {
          * attempts" (SCRUM-172). Naming the role is safe only after the
          * password check above; a wrong password never reaches this line.
          */
-        if (!canAccessDashboard(user.role) && !(await hasLiveInvite(user.email))) {
+        // From the memberships, not the row (SCRUM-1247): an attendee in a live organisation is its host.
+        const role = user.dashboardRole
+        if (!canAccessDashboard(role) && !(await hasLiveInvite(user.email))) {
           throw new Error(APP_ONLY_SIGNIN)
         }
 
@@ -122,9 +125,9 @@ export const authOptions: NextAuthOptions = {
          */
         const ipAddress = signinIp(req?.headers)
         auditLog({ action: "auth.dashboard_signin", resource: "user", resourceId: user.id, userId: user.id, ipAddress, details: { provider: "credentials" } })
-        if (user.role === "app_admin") logger.warn("Admin dashboard sign-in", { userId: user.id, ipAddress })
+        if (role === "app_admin") logger.warn("Admin dashboard sign-in", { userId: user.id, ipAddress })
 
-        return { id: user.id, email: user.email, name: user.name, role: user.role }
+        return { id: user.id, email: user.email, name: user.name, role }
       },
     }),
   ],
@@ -169,20 +172,17 @@ export const authOptions: NextAuthOptions = {
         return { ...token, sub: user.id, role, signedInAt: Date.now(), inviteOnly: !canAccessDashboard(role) }
       }
 
-      const account = token.sub
-        ? await db.user.findUnique({
-            where: { id: token.sub },
-            select: { email: true, role: true, suspended_at: true, deletedAt: true, password_changed_at: true, sessions_revoked_at: true },
-          })
-        : null
+      const account = token.sub ? await sessionAccount(token.sub) : null
       if (!account || isRevoked(token, account)) throw new SessionEnded()
-      // No dashboard role is an invite's session or none: it ends with the invite, and a demoted host's ends at once.
-      const inviteOnly = !canAccessDashboard(account.role)
+      // The claim the middleware, nav and pages read: from the memberships, in this same one statement (SCRUM-1247).
+      const role = account.dashboardRole
+      // No dashboard role is an invite's session or none: it ends with the invite, and a host who leaves their last org ends at once.
+      const inviteOnly = !canAccessDashboard(role)
       if (inviteOnly && !(account.email && (await hasLiveInvite(account.email)))) throw new SessionEnded()
 
       // `provenAt` written back, so a session that only had `iat` keeps the
       // first one it was judged by rather than its next re-encode's.
-      return { ...token, role: account.role, signedInAt: provenAt(token)!, inviteOnly }
+      return { ...token, role, signedInAt: provenAt(token)!, inviteOnly }
     },
   },
 }

@@ -18,6 +18,7 @@ const mockFindUnique = jest.fn()
 const mockInvite = jest.fn()
 jest.mock("@/lib/db", () => ({
   db: {
+    $queryRaw: () => mockSessionRows(mockFindUnique()),
     user: { findUnique: (...a: unknown[]) => mockFindUnique(...a) },
     organisation_invites: { findFirst: (...a: unknown[]) => mockInvite(...a) },
   },
@@ -27,6 +28,7 @@ jest.mock("bcryptjs", () => ({ compare: async (given: string, stored: string) =>
 import { authOptions, getAuth, getInviteAuth } from "@/lib/auth"
 import { SessionEnded } from "@/lib/session-revocation"
 import { APP_ONLY_SIGNIN } from "@/lib/rbac"
+import { mockSessionRows } from "./support/session-account"
 
 type Authorize = (c: Record<string, string>, req?: { headers: Record<string, string> }) => Promise<unknown>
 const rawAuthorize = (
