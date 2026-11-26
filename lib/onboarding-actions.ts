@@ -568,6 +568,7 @@ export async function setOrganisationStatus(
   }
 
   const hidden = await db.$transaction(async (tx) => {
+    const before = await tx.organisations.findUnique({ where: { id: orgId }, select: { status: true } })
     await tx.organisations.update({
       where: { id: orgId },
       data: {
@@ -581,36 +582,38 @@ export async function setOrganisationStatus(
       },
     })
 
+    let hidden: { id: string; title: string; end_time: Date }[] = []
+    let restored = 0
     if (status === "suspended") {
       /*
        * The org's own nights, not its venues' daily live rooms: a venue day is
        * the venue's, the platform moderates it, and suspending the company that
        * claimed a bar does not shut the bar's room on everybody standing in it.
        */
-      const events = await tx.events.findMany({
+      hidden = await tx.events.findMany({
         where: { organizer_org_id: orgId, ...realEventsWhere, status: "published", deleted_at: null },
         select: { id: true, title: true, end_time: true },
       })
       await tx.events.updateMany({
-        where: { id: { in: events.map((e) => e.id) }, ...realEventsWhere },
+        where: { id: { in: hidden.map((e) => e.id) }, ...realEventsWhere },
         data: { status: "draft", pre_suspension_status: "published" },
       })
-      return events
+    } else {
+      restored = (await tx.events.updateMany({
+        where: { organizer_org_id: orgId, ...realEventsWhere, status: "draft", pre_suspension_status: "published", deleted_at: null },
+        data: { status: "published", pre_suspension_status: null },
+      })).count
     }
 
-    await tx.events.updateMany({
-      where: { organizer_org_id: orgId, ...realEventsWhere, status: "draft", pre_suspension_status: "published", deleted_at: null },
-      data: { status: "published", pre_suspension_status: null },
+    // In the transaction: a status change whose record cannot be written is not made.
+    await auditInTx(tx, {
+      userId: admin.id,
+      action: `organisation.${status}`,
+      resource: "organisation",
+      resourceId: orgId,
+      details: { from: before?.status ?? null, reason: trimmed, eventsHidden: hidden.length, eventsRestored: restored },
     })
-    return []
-  })
-
-  auditLog({
-    userId: admin.id,
-    action: `organisation.${status}`,
-    resource: "organisation",
-    resourceId: orgId,
-    details: { reason: trimmed, eventsHidden: hidden.length },
+    return hidden
   })
 
   // After the commit: a push about a hidden event must never precede the
