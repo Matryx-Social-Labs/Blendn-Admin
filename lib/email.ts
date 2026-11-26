@@ -1,7 +1,10 @@
+import { randomUUID } from "crypto"
+
+import { db } from "./db"
 import { logger } from "./logger"
 import { BILLING_PLANS, grossRupees, gstSplit, planDay, rupees } from "./billing-plans"
 import { MIN_ATTENDEES } from "./connection-metrics"
-import { dashboardHost, publicSiteOrigin } from "./env"
+import { dashboardHost, emailReplyTo, publicSiteOrigin } from "./env"
 import {
   approvedHtml,
   freeWindowEndingHtml,
@@ -34,7 +37,7 @@ import {
 
 export interface SendResult {
   sent: boolean
-  reason?: "not_configured" | "provider_error"
+  reason?: "not_configured" | "provider_error" | "suppressed"
   detail?: string
   id?: string
 }
@@ -119,7 +122,7 @@ const ONE_ADDRESS = /^[^\s@,<>"]+@([^\s@,<>"]+)$/
 
 function mayDeliverTo(to: string): boolean {
   if (process.env.RAILWAY_ENVIRONMENT_NAME === "production") return true
-  const address = to.trim().toLowerCase()
+  const address = canonicalEmail(to)
   const domain = ONE_ADDRESS.exec(address)?.[1]
   if (!domain) return false
   const listed = (process.env.EMAIL_ALLOWLIST ?? "").split(",").map((a) => a.trim().toLowerCase())
@@ -131,11 +134,61 @@ export function headerSafe(value: string): string {
   return value.replace(/[\r\n\u2028\u2029]+/g, " ")
 }
 
+/**
+ * The one form of an address: trimmed and lower-cased, which is how every account's address is stored (SCRUM-328) and
+ * how sign-in and the password reset look it up. No Unicode folding and no `+tag` stripping: either would make two
+ * stored accounts one string. `email_suppressions` is written and read in this form. Anything not a string is "".
+ */
+export function canonicalEmail(raw: unknown): string {
+  return typeof raw === "string" ? raw.trim().toLowerCase() : ""
+}
+
+/**
+ * Which mail a send is (SCRUM-1280). Unset is transactional: verification, invites, domain verification, claim and
+ * application decisions, tickets, staff alerts. `password_reset` is a person asking for their own way back in;
+ * `lifecycle` is the mail that carries List-Unsubscribe (growth 04b, 04c, 09a).
+ */
+export type MailStream = "password_reset" | "lifecycle"
+
+/**
+ * Whether a suppression stops this send. A hard bounce stops everything: the address does not exist. A complaint stops
+ * everything but the reset, which the person asked for. An unsubscribe stops only the lifecycle mail it came from:
+ * leaving the morning mail must not stop an org invite or a claim decision.
+ */
+function blocks(reason: string, stream: MailStream | undefined): boolean {
+  if (reason === "unsubscribe") return stream === "lifecycle"
+  return !(reason === "complaint" && stream === "password_reset")
+}
+
+/**
+ * Fails open: a lookup that throws sends. A pilot guest's verification or reset matters more than one extra mail to a
+ * bounced address, which Resend's own suppression list stops anyway.
+ */
+async function suppressed(to: string, stream: MailStream | undefined): Promise<boolean> {
+  try {
+    const row = await db.email_suppressions.findUnique({ where: { email: canonicalEmail(to) }, select: { reason: true } })
+    return !!row && blocks(row.reason, stream)
+  } catch (err) {
+    logger.warn("Email suppression lookup failed; sending anyway", { error: err instanceof Error ? err.message : String(err) })
+    return false
+  }
+}
+
+/** Resend answers these again later (resend.com/docs/api-reference/errors); a 4xx is refused the same way twice. */
+const retryable = (status: number) => status === 429 || status >= 500
+/** About a second, plus up to half a second of jitter so a burst of failures does not retry in step. */
+const retryDelay = () => 1_000 + Math.floor(Math.random() * 500)
+
 export async function sendEmail(opts: {
   to: string
   subject: string
   text: string
   html?: string
+  stream?: MailStream
+  /** Extra headers (List-Unsubscribe); each value is made one line. */
+  headers?: Record<string, string>
+  /** Resend tags: names and values of ASCII letters, digits, `_` and `-`. */
+  tags?: { name: string; value: string }[]
 }): Promise<SendResult> {
   const key = process.env.RESEND_API_KEY
   const from = emailFrom()
@@ -162,34 +215,61 @@ export async function sendEmail(opts: {
     return { sent: false, reason: "not_configured", detail: "recipient not allowlisted outside production" }
   }
 
-  try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from,
-        // No CR/LF in anything a header is made of (step 18 security review,
-        // M4): a subject or an address carrying one is a second header.
-        to: [headerSafe(opts.to)],
-        subject: headerSafe(opts.subject),
-        text: opts.text,
-        ...(opts.html ? { html: opts.html } : {}),
-      }),
-      // A hung mail provider must not hold a request open indefinitely.
-      signal: AbortSignal.timeout(10_000),
-    })
+  if (await suppressed(opts.to, opts.stream)) {
+    // Info, not an error: the address bounced or complained, and not mailing it is the point. The domain only.
+    logger.info("Email not sent — address suppressed", { domain: opts.to.split("@").pop(), stream: opts.stream })
+    return { sent: false, reason: "suppressed" }
+  }
 
-    if (!res.ok) {
+  const replyTo = emailReplyTo()
+  const body = JSON.stringify({
+    from,
+    // No CR/LF in anything a header is made of (step 18 security review,
+    // M4): a subject or an address carrying one is a second header.
+    to: [headerSafe(opts.to)],
+    subject: headerSafe(opts.subject),
+    text: opts.text,
+    ...(opts.html ? { html: opts.html } : {}),
+    ...(replyTo ? { reply_to: headerSafe(replyTo) } : {}),
+    ...(opts.headers
+      ? { headers: Object.fromEntries(Object.entries(opts.headers).map(([k, v]) => [headerSafe(k), headerSafe(v)])) }
+      : {}),
+    ...(opts.tags ? { tags: opts.tags } : {}),
+  })
+  // One key for both attempts: Resend answers a repeat with the first send's result and sends nothing again, so a retry
+  // after an answer that was lost (a timeout, a 5xx after the mail went) is never a second mail.
+  const idempotencyKey = randomUUID()
+
+  // ponytail: one retry in the request, no outbox; a send that fails twice is logged and the caller's fallback runs.
+  for (let attempt = 1; ; attempt++) {
+    const last = attempt === 2
+    try {
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+        body,
+        // A hung mail provider must not hold a request open indefinitely.
+        signal: AbortSignal.timeout(10_000),
+      })
+
+      if (res.ok) {
+        const sent = (await res.json().catch(() => ({}))) as { id?: string }
+        return { sent: true, id: sent.id }
+      }
       const detail = await res.text().catch(() => "")
-      logger.error("Email send failed", { status: res.status, detail: detail.slice(0, 300) })
-      return { sent: false, reason: "provider_error", detail: `HTTP ${res.status}` }
+      if (last || !retryable(res.status)) {
+        logger.error("Email send failed", { status: res.status, attempt, detail: detail.slice(0, 300) })
+        return { sent: false, reason: "provider_error", detail: `HTTP ${res.status}` }
+      }
+    } catch (err) {
+      // Not after our own timeout: the first send may still be in flight (a second would only get Resend's 409), and a
+      // second ten seconds would double what an awaiting caller waits.
+      if (last || (err instanceof Error && err.name === "TimeoutError")) {
+        logger.error("Email send threw", { attempt, error: err instanceof Error ? err.message : String(err) })
+        return { sent: false, reason: "provider_error", detail: String(err) }
+      }
     }
-
-    const body = (await res.json().catch(() => ({}))) as { id?: string }
-    return { sent: true, id: body.id }
-  } catch (err) {
-    logger.error("Email send threw", { error: err instanceof Error ? err.message : String(err) })
-    return { sent: false, reason: "provider_error", detail: String(err) }
+    await new Promise((resolve) => setTimeout(resolve, retryDelay()))
   }
 }
 

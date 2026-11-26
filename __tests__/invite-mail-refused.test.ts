@@ -63,6 +63,14 @@ describe("an invite that could not be emailed", () => {
     expect(mockAudit.mock.calls[0][0].details).toMatchObject({ emailSent: false, emailFailure: "provider_error" })
   })
 
+  it("reads a suppressed address as refused: the invite stands and the link is handed over (SCRUM-1280)", async () => {
+    mockSend.mockResolvedValue({ sent: false, reason: "suppressed" })
+    const r = await inviteMember("11111111-1111-4111-8111-111111111111", "someone@blendn.app", "staff")
+    expect(r).toMatchObject({ ok: true, emailFailure: "provider_error" })
+    expect(r.message).not.toMatch(/isn’t configured/)
+    expect(r.link).toMatch(/^http:\/\/localhost\/invite\?token=/)
+  })
+
   it("says the platform has no email only when it has none", async () => {
     configured = false
     const r = await inviteMember("11111111-1111-4111-8111-111111111111", "someone@blendn.app", "staff")
