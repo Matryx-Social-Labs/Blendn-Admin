@@ -22,7 +22,7 @@ jest.mock("@/lib/audit-log", () => ({ auditLog, auditInTx: (_tx: unknown, entry:
 jest.mock("@/lib/socket-server", () => ({ emitChatMessageHidden }))
 jest.mock("@/lib/trust", () => ({ trustSignalsFor: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
-jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "admin", role: "app_admin", signedInAt: 0 } }) }))
+jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "admin", role: "app_admin", signedInAt: Date.now() } }) }))
 
 import { resolveFlag } from "@/app/dashboard/moderation/actions"
 

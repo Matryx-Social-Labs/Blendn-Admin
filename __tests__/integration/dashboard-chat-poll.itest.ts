@@ -1,5 +1,5 @@
 let session: { user: { id: string; role: "app_admin" } } | null = null
-jest.mock("@/lib/auth", () => ({ getAuth: async () => (session ? { ...session, user: { signedInAt: 0, ...session.user } } : null) }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => (session ? { ...session, user: { signedInAt: Date.now(), ...session.user } } : null) }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { GET as roomFeed } from "@/app/api/events/[id]/chat/messages/route"

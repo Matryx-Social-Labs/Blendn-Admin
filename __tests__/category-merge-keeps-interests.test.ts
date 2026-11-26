@@ -32,7 +32,7 @@ jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 // `requireAdmin` reads the caller's row through `db.user`, which answers with
 // the session's role, so the session is what gets mocked.
 const mockAuth = jest.fn()
-jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth(); return s?.user ? { ...s, user: { signedInAt: Date.now(), ...s.user } } : s } }))
 
 import { mergeCategory } from "@/lib/category-actions"
 

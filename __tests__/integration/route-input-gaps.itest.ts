@@ -1,5 +1,5 @@
 let session: { user: { id: string; role: string } } | null = null
-jest.mock("@/lib/auth", () => ({ getAuth: async () => (session?.user ? { ...session, user: { signedInAt: 0, ...session.user } } : session) }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => (session?.user ? { ...session, user: { signedInAt: Date.now(), ...session.user } } : session) }))
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 process.env.NEXTAUTH_SECRET ??= "itest-input-gaps-secret-of-32-characters"
 process.env.MOBILE_JWT_SECRET ??= "itest-mobile-secret-0123456789abcdefghij"

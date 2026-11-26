@@ -1,5 +1,5 @@
 // Relative imports, as lib/auth.ts.
-import { clientNetworkFrom } from "./client-ip"
+import { clientIpFrom, clientNetworkFrom } from "./client-ip"
 import { RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW } from "./constants"
 import { forget, hit, release } from "./rate-limit-store"
 import { SIGNIN_ACCOUNT_LOCKED, SIGNIN_RATE_LIMITED } from "./rbac"
@@ -45,10 +45,16 @@ export interface SigninKeys {
   accountDay: string
 }
 
-export function signinKeys(email: string, headers: Record<string, unknown> | undefined): SigninKeys {
-  const network = clientNetworkFrom({
-    get: (name) => (typeof headers?.[name] === "string" ? (headers[name] as string) : null),
-  })
+type SigninHeaders = Record<string, unknown> | undefined
+const reader = (headers: SigninHeaders) => ({
+  get: (name: string) => (typeof headers?.[name] === "string" ? (headers[name] as string) : null),
+})
+
+/** The address a sign-in came from, for its audit row: the limits' own reader, the address rather than its /64. */
+export const signinIp = (headers: SigninHeaders): string => clientIpFrom(reader(headers))
+
+export function signinKeys(email: string, headers: SigninHeaders): SigninKeys {
+  const network = clientNetworkFrom(reader(headers))
   return { network: `${PREFIX}:${network}`, account: `${PREFIX}:acct:${email}`, accountDay: `${PREFIX}:acct-day:${email}` }
 }
 

@@ -8,10 +8,10 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
  * organisation memberships, `eventPermissions`, the room, the snapshot.
  */
 // With the `signedInAt` every session carries (lib/session-revocation.ts).
-jest.mock("next-auth/jwt", () => ({ decode: async ({ token }: { token: string }) => ({ sub: token, signedInAt: 0 }) }))
+jest.mock("next-auth/jwt", () => ({ decode: async ({ token }: { token: string }) => ({ sub: token, signedInAt: Date.now() }) }))
 let session: { user: { id: string; role: DashboardRole } } | null = null
 // As getAuth() returns it: the jwt callback always writes signedInAt (lib/session-revocation.ts).
-jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await session; return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await session; return s?.user ? { ...s, user: { signedInAt: Date.now(), ...s.user } } : s } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 // Needs a mounted app router; it is the organiser's venue link in the header.
 jest.mock("@/app/dashboard/events/[id]/venue-link", () => ({ EventVenueLink: () => null }))

@@ -38,7 +38,7 @@ jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/auth", () => ({
   getAuth: async () => {
     const session = await mockAuth()
-    return session?.user ? { ...session, user: { signedInAt: 0, ...session.user } } : session
+    return session?.user ? { ...session, user: { signedInAt: Date.now(), ...session.user } } : session
   },
 }))
 // The in-transaction writer, as lib/audit-log.ts writes it: through the transaction's audit_logs.
