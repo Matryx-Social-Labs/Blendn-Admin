@@ -52,13 +52,18 @@ export function useOpsSnapshot(eventId: string, enabled: boolean) {
       setSnapshot(data)
       setStatus("live")
       clearTimeout(quiet)
+      // Dropped and opened again, by the close listener below: so "reconnecting"
+      // is true, and does not wait the 85 s for Socket.io's ping to notice.
       quiet = setTimeout(() => {
-        if (!cancelled) setStatus("error")
+        if (!cancelled) socket?.disconnect()
       }, QUIET_MS)
     })
 
     socket.on("error", (payload: { message: string; code?: string }) => {
       if (cancelled) return
+      // The server answered, so the socket is not quiet; and a refusal must not be
+      // turned into "connection lost" twenty seconds later.
+      clearTimeout(quiet)
       // Distinguished from a transport failure on purpose: "you may not watch
       // this" and "the connection dropped" need different words on screen.
       setStatus(payload.code === "OPS_FORBIDDEN" ? "denied" : "error")
@@ -73,8 +78,9 @@ export function useOpsSnapshot(eventId: string, enabled: boolean) {
     })
 
     // A close Socket.io will not retry (the server sent DISCONNECT, as
-    // `evictUserSockets` does) is stale at once, and is retried here, so the
-    // screen's "reconnecting" stays true. An ended session fails the handshake.
+    // `evictUserSockets` does, or the quiet timer above dropped it) is stale at
+    // once, and is retried here, so the screen's "reconnecting" stays true. An
+    // ended session fails the handshake; a lost right is refused at the join.
     socket.on("disconnect", () => {
       if (cancelled || socket?.active) return
       setStatus("error")

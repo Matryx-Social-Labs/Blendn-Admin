@@ -44,7 +44,12 @@ const socket = {
   },
   emit: jest.fn(),
   connect: jest.fn(),
-  disconnect: jest.fn(),
+  // As Socket.io's own: a client-side disconnect is a "disconnect" it will not retry.
+  disconnect: jest.fn(function (this: { active: boolean; fire: (e: string, ...a: unknown[]) => void }) {
+    this.active = false
+    this.fire("disconnect", "io client disconnect")
+    return this
+  }),
   fire(event: string, ...args: unknown[]) {
     this.handlers.get(event)?.(...args)
   },
@@ -62,6 +67,7 @@ beforeEach(() => {
   socket.handlers.clear()
   socket.active = true
   socket.connect.mockClear()
+  socket.disconnect.mockClear()
   useOpsSnapshot("e1", true)
   socket.fire("connect")
   socket.fire("ops:snapshot", snapshot)
@@ -107,6 +113,9 @@ describe("useOpsSnapshot after the first snapshot", () => {
     expect(mockStatus()).toBe("live")
     jest.advanceTimersByTime(1)
     expect(mockStatus()).toBe("error")
+    // "Reconnecting" is made true: the quiet socket is dropped and opened again.
+    expect(socket.disconnect).toHaveBeenCalledTimes(1)
+    expect(socket.connect).toHaveBeenCalledTimes(1)
     socket.fire("ops:snapshot", snapshot)
     expect(mockStatus()).toBe("live")
   })
@@ -118,6 +127,19 @@ describe("useOpsSnapshot after the first snapshot", () => {
       expect(mockStatus()).toBe("live")
       socket.fire("ops:snapshot", snapshot)
     }
+  })
+
+  it("leaves a refusal alone: a rejoin the server refuses stays denied", () => {
+    socket.fire("error", { message: "Not authorized to watch this event", code: "OPS_FORBIDDEN" })
+    jest.advanceTimersByTime(10 * OPS_INTERVAL_MS)
+    expect(mockStatus()).toBe("denied")
+    expect(socket.disconnect).not.toHaveBeenCalled()
+  })
+
+  it("is not cleared by another event's snapshot", () => {
+    socket.fire("connect_error", new Error("timeout"))
+    socket.fire("ops:snapshot", { ...snapshot, eventId: "e2" })
+    expect(mockStatus()).toBe("error")
   })
 
   it("keeps the old figures while stale: the screen says they are from then", () => {

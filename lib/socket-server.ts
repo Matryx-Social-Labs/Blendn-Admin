@@ -362,7 +362,6 @@ const opsTimers = new Map<string, OpsLoop>()
 const SOCKET_EVENT_BUDGET = 120
 const SOCKET_EVENT_WINDOW_MS = 10_000
 
-
 export function startOpsBroadcast(eventId: string): void {
   const io = currentIo()
   if (!io || opsTimers.has(eventId)) return
