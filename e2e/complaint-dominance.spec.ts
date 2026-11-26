@@ -20,7 +20,8 @@ import { buildLiveSnapshot } from "../lib/live-snapshot"
  */
 
 const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL, max: 1 }) })
-const tag = `e2e-dominance-${randomUUID().slice(0, 8)}`
+// No "dominance" in the tag: it is in the title and slug, and the page is searched for that word.
+const tag = `e2e-t08-${randomUUID().slice(0, 8)}`
 const WIDTHS = [1280, 768] as const
 const HOUR = 60 * 60 * 1000
 
@@ -110,14 +111,14 @@ test.afterAll(async () => {
 const overflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
 
 /** One category's row in "What went wrong", by its label. */
-const row = (page: Page, label: string) => page.locator("span", { hasText: new RegExp(`^${label}$`) }).locator("..")
+const row = (page: Page, label: string) => page.locator("span", { hasText: new RegExp(`^${label}$`) }).filter({ visible: true }).first().locator("..")
 
 test("the Feedback tab holds back the category one person dominates, as it does one under the floor", async ({ baseURL }) => {
   for (const width of WIDTHS) {
     const ctx = await browser.newContext({ baseURL, viewport: { width, height: 900 }, storageState: await sessionFor(baseURL!) })
     const page = await ctx.newPage()
     await page.goto(`/dashboard/events/${eventId}/feedback`)
-    await expect(page.getByText("What went wrong")).toBeVisible()
+    await expect(page.getByRole("heading", { name: "What went wrong" }).filter({ visible: true }).first()).toBeVisible()
 
     await expect(row(page, "crowding")).toContainText("10")
     await expect(row(page, "entry queue")).toContainText("<5")
