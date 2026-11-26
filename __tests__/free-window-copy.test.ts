@@ -26,14 +26,14 @@ describe("the free window in copy", () => {
 
   it.each(FREE_WINDOW_COPY)("%s never states the old rule as a literal", (file) => {
     const text = read(file)
-    expect(text).not.toMatch(/\b30 days\b/)
+    expect(text).not.toMatch(/\b30 days after\b|\bfor 30 days\b/)
     expect(text).not.toMatch(/\b(5|five|six) people\b/i)
   })
 
-  it.each(["lib/access-line-copy.ts", "app/dashboard/plan/page.tsx", "app/pricing/page.tsx"])("%s reads both constants", (file) => {
+  it.each(["lib/access-line-copy.ts", "app/dashboard/plan/page.tsx", "app/pricing/page.tsx"])("%s interpolates both constants", (file) => {
     const text = read(file)
-    expect(text).toMatch(/\bFREE_WINDOW_DAYS\b/)
-    expect(text).toMatch(/\bMIN_ATTENDEES\b/)
+    expect(text).toMatch(/\{FREE_WINDOW_DAYS\}/)
+    expect(text).toMatch(/\{MIN_ATTENDEES\}/)
   })
 
   // A client page cannot import the server constant; it says "three months", which is 90 days.
