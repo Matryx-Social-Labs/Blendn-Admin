@@ -2,6 +2,7 @@ import { readFileSync } from "fs"
 import { join } from "path"
 import {
   UNNAMED,
+  beganAsRequest,
   displayNameInConversation,
   mayShowRealName,
   theyAskedToSwap,
@@ -142,6 +143,21 @@ describe("theyAskedToSwap", () => {
     expect(theyAskedToSwap(conv({ user1_revealed: true }), A)).toBe(false)
     expect(theyAskedToSwap(conv({ user1_revealed: true, user2_revealed: true }), A)).toBe(false)
     expect(theyAskedToSwap(conv({ user1_pseudonym: null, user2_pseudonym: null, user2_revealed: true }), A)).toBe(false)
+  })
+})
+
+describe("beganAsRequest", () => {
+  // What the DM push asks (SCRUM-1266): a request-born conversation's push names nobody and quotes nothing.
+  const never = { user1_pseudonym: null, user2_pseudonym: null }
+
+  it("is true for a conversation that never had pseudonyms and was not opened between friends", () => {
+    expect(beganAsRequest({ ...conv(never), origin_friendship: false })).toBe(true)
+  })
+
+  it("is false for a match or a Lobby ask (pseudonymous, swapped or not) and for a friends' DM", () => {
+    expect(beganAsRequest({ ...conv(), origin_friendship: false })).toBe(false)
+    expect(beganAsRequest({ ...conv({ user1_revealed: true, user2_revealed: true }), origin_friendship: false })).toBe(false)
+    expect(beganAsRequest({ ...conv(never), origin_friendship: true })).toBe(false)
   })
 })
 
