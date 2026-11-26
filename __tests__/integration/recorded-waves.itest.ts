@@ -156,10 +156,10 @@ describe("one wave per pair per room, recorded", () => {
     const ben = await person("rw-x-b")
     const other = await makeEvent(users[0])
     events.push(other)
-    expect(await recordWave(eventId, ana.id, ben.id, { answering: false })).toEqual({ recorded: true })
+    expect(await recordWave(eventId, ana.id, ben.id)).toEqual({ recorded: true })
     // W1 is per room: the same pair here again is the duplicate, and stores nothing.
-    expect(await recordWave(eventId, ana.id, ben.id, { answering: false })).toEqual({ recorded: false, capped: null })
-    expect(await recordWave(other, ana.id, ben.id, { answering: false })).toEqual({ recorded: true })
+    expect(await recordWave(eventId, ana.id, ben.id)).toEqual({ recorded: false, capped: null })
+    expect(await recordWave(other, ana.id, ben.id)).toEqual({ recorded: true })
   })
 
   it("a handle waved at in another room minutes ago is answered byte for byte as a stranger's, and is delivered (SCRUM-1385)", async () => {

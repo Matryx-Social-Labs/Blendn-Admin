@@ -1272,9 +1272,10 @@ anonymous conversation.
   inside, `NOT_CHECKED_IN` after leaving), before anything about the recipient
   is read; nothing is stored and nobody is pinged. A client should offer
   "Turn on Show online to wave" from its own setting rather than wait for this.
-  A new wave at the
-  same person within 10 minutes in another room is `429 WAVE_TOO_SOON` (a wave
-  back is never held by it).
+  Nothing limits the
+  pair across rooms: a wave at the same person in another room is a first wave
+  there (SCRUM-1385), so a handle is answered the same whoever is behind it.
+  `WAVE_TOO_SOON` is no longer sent (installed clients still map it).
 
 `GET /events/:eventId/waves?cursor=` — who waved at you here, newest first, 20 a
 page: `{ open, total, waves: [{ userId, displayName, wavedAt, wavedBack }], nextCursor }`.
