@@ -37,6 +37,7 @@ jest.mock("@/lib/db", () => ({
     user: { update: jest.fn() },
     board_posts: { findUnique: jest.fn(), updateMany: jest.fn() },
     photo_checks: { findUnique: jest.fn() },
+    audit_logs: { create: jest.fn() },
     $queryRaw: jest.fn(),
     $transaction: jest.fn(async (fn: (tx: unknown) => unknown) => fn(jest.requireMock("@/lib/db").db)),
   },
@@ -226,6 +227,49 @@ describe("holdSexualImage", () => {
   })
 })
 
+describe("holdSexualImage, the edges", () => {
+  const hide = (categories: Record<string, number>): ModerationCheck => ({
+    checked: true,
+    result: { action: "hide", source: "openai_image", categories, confidence: 0.9 },
+  })
+
+  it("another category's hide that also names sexual pages, and sexual/minors is the category it records", async () => {
+    await holdSexualImage(hide({ violence: 0.9, sexual: 0.45 }), "profile", PROFILE_KEY, USER)
+    await holdSexualImage(hide({ sexual: 0.9, "sexual/minors": 0.5 }), "blur", BLUR_KEY, USER)
+    expect(page).toHaveBeenCalledTimes(2)
+    expect(audit.mock.calls.map(([, entry]) => entry.details.category)).toEqual(["sexual", "sexual/minors"])
+  })
+
+  it("the staging override's hide pages nobody", async () => {
+    await holdSexualImage(hide({ staging_override: 1 }), "profile", PROFILE_KEY, USER)
+    expect(page).not.toHaveBeenCalled()
+    expect(audit).not.toHaveBeenCalled()
+  })
+
+  it("a key it could not resolve still pages and writes the row, and says so at error", async () => {
+    await holdSexualImage(SEXUAL_HIDE, "lobby", null, USER)
+    expect(page).toHaveBeenCalledTimes(1)
+    expect(audit).toHaveBeenCalledWith(expect.anything(), auditEntry("lobby", null as unknown as string))
+    expect(logger.error).toHaveBeenCalledWith("Sexual image hold: the object key could not be resolved", { userId: USER, objectKey: null })
+  })
+
+  it("the real audit writer stores the platform's row: no actor, no address, no organisation", async () => {
+    audit.mockImplementation(jest.requireActual("@/lib/audit-log").auditInTx)
+    await holdSexualImage(SEXUAL_HIDE, "profile", PROFILE_KEY, USER)
+    expect(db.audit_logs.create).toHaveBeenCalledWith({
+      data: {
+        user_id: null,
+        action: "moderation.sexual_image_hold",
+        resource: "user",
+        resource_id: USER,
+        details: { objectKey: PROFILE_KEY, path: "profile", category: "sexual" },
+        ip_address: null,
+        org_id: null,
+      },
+    })
+  })
+})
+
 describe("the page is never lost to a pull that fails", () => {
   it("a profile pull that throws still pages, and the failure is logged", async () => {
     pulled.mockRejectedValueOnce(new Error("deadlock detected"))
@@ -236,6 +280,19 @@ describe("the page is never lost to a pull that fails", () => {
     expect(page).toHaveBeenCalledTimes(1)
     expect(logger.error).toHaveBeenCalledWith(
       "Profile photo moderation failed; photo left in place",
+      expect.objectContaining({ userId: USER, error: "deadlock detected" })
+    )
+  })
+
+  it("a blur pull that throws still pages, and the failure is logged", async () => {
+    pulled.mockRejectedValueOnce(new Error("deadlock detected"))
+    vendor.mockResolvedValue(SEXUAL_HIDE)
+
+    await moderateBlurPhoto(BLUR_URL, USER)
+
+    expect(page).toHaveBeenCalledTimes(1)
+    expect(logger.error).toHaveBeenCalledWith(
+      "Blurred photo moderation failed; left in place",
       expect.objectContaining({ userId: USER, error: "deadlock detected" })
     )
   })
