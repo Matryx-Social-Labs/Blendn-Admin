@@ -1,13 +1,20 @@
 // Relative imports: reached from server.ts through lib/reminder-sweeper.ts (build:server is plain tsc).
+import { FREE_WINDOW_DAYS, freeWindow } from "./analytics-access"
 import { db } from "./db"
-import { freeWindowEndingEmail, sendEmail } from "./email"
+import { emailConfigured, freeWindowEndingEmail, sendEmail } from "./email"
 import { liveEntitlement } from "./entitlements"
+import { realEventsWhere } from "./event-kind"
 import { logger } from "./logger"
 import { mayBuyHere } from "./plan-market"
 
 /** How long before `analytics_free_until` the mail goes (DECISIONS 2026-11-25: "one email 14 days before it ends"). */
 const FREE_WINDOW_NOTICE_DAYS = 14
 const DAY_MS = 24 * 60 * 60 * 1000
+/** Windows the pass writes at most, for hosts who never opened Plan or Analytics (SCRUM-1421). */
+const WINDOW_WRITES_PER_PASS = 25
+/** Where the last pass's pick stopped, so a band of more than 25 takes turns (per process; a restart starts over). */
+let windowPickOffset = 0
+let warnedUnconfigured = false
 
 /**
  * One mail per organisation per free window (SCRUM-1275), to its owners and
@@ -24,6 +31,17 @@ const DAY_MS = 24 * 60 * 60 * 1000
  * Returns how many organisations it mailed.
  */
 export async function sendFreeWindowEndingMail(now: Date = new Date()): Promise<number> {
+  // Before anything is claimed (SCRUM-1421): an unset key would claim every organisation due and mail none of them.
+  if (!emailConfigured()) {
+    if (!warnedUnconfigured) logger.warn("Free-window ending mail off: RESEND_API_KEY or EMAIL_FROM unset")
+    warnedUnconfigured = true
+    return 0
+  }
+  // Its own catch: a failed window write never holds back the mail to organisations that have theirs.
+  await writeMissingWindows(now).catch((error: unknown) =>
+    logger.warn("Free windows not written this pass", { error: error instanceof Error ? error.message : String(error) })
+  )
+
   // ponytail: unbounded, but only organisations whose window ends in the next 14 days and that are unmailed; the
   // entitled and the not-in-market among them are re-read every pass. Add a batch if that ever runs to thousands.
   const due = await db.organisations.findMany({
@@ -80,4 +98,52 @@ async function mailOwnersAndAdmins(orgId: string, mail: { subject: string; text:
     })
   }
   return unsent.length < members.length
+}
+
+/**
+ * The window is otherwise written only when somebody opens Plan or Analytics
+ * (`analyticsAccess`), so a host who never did would never be picked above
+ * (SCRUM-1421). Written here through the same `freeWindow`, for organisations
+ * with a real night that ended 76 to 90 days ago: the nights whose window
+ * could end within the notice. An older first night gives a window already
+ * past, written and not mailed; a newer one is written when it reaches day 76.
+ * Nothing is read for an organisation that has its window.
+ *
+ * ponytail: 25 a pass, oldest organisation first, the next 25 on the next
+ * pass. A night under 8 is recounted each turn while it is in the 14-day band
+ * (about 3 indexed queries per organisation); remember who was counted if
+ * that grows. The pick reads the whole (status, end_time) index on events;
+ * a partial index on end_time once events pass ~500k rows. A sweeper down for
+ * over 14 days lets a night leave the band unmailed (written on first view).
+ */
+async function writeMissingWindows(now: Date): Promise<void> {
+  const daysAgo = (days: number) => new Date(now.getTime() - days * DAY_MS)
+  const orgs = await db.organisations.findMany({
+    where: {
+      analytics_free_until: null,
+      events: {
+        some: {
+          ...realEventsWhere,
+          deleted_at: null,
+          end_time: { gt: daysAgo(FREE_WINDOW_DAYS), lte: daysAgo(FREE_WINDOW_DAYS - FREE_WINDOW_NOTICE_DAYS) },
+        },
+      },
+    },
+    select: { id: true },
+    orderBy: [{ created_at: "asc" }, { id: "asc" }],
+    skip: windowPickOffset,
+    take: WINDOW_WRITES_PER_PASS,
+  })
+  windowPickOffset = orgs.length < WINDOW_WRITES_PER_PASS ? 0 : windowPickOffset + orgs.length
+  for (const org of orgs) {
+    try {
+      await freeWindow(org.id, now)
+    } catch (error) {
+      // Asked again next pass; one organisation never holds back the rest, or the mail.
+      logger.warn("Free window not written this pass", {
+        orgId: org.id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
 }
