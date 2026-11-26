@@ -24,8 +24,8 @@ registry.registerPath({
     "and is additionally checked against obvious choices and against the local part of the " +
     "address — the same rule `/api/auth/reset-password` enforces, so a password accepted here " +
     "can always be reset to something similar. Returns the created profile alongside the user. " +
-    "409 `CONFLICT` \"Email already registered\" for a taken address, and for the same inbox as a " +
-    "suspended account (lower case, no `+tag`, Gmail dots ignored); no account is written. " +
+    "409 `CONFLICT` \"Email already registered\" when any account holds the same inbox (lower case, " +
+    "no `+tag`, Gmail dots ignored); no account is written. " +
     "Rate limited: 3 requests per hour.",
   request: {
     body: {

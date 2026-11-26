@@ -68,6 +68,34 @@ async function expectSuspendedRefusal(res: Response) {
   })
 }
 
+describe("identity_email, the one definition (migration SQL)", () => {
+  const key = async (email: string | null) =>
+    (await db.$queryRaw<{ key: string | null }[]>`SELECT identity_email(${email}::text) AS "key"`)[0].key
+
+  it.each([
+    [" A.B+x@GoogleMail.com ", "ab@gmail.com"],
+    ["A.B+x@Gmail.com", "ab@gmail.com"],
+    ["a.b+x@company.com", "a.b@company.com"],
+    ["Rhea.Kapoor+again@blendn.app", "rhea.kapoor@blendn.app"],
+    ["+x@company.com", "+x@company.com"],
+  ])("folds %s to %s", async (email, expected) => {
+    expect(await key(email)).toBe(expected)
+  })
+
+  it.each([[null], [""], ["no-at-sign"]])("gives NULL for %p, which matches nobody", async (email) => {
+    expect(await key(email)).toBeNull()
+  })
+
+  it("is IMMUTABLE and indexed", async () => {
+    const [fn] = await db.$queryRaw<{ volatile: string }[]>`
+      SELECT provolatile::text AS "volatile" FROM pg_proc WHERE proname = 'identity_email'`
+    expect(fn.volatile).toBe("i")
+    const [idx] = await db.$queryRaw<{ valid: boolean }[]>`
+      SELECT indisvalid AS "valid" FROM pg_index WHERE indexrelid = '"User_identity_email_idx"'::regclass`
+    expect(idx.valid).toBe(true)
+  })
+})
+
 /** `itest_x_abc` → `it.est_x_abc`: the same Gmail inbox, the dots moved. */
 const dotsMoved = (local: string) => `${local.slice(0, 2)}.${local.slice(2)}`
 
@@ -96,6 +124,18 @@ describe("sign-up", () => {
     await suspended(`${local}@blendn.test`)
     const res = await signup(`${local}+2@blendn.test`)
     expect({ status: res.status, body: await res.json() }).toEqual(await takenAnswer())
+  })
+
+  it("answers an active owner's +tag and a suspended owner's +tag byte for byte the same", async () => {
+    const answer = async (suspendedAt: Date | null) => {
+      const local = testId("owner")
+      users.push((await db.user.create({ data: { email: `${local}@gmail.com`, name: "Owner", suspended_at: suspendedAt }, select: { id: true } })).id)
+      const res = await signup(`${dotsMoved(local)}+q@gmail.com`)
+      return { status: res.status, body: await res.text() }
+    }
+    const active = await answer(null)
+    expect(active).toEqual(await answer(new Date()))
+    expect(active.status).toBe(409)
   })
 
   it("lets a fresh email sign up (negative control)", async () => {

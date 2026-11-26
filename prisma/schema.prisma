@@ -44,6 +44,8 @@ enum user_role {
 model User {
   id            String    @id @default(cuid())
   name          String?
+  /// Also indexed as `identity_email(email)` ("User_identity_email_idx", SCRUM-1172): one key per inbox, read by
+  /// lib/suspended-identity.ts. Migration SQL only — this file cannot express an expression index.
   email         String    @unique
   emailVerified DateTime?
   password      String? // hashed password for credentials

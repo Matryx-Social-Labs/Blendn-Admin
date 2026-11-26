@@ -22,7 +22,7 @@ import { checkPassword } from "@/lib/password"
 import { normalizeLocationToCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
 import { screenUserText, textNotAllowedResponse } from "@/lib/moderation/user-text"
-import { isSuspendedIdentity } from "@/lib/suspended-identity"
+import { inboxTaken } from "@/lib/suspended-identity"
 
 export async function POST(request: NextRequest) {
   // Apply rate limiting
@@ -64,17 +64,12 @@ export async function POST(request: NextRequest) {
     }
 
     /*
-     * Taken, or the same inbox as a suspended account under a +tag or moved
-     * dots (SCRUM-1172): one answer for both, and both reads always run, so
-     * sign-up never says which addresses are suspended (sign-in says so only
-     * after the password).
+     * Taken: any account holding the same inbox, also under another case, a
+     * +tag or moved dots (`identity_email`, SCRUM-1172). One answer whoever
+     * holds it, so sign-up never says which addresses are suspended (sign-in
+     * says so only after the password).
      */
-    const [existingUser, suspended] = await Promise.all([
-      db.user.findUnique({ where: { email }, select: { id: true } }),
-      isSuspendedIdentity(email),
-    ])
-
-    if (existingUser || suspended) {
+    if (await inboxTaken(email)) {
       return conflictResponse("Email already registered")
     }
 

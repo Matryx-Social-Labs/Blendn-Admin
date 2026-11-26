@@ -1,30 +1,19 @@
-import { db } from "@/lib/db"
-
-const GMAIL_DOMAINS = new Set(["gmail.com", "googlemail.com"])
+import { db } from "./db"
 
 /**
- * One key per inbox: lower case, no `+tag`, and for Gmail no dots and one
- * domain, so `A.B+x@Gmail.com` and `ab@gmail.com` are the same person.
+ * The accounts that hold this inbox. `identity_email` (migration SQL, SCRUM-1172) folds case, a `+tag`, and
+ * Gmail's dots and googlemail.com, so `A.B+x@Gmail.com` and `ab@gmail.com` are one inbox; indexed.
  */
-export function identityEmail(email: string): string {
-  const typed = email.trim().toLowerCase()
-  const at = typed.lastIndexOf("@")
-  const local = typed.slice(0, at).split("+")[0] || typed.slice(0, at)
-  const domain = typed.slice(at + 1)
-  return GMAIL_DOMAINS.has(domain) ? `${local.replaceAll(".", "")}@gmail.com` : `${local}@${domain}`
+const holdersOf = (email: string) =>
+  db.$queryRaw<{ suspended: boolean }[]>`
+    SELECT "suspended_at" IS NOT NULL AS "suspended" FROM "User" WHERE identity_email("email") = identity_email(${email})`
+
+/** Whether any account holds this inbox: sign-up answers it as a taken address. */
+export async function inboxTaken(email: string): Promise<boolean> {
+  return (await holdersOf(email)).length > 0
 }
 
-/**
- * Whether a new account for this email would be a suspended person's
- * (SCRUM-1172). Read before sign-up, Google or Apple creates a `User`.
- */
+/** Whether a suspended account holds this inbox: Google and Apple refuse to create an account for it. */
 export async function isSuspendedIdentity(email: string): Promise<boolean> {
-  const key = identityEmail(email)
-  const domains = key.endsWith("@gmail.com") ? [...GMAIL_DOMAINS] : [key.slice(key.lastIndexOf("@") + 1)]
-  // ponytail: reads every suspended row on the domain; fine while suspensions are few, a stored key column if not.
-  const suspended = await db.user.findMany({
-    where: { suspended_at: { not: null }, OR: domains.map((d) => ({ email: { endsWith: `@${d}` } })) },
-    select: { email: true },
-  })
-  return suspended.some((user) => identityEmail(user.email) === key)
+  return (await holdersOf(email)).some((holder) => holder.suspended)
 }
