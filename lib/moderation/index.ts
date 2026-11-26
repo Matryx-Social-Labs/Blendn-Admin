@@ -3,7 +3,7 @@ import { checkKeywords } from "./keyword-filter"
 import { checkTextContent, checkImageContent, type ModerationCheck } from "./openai-moderation"
 import { hideMessage, flagForReview, checkAndAutoMute, recordExamined } from "./actions"
 import { checkContactInfo } from "./contact-info"
-import { forcedHide } from "./staging-override"
+import { forcedHide, textCheckFor } from "./staging-override"
 import { readableUrl } from "@/lib/tigris"
 import type { ModerationResult } from "./types"
 
@@ -17,12 +17,12 @@ import type { ModerationResult } from "./types"
  * emit — the ordering CLAUDE.md names as a real bug once already. One
  * function, so a third route cannot pick which checks to run before saving.
  *
- * `autoMute` is false for contact details: sharing your own number is not
- * abuse, and three of them in an hour is not a reason to silence somebody.
- * The rule holds beyond this call (SCRUM-485): a contact-only hide does not
- * count toward the NEXT mute either, and the auto-unmute counts the same way
- * (`abuseHiddenCount` in `actions.ts`). A hide that carries a contact detail
- * and anything else counts.
+ * `autoMute` is true for a slur only. Sharing your own number is not abuse
+ * (SCRUM-485), and a swear word the list hides harms nobody else in the room
+ * (D-052a): neither starts a mute, the count that decides the NEXT mute leaves
+ * both out, and the auto-unmute counts the same way (`abuseHiddenCount` in
+ * `actions.ts`). The model still judges such a line, after the response
+ * (`recordHide`), and its `hide` counts.
  */
 export function preSaveCheck(content: string): { hide: PreSaveHide | null; keyword: ModerationResult | null } {
   // The keyword verdict goes back too: a route reuses it for `inlineFlags` rather than asking twice.
@@ -32,11 +32,50 @@ export function preSaveCheck(content: string): { hide: PreSaveHide | null; keywo
 
 type PreSaveHide = { result: ModerationResult; autoMute: boolean }
 
+const keywordHide = (keyword: ModerationResult | null): PreSaveHide | null =>
+  keyword?.action === "hide" ? { result: keyword, autoMute: "slur" in keyword.categories } : null
+
 function hideBeforeSave(content: string, keyword: ModerationResult | null): PreSaveHide | null {
-  if (keyword && keyword.action === "hide") return { result: keyword, autoMute: true }
+  const hide = keywordHide(keyword)
+  if (hide) return hide
   const contact = checkContactInfo(content)
   if (contact && contact.action === "hide") return { result: contact, autoMute: false }
   return null
+}
+
+/**
+ * Records a line the deterministic checks hid, off the response path: its flag,
+ * then the mute count. A hide that does not count by itself (a swear word, a
+ * contact detail) is put to the model, and the model's `hide` is recorded as
+ * its own flag and counts. A model that cannot answer leaves the line uncounted.
+ * The line is already hidden; nothing here is emitted. Never throws.
+ */
+export async function recordHide(
+  messageId: string,
+  chatGroupId: string,
+  userId: string,
+  content: string,
+  hide: PreSaveHide,
+  textCheck?: Promise<ModerationCheck>
+): Promise<void> {
+  try {
+    // The flag before the count: the count reads flags (SCRUM-483).
+    await flagForReview(messageId, chatGroupId, userId, hide.result)
+    if (!hide.autoMute) {
+      let text = await (textCheck ?? textCheckFor(userId, content))
+      // A call that failed outright is asked once more, as `moderateMessage` does; a timeout or no key is not.
+      if (!text.checked && text.reason === "error") text = await textCheckFor(userId, content)
+      if (!text.checked) {
+        logger.warn("Hidden line not judged by the model; it does not count toward a mute", { messageId, reason: text.reason })
+        return
+      }
+      if (text.result?.action !== "hide") return
+      await flagForReview(messageId, chatGroupId, userId, text.result)
+    }
+    await checkAndAutoMute(userId, chatGroupId)
+  } catch (error) {
+    logger.error("Failed to record a hidden line", { messageId, error: String(error) })
+  }
 }
 
 /**
@@ -130,10 +169,10 @@ export async function moderateMessage(
     }
 
     const keywordResult = checkKeywords(content)
-    if (keywordResult && keywordResult.action === "hide") {
-      await hideMessage(messageId, chatGroupId, userId, keywordResult)
-      await flagForReview(messageId, chatGroupId, userId, keywordResult)
-      await checkAndAutoMute(userId, chatGroupId)
+    const hiddenByKeyword = keywordHide(keywordResult)
+    if (hiddenByKeyword) {
+      await hideMessage(messageId, chatGroupId, userId, hiddenByKeyword.result)
+      await recordHide(messageId, chatGroupId, userId, content, hiddenByKeyword, textCheck)
       return
     }
 

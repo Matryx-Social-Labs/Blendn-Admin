@@ -10,7 +10,7 @@ import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { idForViewer } from "@/lib/room-handle"
 import { crewMemberImages, namesInRoom } from "@/lib/identity"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { moderateMessage, checkSpam, preSaveCheck, inlineFlags } from "@/lib/moderation"
+import { moderateMessage, checkSpam, preSaveCheck, inlineFlags, recordHide } from "@/lib/moderation"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
 import { notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 import { textCheckFor } from "@/lib/moderation/staging-override"
@@ -523,13 +523,11 @@ export async function POST(
         if (!raced) throw error
         return answerRoomRetry(raced, chatGroupId)
       }
-      // Flag for review and, for abuse rather than a phone number, count
-      // toward an auto-mute (fire-and-forget). The flag first: the count reads
+      // Flag for review and, for a slur or a line the model judges abusive,
+      // count toward an auto-mute (`recordHide`, fire-and-forget). The flag first: the count reads
       // flags, and run side by side it missed this message's own, so the mute
       // landed on the fourth hidden message instead of the third (SCRUM-483).
-      void flagForReview(message.id, chatGroupId, user.userId, preSave.result).then(() =>
-        preSave.autoMute ? checkAndAutoMute(user.userId, chatGroupId) : undefined
-      )
+      void recordHide(message.id, chatGroupId, user.userId, content, preSave)
       // Return success to sender but message is already hidden — never emitted to others
       return successResponse({
         id: message.id,

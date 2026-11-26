@@ -283,7 +283,9 @@ The image check uses the same categories and thresholds as text moderation: hide
 
 ### Auto-mute (repeated violations)
 
-If a user accumulates **3 or more hidden abusive messages within 1 hour** in the same chat group, they are automatically muted. A message hidden only for a contact detail (phone, handle, link) is hidden and flagged for review but does **not** count toward a mute (SCRUM-485); a flag that carries anything besides `contact_*` categories does:
+If a user accumulates **3 or more hidden abusive messages within 1 hour** in the same chat group, they are automatically muted. A message hidden only for a contact detail (phone, handle, link) is hidden and flagged for review but does **not** count toward a mute (SCRUM-485); neither does a message the keyword list hid for a swear word, a flag whose only category is `profanity` (D-052a, SCRUM-1469). A keyword hit on the English slurs (the first row of the table above) is written as `slur` and counts. A flag that carries anything besides `contact_*` and `profanity` counts.
+
+The model still judges a line hidden for a swear word or a contact detail, after the response (`recordHide` in `lib/moderation/index.ts`): its `hide` is recorded as a second flag on the message (`auto_text`, the model's categories) and counts. When the model does not answer (no key, an error, a timeout) the line does not count, and a warning is logged. The mute applies only to an `active` member: a host's mute or ban that landed before the count is left as the host set it.
 
 1. `chat_group_members.status` set to `"muted"`
 2. Socket.io emits `chat:memberMuted` with `{ muted: true }` — client disables input
@@ -295,7 +297,7 @@ If a user accumulates **3 or more hidden abusive messages within 1 hour** in the
 
 ### Auto-unmute (mute expiry)
 
-When a muted user tries to send a message, the backend checks if they still have 3+ hidden abusive messages (contact-detail hides do not count) in the last hour:
+When a muted user tries to send a message, the backend checks if they still have 3+ hidden abusive messages (contact-detail and swear-word hides do not count) in the last hour:
 
 1. If **no** (mute window has passed) → auto-unmute: status set to `"active"`, Socket.io emits `chat:memberMuted` with `{ muted: false, reason: "Auto-mute expired" }`, message send proceeds normally
 2. If **yes** (recent violations still in window) → user stays muted, 403 returned
