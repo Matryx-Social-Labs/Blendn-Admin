@@ -31,7 +31,6 @@ const PRO = [
   "12 months of guests by day and time, regulars and returning share",
   "Your venue's history from before your claim, as totals",
   "Blind offers to your regulars, with a monthly send quota (coming)",
-  "Perks for Blendn+ members (coming)",
 ]
 
 /**
