@@ -10,7 +10,7 @@ import { auditInTx, getRequestIp } from "@/lib/audit-log"
 import { orgPermissions } from "@/lib/org-permissions"
 import { hashInviteToken, inviteState } from "@/lib/org-invites"
 import { readJson } from "@/lib/api-input"
-import { ORG_KIND_SQL } from "@/lib/org-membership"
+import { ORG_KIND_SQL, dashboardRoleFor } from "@/lib/org-membership"
 
 /**
  * Accepting an invitation to an organisation.
@@ -142,8 +142,9 @@ export async function POST(req: NextRequest) {
        * organisation's kind, so a brand's member never comes out able to create events. `where` holds "only out of
        * attendee" against whatever changed since the session was read.
        */
-      const [{ kind }] = await tx.$queryRaw<{ kind: "organizer" | "venue_owner" | "sponsor" }[]>`
-        SELECT ${ORG_KIND_SQL} AS kind FROM organisations o WHERE o.id = ${invite.org_id}::uuid`
+      const [org] = await tx.$queryRaw<{ kind: string }[]>`SELECT ${ORG_KIND_SQL} AS kind FROM organisations o WHERE o.id = ${invite.org_id}::uuid`
+      // Through the session's own narrowing: one of the three host kinds, or a throw; no row is `attendee`, a no-op.
+      const kind = dashboardRoleFor({ role: "attendee", home_kind: org?.kind ?? null })
       const promoted = await tx.user.updateMany({ where: { id: user.id, role: "attendee" }, data: { role: kind } })
 
       // In the transaction: a role change this large has a record, or it did not happen.

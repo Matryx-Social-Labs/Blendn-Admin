@@ -36,13 +36,15 @@ async function invitedBy(
   role: "organizer" | "venue_owner" | "sponsor" | "attendee",
   grants: "organizer" | "venue_owner" | "sponsor" | null = null,
   invitedAs: "staff" | "owner" = "staff",
-  kind: "events" | "venue" | "brand" = "events"
+  kind: "events" | "venue" | "brand" | "may_sponsor" = "events",
+  invitee: "attendee" | "venue_owner" = "attendee"
 ) {
   const inviter = await makeUser(testId("inv-from"))
   await db.user.update({ where: { id: inviter }, data: { role } })
   const attendee = await makeUser(testId("inv-to"))
   users.push(inviter, attendee)
-  const org = await db.organisations.create({ data: { display_name: testId("inv-org"), kind: "company", status: "verified" } })
+  if (invitee !== "attendee") await db.user.update({ where: { id: attendee }, data: { role: invitee } })
+  const org = await db.organisations.create({ data: { display_name: testId("inv-org"), kind: "company", status: "verified", may_sponsor: kind === "may_sponsor" } })
   orgs.push(org.id)
   if (kind === "venue") {
     await db.venues.create({ data: { name: testId("inv-venue"), city: "Bengaluru", latitude: 12.97, longitude: 77.6, owner_org_id: org.id, claimed_at: new Date() } })
@@ -80,10 +82,19 @@ describe("accepting an invite as an attendee", () => {
     ["events", "organizer"],
     ["venue", "venue_owner"],
     ["brand", "sponsor"],
+    ["may_sponsor", "sponsor"],
   ] as const)("into a %s org comes out %s, a member of the org, whatever the inviter's role or the invite's grants_role", async (kind, role) => {
     const { attendee, org, token } = await invitedBy("organizer", "organizer", "staff", kind)
     expect((await post(token)).status).toBe(200)
     expect(await standing(attendee, org)).toEqual({ role, members: 1 })
+  })
+
+  it("leaves a row that is not attendee as it is, and records no dashboard role", async () => {
+    const { attendee, org, token } = await invitedBy("organizer", null, "staff", "brand", "venue_owner")
+    expect((await post(token)).status).toBe(200)
+    expect(await standing(attendee, org)).toEqual({ role: "venue_owner", members: 1 })
+    const audit = await db.audit_logs.findFirst({ where: { user_id: attendee, action: "org.invite.accepted" }, select: { details: true } })
+    expect(audit?.details).not.toHaveProperty("dashboardRole")
   })
 
   it("from before the grants_role column, or from an attendee-role owner, is good", async () => {

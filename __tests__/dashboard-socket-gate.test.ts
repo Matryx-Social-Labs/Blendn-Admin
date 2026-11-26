@@ -41,6 +41,14 @@ it("lets a live dashboard account through, with the role read from the row", asy
   expect(mockFindUnique).toHaveBeenCalledTimes(1)
 })
 
+// SCRUM-1247: the role is the home organisation's kind, whatever the row says.
+it("lets in an attendee-role member of a live venue org as venue_owner, and refuses a dashboard-role row with none", async () => {
+  mockFindUnique.mockResolvedValue({ ...live, role: "attendee", home_kind: "venue_owner" })
+  await expect(authenticateDashboardSocket(COOKIE)).resolves.toEqual({ userId: "u1", email: "host@example.com", role: "venue_owner" })
+  mockFindUnique.mockResolvedValue({ ...live, role: "organizer", home_kind: null })
+  await expect(authenticateDashboardSocket(COOKIE)).resolves.toBeNull()
+})
+
 it("refuses a deleted account whose cookie is still live", async () => {
   mockFindUnique.mockResolvedValue({ ...live, deletedAt: new Date() })
   await expect(authenticateDashboardSocket(COOKIE)).resolves.toBeNull()

@@ -13,8 +13,9 @@ import { statePathFor } from "./global-setup"
  * Dashboard entry comes from the membership, not `User.role` (SCRUM-1247).
  *
  * An attendee-role account is invited to organizer@'s organisation, signs in at the dashboard through the real form
- * (a live invite lets them), accepts, and Events opens. The control, an attendee with no membership and no invite,
- * gets the app-only refusal at /login. Then the seeded organizer@ (an owner of that org, the pilot hosts' shape)
+ * (a live invite lets them) and accepts. With its row put back to `attendee`, it signs in again and Events opens: the
+ * membership alone. With the membership removed, the same sign-in is refused. The control, an attendee with no
+ * membership and no invite, gets the app-only refusal at /login. Then the seeded organizer@ (an owner of that org, the pilot hosts' shape)
  * still reaches every page of its sidebar, with the session's role claim `organizer`.
  *
  * The real form, not a minted cookie: `authorize` is half of what changed. Its own `x-real-ip` from a documentation
@@ -98,20 +99,25 @@ test("an attendee who accepts an organizer org's invite enters the dashboard; on
   expect(memberships).toEqual([{ org_id: home.org_id, role: "staff" }])
   expect(row.role).toBe("organizer")
 
-  // Into the dashboard. The cookie from the invite's sign-in said attendee; the next session read derives organizer.
-  await page.getByRole("link", { name: "Go to dashboard" }).click()
-  await page.waitForURL((u) => !u.pathname.startsWith("/invite"), { timeout: 30_000 })
-  const form = page.locator("#email")
-  if (new URL(page.url()).pathname === "/login" && (await form.isVisible())) {
-    console.log("the stale cookie went to /login; signing in again, as the invite page says")
-    await signIn(page, invited.email)
-  }
-  await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 })
-  expect(await claim(page)).toMatchObject({ id: invited.id, role: "organizer", inviteOnly: false })
-  await page.goto("/dashboard/events", { waitUntil: "domcontentloaded" })
-  await expect(page).toHaveURL(/\/dashboard\/events$/)
+  // The page says to sign in again: the cookie from the invite's sign-in carries no dashboard (today's behaviour).
+  await expect(page.getByText("Sign out and back in to pick up your new access.")).toBeVisible()
+
+  // The membership alone: the row goes back to attendee (as task 11 will leave it), and the next sign-in still enters.
+  await db.user.update({ where: { id: invited.id }, data: { role: "attendee" } })
+  await page.context().clearCookies()
+  await page.goto(`/login?callbackUrl=${encodeURIComponent("/dashboard/events")}`)
+  await signIn(page, invited.email)
+  await expect(page).toHaveURL(/\/dashboard\/events$/, { timeout: 30_000 })
   await expect(page.locator("main h1")).toHaveCount(1)
   await expect(page).toHaveTitle(/^Events/)
+  expect(await claim(page)).toMatchObject({ id: invited.id, role: "organizer", inviteOnly: false })
+
+  // And without it: the same account, the membership gone, is refused at the form like any attendee.
+  await db.organisation_members.deleteMany({ where: { user_id: invited.id } })
+  await page.context().clearCookies()
+  await page.goto("/login")
+  await signIn(page, invited.email)
+  await expect(page.locator("#signin-error")).toContainText(APP_ONLY)
 })
 
 test("the seeded organizer@, an org owner, still reaches every page of its sidebar", async ({ browser, baseURL }) => {

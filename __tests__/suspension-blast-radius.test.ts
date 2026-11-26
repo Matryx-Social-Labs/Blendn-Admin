@@ -111,9 +111,19 @@ describe("every read gate consults it", () => {
        * and nothing else. They only add up to "everywhere" together.
        */
       const src = stripComments(read(gate.file))
-      expect(src).toMatch(/suspended_at|accountBlockReason/)
+      // Directly, or through the one session read (`sessionAccount`, SCRUM-1247) handed to `isRevoked`, which
+      // `the session read selects suspension` below pins.
+      const throughSessionRead = /\b(sessionAccount|signinAccount)\(/.test(src) && /isRevoked\(/.test(src)
+      expect(throughSessionRead || /suspended_at|accountBlockReason/.test(src)).toBe(true)
     })
   }
+
+  it("the session read selects suspension (lib/org-membership.ts)", () => {
+    const columns = /const ACCOUNT_COLUMNS = Prisma\.sql`[^`]*`/.exec(stripComments(read("lib/org-membership.ts")))
+    expect(columns).not.toBeNull()
+    expect(columns![0]).toMatch(/u\.suspended_at/)
+    expect(columns![0]).toMatch(/u\."deletedAt"/)
+  })
 })
 
 describe("lib/auth.ts holds two gates, and both are asserted separately", () => {
@@ -139,8 +149,8 @@ describe("lib/auth.ts holds two gates, and both are asserted separately", () => 
   it("the jwt callback re-reads suspension, so a live cookie dies", () => {
     const jwtBody = /async jwt\([\s\S]*?\n    \},/.exec(AUTH())
     expect(jwtBody).not.toBeNull()
-    // Selected...
-    expect(jwtBody![0]).toMatch(/select:[^}]*suspended_at/)
+    // Selected, by the one session read (SCRUM-1247; its columns are pinned above)...
+    expect(jwtBody![0]).toMatch(/await sessionAccount\(token\.sub\)/)
     // ...and actually consulted, not just fetched: through the one rule
     // (step 18, M6), which must itself consult it.
     expect(jwtBody![0]).toMatch(/isRevoked\(token,\s*account\)/)

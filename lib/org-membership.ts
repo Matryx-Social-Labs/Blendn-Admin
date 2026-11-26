@@ -32,13 +32,17 @@ export const activeMembership = { org: { status: { not: "suspended" as const } }
 export const HOME_ORG_ORDER = [{ created_at: "asc" as const }, { org_id: "asc" as const }]
 
 /**
- * An organisation's dashboard kind, over the alias `o`: a brand's (granted `may_sponsor`, or owning a live, unmerged
+ * An organisation's dashboard kind, over the alias `o`. A brand's (granted `may_sponsor`, or owning a live, unmerged
  * brand: a revoked grant still leaves a brand to look after) before a venue's (owns a live venue), a venue's before an
- * events org's. SQL, not TypeScript, so the session read is one statement; this is the rule's only text.
+ * events org's. An org that has neither yet is what its approved application asked to be: a venue owner approved this
+ * morning has no venue until their first claim, and must be able to file it. SQL, not TypeScript, so the session read is
+ * one statement; this is the rule's only text.
  */
 export const ORG_KIND_SQL = Prisma.sql`CASE
   WHEN o.may_sponsor OR EXISTS (SELECT 1 FROM sponsors s WHERE s.org_id = o.id AND s.deleted_at IS NULL AND s.merged_into IS NULL) THEN 'sponsor'
   WHEN EXISTS (SELECT 1 FROM venues v WHERE v.owner_org_id = o.id AND v.deleted_at IS NULL) THEN 'venue_owner'
+  WHEN EXISTS (SELECT 1 FROM organiser_onboarding_requests r WHERE r.org_id = o.id AND r.status = 'approved' AND r.requested_role = 'sponsor') THEN 'sponsor'
+  WHEN EXISTS (SELECT 1 FROM organiser_onboarding_requests r WHERE r.org_id = o.id AND r.status = 'approved' AND r.requested_role = 'venue_owner') THEN 'venue_owner'
   ELSE 'organizer'
 END`
 
@@ -84,20 +88,10 @@ export interface SessionAccount {
 
 type Row = Omit<SessionAccount, "dashboardRole" | "role"> & { role: string; home_kind: string | null }
 
-function toAccount(row: Row): SessionAccount {
+function toAccount({ home_kind, ...row }: Row): SessionAccount {
   if (!USER_ROLES.has(row.role)) throw new Error("Unknown user role")
   const role = row.role as user_role
-  return {
-    id: row.id,
-    email: row.email,
-    name: row.name,
-    role,
-    suspended_at: row.suspended_at,
-    deletedAt: row.deletedAt,
-    password_changed_at: row.password_changed_at,
-    sessions_revoked_at: row.sessions_revoked_at,
-    dashboardRole: dashboardRoleFor({ role, home_kind: row.home_kind }),
-  }
+  return { ...row, role, dashboardRole: dashboardRoleFor({ role, home_kind }) }
 }
 
 const ACCOUNT_COLUMNS = Prisma.sql`u.id, u.email, u.name, u.role::text AS role, u.suspended_at, u."deletedAt",
