@@ -41,7 +41,8 @@ it("a loop silent for 3 × its interval is reported once, then once when it beat
   checkLoops(T0 + 17 * MIN)
   checkLoops(T0 + 40 * MIN)
   expect(logError).toHaveBeenCalledTimes(1)
-  expect(logError).toHaveBeenCalledWith("Background loop stalled", {
+  // The loop in the message: logger.error fingerprints on the message, so each loop is its own Sentry issue.
+  expect(logError).toHaveBeenCalledWith("Background loop stalled: reminders", {
     loop: "reminders",
     lastBeatAt: new Date(T0).toISOString(),
     intervalMs: 5 * MIN,

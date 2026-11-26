@@ -3012,8 +3012,8 @@
     },
     "heartbeat.test.ts": {
       "guards": "SCRUM-1228: a loop is stale only past 3 x its interval; a loop that never registered is never stale; the watchdog logs 'Background loop stalled' once per stall with loop, lastBeatAt and intervalMs, 'Background loop recovered' once when it beats again, and a second stall again; state on globalThis (the health route's bundle reads what server.ts's loops wrote); checkLoops never throws.",
-      "mutation": "(RED) lib/heartbeat absent on origin/dev 339403a1. (H1) STALE_AFTER_INTERVALS 1. (H2) the once-per-stall check removed. (H3) recovery never clears the report. (H4) state in a module-local object, not globalThis. (H5) the catch replaced by a finally.",
-      "observed": "RED: suite failed to run. H1: 2 of 5 failing. H2: 1 of 5. H3: 1 of 5. H4: 2 of 5. H5: 1 of 5. Restored each from a copy; 5 of 5.",
+      "mutation": "(RED) lib/heartbeat absent on origin/dev 339403a1. (H1) STALE_AFTER_INTERVALS 1. (H2) the once-per-stall check removed. (H3) recovery never clears the report. (H4) state in a module-local object, not globalThis. (H5) the catch replaced by a finally. (H6) the stall message without the loop (one Sentry issue for every loop: logger.error fingerprints on the message).",
+      "observed": "RED: suite failed to run. H1: 2 of 5 failing. H2: 1 of 5. H3: 1 of 5. H4: 2 of 5. H5: 1 of 5. H6: 1 of 5. Restored each from a copy; 5 of 5.",
       "date": "2026-11-27"
     },
     "shutdown-drain.test.ts": {

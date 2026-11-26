@@ -36,9 +36,11 @@ export function staleLoops(now: number = Date.now()): string[] {
 }
 
 /**
- * The watchdog's pass: one error per stall (Sentry groups it by message, ops/07's
- * new-issue rule mails the team), one info line when the loop beats again. Never
- * throws: it runs on a timer in the process that serves every request.
+ * The watchdog's pass: one error per stall, one info line when the loop beats
+ * again. The loop is in the message because `logger.error` fingerprints on the
+ * message alone: one Sentry issue per loop, so a second loop stalling is a new
+ * issue, which is what ops/07's rule mails. Never throws: it runs on a timer in
+ * the process that serves every request.
  */
 export function checkLoops(now: number = Date.now()): void {
   try {
@@ -53,7 +55,7 @@ export function checkLoops(now: number = Date.now()): void {
       if (reported.has(loop)) continue
       const { at, intervalMs } = loops.get(loop)!
       reported.set(loop, at)
-      logger.error("Background loop stalled", { loop, lastBeatAt: new Date(at).toISOString(), intervalMs })
+      logger.error(`Background loop stalled: ${loop}`, { loop, lastBeatAt: new Date(at).toISOString(), intervalMs })
     }
   } catch {
     // The logger failing is the only way here; the next pass tries again.

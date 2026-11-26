@@ -666,10 +666,11 @@ the `HEALTH_METRICS_TOKEN` header (see Health Check, above).
 The sweepers run inside the web process (`lib/background.ts`, and the sponsored
 scheduler in `lib/socket-server.ts`). Each one beats when it starts and after
 every pass that worked (`lib/heartbeat.ts`); once a minute a watchdog logs
-**`Background loop stalled`** (`logger.error`, so it reaches Sentry as one issue
-and the new-issue rule mails the team) for a loop whose last beat is older than
+**`Background loop stalled: <loop>`** for a loop whose last beat is older than
 three of its intervals, and **`Background loop recovered`** when it beats again.
-The error carries `loop`, `lastBeatAt` and `intervalMs`. A stalled loop is
+It is a `logger.error`, so it reaches Sentry as one issue per loop (the loop is in
+the message, which is the fingerprint) and the new-issue rule mails the team; it
+carries `loop`, `lastBeatAt` and `intervalMs`. A stalled loop is
 either a dead timer or every pass failing: the loop's own error line
 (`Presence sweep failed`, `Reminder sweep failed`, …) in the same logs says which.
 
