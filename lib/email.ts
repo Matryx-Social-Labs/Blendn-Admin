@@ -489,9 +489,12 @@ export interface NightResults {
 }
 
 const NEXT_LABEL = "List your next night"
-const footer = (unsubscribeUrl: string) => [
+/** Why each lifecycle mail came: its footer, in the text part and the HTML. */
+const MORNING_WHY = "You get this the morning after each night your organization runs on Blend’n."
+const NEXT_NIGHT_WHY = "You get this a week after a night with nothing listed next, at most once a month."
+const footer = (why: string, unsubscribeUrl: string) => [
   "—",
-  "You get this the morning after each night your organization runs on Blend’n. Invites and account mail still come.",
+  `${why} Invites and account mail still come.`,
   `Unsubscribe from these mails: ${unsubscribeUrl}`,
 ]
 const count = (n: number) => n.toLocaleString("en-US")
@@ -520,7 +523,7 @@ export function resultsEmail(r: NightResults) {
       r.nextUrl,
       ...(note ? ["", note] : []),
       "",
-      ...footer(r.unsubscribeUrl),
+      ...footer(MORNING_WHY, r.unsubscribeUrl),
     ].join("\n"),
     html: resultsHtml({
       title: subject,
@@ -530,6 +533,7 @@ export function resultsEmail(r: NightResults) {
       button: { href: r.overviewUrl, label: "Open the night’s results" },
       next: { href: r.nextUrl, label: NEXT_LABEL },
       note,
+      why: MORNING_WHY,
       unsubscribeUrl: r.unsubscribeUrl,
     }),
   }
@@ -553,7 +557,7 @@ export function noCheckInsEmail(r: { title: string; nextUrl: string; unsubscribe
       `${NEXT_LABEL}:`,
       r.nextUrl,
       "",
-      ...footer(r.unsubscribeUrl),
+      ...footer(MORNING_WHY, r.unsubscribeUrl),
     ].join("\n"),
     html: resultsHtml({
       title: subject,
@@ -563,6 +567,35 @@ export function noCheckInsEmail(r: { title: string; nextUrl: string; unsubscribe
       button: { href: r.nextUrl, label: NEXT_LABEL },
       next: null,
       note: null,
+      why: MORNING_WHY,
+      unsubscribeUrl: r.unsubscribeUrl,
+    }),
+  }
+}
+
+/**
+ * The "list your next" nudge (SCRUM-1284): a week after an organization's latest night, with nothing coming up. One line
+ * on that night and one button; no second ask. `checkedIn` is through the disclosure floor (null: fewer than 5), and 0
+ * means nobody checked in, so no figure is quoted at all.
+ */
+export function nextNightEmail(r: { title: string; checkedIn: number | null; nextUrl: string; unsubscribeUrl: string }) {
+  const line =
+    r.checkedIn === 0
+      ? `It’s a week since ${r.title}, and nothing is listed after it yet.`
+      : `${r.checkedIn === null ? "Fewer than 5" : count(r.checkedIn)} people checked in on Blend’n at ${r.title} last week. Nothing is listed after it yet.`
+  const subject = `${r.title}: what’s next?`
+  return {
+    subject,
+    text: [line, "", `${NEXT_LABEL}:`, r.nextUrl, "", ...footer(NEXT_NIGHT_WHY, r.unsubscribeUrl)].join("\n"),
+    html: resultsHtml({
+      title: subject,
+      preheader: line,
+      heading: "What’s next?",
+      lines: [line],
+      button: { href: r.nextUrl, label: NEXT_LABEL },
+      next: null,
+      note: null,
+      why: NEXT_NIGHT_WHY,
       unsubscribeUrl: r.unsubscribeUrl,
     }),
   }

@@ -335,12 +335,6 @@ export type AuthenticatedSocket = Socket<
  */
 
 
-/**
- * Join `room` only if `check` authorizes it, otherwise tell the client.
- *
- * Fails closed: a throwing check (malformed UUID from a hostile client, DB
- * blip) denies the join rather than leaking the room.
- */
 /*
  * Per-event snapshot broadcasting.
  *
@@ -475,6 +469,33 @@ export function stopAllOpsBroadcasts(): void {
   for (const eventId of Array.from(opsTimers.keys())) stopOpsBroadcast(eventId)
 }
 
+/** What a join whose access check could not be answered is told (SCRUM-1402). */
+export const JOIN_RETRY_MESSAGE = "Could not join right now. Try again."
+
+/**
+ * The access check threw: the database did not answer (a pool wait past 5 s, a
+ * statement cancelled at 8 s, #1061). That is not a refusal, so the client is
+ * told to try again -- never FORBIDDEN, which a valid, checked-in guest read as
+ * "not allowed" in the doors-open burst. No retry here: the client asks again.
+ */
+function joinCheckFailed(socket: AuthenticatedSocket, room: string, error: unknown): void {
+  // An error line reaches Sentry, one issue for the burst: a saturated pool at doors-open must be seen.
+  logger.error("Socket join check failed", {
+    room,
+    userId: socket.data.userId,
+    error: error instanceof Error ? error.message : String(error),
+  })
+  // `ErrorCode.SERVER_ERROR` (lib/api-response.ts), spelled out like FORBIDDEN here.
+  socket.emit("error", { message: JOIN_RETRY_MESSAGE, code: "SERVER_ERROR" })
+}
+
+/**
+ * Join `room` only if `check` authorizes it, otherwise tell the client.
+ *
+ * A malformed id is refused before any read. A check that says no is
+ * FORBIDDEN; a check that throws is `joinCheckFailed` (try again). Either way
+ * the socket stays out of the room.
+ */
 export async function guardJoin(
   socket: AuthenticatedSocket,
   room: string,
@@ -488,24 +509,72 @@ export async function guardJoin(
     socket.emit("error", { message: denyMessage, code: "FORBIDDEN" })
     return
   }
+  let allowed: boolean
   try {
-    if (await check()) {
-      socket.join(room)
-      logger.debug("Socket joined room", { room, userId: socket.data.userId })
-      return
-    }
+    allowed = await check()
   } catch (error) {
-    // Room IDs are `@db.Uuid`, so a malformed one from a hostile client makes
-    // Prisma throw. Socket.io does not await listeners, so an escaping rejection
-    // would take down the process — deny instead.
-    logger.warn("Socket join authorization check failed", {
-      room,
-      userId: socket.data.userId,
-      error: error instanceof Error ? error.message : String(error),
-    })
+    // Socket.io does not await listeners: an escaping rejection would take the process down.
+    joinCheckFailed(socket, room, error)
+    return
   }
+  if (!allowed) {
+    socket.emit("error", { message: denyMessage, code: "FORBIDDEN" })
+    return
+  }
+  socket.join(room)
+  logger.debug("Socket joined room", { room, userId: socket.data.userId })
+}
 
-  socket.emit("error", { message: denyMessage, code: "FORBIDDEN" })
+/** The dashboard's Live tab joins its copy of an event's live operations (`event:<id>:ops:<view>`). */
+export async function joinEventOps(socket: AuthenticatedSocket, rawEventId: string): Promise<void> {
+  // A uuid or nothing: the id names the room and keys the broadcast loop,
+  // so an object or a second spelling would start a loop of its own.
+  if (!isUuid(rawEventId) || socket.data.principal !== "dashboard" || !socket.data.role) {
+    // An attendee token must never reach ops aggregates, even if the user
+    // behind it also happens to hold a dashboard role.
+    socket.emit("error", { message: "Not authorized", code: "OPS_FORBIDDEN" })
+    return
+  }
+  const eventId = rawEventId.toLowerCase()
+  const principal = {
+    userId: socket.data.userId,
+    email: socket.data.email,
+    role: socket.data.role,
+  }
+  /*
+   * Not `guardJoin`: which room is decided by who is asking. Whoever runs
+   * the event and the venue it is held at are sent different copies of the
+   * snapshot, to different rooms (SCRUM-516). A refusal carries the code
+   * the dashboard hook reads as "denied"; a check that threw is "try again"
+   * (`joinCheckFailed`), which the hook reads as "connection lost" and asks
+   * again.
+   */
+  // Out of both first: a socket asking again after its access changed keeps
+  // neither copy it had, whatever the answer is now -- or if there is none.
+  socket.leave(opsRoom(eventId, "host"))
+  socket.leave(opsRoom(eventId, "venue"))
+  let view: OpsView | null
+  try {
+    view = await eventOpsView(principal, eventId)
+  } catch (error) {
+    joinCheckFailed(socket, `event:${eventId}:ops`, error)
+    return
+  }
+  if (!view) {
+    socket.emit("error", { message: "Not authorized to watch this event", code: "OPS_FORBIDDEN" })
+    return
+  }
+  socket.join(opsRoom(eventId, view))
+  startOpsBroadcast(eventId)
+  // One snapshot now, so the screen is populated on open rather than blank
+  // until the first tick -- read through the loop's hold, so a crowd of
+  // dashboards opening at once costs one read of "Meeting tonight", not one each.
+  const snapshot = await buildLiveSnapshot(eventId, opsTimers.get(eventId)?.held, { social: view === "host" }).catch((error: unknown) => {
+    // The 5 s tick sends the next one; this says why the screen waited for it.
+    logger.warn("Initial ops snapshot failed", { eventId, error: error instanceof Error ? error.message : String(error) })
+    return null
+  })
+  if (snapshot) socket.emit("ops:snapshot", asSeenBy(view, snapshot))
 }
 
 async function readTypingMembership(userId: string, chatGroupId: string) {
@@ -580,8 +649,8 @@ export async function emitChatTyping(
       socket.id
     )
   } catch (error) {
-    // Same fail-safe as guardJoin: chat_group_id is `@db.Uuid`, and an
-    // escaping rejection from this listener would take down the process.
+    // chat_group_id is `@db.Uuid`, and an escaping rejection from this
+    // listener would take down the process.
     logger.warn("Typing indicator lookup failed", {
       chatGroupId,
       userId: socket.data.userId,
@@ -1096,52 +1165,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
      * carries attendee-facing traffic including check-in names, and a host must
      * not receive it. This one carries aggregates only.
      */
-    authSocket.on("join:eventOps", async (rawEventId) => {
-      // A uuid or nothing: the id names the room and keys the broadcast loop,
-      // so an object or a second spelling would start a loop of its own.
-      if (!isUuid(rawEventId) || authSocket.data.principal !== "dashboard" || !authSocket.data.role) {
-        // An attendee token must never reach ops aggregates, even if the user
-        // behind it also happens to hold a dashboard role.
-        authSocket.emit("error", { message: "Not authorized", code: "OPS_FORBIDDEN" })
-        return
-      }
-      const eventId = rawEventId.toLowerCase()
-      const principal = {
-        userId: authSocket.data.userId,
-        email: authSocket.data.email,
-        role: authSocket.data.role,
-      }
-      /*
-       * Not `guardJoin`: which room is decided by who is asking. Whoever runs
-       * the event and the venue it is held at are sent different copies of the
-       * snapshot, to different rooms (SCRUM-516). Fails closed the same way --
-       * a throw (a malformed id from a hostile client) denies -- and with the
-       * code the dashboard hook reads as "denied" rather than "connection lost".
-       */
-      const view = await eventOpsView(principal, eventId).catch((error: unknown) => {
-        logger.warn("Socket join authorization check failed", {
-          room: `event:${eventId}:ops`,
-          userId: authSocket.data.userId,
-          error: error instanceof Error ? error.message : String(error),
-        })
-        return null
-      })
-      // Out of both first: a socket asking again after its access changed keeps
-      // neither copy it had, whatever the answer is now.
-      authSocket.leave(opsRoom(eventId, "host"))
-      authSocket.leave(opsRoom(eventId, "venue"))
-      if (!view) {
-        authSocket.emit("error", { message: "Not authorized to watch this event", code: "OPS_FORBIDDEN" })
-        return
-      }
-      authSocket.join(opsRoom(eventId, view))
-      startOpsBroadcast(eventId)
-      // One snapshot now, so the screen is populated on open rather than blank
-      // until the first tick -- read through the loop's hold, so a crowd of
-      // dashboards opening at once costs one read of "Meeting tonight", not one each.
-      const snapshot = await buildLiveSnapshot(eventId, opsTimers.get(eventId)?.held, { social: view === "host" }).catch(() => null)
-      if (snapshot) authSocket.emit("ops:snapshot", asSeenBy(view, snapshot))
-    })
+    authSocket.on("join:eventOps", (rawEventId) => void joinEventOps(authSocket, rawEventId))
 
     authSocket.on("leave:eventOps", (eventId) => {
       authSocket.leave(opsRoom(eventId, "host"))

@@ -489,7 +489,8 @@ export function ticketOrderHtml(opts: { heading: string; paragraphs: string[]; l
 }
 
 /**
- * The host's morning results mail and its zero-check-in twin (SCRUM-1282). `lines` are plain text, written once in
+ * The host's morning results mail, its zero-check-in twin (SCRUM-1282) and the "list your next" nudge (SCRUM-1284),
+ * each with its own `why` in the footer. `lines` are plain text, written once in
  * ./email.ts for both parts; escaped here. One button; "List your next night" is a plain link under it, never a
  * second button (lane advisor, 2026-11-26). The footer replaces "transactional" with the unsubscribe, because this
  * mail is not one.
@@ -502,6 +503,8 @@ export function resultsHtml(opts: {
   button: { href: string; label: string }
   next: { href: string; label: string } | null
   note: string | null
+  /** Why this mail came, plain text: the footer's first sentence. */
+  why: string
   unsubscribeUrl: string
 }): string {
   const link = (href: string, label: string) =>
@@ -517,7 +520,7 @@ export function resultsHtml(opts: {
       ...(opts.next ? [`<p style="margin:18px 0 0;font-family:${FONT};font-size:14px;line-height:22px;">${link(opts.next.href, opts.next.label)}</p>`] : []),
       ...(opts.note ? [note(esc(opts.note))] : []),
     ].join("\n"),
-    footer: `You get this the morning after each night your organization runs on Blend&rsquo;n. <a href="${esc(opts.unsubscribeUrl)}" target="_blank" style="color:${MUTED};text-decoration:underline;">Unsubscribe from these mails</a>. Invites and account mail still come.`,
+    footer: `${esc(opts.why)} <a href="${esc(opts.unsubscribeUrl)}" target="_blank" style="color:${MUTED};text-decoration:underline;">Unsubscribe from these mails</a>. Invites and account mail still come.`,
   })
 }
 

@@ -210,9 +210,9 @@ describe("canJoinEvent", () => {
 
 describe("malformed room IDs", () => {
   // Room ID columns are `@db.Uuid`, so Prisma throws on a non-UUID string
-  // instead of returning null. These must reject so `guardJoin` can deny;
-  // an escaping rejection would crash the process (Socket.io does not await
-  // its listeners).
+  // instead of returning null. These must reject, never resolve true: `guardJoin`
+  // refuses a non-uuid before asking, and answers any rejection that gets past
+  // it as "try again" (SCRUM-1402) rather than letting it crash the process.
   const prismaError = new Error("Inconsistent column data: Error creating UUID")
 
   it("propagates the error from canJoinChat rather than resolving true", async () => {
