@@ -44,6 +44,8 @@ let fetchMock: jest.Mock
 let sweep: (now?: Date) => Promise<void>
 let notifyStaff: (text: string) => Promise<string>
 let DEGRADED: number
+let startLoop: () => void
+let stopLoop: () => void
 
 /** A count over `reports` that honours the window the sweep asks for. */
 function windowCount({ where }: { where: { status: string; created_at: { gt: Date; lte: Date } } }) {
@@ -83,6 +85,8 @@ beforeEach(async () => {
   sweep = mod.runStaffAlertSweep
   notifyStaff = mod.notifyStaff
   DEGRADED = mod.DEGRADED_UNCHECKED_PER_HOUR
+  startLoop = mod.startStaffAlertSweeper
+  stopLoop = mod.stopStaffAlertSweeper
 })
 
 afterAll(() => {
@@ -101,6 +105,14 @@ describe("the sweep", () => {
     expect(posted()[0]).toContain("1 severe flag")
     expect(posted()[0]).toMatch(/oldest pending \d+ min/)
     expect(posted()[0]).toContain("https://dashboard.blendn.app/dashboard/moderation")
+  })
+
+  it("adds the three report tables together", async () => {
+    reports.push({ id: "r1", created_at: at(-30) })
+    mockDb.message_reports.count.mockResolvedValue(1)
+    mockDb.event_reports.count.mockResolvedValue(1)
+    await sweep(at(0))
+    expect(posted()[0]).toContain("3 new reports")
   })
 
   it("posts nothing, and logs nothing, when there is nothing new", async () => {
@@ -239,9 +251,49 @@ describe("moderation degraded", () => {
     expect(posted()[1]).toMatch(/moderation degraded/i)
   })
 
+  it("is said again for a second episode, and repeated when its send failed", async () => {
+    mockDb.chat_messages.count.mockResolvedValue(DEGRADED + 1)
+    fetchMock.mockRejectedValueOnce(new Error("down"))
+    await sweep(at(0))
+    await sweep(at(60))
+    mockDb.chat_messages.count.mockResolvedValue(0)
+    await sweep(at(120))
+    mockDb.chat_messages.count.mockResolvedValue(DEGRADED + 1)
+    await sweep(at(180))
+    expect(posted()).toHaveLength(3)
+    expect(posted().slice(1).every((t) => /moderation degraded/i.test(t))).toBe(true)
+  })
+
   it("is not said at the threshold", async () => {
     mockDb.chat_messages.count.mockResolvedValue(DEGRADED)
     await sweep(at(0))
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("the loop", () => {
+  afterEach(() => {
+    stopLoop()
+    jest.useRealTimers()
+  })
+
+  const flush = async () => {
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+  }
+
+  it("runs at boot and every minute, once however often it is started, and not after stop", async () => {
+    jest.useFakeTimers()
+    startLoop()
+    startLoop()
+    await flush()
+    expect(mockDb.user_reports.count).toHaveBeenCalledTimes(1)
+    for (let minute = 0; minute < 2; minute++) {
+      await jest.advanceTimersByTimeAsync(60_000)
+      await flush()
+    }
+    expect(mockDb.user_reports.count).toHaveBeenCalledTimes(3)
+    stopLoop()
+    await jest.advanceTimersByTimeAsync(180_000)
+    expect(mockDb.user_reports.count).toHaveBeenCalledTimes(3)
   })
 })

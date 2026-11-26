@@ -33,11 +33,13 @@ afterAll(async () => {
   await db.chat_messages.deleteMany({ where: { user_id: { in: users } } })
   await db.chat_groups.deleteMany({ where: { event_id: { in: events } } })
   await db.user_reports.deleteMany({ where: { reporter_id: { in: users } } })
+  await db.message_reports.deleteMany({ where: { reporter_id: { in: users } } })
+  await db.event_reports.deleteMany({ where: { user_id: { in: users } } })
   await cleanup(users, events)
   await closeDb()
 }, 60_000)
 
-it("announces one new pending report and the severe flags, once, with nothing about the people", async () => {
+it("announces the new pending reports of all three kinds and the severe flags, once, with nothing about the people", async () => {
   const reporter = await makeUser(testId("sa_reporter"))
   const reported = await makeUser(testId("sa_reported"))
   const host = await makeUser(testId("sa_host"), "organizer")
@@ -47,6 +49,8 @@ it("announces one new pending report and the severe flags, once, with nothing ab
   const group = await db.chat_groups.create({ data: { event_id: eventId, name: "room", status: "active" } })
 
   await db.user_reports.create({ data: { reporter_id: reporter, reported_id: reported, reason: "threat", created_at: sec(10) } })
+  await db.message_reports.create({ data: { reporter_id: reporter, message_id: group.id, message_type: "group", reason: "x", created_at: sec(10) } })
+  await db.event_reports.create({ data: { event_id: eventId, user_id: reporter, reason: "x", created_at: sec(10) } })
   // Already decided: not new work.
   await db.user_reports.create({ data: { reporter_id: reporter, reported_id: reported, reason: "x", status: "resolved", created_at: sec(11) } })
 
@@ -58,7 +62,11 @@ it("announces one new pending report and the severe flags, once, with nothing ab
   }
   await flag({ "self-harm/intent": 0.5 }, 0.5) // severe by category
   await flag({ spam: 0.95 }, 0.95) // severe by confidence
+  await flag({ "violence/graphic": 0.5 }, 0.5) // severe by category
+  await flag({ "sexual/minors": 0.3 }, 0.3) // severe by category
+  await flag({ "harassment/threatening": 0.5 }, 0.5) // severe by category
   await flag({ sexual: 0.5 }, 0.5) // not severe
+  await flag({ harassment: 0.6 }, 0.6) // not severe: the prefix is harassment/threatening
   await flag(["safety_conduct"], 0.5) // the sentiment sweeper's shape: an array, never an error
   await flag({ violence: 0.99 }, 0.99, "approved") // decided
 
@@ -68,7 +76,7 @@ it("announces one new pending report and the severe flags, once, with nothing ab
 
   expect(fetchMock).toHaveBeenCalledTimes(1)
   const text = JSON.parse(fetchMock.mock.calls[0][1].body).text as string
-  expect(text).toContain("1 new report")
-  expect(text).toContain("2 severe flags")
+  expect(text).toContain("3 new reports")
+  expect(text).toContain("5 severe flags")
   for (const id of [reporter, reported, host, eventId, group.id]) expect(text).not.toContain(id)
 })
