@@ -248,7 +248,7 @@ The image check uses the same categories and thresholds as text moderation: hide
 4. A `moderation_flags` record is created for admin review
 5. Auto-mute check runs (see below)
 
-**Post-emit fallback (OpenAI timed out, async catch):**
+**Post-emit fallback (OpenAI timed out, async catch; never in an event room with more than 200 checked in, see Layer 3):**
 1. Message `moderation_status` set to `"hidden"`, `deleted_at` set
 2. Socket.io emits `chat:messageDeleted` with `{ moderation: true, userId }` — other users remove the message, sender sees a "message removed" placeholder
 3. A `moderation_flags` record is created for admin review
