@@ -1509,6 +1509,8 @@ model notifications {
   @@index([user_id, created_at])
   // The unread count, which the bell asks for on every screen.
   @@index([user_id, read_at])
+  // The retention sweep's unread rule (SCRUM-1224). Its read rule has a partial `read_at` index, in migration SQL only.
+  @@index([created_at])
 }
 
 // Private Messaging
