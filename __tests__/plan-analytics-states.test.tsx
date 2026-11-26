@@ -119,7 +119,7 @@ describe("a button that is aria-disabled", () => {
 describe("Panel heading", () => {
   it("lets a long hint wrap under the title instead of squeezing the title", () => {
     const out = renderToStaticMarkup(
-      <Panel title="Payments" hint="Invoices are issued through Razorpay by a company with a long name">
+      <Panel title="Payments" hint="Payments are taken by Razorpay for a company with a long name">
         body
       </Panel>
     )
@@ -137,16 +137,17 @@ describe("analyticsAccessLine", () => {
     const line = analyticsAccessLine({ ...base, reason: "free_window", freeUntil: "2026-10-23T20:00:00.000Z", firstFreeEvent: first }, day)
     expect(line.headline).toBe("Open until D(2026-10-23)")
     expect(line.detail).toContain(`Sunday Soul Sante, ${FIRST_EVENT_RULE}, ended D(2026-09-23)`)
+    expect(line.detail).toContain("Everything here is open until 90 days after it.")
     expect(line.detail).toContain("After that Sunday Soul Sante stays open for good, and Event Insights or Analytics opens the rest.")
   })
 
   it("says an open window with no date yet is open for now, by the rule in plain words", () => {
     const line = analyticsAccessLine({ ...base, reason: "free_window" }, day)
     expect(line.headline).toBe("Open for now")
-    expect(line.detail).toBe(`Everything here is open until 30 days after ${FIRST_EVENT_RULE}.`)
+    expect(line.detail).toBe(`Everything here is open until 90 days after ${FIRST_EVENT_RULE}.`)
   })
 
-  it("never uses the internal word for the five-person rule", () => {
+  it("never uses the internal word for the eight-person rule", () => {
     const lines = [
       analyticsAccessLine({ ...base, reason: "free_window", freeUntil: "2026-10-23T20:00:00.000Z", firstFreeEvent: first }, day),
       analyticsAccessLine({ ...base, reason: "free_window" }, day),
@@ -154,7 +155,7 @@ describe("analyticsAccessLine", () => {
       analyticsAccessLine({ ...base }, day),
     ]
     for (const l of lines) expect(`${l.headline} ${l.detail}`).not.toMatch(/privacy floor/i)
-    expect(FIRST_EVENT_RULE).toContain("5 people")
+    expect(FIRST_EVENT_RULE).toContain("8 people")
   })
 
   it("keeps the grant, subscription and free-plan lines", () => {

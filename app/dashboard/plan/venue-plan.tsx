@@ -94,7 +94,7 @@ export function VenuePlan({ view, pending }: { view: VenuePlanPage; pending: boo
         </p>
       ) : null}
 
-      <Panel title="Payments" hint="Invoices are issued through Razorpay by Matryx Social Labs Private Limited">
+      <Panel title="Payments" hint="Payments are taken by Razorpay for Matryx Social Labs Private Limited">
         {view.payments.length === 0 ? (
           <p className="text-[0.8125rem] text-muted-foreground">Nothing paid yet.</p>
         ) : (

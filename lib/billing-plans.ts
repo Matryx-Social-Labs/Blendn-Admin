@@ -12,8 +12,9 @@
  * year (two months free, audit §6.2); all before 18% GST. India shows consumer prices
  * with tax in, and the plan says to (₹2,359 / ₹589), so what Razorpay charges
  * is the GST-inclusive figure rounded to the rupee — the number on the card is
- * the number on the statement. The invoice splits it back out; issuing it with
- * the right GSTIN is Razorpay Invoices' job, configured by the owner.
+ * the number on the statement. No invoice is issued yet: nothing sends a GSTIN
+ * to Razorpay, and whether and how one is issued is the legal Epic's question
+ * (SCRUM-1269), so no page promises one.
  *
  * Pure and client-safe: no database, no secrets.
  */
