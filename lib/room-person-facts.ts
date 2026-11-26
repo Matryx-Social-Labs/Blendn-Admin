@@ -32,8 +32,13 @@ export async function roomPersonFacts(
   eventId: string | null,
   userIds: string[]
 ): Promise<Map<string, RoomPersonFacts>> {
-  if (viewerId && eventId && (await operatesEvent(viewerId, eventId))) return new Map(userIds.map((id) => [id, NO_FACTS]))
-  const [bands, regulars] = await Promise.all([eventId ? bandsAt(eventId, userIds) : new Map<string, AgeBand>(), regularsAmong(userIds)])
+  // All three at once: a roster page waits on the database in one wave more, not two (roster-scope.itest.ts).
+  const [operates, bands, regulars] = await Promise.all([
+    viewerId && eventId ? operatesEvent(viewerId, eventId) : false,
+    eventId ? bandsAt(eventId, userIds) : new Map<string, AgeBand>(),
+    regularsAmong(userIds),
+  ])
+  if (operates) return new Map(userIds.map((id) => [id, NO_FACTS]))
   return new Map(userIds.map((id) => [id, { ageBand: bands.get(id) ?? null, tenure: regulars.has(id) ? "regular" : "new" }]))
 }
 
