@@ -2,9 +2,12 @@ import { randomUUID } from "crypto"
 
 import { db } from "./db"
 import { logger } from "./logger"
+import { BILLING_PLANS, grossRupees, gstSplit, planDay, rupees } from "./billing-plans"
+import { MIN_ATTENDEES } from "./connection-metrics"
 import { dashboardHost, emailReplyTo, publicSiteOrigin } from "./env"
 import {
   approvedHtml,
+  freeWindowEndingHtml,
   claimDecisionHtml,
   declinedHtml,
   domainVerifyHtml,
@@ -465,5 +468,46 @@ export function ticketOrderEmail(opts: { subject: string; heading: string; parag
     subject: opts.subject,
     text: [opts.heading, "", ...paragraphs.flatMap((p) => [p, ""]), link].join("\n"),
     html: ticketOrderHtml({ heading: opts.heading, paragraphs, link }),
+  }
+}
+
+/**
+ * 14 days before an organisation's free Analytics ends (SCRUM-1275; DECISIONS
+ * 2026-11-25, OWNER.md "When free months end": the views lock as coded and the
+ * mail names today's prices). Prices from the price table, as /pricing shows
+ * them: what is paid, then the GST split. No invoice is promised (none is
+ * issued yet) and no figure of theirs is shown, blurred or otherwise.
+ */
+export function freeWindowEndingEmail(opts: { orgName: string; endsAt: Date }) {
+  const date = planDay(opts.endsAt)
+  const pass = BILLING_PLANS.event_pass
+  const monthly = BILLING_PLANS.analytics_monthly
+  const link = `${dashboardUrl()}/dashboard/plan`
+  const heading = `Your free Analytics ends on ${date}`
+  const paragraphs = [
+    `Every Analytics view for ${opts.orgName} has been free so far. That ends on ${date}.`,
+    [
+      "Free for good:",
+      "• Running events: listing, GPS check-in, the live room and its safety tools",
+      "• Each event’s own numbers",
+      `• The analytics of your first event with at least ${MIN_ATTENDEES} people checked in`,
+    ].join("\n"),
+    [
+      `Locked from ${date}:`,
+      "• Return rates and comparisons across your events",
+      "• The deeper Event Insights of every other event",
+    ].join("\n"),
+    [
+      "To keep them open:",
+      `• Event Insights, one event, for good: ${rupees(grossRupees(pass))} once (${gstSplit(pass)})`,
+      `• Analytics, all your events: ${rupees(grossRupees(monthly))} a month (${gstSplit(monthly)})`,
+    ].join("\n"),
+    "Nothing is deleted. Your events and their data are kept, and a view opens with its full history as soon as your payment is confirmed.",
+  ]
+  const note = `You’re getting this once, as an owner or admin of ${opts.orgName} on Blend’n.`
+  return {
+    subject: heading,
+    text: [...paragraphs.flatMap((p) => [p, ""]), `See your plan: ${link}`, "", note].join("\n"),
+    html: freeWindowEndingHtml({ heading, paragraphs, link, note }),
   }
 }
