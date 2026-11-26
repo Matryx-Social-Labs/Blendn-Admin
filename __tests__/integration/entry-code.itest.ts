@@ -189,6 +189,15 @@ describe("a door code at the check-in door", () => {
     expect((await checkIn(p.token, e.id, fix(INSIDE, 10))).status).toBe(200)
   })
 
+  it("lets no more than 5 of a parallel burst reach the compare", async () => {
+    const e = await event()
+    const p = await person("entry")
+    const answers = await Promise.all(Array.from({ length: 12 }, () => checkIn(p.token, e.id, { ...fix(NEAR, 30), doorCode: wrongFor(e) })))
+    const codes = await Promise.all(answers.map(async (r) => (await r.json()).errorCode))
+    expect(codes.filter((c) => c === "DOOR_CODE_WRONG")).toHaveLength(5)
+    expect(codes.filter((c) => c === "DOOR_CODE_LOCKED")).toHaveLength(7)
+  })
+
   it("turns code entry off for the night after 10 wrong in the occurrence", async () => {
     const e = await event()
     const p = await person("entry")
@@ -256,10 +265,9 @@ describe("a door code at the check-in door", () => {
     const e = await event()
     const p = await person("entry")
     // Redis down as a fail-closed key sees it; the route's own fail-open `safety` limiter counts in memory as it would.
-    const { hit, peek, peekWindow } = store
+    const { hit, peek } = store
     const down = <A extends unknown[], R>(real: (key: string, ...rest: A) => Promise<R>) =>
       (key: string, ...rest: A) => (key.startsWith("entry-") ? Promise.reject(new store.StoreUnavailable("down")) : real(key, ...rest))
-    jest.spyOn(store, "peekWindow").mockImplementation(down(peekWindow))
     jest.spyOn(store, "peek").mockImplementation(down(peek))
     jest.spyOn(store, "hit").mockImplementation(down(hit))
     const res = await checkIn(p.token, e.id, { ...fix(NEAR, 30), doorCode: code(e) })

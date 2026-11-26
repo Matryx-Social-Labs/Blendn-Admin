@@ -35,6 +35,20 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "entry-code.test.ts": {
+      "guards": "Gate 13 (SCRUM-1316, design/02a SPEC §1-§2): the event's door code is HKDF 'blendn door-code v1' over event:occurrence:step; steps 0/-1/-2 match, -3 answers 'changed', -4 and +1 are wrong; another event's or occurrence's code fails; 8/B 5/S 2/Z fold both ways; the code exists from doors to the end on a published, non-venue-day, uncancelled, unpaused occurrence; a pause holds 10 minutes and never from before this occurrence's doors; the auto-pause trips only at wrong >= 30 and wrong > correct.",
+      "mutation": "RED on dev 5da8952a: module lib/entry-code missing. M2271 GRACE_STEPS 2 -> 1; M2272 the doors floor dropped from entryPauseInForce; M2273 the trip without `wrong > correct`; M2274 foldConfusables returns its input.",
+      "observed": "RED: suite fails to compile. M2271: 2 of 11 failing; M2272: 1 of 11; M2273: 1 of 11; M2274: 1 of 11. Each reverted, 11 of 11 green.",
+      "date": "2026-11-26",
+      "source": "run-on-branch"
+    },
+    "entry-code.itest.ts": {
+      "guards": "Gate 13 (SCRUM-1316) through the real check-in route on a db:migrate database: method door_code from 400 m; wrong, changed, far (>1 km, no accuracy, >1000 m accuracy, mocked), locked (5 in 10 min with the time; 10 a night; removed from the room), paused (not before doors, lifts after 10 min), auto-pause audited as the system, Redis-out 503 with GPS unaffected; the review bypass first; weak_fix recorded and DOOR_CODE_OFFERED; the GPS success response unchanged; doorCode.available never the code; readDoor/pause/resume on canOperate with pseudonyms and handles only.",
+      "mutation": "RED on dev 5da8952a: module lib/entry-code missing. M2275 StoreUnavailable no longer caught in entryCodeGate; M2276 a host's removal no longer locks code entry; M2277 readDoor without the canOperate check; M2278 the arrival row carries userId; M2279 the review bypass no longer runs before the code.",
+      "observed": "RED: suite fails to compile. M2275-M2279: each 1 of 26 failing, the test named for it. Each reverted, 26 of 26 green.",
+      "date": "2026-11-26",
+      "source": "run-on-branch"
+    },
     "server-statement-cap.test.ts": {
       "guards": "SCRUM-1221: server.ts sets DATABASE_STATEMENT_TIMEOUT_MS to 8000 when unset or blank, and checks it with statementTimeoutMs(), before app.prepare, initSocketServer and startBackgroundWork can open a connection; scripts that import lib/db never set it and keep no cap.",
       "mutation": "M2268 the default line deleted from server.ts; M2269 the default line moved to after startBackgroundWork().",
@@ -634,8 +648,8 @@
     },
     "check-in-refusals.test.ts": {
       "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
-      "mutation": "Replace app/api/mobile/events/[eventId]/checkin/route.ts with an empty stub (`export {}`), run this suite, revert. Re-run as M545 after step 4 moved half the refusals into lib/check-in-core.ts (the suite reads both).",
-      "observed": "3 failing; M545 (2026-10-02): 2 of 9 failing ('records all six ways', 'never records coordinates').",
+      "mutation": "Replace app/api/mobile/events/[eventId]/checkin/route.ts with an empty stub (`export {}`), run this suite, revert. Re-run as M545 after step 4 moved half the refusals into lib/check-in-core.ts (the suite reads both). M2270 (gate 13, SCRUM-1316): the door_code_far record(...) call in lib/entry-code-gate.ts replaced with `void shortfall`.",
+      "observed": "3 failing; M545 (2026-10-02): 2 of 9 failing ('records all six ways', 'never records coordinates'). M2270 (2026-11-26): 1 of 9 failing ('records every way to be turned away').",
       "date": "2026-08-25",
       "source": "run-at-integration-merge"
     },

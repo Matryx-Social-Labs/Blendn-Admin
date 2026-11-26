@@ -81,6 +81,10 @@ export const CheckinRequestSchema = z
     longitude: z.number().min(-180).max(180),
     deviceInfo: DeviceInfoSchema.extend({
       gpsAccuracy: z.number().optional(),
+      mocked: z
+        .boolean()
+        .optional()
+        .describe("The OS says the fix is simulated (iOS `isMocked`, Android `isFromMockProvider`). With `doorCode`, refused as `DOOR_CODE_FAR`."),
     }).optional(),
     withCrewId: z
       .string()
@@ -93,6 +97,19 @@ export const CheckinRequestSchema = z
       ),
   })
   .openapi("CheckinRequest")
+
+/** The event door's body: the shared check-in body plus the host's door code (gate 13). Go Live takes no code. */
+export const EventCheckinRequestSchema = CheckinRequestSchema.extend({
+  doorCode: z
+    .string()
+    .max(12)
+    .optional()
+    .describe(
+      "The host's door code (gate 13), typed by a guest GPS could not place: six characters, lower case, spaces and dashes accepted, " +
+        "8/B, 5/S and 2/Z read as one. Needs `deviceInfo.gpsAccuracy` (at most 1000 m) and a fix within 1 km of the fence; replaces the fence " +
+        "and its 150 m ceiling. Never returned by any endpoint: only the host's dashboard shows it."
+    ),
+}).openapi("EventCheckinRequest")
 
 export const RatingRequestSchema = z
   .object({
@@ -401,6 +418,10 @@ export const EventDetailSchema = z
     checkInRadius: z.number().openapi({
       description:
         "Radius in metres around latitude/longitude that contains the whole check-in area (outline or circle) plus its buffer. Derived from the event's geofence, which is a copy of its venue's taken when the event was saved. The server judges check-in against the real area; this circle only contains it.",
+    }),
+    doorCode: z.object({ available: z.boolean() }).openapi({
+      description:
+        "Whether the host's door code is live now (gate 13): the door is open (doors, start − 90 min, to the end), the event is published and the code is not paused. The app offers \"Enter door code\" on its own weak-fix tray when true. Never the code: only the host's dashboard shows it.",
     }),
     isFeatured: z.boolean(),
     promoted: z.boolean().openapi({
@@ -935,6 +956,7 @@ export const InterestedUsersResponseSchema = z
 const schemas = {
   EventQuery: EventQuerySchema,
   CheckinRequest: CheckinRequestSchema,
+  EventCheckinRequest: EventCheckinRequestSchema,
   RatingRequest: RatingRequestSchema,
   RsvpRequest: RsvpRequestSchema,
   AnnounceRequest: AnnounceRequestSchema,

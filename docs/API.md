@@ -983,7 +983,7 @@ and `/event/<id>` and their link-preview cards. No auth, no CORS; `lib/share-pub
 |--------|----------|-------------|
 | GET | `/events` | List events (paginated, filterable) |
 | GET | `/events/:eventId` | Get event details. Also carries `area` (the confirmed venue's area, else the city; null when neither is known), `doorPolicy`, `details` (or null) and `amenities`, none of which the list has. `chatGroup` is `{ id, name, status, member_count }` — snake_case — or null; `member_count` is `stats.hereCount`, in the room now (the column of that name only ever went up, and is not read). `categories[]` are the leaves as stored, `{ id, name, slug, description, icon }`, with no `parent`. `distance` is kilometres from `lat`/`lon`, and `null` (never absent) without them. `organizer` is `{ id, name, image, kind }` and never the user who created the row (SCRUM-1146): `organizer.id` is the organisation's id for `org` and null otherwise, `image` is always null. `organizer.kind` (SCRUM-1095) says what the name is: `org` (an organisation), `venue` (a venue day, its venue), `platform` (Blendn standing in), or `person` (an event with no organisation; `name` is null, the creating user's name is not sent). Draw a "Host" only for `org`; `GET /events` rows and `GET /users/:userId/favorites` rows carry the same. Also `changedAt`, `changedFields`, `changedFrom`, `days`, `dayCount` and `dayNumber` ([Flow 3](#the-event-what-changed-the-days-and-why-a-link-is-refused-flow-3)) |
-| POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`). On a native ticketed event (`TICKETING` on), 403 `tickets_required` unless the caller holds a ticket whose order is paid or is the event's staff (SCRUM-1014). `left` names the rooms it took you out of (see "One room at a time, and the switch"). Optional `withCrewId` tells that crew you're in ("With {crew}", answered by `crewTold`) |
+| POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`). On a native ticketed event (`TICKETING` on), 403 `tickets_required` unless the caller holds a ticket whose order is paid or is the event's staff (SCRUM-1014). `left` names the rooms it took you out of (see "One room at a time, and the switch"). Optional `withCrewId` tells that crew you're in ("With {crew}", answered by `crewTold`). Optional `doorCode` is the host's door code for a guest GPS could not place: see "The door code" |
 | GET | `/events/:eventId/people` | People from a night you attended, for the Recap — see below |
 | POST | `/events/:eventId/checkout` | Check out of event |
 | POST | `/events/:eventId/presence` | "Am I still counted as here?", every few minutes while checked in. `status` is `inside`, `outside`, `unknown` (a fix worse than the door's 150 m that reads outside: it neither starts nor advances the departure clock, SCRUM-1326), `checked_out` or `not_checked_in`. Checked out after 20 minutes outside, and on silence only after two outside readings at least 10 minutes apart; see `docs/CHECKIN.md` |
@@ -1740,6 +1740,41 @@ feature is worth. Rows cascade on account deletion.
 ```json
 { "pagination": { "page": 1, "limit": 20, "totalCount": 100, "totalPages": 5, "hasMore": true } }
 ```
+
+### The door code (gate 13)
+
+A guest whose GPS cannot place them types the code on the host's screen. The
+code changes every 30 seconds, is per event occurrence, and is never returned
+by any mobile endpoint: only the host's dashboard Door shows it.
+
+- **When it exists:** `GET /events/:eventId` carries `doorCode: { available }`,
+  true while the door is open (doors, start − 90 min, to the end), the event is
+  published and the code is not paused. Never the code.
+- **When to offer it:** a refusal of `POST /events/:eventId/checkin` with
+  `reasonCode: DOOR_CODE_OFFERED`: an `OUT_OF_RANGE` within 1 km of the fence,
+  or a fix over 150 m accuracy (now recorded as `weak_fix`), while the code is
+  live. The server decides; the app does no distance maths.
+- **The request:** the usual body plus `doorCode` (string, at most 12; lower
+  case, spaces and dashes accepted; 8/B, 5/S, 2/Z read as one) and
+  `deviceInfo.gpsAccuracy` (required with a code), optionally
+  `deviceInfo.mocked`. Every other gate runs first, unchanged.
+- **The answers, in order** (`errorCode`, status, sentence):
+
+| `errorCode` | Status | Sentence |
+|---|---|---|
+| `DOOR_CODE_PAUSED` | 400 | The door code is paused. Ask the host. |
+| `DOOR_CODE_LOCKED` | 429 | Too many tries. Try again at 10:52 PM, or step outside and use GPS. (5 wrong in 10 minutes; the time is on the event's clock) |
+| `DOOR_CODE_LOCKED` | 429 | Too many tries tonight. Step outside and use GPS. (10 wrong in the night, or removed from the room by the host) |
+| `DOOR_CODE_FAR` | 400 | You need to be at the venue to use the door code. (no accuracy, over 1000 m, a mocked fix, or more than 1 km short) |
+| `DOOR_CODE_CHANGED` | 400 | That code just changed. Read the new one on the host's screen. (not counted as a guess) |
+| `DOOR_CODE_WRONG` | 400 | That code didn't match. Check the host's screen; it may have just changed. |
+| `DOOR_CODE_UNAVAILABLE` | 503 | The door code isn't available right now. Try GPS. (the counters cannot be read; GPS is unaffected) |
+
+A valid code checks in exactly as GPS does, same response; the row records
+`method: door_code`. An App Review account at a `review_demo` event ignores the
+code (`method: review`). Wrong codes count per person and per event; 30 wrong
+in 10 minutes with more wrong than right pauses the code for 10 minutes and
+tells the host's Door.
 
 ### A venue day's id is not an event's
 

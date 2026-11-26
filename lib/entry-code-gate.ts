@@ -8,7 +8,7 @@ import { evaluateCheckIn, type Geofence } from "@/lib/geofence"
 import { logger } from "@/lib/logger"
 import { mobileTime } from "@/lib/mobile-datetime"
 import type { OccurrenceSlot } from "@/lib/occurrences"
-import { forget, hit, peek, peekWindow, StoreUnavailable } from "@/lib/rate-limit-store"
+import { forget, hit, peek, release, StoreUnavailable } from "@/lib/rate-limit-store"
 import { normaliseCode } from "@/lib/rotating-code"
 
 /**
@@ -59,26 +59,31 @@ export async function entryCodeGate(a: EntryCodeAttempt): Promise<Refusal | null
   }
 
   try {
-    const locked = await lockFor(a)
+    const { locked, giveBack } = await reserveAttempt(a)
     if (locked) {
+      await giveBack()
       record("door_code_locked")
       return errorResponse(locked, 429, "DOOR_CODE_LOCKED")
     }
 
     const shortfall = shortfallOf(a)
     if (shortfall === null || shortfall > ENTRY_CODE_NEAR_M) {
+      await giveBack()
       record("door_code_far", shortfall === null ? {} : { shortfallMetres: shortfall })
       return errorResponse(ENTRY_CODE_SAYS.far, 400, "DOOR_CODE_FAR")
     }
 
     const match = matchEntryCode(a.event.id, a.occurrence.id, a.typed, a.now)
     if (match === "match") {
-      await hit(rightKey(a.occurrence.id), WINDOW_MS, CLOSED)
+      await Promise.all([giveBack(), hit(rightKey(a.occurrence.id), WINDOW_MS, CLOSED)])
       return null
     }
-    if (match === "changed") return errorResponse(ENTRY_CODE_SAYS.changed, 400, "DOOR_CODE_CHANGED")
+    if (match === "changed") {
+      await giveBack()
+      return errorResponse(ENTRY_CODE_SAYS.changed, 400, "DOOR_CODE_CHANGED")
+    }
 
-    await countWrong(a)
+    if (normaliseCode(a.typed)) await countEventWrong(a)
     record("door_code_wrong")
     return errorResponse(ENTRY_CODE_SAYS.wrong, 400, "DOOR_CODE_WRONG")
   } catch (error) {
@@ -88,17 +93,27 @@ export async function entryCodeGate(a: EntryCodeAttempt): Promise<Refusal | null
   }
 }
 
-/** The sentence when this person may not try a code now: removed from the room, ten wrong tonight, or five in ten minutes. */
-async function lockFor(a: EntryCodeAttempt): Promise<string | null> {
-  const [removed, tonight, recent] = await Promise.all([
-    // The host's answer to a shared code: a removal turns code entry off for the occurrence.
+/**
+ * Count this attempt against the person before anything is compared, so a
+ * burst of parallel guesses cannot all read "under the limit" (reserve, then
+ * check); `giveBack` returns it for anything that is not a wrong code. Locked:
+ * removed from the room by the host (the answer to a shared code), over ten
+ * wrong tonight, or over five in ten minutes, with the time it lifts.
+ */
+async function reserveAttempt(a: EntryCodeAttempt): Promise<{ locked: string | null; giveBack: () => Promise<void> }> {
+  const keys = [personKey(a.occurrence.id, a.userId), nightKey(a.occurrence.id, a.userId)] as const
+  const tonightMs = Math.max(a.occurrence.endTime.getTime() - a.now.getTime(), 0) + 60 * 60_000
+  const [removed, recent, tonight] = await Promise.all([
     db.chat_group_members.findFirst({ where: { user_id: a.userId, status: "banned", chat_group: { event_id: a.event.id } }, select: { user_id: true } }),
-    peek(nightKey(a.occurrence.id, a.userId), CLOSED),
-    peekWindow(personKey(a.occurrence.id, a.userId), CLOSED),
+    hit(keys[0], WINDOW_MS, CLOSED),
+    hit(keys[1], tonightMs, CLOSED),
   ])
-  if (removed || tonight >= PERSON_NIGHT_WRONG) return ENTRY_CODE_SAYS.lockedTonight
-  if (recent.count >= PERSON_WRONG) return ENTRY_CODE_SAYS.lockedUntil(mobileTime(new Date(recent.resetAt), a.event.timezone))
-  return null
+  const giveBack = async () => {
+    await Promise.all(keys.map((k) => release(k)))
+  }
+  if (removed || tonight.count > PERSON_NIGHT_WRONG) return { locked: ENTRY_CODE_SAYS.lockedTonight, giveBack }
+  if (recent.count > PERSON_WRONG) return { locked: ENTRY_CODE_SAYS.lockedUntil(mobileTime(new Date(recent.resetAt), a.event.timezone)), giveBack }
+  return { locked: null, giveBack }
 }
 
 /** Metres short of the fence, or null when the fix cannot place the person at all (no accuracy, too vague, mocked, no fence). */
@@ -108,12 +123,12 @@ function shortfallOf(a: EntryCodeAttempt): number | null {
   return verdict.ok ? 0 : verdict.shortfall
 }
 
-/** A mismatch counts against the person; one that could be a code counts against the event too, and may pause it. */
-async function countWrong(a: EntryCodeAttempt): Promise<void> {
+/**
+ * A wrong code that could be one counts against the event too, and may pause it.
+ * ponytail: the trip reads the counts after its own hit, so a burst can trip a few attempts late; the pause still lands.
+ */
+async function countEventWrong(a: EntryCodeAttempt): Promise<void> {
   const occurrenceId = a.occurrence.id
-  const tonightMs = Math.max(a.occurrence.endTime.getTime() - a.now.getTime(), 0) + 60 * 60_000
-  await Promise.all([hit(personKey(occurrenceId, a.userId), WINDOW_MS, CLOSED), hit(nightKey(occurrenceId, a.userId), tonightMs, CLOSED)])
-  if (!normaliseCode(a.typed)) return
   const [wrong, right] = await Promise.all([hit(wrongKey(occurrenceId), WINDOW_MS, CLOSED), peek(rightKey(occurrenceId), CLOSED)])
   if (tripsEntryPause(wrong.count, right)) await setEntryPause(a.event.id, a.occurrence, null, a.now, { wrong: wrong.count, correct: right })
 }
