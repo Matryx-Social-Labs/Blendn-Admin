@@ -130,7 +130,7 @@ export async function lastMessagesOf(chatGroupIds: string[], blockedIds: string[
  * The most a room's `unreadCount` says (SCRUM-1223): the app shows "9+" above 9, so 10 is all it needs, and each room's
  * count stops at its tenth row (`LIMIT` inside the `LATERAL`) however long the room's history is.
  */
-export const UNREAD_ROOM_CAP = 10
+const UNREAD_ROOM_CAP = 10
 
 /** A line that can be unread for this viewer: visible, not theirs, not from a block, not hidden, not an advert. */
 const mayBeUnread = (notUnread: string[], hiddenLineIds: string[]) => Prisma.sql`deleted_at IS NULL

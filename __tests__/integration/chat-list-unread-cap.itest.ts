@@ -89,6 +89,48 @@ describe("the chat list's unread count is capped per room", () => {
     expect(res.body.data.groups[0].unreadCount).toBe(2)
   })
 
+  it("counts only lines that can be unread before it stops: deleted lines and adverts do not fill the cap", async () => {
+    const { viewer, a, roomId } = await roomWith("uc-filt")
+    await say(roomId, a.id, 1)
+    await readUpTo(roomId, viewer.id, 1)
+    await db.chat_messages.createMany({
+      data: Array.from({ length: 12 }, (_, i) => [
+        { chat_group_id: roomId, user_id: a.id, content: `gone ${i}`, deleted_at: at(30), created_at: at(2 + i) },
+        { chat_group_id: roomId, user_id: a.id, content: `advert ${i}`, metadata: { sponsored_message_id: "44444444-4444-4444-8444-444444444444" }, created_at: at(2 + i) },
+      ]).flat(),
+    })
+    await say(roomId, a.id, 3, 20)
+
+    const marked = await api.chatGroups(viewer)
+    await db.chat_group_members.updateMany({ where: { chat_group_id: roomId, user_id: viewer.id }, data: { last_read_message_id: null } })
+    const unmarked = await api.chatGroups(viewer)
+
+    expect(marked.body.data.groups[0].unreadCount).toBe(3)
+    expect(unmarked.body.data.groups[0].unreadCount).toBe(4)
+  })
+
+  it("counts a room whose read marker's message is gone from its start, capped, beside a room with a live marker", async () => {
+    const live = await roomWith("uc-live")
+    await say(live.roomId, live.a.id, 8)
+    await readUpTo(live.roomId, live.viewer.id, 5)
+    const host = await person("uc-gone-host")
+    const e = await liveEvent(host.id)
+    await arrive(e.eventId, e.occurrenceId, live.viewer, "Otter V3")
+    await arrive(e.eventId, e.occurrenceId, live.a, "Heron A3")
+    const gone = await db.chat_groups.findUniqueOrThrow({ where: { event_id: e.eventId }, select: { id: true } })
+    await say(gone.id, live.a.id, 15)
+    await db.chat_group_members.updateMany({
+      where: { chat_group_id: gone.id, user_id: live.viewer.id },
+      data: { last_read_message_id: "55555555-5555-4555-8555-555555555555" },
+    })
+
+    const res = await api.chatGroups(live.viewer)
+
+    const unread = new Map((res.body.data.groups as { id: string; unreadCount: number }[]).map((g) => [g.id, g.unreadCount]))
+    expect(unread.get(live.roomId)).toBe(3)
+    expect(unread.get(gone.id)).toBe(10)
+  })
+
   it("says 0 once the room is read through the API, and the marker is the newest line", async () => {
     const { viewer, a, roomId } = await roomWith("uc-read")
     await say(roomId, a.id, 25)
