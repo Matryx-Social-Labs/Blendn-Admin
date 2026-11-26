@@ -43,7 +43,6 @@ import {
   sweepOrphanChatUploads,
   sweepOrphanPhotos,
 } from "@/lib/photo-orphans"
-import { db as appDb } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { bucketFor } from "@/lib/tigris"
 import { db, cleanup, closeDb, makeEvent, makeUser, onboard } from "./helpers"
@@ -248,6 +247,13 @@ describe("the unsent chat upload sweep", () => {
   const putChat = (key: string, at: Date = OLD) => chatBucket.set(key, at)
   const rawKey = (uid: string, name = "photo.jpg") => `chat/${uid}/1790641297767-cfg6ta-${name}`
   const chatPass = (mode: "log" | "delete" = "delete") => sweepOrphanChatUploads({ now: NOW, mode })
+  /** The pass ran (not refused) and took exactly the unreferenced sibling: so what survived, a reference kept. */
+  async function keepsAllBut(uid: string) {
+    const orphan = rawKey(uid, "unsent.jpg")
+    putChat(orphan)
+    expect(await chatPass()).toMatchObject({ refused: false })
+    expect(deleted).toEqual([orphan])
+  }
 
   async function sender() {
     const id = await makeUser("chat")
@@ -329,8 +335,7 @@ describe("the unsent chat upload sweep", () => {
     const key = rawKey(owner, "shared.jpg")
     await dm(other, `${privateHost}/${key}`)
     putChat(key)
-    await chatPass()
-    expect(deleted).toEqual([])
+    await keepsAllBut(owner)
   })
 
   it("keeps an upload a room message's metadata names, under mediaUrl or any other field", async () => {
@@ -340,8 +345,7 @@ describe("the unsent chat upload sweep", () => {
     await roomMessage(uid, { attachment: { url: `${privateHost}/${elsewhere}` } })
     putChat(media)
     putChat(elsewhere)
-    await chatPass()
-    expect(deleted).toEqual([])
+    await keepsAllBut(uid)
   })
 
   it("keeps an upload a Lobby post names", async () => {
@@ -351,8 +355,7 @@ describe("the unsent chat upload sweep", () => {
     chatEvents.push(eventId)
     await db.board_posts.create({ data: { event_id: eventId, author_id: uid, kind: "chat", body: "Look", photo_url: `${privateHost}/${key}`, photo_status: "pending" } })
     putChat(key)
-    await chatPass()
-    expect(deleted).toEqual([])
+    await keepsAllBut(uid)
   })
 
   it("keeps an image a report holds past its author's account (a bare key in retained_report_media)", async () => {
@@ -362,8 +365,7 @@ describe("the unsent chat upload sweep", () => {
       data: { user_id: uid, object_key: key, message_id: "00000000-0000-4000-8000-000000000001", message_type: "private", account_deleted_at: OLD, erase_by: new Date(NOW.getTime() + ORPHAN_GRACE_MS) },
     })
     putChat(key)
-    await chatPass()
-    expect(deleted).toEqual([])
+    await keepsAllBut(uid)
   })
 
   it("keeps an image a sexual image hold names in its audit row", async () => {
@@ -372,8 +374,7 @@ describe("the unsent chat upload sweep", () => {
     const row = await db.audit_logs.create({ data: { action: "moderation.sexual_image_hold", resource: "user", resource_id: uid, details: { objectKey: key, path: "lobby", category: "sexual" } }, select: { id: true } })
     auditIds.push(row.id)
     putChat(key)
-    await chatPass()
-    expect(deleted).toEqual([])
+    await keepsAllBut(uid)
   })
 
   it("keeps an upload a reference names percent-encoded", async () => {
@@ -381,8 +382,7 @@ describe("the unsent chat upload sweep", () => {
     const key = rawKey(uid, "encoded.jpg")
     await dm(uid, `${privateHost}/${encodeURIComponent(key)}`)
     putChat(key)
-    await chatPass()
-    expect(deleted).toEqual([])
+    await keepsAllBut(uid)
   })
 
   it("keeps an upload younger than the grace window: a send can still come", async () => {
@@ -438,8 +438,13 @@ describe("the unsent chat upload sweep", () => {
   it("fails closed when the references cannot be read: nothing deleted", async () => {
     const uid = await sender()
     putChat(rawKey(uid))
-    jest.spyOn(appDb, "$queryRaw").mockRejectedValueOnce(new Error("db down"))
-    await expect(chatPass()).rejects.toThrow("db down")
+    // A real failure of the reference read (suites run one at a time): `db` is a proxy no spy reaches.
+    await db.$executeRawUnsafe(`ALTER TABLE retained_report_media RENAME COLUMN object_key TO itest_object_key`)
+    try {
+      await expect(chatPass()).rejects.toThrow(/object_key/)
+    } finally {
+      await db.$executeRawUnsafe(`ALTER TABLE retained_report_media RENAME COLUMN itest_object_key TO object_key`)
+    }
     expect(deleted).toEqual([])
     expect(chatBucket.has(rawKey(uid))).toBe(true)
   })
@@ -471,11 +476,11 @@ describe("the unsent chat upload sweep", () => {
     chatKeys.forEach((k) => putChat(k))
 
     const first = await sweepAllOrphans({ now: NOW, mode: "delete" })
-    expect(first.profile.deleted + first.chat.deleted).toBe(MAX_DELETES_PER_PASS)
-    expect(first.chat.deleted).toBe(0)
+    expect(first.profile!.deleted + first.chat!.deleted).toBe(MAX_DELETES_PER_PASS)
+    expect(first.chat!.deleted).toBe(0)
     stopOrphanPhotoSweeper()
     const second = await sweepAllOrphans({ now: NOW, mode: "delete" })
-    expect(second.chat.deleted).toBe(5)
+    expect(second.chat!.deleted).toBe(5)
   })
 
   it("keeps its own cursor: a profile pass part-way through its bucket does not move where chat reads", async () => {

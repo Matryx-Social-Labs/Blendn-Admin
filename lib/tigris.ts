@@ -408,13 +408,14 @@ export async function deletePrefix(prefix: string, keep: ReadonlySet<string> = n
   return deleted
 }
 
-/** One page of the public bucket under a prefix: keys and when each was last written (SCRUM-730). */
+/** One page of a bucket (the public one unless named) under a prefix: keys and when each was last written (SCRUM-730). */
 export async function listPublicObjects(
   prefix: string,
-  continuationToken?: string
+  continuationToken?: string,
+  bucket: string = TIGRIS_BUCKET
 ): Promise<{ objects: { key: string; lastModified: Date }[]; next: string | undefined }> {
   const page = await getS3Client().send(
-    new ListObjectsV2Command({ Bucket: TIGRIS_BUCKET, Prefix: prefix, ContinuationToken: continuationToken }),
+    new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: continuationToken }),
     { abortSignal: AbortSignal.timeout(DELETE_CALL_TIMEOUT_MS) }
   )
   const objects = (page.Contents ?? []).flatMap((o) => (o.Key && o.LastModified ? [{ key: o.Key, lastModified: o.LastModified }] : []))
