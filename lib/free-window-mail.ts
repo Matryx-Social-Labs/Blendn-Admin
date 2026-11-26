@@ -6,7 +6,7 @@ import { logger } from "./logger"
 import { mayBuyHere } from "./plan-market"
 
 /** How long before `analytics_free_until` the mail goes (DECISIONS 2026-11-25: "one email 14 days before it ends"). */
-export const FREE_WINDOW_NOTICE_DAYS = 14
+const FREE_WINDOW_NOTICE_DAYS = 14
 const DAY_MS = 24 * 60 * 60 * 1000
 
 /**

@@ -489,9 +489,9 @@ export function ticketOrderHtml(opts: { heading: string; paragraphs: string[]; l
  * paragraphs come from `freeWindowEndingEmail` (lib/email.ts) as plain text,
  * so the text and HTML parts say the same thing; each is escaped here.
  */
-export function freeWindowEndingHtml(opts: { title: string; heading: string; paragraphs: string[]; link: string; note: string }): string {
+export function freeWindowEndingHtml(opts: { heading: string; paragraphs: string[]; link: string; note: string }): string {
   return designEmail({
-    title: opts.title,
+    title: opts.heading,
     preheader: opts.paragraphs[0] ?? opts.heading,
     eyebrow: "Your plan",
     heading: opts.heading,

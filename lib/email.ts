@@ -428,6 +428,6 @@ export function freeWindowEndingEmail(opts: { orgName: string; endsAt: Date }) {
   return {
     subject: heading,
     text: [...paragraphs.flatMap((p) => [p, ""]), `See your plan: ${link}`, "", note].join("\n"),
-    html: freeWindowEndingHtml({ title: heading, heading, paragraphs, link, note }),
+    html: freeWindowEndingHtml({ heading, paragraphs, link, note }),
   }
 }
