@@ -5,7 +5,8 @@ import { db } from "./db"
 import { logger } from "./logger"
 import { checkImageContent, type ModerationCheck } from "./moderation/openai-moderation"
 import { forcedHide } from "./moderation/staging-override"
-import { readableUrl } from "./tigris"
+import { escalateChildSafetyImage } from "./moderation/child-safety"
+import { readableUrl, sealedChatKey } from "./tigris"
 
 /**
  * A Lobby post's one photo (SCRUM-1026, owner decision 1).
@@ -62,14 +63,20 @@ export async function moderateLobbyPhoto(postId: string, check = checkImageConte
       select: { author_id: true, photo_url: true, photo_status: true },
     })
     if (!post?.photo_url || post.photo_status !== "pending") return null
-    const verdict = photoVerdict(forcedHide(post.author_id) ?? (await check(await readableUrl(post.photo_url), PHOTO_CHECK)))
+    const judged = forcedHide(post.author_id) ?? (await check(await readableUrl(post.photo_url), PHOTO_CHECK))
+    const verdict = photoVerdict(judged)
     if (!verdict) return null
     const { count } = await db.board_posts.updateMany({
       where: { id: postId, photo_status: "pending" },
       data: { photo_status: verdict, photo_checked_at: new Date() },
     })
-    if (count > 0 && verdict === "rejected") logger.warn("Lobby photo rejected by moderation", { postId })
-    return count > 0 ? verdict : null
+    if (count === 0) return null
+    if (verdict === "rejected") {
+      logger.warn("Lobby photo rejected by moderation", { postId })
+      // Only the pass that rejected it pages: one that lost the race returned above.
+      await escalateChildSafetyImage(judged, sealedChatKey(post.photo_url), post.author_id)
+    }
+    return verdict
   } catch (error) {
     logger.error("Lobby photo moderation failed; photo left pending", {
       postId,

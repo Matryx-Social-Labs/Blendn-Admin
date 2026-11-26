@@ -1,5 +1,6 @@
 import { checkImageContent } from "./moderation/openai-moderation"
 import { forcedHide } from "./moderation/staging-override"
+import { escalateChildSafetyImage } from "./moderation/child-safety"
 import { deleteFile, ownedPhotoKey, sealUpload, withdrawFromPublic, type SealRefusal } from "./tigris"
 import { db } from "./db"
 import { logger } from "./logger"
@@ -204,7 +205,12 @@ export async function moderateProfilePhoto(url: string, userId: string): Promise
   try {
     const check = forcedHide(userId) ?? (await checkImageContent(url, PHOTO_CHECK))
     if (check.checked && check.result?.action === "hide") {
-      await pullPhoto(url, userId)
+      // The page goes whether or not the pull went through: a failed pull is logged below, and is the more urgent.
+      try {
+        await pullPhoto(url, userId)
+      } finally {
+        await escalateChildSafetyImage(check, ownedPhotoKey(url, userId), userId)
+      }
       return
     }
     await recordPhotoCheck(url, userId, check.checked)
@@ -230,10 +236,14 @@ export async function moderateBlurPhoto(url: string, userId: string): Promise<vo
   try {
     const check = forcedHide(userId) ?? (await checkImageContent(url, PHOTO_CHECK))
     if (check.checked && check.result?.action === "hide") {
-      await recordPhotoPulled(url, userId)
-      await db.profiles.updateMany({ where: { id: userId, blur_photo: url }, data: { blur_photo: null } })
-      await withdraw(url, userId)
-      logger.warn("Blurred profile photo removed after moderation", { userId })
+      try {
+        await recordPhotoPulled(url, userId)
+        await db.profiles.updateMany({ where: { id: userId, blur_photo: url }, data: { blur_photo: null } })
+        await withdraw(url, userId)
+        logger.warn("Blurred profile photo removed after moderation", { userId })
+      } finally {
+        await escalateChildSafetyImage(check, ownedPhotoKey(url, userId), userId)
+      }
       return
     }
     // Recorded like a photo, so one that could not be checked is on the same list.
