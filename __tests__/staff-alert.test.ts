@@ -208,7 +208,7 @@ describe("no channel configured", () => {
   it.each([["production"], ["staging"]])("logs the hint but not the page text (%s)", async (name) => {
     process.env.RAILWAY_ENVIRONMENT_NAME = name
     await notifyStaff("Image pulled: key uploads/K-key-123.jpg user U-user-456")
-    const logged = JSON.stringify([mockLogger.error.mock.calls, mockLogger.info.mock.calls])
+    const logged = JSON.stringify(Object.values(mockLogger).map((f) => f.mock.calls))
     expect(logged).toContain("STAFF_ALERT_SLACK_WEBHOOK_URL")
     expect(logged).not.toContain("K-key-123")
     expect(logged).not.toContain("U-user-456")

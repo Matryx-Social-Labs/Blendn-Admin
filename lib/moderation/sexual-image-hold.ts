@@ -29,12 +29,13 @@ const lastPaged = new Map<string, number>()
  * image, no name. Never throws: nothing here may stop, or undo, the pull.
  */
 export async function holdSexualImage(check: ModerationCheck, path: ImagePath, objectKey: string | null, userId: string): Promise<void> {
+  // In a log line only where no audit row holds them: the row's write failed, or it may not have run.
   const context = { userId, objectKey }
   try {
     const categories = check.checked && check.result?.action === "hide" && check.result.source === "openai_image" ? check.result.categories : undefined
     const category = (["sexual/minors", "sexual"] as const).find((c) => categories?.[c] !== undefined)
     if (!category) return
-    if (!objectKey) logger.error("Sexual image hold: the object key could not be resolved", context)
+    if (!objectKey) logger.error("Sexual image hold: the object key could not be resolved", { path })
     // No actor: the platform did this (lib/audit-log.ts `actsFor`). Awaited, so a lost row is logged here, with whose it was.
     const audited = await db
       .$transaction((tx) => auditInTx(tx, { action: "moderation.sexual_image_hold", resource: "user", resourceId: userId, details: { objectKey, path, category } }))
@@ -47,7 +48,7 @@ export async function holdSexualImage(check: ModerationCheck, path: ImagePath, o
     for (const [id, at] of lastPaged) if (now - at >= PAGE_COOLDOWN_MS) lastPaged.delete(id)
     // The cooldown leaves a pull to its audit row; one whose row was lost is paged regardless.
     if (audited && lastPaged.has(userId)) {
-      logger.info("Sexual image page held back by the 10-minute cooldown", { ...context, path })
+      logger.info("Sexual image page held back by the 10-minute cooldown", { path })
       return
     }
     // Taken before the send, so a second pull arriving during it waits out the window too; given back unless a page went.
@@ -61,7 +62,7 @@ export async function holdSexualImage(check: ModerationCheck, path: ImagePath, o
     } finally {
       if (result !== "sent") lastPaged.delete(userId)
     }
-    if (result !== "sent") logger.error("Sexual image hold: staff were not paged", { ...context, result })
+    if (result !== "sent") logger.error("Sexual image hold: staff were not paged", { path, result })
   } catch (error) {
     logger.error("Sexual image hold failed", { ...context, error: error instanceof Error ? error.message : String(error) })
   }
