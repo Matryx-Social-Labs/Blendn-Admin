@@ -141,17 +141,15 @@ async function main() {
   /*
    * The organiser cannot be the review account: it is an attendee, and an
    * attendee owning an event is a state nothing else in the product produces.
-   * Reuse a real organiser if one exists, otherwise make a dedicated one. Read
-   * only when the event is created: a re-run keeps the row's organiser.
+   * Reuse a real organiser if one exists, otherwise make a dedicated one. Only
+   * a new row takes it: a re-run keeps the event's organiser.
    */
-  const organizerId = async () =>
-    (
-      (await db.user.findFirst({ where: { role: { not: "attendee" } }, orderBy: { createdAt: "asc" } })) ??
-      (await db.user.create({
-        data: { email: `demo-organiser@${email.split("@")[1]}`, name: "Blend'n Demo", role: "organizer" },
-      }))
-    ).id
-  const { event, occurrences } = await upsertReviewDemoEvent(organizerId)
+  const organizer =
+    (await db.user.findFirst({ where: { role: { not: "attendee" } }, orderBy: { createdAt: "asc" } })) ??
+    (await db.user.create({
+      data: { email: `demo-organiser@${email.split("@")[1]}`, name: "Blend'n Demo", role: "organizer" },
+    }))
+  const { event, occurrences } = await upsertReviewDemoEvent(organizer.id)
 
   console.log("Review account ready.")
   console.log(`  email         ${email}`)
@@ -193,7 +191,7 @@ if (require.main === module) {
  * next day's (the 90-minute door lead covers the seam) and leaves no sliver of
  * a last day.
  */
-async function upsertReviewDemoEvent(organizerId: () => Promise<string>) {
+async function upsertReviewDemoEvent(organizerId: string) {
   const start = new Date(Date.now() - 60 * 60 * 1000)
   const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000 - 60 * 1000)
   const window = {
@@ -226,7 +224,7 @@ async function upsertReviewDemoEvent(organizerId: () => Promise<string>) {
           country: CITY.country,
           timezone: CITY.timezone,
           max_capacity: 120,
-          organizer_id: await organizerId(),
+          organizer_id: organizerId,
           check_in_radius: 150,
         },
       })

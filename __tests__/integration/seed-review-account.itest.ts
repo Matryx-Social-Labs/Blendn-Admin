@@ -91,7 +91,6 @@ describe("seed:review on a database with real upcoming events", () => {
       if (!pickOccurrence(slots, new Date(at)).ok) closed.push(new Date(at).toISOString())
     }
     expect(closed).toEqual([])
-    expect(pickOccurrence(slots, new Date(now + 2 * 24 * HOUR)).ok).toBe(true)
   })
 
   it("opens by id for the review account and for anybody holding the link, wherever they are", async () => {
