@@ -817,8 +817,8 @@
     },
     "what-an-organiser-sees.test.ts": {
       "guards": "see the test's own docblock; the mutation below proves it is not vacuous Since step 15 the feedback digest's checks read lib/feedback-digest.ts, where the digest moved so the page builds it from its loader's event.",
-      "mutation": "Replace app/dashboard/events/[id]/feedback/actions.ts with an empty stub (`export {}`), run this suite, revert M558 (step 15): in lib/feedback-digest.ts, contributors counted by feedback row (`people.add(row.id)`) instead of by person. 2026-11-06 (the count moved into `tallyFeedback`, shared with the live screen and the purge's frozen tally): `who.add(row.userId)` replaced by `who.add(String(who.size))` (one per row).",
-      "observed": "4 failing M558: 1 failing ('counts distinct people per category, not messages'); reverted. 2026-11-06: 1 failing (the same test); restored, 17/17.",
+      "mutation": "Replace app/dashboard/events/[id]/feedback/actions.ts with an empty stub (`export {}`), run this suite, revert M558 (step 15): in lib/feedback-digest.ts, contributors counted by feedback row (`people.add(row.id)`) instead of by person. 2026-11-06 (the count moved into `tallyFeedback`, shared with the live screen and the purge's frozen tally): `who.add(row.userId)` replaced by `who.add(String(who.size))` (one per row). 2026-11-26 (SCRUM-1285: the tally counts each person's messages per category): `who.set(row.userId, (who.get(row.userId) ?? 0) + 1)` replaced by `who.set(String(who.size), 1)` (one per row); and the quotable categories taken from contributors alone instead of `categories.filter((c) => !c.suppressed)`.",
+      "observed": "4 failing M558: 1 failing ('counts distinct people per category, not messages'); reverted. 2026-11-06: 1 failing (the same test); restored, 17/17. 2026-11-26: one per row, 8 of 27 failing with complaint-dominance.test.tsx ('counts distinct people per category, not messages' among them); contributors-only quotes, 1 failing ('derives `quotable` from the rule'); restored, 27/27.",
       "date": "2026-08-25",
       "source": "run-at-integration-merge"
     },
@@ -2882,6 +2882,18 @@
       "guards": "SCRUM-1281: a named Table's scroll box (components/ui/table.tsx) is a focusable region carrying the table's name, so a table that scrolls sideways at 375 passes axe scrollable-region-focusable; an unnamed table adds no tab stop.",
       "mutation": "(M12) the region/tabIndex/aria-label spread removed from the container.",
       "observed": "M12: 1 of 2 failing (the named case). Restored; 2 of 2.",
+      "date": "2026-11-26"
+    },
+    "complaint-dominance.test.tsx": {
+      "guards": "SCRUM-1285: a complaint category one person wrote more than half of is held back (5 people, one with 20 of 25), shown at exactly half (10 of 20), shown when spread evenly; tallyFeedback counts the largest single person's messages from the rows it reads; the disclosed entry and its CategoryBars markup are identical to a sub-floor category's apart from the name, sort after the shown ones, and carry no suppressionReason or reason word; an undominated category's payload is the same with the largest share as without it.",
+      "mutation": "(N0) the test run on origin/dev 33eea380 before the change; (M4) `topContributorShare > MAX_DOMINANCE` made `>=`; (M5) `suppressionReason: disclosure.reason` put back on discloseCategories' entries.",
+      "observed": "N0: 10 of 11 failing; 5 people with one writing 20 of 25 read count 25, suppressed false (the negative control). M4: 1 of 27 failing (exactly half). M5: 6 of 27 failing. Restored; 27 of 27.",
+      "date": "2026-11-26"
+    },
+    "complaint-dominance.itest.ts": {
+      "guards": "SCRUM-1285 on a db:migrate database: the live snapshot and the host digest hold back a category one person wrote 20 of 25 of, identical to a sub-floor category apart from the name, show the evenly spread one (10), quote none of the held-back category (messagesTotal 10), carry no suppressionReason or 'dominance'; the 180-day purge freezes top_messages {entry_queue: 20, crowding: 2, safety_conduct: 1} and the digest reads the same categories after it; a tally with top_messages NULL reads as before (25 shown).",
+      "mutation": "(M1) live-snapshot.ts calls discloseCategories without topMessages; (M2) the digest without categoryTop; (M3) the freeze writes no top_messages; (M5) suppressionReason back on the entries; (M6) quotable from people alone.",
+      "observed": "M1: 1 of 4 failing (the live snapshot). M2: 1 of 4 (the digest). M3: 1 of 4 (the purge). M5: 3 of 4. M6: 1 of 4 (the quotes). Restored; 4 of 4.",
       "date": "2026-11-26"
     }
   },
