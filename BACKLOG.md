@@ -414,10 +414,7 @@ list-and-scan workaround around it.
 
 # Execution Order
 
-**Phase 1 — Critical security/crash risk**
-- ~~Socket room authorization on join (2.1)~~ — done
-
-**Phase 2 — Backend correctness & hygiene**
+**Phase 1 — Backend correctness & hygiene**
 - Non-null assertion cleanup (2.5)
 - Unawaited DB write logging (2.6)
 - zod validation gaps (5.1, 5.2)
@@ -426,7 +423,7 @@ list-and-scan workaround around it.
 - Error response standardization (4.5)
 - Hardcoded limits → constants (4.6)
 
-**Phase 3 — Dashboard UI completeness**
+**Phase 2 — Dashboard UI completeness**
 - ~~Consolidate duplicate events-table (3.1)~~ — done
 - Empty states (3.2), loading skeletons (3.3)
 - Accessibility labels (3.4)
@@ -435,13 +432,13 @@ list-and-scan workaround around it.
 - Clipboard error handling (3.10)
 - ~~Upload progress indicator (3.8)~~ — done
 
-**Phase 4 — Code quality / structural cleanup**
+**Phase 3 — Code quality / structural cleanup**
 - Split remaining oversized components (4.1) — `event-form.tsx` already done; `actions.ts`/`users-table.tsx` still open
 - ~~Resolve unused `data-table.tsx` and dependent deps (1.3, 4.7)~~ — done
 - ~~Design tokens for colors (3.5)~~ — done; spacing scale (3.6) still open; ~~Tabs standardization (3.7)~~ — done
 - Scheduler graceful shutdown (1.2)
 
-**Phase 5 — Observability & docs polish**
+**Phase 4 — Observability & docs polish**
 - SENTRY_AUTH_TOKEN build behavior (7.2)
 - Docs reconciliation: SOCKET_EVENTS.md, chat-moderation.md (7.3, 7.4)
 - .env.example completeness (1.1)

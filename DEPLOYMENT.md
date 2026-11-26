@@ -500,7 +500,7 @@ Returns:
 }
 ```
 
-`pool`, `eventLoopDelayMs` and `sockets` are counts about this process (SCRUM-1221), present only with `Authorization: Bearer $HEALTH_METRICS_TOKEN` (or anywhere but Railway production while the token is unset); the monitor that alerts on them must send that header. `pool` is `null` before the first query; `sockets` is `null` where Socket.io is not attached. `eventLoopDelayMs` is the last full minute, rotated inside the process and never reset by a read (the endpoint is public), `null` for the first minute; the 10 ms resolution of `monitorEventLoopDelay` is its floor. A rising `eventLoopDelayMs.p99` is the one process saturating, and `pool.waiting` above 0 is requests queued for a connection; the alert thresholds are kept with the other monitor settings ([Operating production](#operating-production), Monitoring).
+`pool`, `eventLoopDelayMs` and `sockets` are counts about this process (SCRUM-1221), present only with `Authorization: Bearer $HEALTH_METRICS_TOKEN` (or anywhere but Railway production while the token is unset); the monitor that alerts on them must send that header. `pool` is `null` before the first query; `sockets` is `null` where Socket.io is not attached. `eventLoopDelayMs` is the last full minute, rotated inside the process and never reset by a read (the endpoint is public), `null` for the first minute; the 10 ms resolution of `monitorEventLoopDelay` is its floor. A rising `eventLoopDelayMs.p99` is the one process saturating, and `pool.waiting` above 0 is requests queued for a connection; the alert thresholds are kept with the other monitor settings (see Monitoring under [Operating production](#operating-production)).
 
 ## Troubleshooting
 
@@ -543,9 +543,9 @@ npm start
 What to do when production breaks. One replica, no over-the-air updates, and a
 rollback that never touches the schema.
 
-**Who.** The owner, and the on-call person. Who is on call, how to reach them,
-how alerts reach them and the response targets are in the password manager note
-"Blendn on-call", never in git.
+**Who.** The owner, and the on-call person. How to reach each is in the password
+manager note "Blendn on-call", never in git; how alerts reach them and the
+response targets are on the ops runbook ticket (SCRUM-1198).
 
 **Severity.**
 - **S1:** the API or sign-in is down, or data is exposed or lost. Call the owner at once.
@@ -555,7 +555,7 @@ how alerts reach them and the response targets are in the password manager note
 **First steps in an S1.** Open a Jira ticket in project SCRUM, label
 `incident`, and keep the timeline in it. Consoles: railway.com (project Blendn,
 service Blendn-Admin, environment production) and Sentry (project
-`blendn-admin`; the address is in the password manager note). For
+`blendn-admin`; the address is on SCRUM-1198). For
 the CLI, once, in a clone of `Matryx-Social-Labs/Blendn-Admin`:
 `railway link --project Blendn --environment production --service Blendn-Admin`.
 Do step 1, then the first of steps 2 to 6 that matches.
@@ -639,14 +639,17 @@ production track. Then retire the bad build once the fix is live (step 5). A ser
 normal merge and promotion, or the rollback above.
 
 **Monitoring.** Sentry, project `blendn-admin`. The app reports errors and
-traces only with `NEXT_PUBLIC_SENTRY_DSN` set, tagged with the Railway
-environment (`RAILWAY_ENVIRONMENT_NAME`, `sentry.server.config.ts`), so an alert
-that names `staging` is not a production incident. Uptime checks, metric
+traces only with `NEXT_PUBLIC_SENTRY_DSN` set. Server and edge events carry the
+Railway environment (`RAILWAY_ENVIRONMENT_NAME`, `sentry.server.config.ts`,
+`sentry.edge.config.ts`), so an alert that names `staging` is not a production
+incident; browser events carry none and read as `production`, so check the host
+of a browser error before calling it one. Uptime checks, metric
 monitors and the alert rules that email the team live in the Sentry console
 (Alerts, Monitors), not in this repo; which are on, their ids and their
-thresholds are kept in the ops Jira tickets, not here. After a deploy: step 1's
-two `curl`s, then the project's Issues filtered to that environment show nothing
-new since the deploy.
+thresholds are on SCRUM-1198, not here. After a deploy: step 1's
+two `curl`s, `railway deployment list` shows the new deployment SUCCESS,
+`railway logs --deployment --lines 200` has no `Health check - Database error`,
+and the project's Issues for that environment show nothing new since the deploy.
 
 Railway's own graphs (CPU, memory, HTTP) are on the service's Metrics tab;
 `/api/health` reports the pool, event-loop delay and sockets only to a request with

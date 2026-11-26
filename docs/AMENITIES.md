@@ -213,7 +213,7 @@ here and unbuilt. Nothing about them is foreclosed — the event stores its own
 rows either way, so suggestions land later as *defaults* without changing what
 any past event claimed.
 
-**The backfill is also not built, which closes the critical gap above.** The
+**The backfill is also not built.** The
 reverse-geocode is best-effort on write and a null renders the city, which is
 exactly what happens today. Shipping an unscheduled, unmonitored job to fill
 those nulls would add the one silent failure path this plan had. When there is a
