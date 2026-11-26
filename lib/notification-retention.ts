@@ -49,65 +49,81 @@ export const PRODUCT_EVENT_RETENTION_DAYS = 180
 
 const SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000 // 6 hours
 const BATCH_LIMIT = 5_000
+/*
+ * A pass loops while a batch comes back full (SCRUM-1224): one batch per six hours was a 20,000-row/day ceiling that
+ * bell rows pass within weeks of launch. Bounded, so one pass never holds the loop for long: 20 batches (100,000 rows
+ * per table per pass, 400,000 a day) or a minute, with a pause between batches for the bell reads and writes.
+ */
+const MAX_BATCHES = 20
+const MAX_DRAIN_MS = 60_000
+const BATCH_PAUSE_MS = 200
 
 let sweepTimer: ReturnType<typeof setTimeout> | null = null
+let stopped = false
 
 function daysAgo(days: number, now: Date): Date {
   return new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
 }
 
+/*
+ * One batch per statement. `= ANY(ARRAY(subquery))`, not `IN (subquery)`: with IN the planner hash-joins the batch
+ * against a sequential scan of the whole table on every batch (EXPLAIN, SCRUM-1224); ANY(ARRAY) reads the batch's
+ * rows by primary key. The read rule is served by `notifications_read_at_idx` (partial, migration SQL) and the unread
+ * rule by `notifications_created_at_idx`, so a batch that finds nothing reads a few index pages, not the table.
+ */
+
 /**
- * Delete notifications past their window. Returns how many went.
+ * Delete one batch of notifications past their window. Returns how many went.
  *
- * Bounded per pass. A first run against a table that has never been pruned
- * could otherwise be a single unbounded delete over years of rows, taking locks
- * on a table that every bell read touches. Six-hourly passes drain it instead,
- * and the caller can see from the return value whether a backlog remains.
+ * Bounded per batch: a single unbounded delete over a never-pruned table would hold locks on a table every bell read
+ * touches. `runSweep` repeats it while a batch comes back full.
  *
- * Idempotent: the predicates are absolute timestamps, so a second pass in the
- * same window deletes nothing.
+ * Idempotent: the predicates are absolute timestamps, so a second batch in the same window deletes only what is left.
  */
 export async function pruneNotifications(now: Date = new Date()): Promise<number> {
-  const stale = await db.notifications.findMany({
-    where: {
-      OR: [
-        { read_at: { not: null, lt: daysAgo(READ_RETENTION_DAYS, now) } },
-        { read_at: null, created_at: { lt: daysAgo(UNREAD_RETENTION_DAYS, now) } },
-      ],
-    },
-    select: { id: true },
-    take: BATCH_LIMIT,
-  })
-
-  if (stale.length === 0) return 0
-
-  const { count } = await db.notifications.deleteMany({
-    where: { id: { in: stale.map((n) => n.id) } },
-  })
-  return count
+  return db.$executeRaw`
+    DELETE FROM notifications WHERE id = ANY(ARRAY(
+      SELECT id FROM notifications
+      WHERE read_at < ${daysAgo(READ_RETENTION_DAYS, now)}
+         OR (read_at IS NULL AND created_at < ${daysAgo(UNREAD_RETENTION_DAYS, now)})
+      LIMIT ${BATCH_LIMIT}
+    ))`
 }
 
-/** Behavioural signals past their window. Same batching, same bound. */
+/** One batch of behavioural signals past their window. Same bound; `occurred_at` has a BRIN index. */
 export async function pruneProductEvents(now: Date = new Date()): Promise<number> {
-  const stale = await db.product_events.findMany({
-    where: { occurred_at: { lt: daysAgo(PRODUCT_EVENT_RETENTION_DAYS, now) } },
-    select: { id: true },
-    take: BATCH_LIMIT,
-  })
-  if (stale.length === 0) return 0
+  return db.$executeRaw`
+    DELETE FROM product_events WHERE id = ANY(ARRAY(
+      SELECT id FROM product_events WHERE occurred_at < ${daysAgo(PRODUCT_EVENT_RETENTION_DAYS, now)} LIMIT ${BATCH_LIMIT}
+    ))`
+}
 
-  const { count } = await db.product_events.deleteMany({
-    where: { id: { in: stale.map((e) => e.id) } },
-  })
-  return count
+/** Batches until one comes back short, or the cap. `capped` means rows may be left for the next pass. */
+async function drain(prune: (now: Date) => Promise<number>): Promise<{ deleted: number; batches: number; capped: boolean }> {
+  const now = new Date()
+  const started = Date.now()
+  let deleted = 0
+  for (let batches = 1; ; batches++) {
+    const count = await prune(now)
+    deleted += count
+    if (count < BATCH_LIMIT) return { deleted, batches, capped: false }
+    if (stopped || batches >= MAX_BATCHES || Date.now() - started >= MAX_DRAIN_MS) {
+      return { deleted, batches, capped: true }
+    }
+    await new Promise((resolve) => setTimeout(resolve, BATCH_PAUSE_MS))
+  }
+}
+
+function logDrain(message: string, result: { deleted: number; batches: number; capped: boolean }): void {
+  if (result.deleted === 0) return
+  // A capped pass means the backlog outgrew 100,000 rows in six hours: worth a warning, not just a count.
+  if (result.capped) logger.warn(message, result)
+  else logger.info(message, result)
 }
 
 export async function runSweep(): Promise<void> {
   try {
-    const deleted = await pruneNotifications()
-    if (deleted > 0) {
-      logger.info("Pruned notifications", { deleted, hadMore: deleted === BATCH_LIMIT })
-    }
+    logDrain("Pruned notifications", await drain(pruneNotifications))
   } catch (error) {
     logger.error("Notification prune failed", { error: String(error) })
   }
@@ -117,10 +133,7 @@ export async function runSweep(): Promise<void> {
    * are unrelated and share only a cadence.
    */
   try {
-    const deleted = await pruneProductEvents()
-    if (deleted > 0) {
-      logger.info("Pruned product events", { deleted, hadMore: deleted === BATCH_LIMIT })
-    }
+    logDrain("Pruned product events", await drain(pruneProductEvents))
   } catch (error) {
     logger.error("Product event prune failed", { error: String(error) })
   }
@@ -169,8 +182,6 @@ export async function runSweep(): Promise<void> {
  * `finally`, not the end of `try`: a throw must still reschedule, or one failed
  * sweep retires the loop for the life of the process.
  */
-let stopped = false
-
 export function startNotificationRetentionSweeper(): void {
   if (sweepTimer) return
   stopped = false
