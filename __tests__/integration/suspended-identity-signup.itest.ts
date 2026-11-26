@@ -89,7 +89,7 @@ describe("identity_email, the one definition (migration SQL)", () => {
     expect(await key(email)).toBe(expected)
   })
 
-  it.each([[null], [""], ["no-at-sign"]])("gives NULL for %p, which matches nobody", async (email) => {
+  it.each([[null], [""], ["no-at-sign"], ["@gmail.com"], ["x@"], ["...@gmail.com"]])("gives NULL for %p, which matches nobody", async (email) => {
     expect(await key(email)).toBeNull()
   })
 
