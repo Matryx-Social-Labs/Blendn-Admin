@@ -588,8 +588,9 @@ jobs:
           retention-days: 7
 
       # Screenshots a spec takes on purpose (page.screenshot into
-      # test-results/screens) so a dashboard drive run here can be read, green
-      # or red. Small: only what a spec chose to keep.
+      # test-results/screens), so a dashboard drive run here can be read when it
+      # passes. On a failure they ride in `playwright-report` with the rest of
+      # test-results/. Small: only what a spec chose to keep.
       - uses: actions/upload-artifact@v4
         if: success()
         with:

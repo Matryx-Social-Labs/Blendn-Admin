@@ -1,4 +1,3 @@
-import { mkdirSync } from "node:fs"
 import { test, expect, type Page } from "@playwright/test"
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
@@ -21,10 +20,11 @@ test.skip(!process.env.GEOCODE_UPSTREAM, "needs the OSM stub (GEOCODE_UPSTREAM) 
 
 const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL, max: 1 }) })
 const SCREENS = "test-results/screens"
-let eventId: string | undefined
+const TITLE = "e2e street-map trace (SCRUM-1147)"
 
+// By title, not id: a CI retry or a slow redirect after the save must not leave a row behind.
 test.afterAll(async () => {
-  if (eventId) await db.events.deleteMany({ where: { id: eventId } })
+  await db.events.deleteMany({ where: { title: TITLE } })
   await db.$disconnect()
 })
 
@@ -37,15 +37,17 @@ const CORNERS = [
 ] as const
 
 async function shoot(page: Page, name: string) {
-  mkdirSync(SCREENS, { recursive: true })
   await page.locator(".leaflet-container").scrollIntoViewIfNeeded()
   await page.screenshot({ path: `${SCREENS}/${name}.png` })
 }
 
 test("an outline traced by hand on the street map is saved; no Esri tile loads; the OSM credit links to its copyright page", async ({ page }) => {
+  // Both, so an empty Esri list is a listener that saw tiles, not one that saw nothing.
   const esri: string[] = []
+  let osmTiles = 0
   page.on("request", (r) => {
     if (r.url().includes("arcgisonline.com")) esri.push(r.url())
+    if (r.url().includes("tile.openstreetmap.org/")) osmTiles++
   })
   await page.setViewportSize({ width: 1280, height: 900 })
 
@@ -57,10 +59,13 @@ test("an outline traced by hand on the street map is saved; no Esri tile loads; 
   await expect(hit).toBeVisible({ timeout: 15_000 })
   await hit.click()
   await expect(page.locator('[data-area-source="circle"]')).toBeVisible({ timeout: 15_000 })
+  const pin = page.locator("[data-lat]").first()
+  const pinAt = [Number(await pin.getAttribute("data-lat")), Number(await pin.getAttribute("data-lng"))]
 
   // One base map: no layer to choose, and the credit is a link. Soft, so a
   // regression reports every broken promise in one run, the Esri requests too.
   await expect.soft(page.getByRole("button", { name: "Satellite" })).toHaveCount(0)
+  await expect.soft(map.locator("..").locator("[aria-pressed]")).toHaveCount(0)
   const credit = page.locator(".leaflet-control-attribution")
   await expect.soft(credit).toContainText("OpenStreetMap contributors")
   await expect.soft(credit.locator('a[href="https://www.openstreetmap.org/copyright"]')).toHaveText("OpenStreetMap")
@@ -86,13 +91,13 @@ test("an outline traced by hand on the street map is saved; no Esri tile loads; 
   await expect.soft(credit.locator('a[href="https://www.openstreetmap.org/copyright"]')).toBeVisible()
   await shoot(page, "trace-768-closed")
 
-  await page.getByLabel("Title").fill("e2e street-map trace (SCRUM-1147)")
+  await page.getByLabel("Title").fill(TITLE)
   await page.getByLabel("Description").fill("Saved by e2e/where-street-map-trace.spec.ts.")
   await page.getByLabel("Starts").fill("2030-11-12T19:00")
   await page.getByLabel("Ends").fill("2030-11-12T22:00")
   await page.getByRole("button", { name: "Save draft" }).first().click()
   await expect(page).toHaveURL(/\/dashboard\/events\/[0-9a-f-]{36}$/, { timeout: 30_000 })
-  eventId = new URL(page.url()).pathname.split("/").pop()!
+  const eventId = new URL(page.url()).pathname.split("/").pop()!
 
   // The read-back, as the task writes it.
   const [row] = await db.$queryRaw<{ geofence: { type: string; ring: [number, number][] } }[]>`
@@ -102,16 +107,22 @@ test("an outline traced by hand on the street map is saved; no Esri tile loads; 
   expect(row.geofence.ring).toHaveLength(CORNERS.length)
 
   // The ring is the clicked corners: longitude follows x and latitude follows y
-  // at one scale each (Web Mercator is affine at this size), within a pixel.
+  // at one scale each (Web Mercator is affine at this size), within a pixel; on
+  // the picked place, at a street zoom (z15-z20 is 4e-5 to 1.3e-6 degrees a pixel).
   const ring = row.geofence.ring
   const sx = (ring[1][1] - ring[0][1]) / (clicked[1].x - clicked[0].x)
   const sy = (ring[2][0] - ring[1][0]) / (clicked[2].y - clicked[1].y)
-  expect(sx).toBeGreaterThan(0)
+  expect(sx).toBeGreaterThan(1e-6)
+  expect(sx).toBeLessThan(5e-5)
   expect(sy).toBeLessThan(0)
+  const centre = [0, 1].map((k) => ring.reduce((sum, p) => sum + p[k], 0) / ring.length)
+  expect(Math.abs(centre[0] - pinAt[0])).toBeLessThan(0.003)
+  expect(Math.abs(centre[1] - pinAt[1])).toBeLessThan(0.003)
   ring.forEach(([lat, lng], i) => {
     expect(Math.abs(lng - (ring[0][1] + sx * (clicked[i].x - clicked[0].x)))).toBeLessThan(Math.abs(sx) * 1.5)
     expect(Math.abs(lat - (ring[0][0] + sy * (clicked[i].y - clicked[0].y)))).toBeLessThan(Math.abs(sy) * 1.5)
   })
 
+  expect(osmTiles).toBeGreaterThan(0)
   expect(esri).toEqual([])
 })

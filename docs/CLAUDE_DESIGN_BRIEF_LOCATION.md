@@ -66,8 +66,8 @@ be safe".
 
 A map. Leaflet with OpenStreetMap is already in the product and working
 (`components/location-picker.tsx` — search, drag-a-pin, reverse-geocode, live
-radius circle). Satellite imagery will be added as a layer so buildings can be
-traced.
+radius circle). There is no satellite layer: the Esri imagery tried once was
+unlicensed and was removed (SCRUM-1147); outlines are traced on the street map.
 
 **Two modes, and the choice between them needs designing:**
 
