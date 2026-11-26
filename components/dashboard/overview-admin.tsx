@@ -501,6 +501,8 @@ const stepColumns: Column<StepRow & { id: string; of: number }>[] = [
  */
 export function OnboardingStopped({ steps }: { steps: StepRow[] }) {
   const total = steps.reduce((n, s) => n + s.people, 0)
+  // The exact total less the rows shown would give a row of a few away, so it is named only when none is hidden.
+  const named = steps.every((s) => fewCount(s.people) !== "few")
   return (
     <>
       <h3 className="mt-1.5 text-[0.8125rem] font-semibold">Where onboarding stopped</h3>
@@ -512,7 +514,7 @@ export function OnboardingStopped({ steps }: { steps: StepRow[] }) {
       />
       <p className="text-[0.75rem] text-faint-foreground">
         The furthest step with anything filled in, read from the profile; a step answered with nothing, or location
-        left on, reads as the step before. Together the rows are the {formatNumber(total)} sign-ups above.
+        left on, reads as the step before. Together the rows are the{named ? ` ${formatNumber(total)}` : ""} sign-ups above.
       </p>
     </>
   )

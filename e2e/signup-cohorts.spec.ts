@@ -22,9 +22,12 @@ import { fewCount } from "../lib/disclosure"
  * the mobile API and taken through the app's per-step profile PUTs (the client's
  * lib/onboarding.ts STEP_FIELDS bodies): one stopped after basics, one after
  * preferences, one after details, one finished. Their profile rows are read
- * back and printed; every row of the block equals the cohort's own profiles,
- * placed at a step here in JS rather than by the query's CASE, at 1280, 768 and
- * 375, nothing wider than the viewport. An organizer's overview has no block.
+ * back and printed, and each sits at its step. Every row of the block equals
+ * the cohort's own profiles, placed at a step here in JS rather than by the
+ * query's CASE, as the panel floors them (a count under 5 is "a few", so it
+ * proves row order, labels, zeros and counts from 5; the itest proves each
+ * placement), at 1280, 768 and 375, nothing wider than the viewport. An
+ * organizer's overview has no block.
  */
 
 const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL, max: 1 }) })
@@ -218,7 +221,7 @@ const DETAILS = { interests: ["Board games"], bio: "Ask me about trains" }
 async function onboardThrough(baseURL: string, label: string, bodies: object[]) {
   const api = await playwrightRequest.newContext({ baseURL, extraHTTPHeaders: { "x-real-ip": `198.51.100.${1 + Math.floor(Math.random() * 250)}` } })
   const signup = await api.post("/api/mobile/auth/signup", {
-    data: { email: `${tag}-${label}@e2e.invalid`, password: `Mauve-otter-${randomUUID()}`, name: "Onboarding Tester", age: 29 },
+    data: { email: `${tag}-${label}@e2e.invalid`, password: `Mauve-otter-${randomUUID()}`, name: "Onboarding Tester", age: 30 },
   })
   expect(signup.status(), await signup.text()).toBe(201)
   const { user, accessToken } = (await signup.json()).data
@@ -243,7 +246,7 @@ function furthest(r: Filled): Step {
   if (r.onboarded) return "finished"
   if (r.share_location === false) return "location"
   if ((r.photos ?? 0) > 0) return "media"
-  if ((r.interests ?? 0) > 0 || (r.bio ?? "") !== "" || r.graph) return "details"
+  if ((r.interests ?? 0) > 0 || (r.bio ?? "").trim() !== "" || r.graph) return "details"
   if ((r.intents ?? 0) > 0 || (r.orientations ?? 0) > 0 || r.show_orientation || r.reveal_by_default) return "preferences"
   if (r.dob_filled || r.gender !== null) return "basics"
   return "none"
@@ -292,7 +295,9 @@ test("where onboarding stopped: accounts stopped through the API sit at their st
     )
     console.log(`READBACK onboarding-panel ${JSON.stringify({ width, shown })}`)
     expect(shown).toEqual(expected)
-    await expect(page.getByText(`Together the rows are the ${formatNumber(cohort.length)} sign-ups above.`)).toBeVisible()
+    // The total is named only when no row is "a few" (it would give that row away).
+    const named = expected.every(([, count]) => count !== "a few")
+    await expect(page.getByText(`Together the rows are the${named ? ` ${formatNumber(cohort.length)}` : ""} sign-ups above.`)).toBeVisible()
     expect(await overflow(page), `overflow at ${width}`).toBeLessThanOrEqual(0)
     await table.scrollIntoViewIfNeeded()
     await test.info().attach(`onboarding-${width}.png`, { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })

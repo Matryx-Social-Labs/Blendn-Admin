@@ -192,6 +192,9 @@ describe("who receives it", () => {
     const staff = await getDashboardOverview()
     expect(staff).toHaveProperty("cohorts.weeks")
     expect(staff).toHaveProperty("cohorts.steps")
+    expect(staff.role === "app_admin" && staff.cohorts.steps.map((s) => s.step)).toEqual([
+      "none", "basics", "preferences", "details", "media", "location", "finished",
+    ])
     for (const [id, role] of [[organizer, "organizer"], [owner, "venue_owner"]] as const) {
       session = { user: { id, role } }
       const overview = await getDashboardOverview()
@@ -227,11 +230,16 @@ describe("where onboarding stopped (SCRUM-1283)", () => {
     await starter("ob-signup", {}) // the name is sign-up's, not the basics step's
     await starter("ob-bare", null) // no profile row at all
     await starter("ob-basics", { date_of_birth: dob })
+    await starter("ob-gender", { gender: "man" }) // gender alone is the basics step too
+    await starter("ob-blank-bio", { date_of_birth: dob, bio: "  " }) // a cleared bio is not details
     await starter("ob-intent", { date_of_birth: dob, intent_default: ["networking"] })
     await starter("ob-reveal", { date_of_birth: dob, reveal_by_default: true })
+    await starter("ob-orientation", { date_of_birth: dob, orientations: ["queer"] })
+    await starter("ob-show", { date_of_birth: dob, show_orientation: true })
     await starter("ob-bio", { date_of_birth: dob, bio: "Ask me about trains" }) // bio but no photos
     const graph = await starter("ob-graph", { date_of_birth: dob })
     await db.user_interests.create({ data: { user_id: graph, category_id: category } })
+    await starter("ob-names", { date_of_birth: dob, interests: ["Board games"] }) // the free-text names alone
     // All but location: sharing left on, which is also the column's default.
     await starter("ob-media", { date_of_birth: dob, gender: "woman", intent_default: ["friendship"], bio: "Hi", photos: ["https://x.invalid/p.jpg"] })
     await starter("ob-skipped", { date_of_birth: dob, photos: ["https://x.invalid/q.jpg"] }) // preferences and details skipped
@@ -244,15 +252,15 @@ describe("where onboarding stopped (SCRUM-1283)", () => {
     const result = await signupCohorts(2, NOW3)
     expect(result.steps).toEqual([
       { step: "none", people: 2 },
-      { step: "basics", people: 1 },
-      { step: "preferences", people: 2 },
-      { step: "details", people: 2 },
+      { step: "basics", people: 3 },
+      { step: "preferences", people: 4 },
+      { step: "details", people: 3 },
       { step: "media", people: 2 },
       { step: "location", people: 1 },
       { step: "finished", people: 1 },
     ])
     const signedUp = result.weeks.reduce((n, w) => n + w.signedUp, 0)
     expect(result.steps.reduce((n, s) => n + s.people, 0)).toBe(signedUp)
-    expect(signedUp).toBe(11)
+    expect(signedUp).toBe(16)
   })
 })

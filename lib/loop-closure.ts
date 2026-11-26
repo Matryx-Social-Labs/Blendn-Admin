@@ -158,7 +158,7 @@ export interface CohortRow {
  * per-step routes: each step PUTs its own fields to the one profile route, so how far somebody got is what they filled.
  */
 export const ONBOARDING_STEPS = ["basics", "preferences", "details", "media", "location"] as const
-export type OnboardingStep = (typeof ONBOARDING_STEPS)[number]
+type OnboardingStep = (typeof ONBOARDING_STEPS)[number]
 
 /**
  * What each step leaves behind, read from the profile `p` of the person `u`. Only a filled field is evidence:
@@ -173,7 +173,7 @@ export type OnboardingStep = (typeof ONBOARDING_STEPS)[number]
 const STEP_FILLED: Record<OnboardingStep, Prisma.Sql> = {
   basics: Prisma.sql`p.date_of_birth IS NOT NULL OR p.gender IS NOT NULL`,
   preferences: Prisma.sql`cardinality(p.intent_default) > 0 OR cardinality(p.orientations) > 0 OR p.show_orientation OR p.reveal_by_default`,
-  details: Prisma.sql`cardinality(p.interests) > 0 OR p.bio <> '' OR EXISTS (SELECT 1 FROM user_interests ui WHERE ui.user_id = u.id)`,
+  details: Prisma.sql`cardinality(p.interests) > 0 OR btrim(p.bio) <> '' OR EXISTS (SELECT 1 FROM user_interests ui WHERE ui.user_id = u.id)`,
   media: Prisma.sql`cardinality(p.photos) > 0`,
   location: Prisma.sql`p.share_location = false`,
 }
@@ -246,6 +246,8 @@ export async function signupCohorts(weeks = 8, now: Date = new Date()): Promise<
       -- "createdAt" is a timestamp without time zone, written in UTC.
       SELECT u.id, u."createdAt" AT TIME ZONE 'UTC' AS joined, p.signup_source AS source, ${FURTHEST_STEP} AS step
       FROM "User" u
+      -- ponytail: the planner hash-joins all of profiles (a seq scan, cheaper at 195k than 28k pk lookups); re-EXPLAIN at
+      -- ~1M profiles, where LEFT JOIN LATERAL (SELECT * FROM profiles x WHERE x.id = u.id OFFSET 0) pins the pk lookup.
       LEFT JOIN profiles p ON p.id = u.id
       WHERE u."deletedAt" IS NULL
         AND u.id <> ${SYSTEM_USER_ID}

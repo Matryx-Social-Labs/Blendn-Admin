@@ -35,12 +35,18 @@ it("shows one row per step in the app's order, then finished, and says the rows 
     "|Location|location sharing turned off|a few|",
     "|Finished onboarding|7,337|35%|",
   ])
-  expect(html).toContain("Together the rows are the 21,037 sign-ups above.")
+  // Location is a few, so the total is not named: it less the rows shown would give it away.
+  expect(html).toContain("Together the rows are the sign-ups above.")
+})
+
+it("names the total the rows add up to when no row is hidden", () => {
+  const html = renderToStaticMarkup(createElement(OnboardingStopped, { steps: steps([1962, 3104, 2240, 1511, 4880, 0, 7337]) }))
+  expect(html).toContain("Together the rows are the 21,034 sign-ups above.")
 })
 
 it("says a few under 5 with no share, and a real zero as 0", () => {
   const html = renderToStaticMarkup(createElement(OnboardingStopped, { steps: steps([9, 4, 2, 0, 6, 0, 41]) }))
   expect(rows(html)[1]).toBe("|Basics|date of birth or gender|a few|")
   expect(rows(html)[3]).toBe("|Details|interests or bio|0|0%|")
-  expect(html).toContain("Together the rows are the 62 sign-ups above.")
+  expect(html).toContain("Together the rows are the sign-ups above.")
 })
