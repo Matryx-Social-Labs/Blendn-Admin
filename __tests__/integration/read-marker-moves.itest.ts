@@ -2,7 +2,7 @@ process.env.MOBILE_JWT_SECRET ??= "itest-mobile-secret-0123456789abcdefghij"
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
 import { db } from "./helpers"
-import { api, arrive, call, cleanupCrewWorld, liveEvent, person, type Person } from "./crew-world"
+import { api, arrive, call, cleanupCrewWorld, liveEvent, person, routes, type Person } from "./crew-world"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const eventChat = require("@/app/api/mobile/events/[eventId]/chat/route") as typeof import("@/app/api/mobile/events/[eventId]/chat/route")
@@ -97,4 +97,19 @@ describe.each(readers)("%s writes the read marker only when it moves", (label, r
     const after = await api.chatGroups(r.viewer)
     expect(after.body.data.groups.find((g: { id: string }) => g.id === r.roomId).unreadCount).toBe(0)
   })
+})
+
+it("an older page (`before=`) of GET /chat/groups/:id/messages never moves the marker back", async () => {
+  const r = await roomWith("rm-old")
+  await say(r.roomId, r.other.id, 1)
+  const newest = await say(r.roomId, r.other.id, 2)
+  await api.read(r.viewer, r.roomId)
+  await stampUntouched(r.roomId, r.viewer.id)
+
+  const older = await call(routes.messages.GET, `/api/mobile/chat/groups/${r.roomId}/messages?before=${newest.id}`, r.viewer, {
+    params: { chatGroupId: r.roomId },
+  })
+
+  expect(older.status).toBe(200)
+  expect(await markerRow(r.roomId, r.viewer.id)).toEqual({ last_read_message_id: newest.id, updated_at: UNTOUCHED })
 })
