@@ -12,6 +12,7 @@ import { cleanup, closeDb, db, makeUser, occurrenceOf, putInRoom, testId } from 
 
 const MIN = 60_000
 const users: { id: string; email: string }[] = []
+const guestIds: string[] = []
 const orgs: string[] = []
 const events: string[] = []
 const mails: { to: string; subject: string; text: string; headers?: Record<string, string>; tags: { name: string; value: string }[] }[] = []
@@ -51,7 +52,7 @@ async function liveNight(orgId: string | null, capacity = 2, guests = 4) {
   const occurrenceId = await occurrenceOf(event.id)
   for (let i = 0; i < guests; i++) {
     const u = await makeUser(testId(`la-g${i}`))
-    users.push({ id: u, email: "" })
+    guestIds.push(u)
     await putInRoom({ eventId: event.id, occurrenceId, userId: u })
   }
   return event.id
@@ -59,10 +60,14 @@ async function liveNight(orgId: string | null, capacity = 2, guests = 4) {
 
 const capacity = (eventId: string, max: number) => db.events.update({ where: { id: eventId }, data: { max_capacity: max } })
 const mailedTo = (who: { email: string }[]) => mails.filter((m) => who.some((u) => u.email === m.to)).map((m) => m.to).sort()
-/** The mail is fire and forget: wait for it to land (or, for "none", long enough that it would have). */
-async function settle(expect = 0, who: { email: string }[] = []) {
-  for (let i = 0; i < 50 && mailedTo(who).length < expect; i++) await new Promise((r) => setTimeout(r, 50))
-  await new Promise((r) => setTimeout(r, 300))
+const aboutEvent = (eventId: string) => mails.filter((m) => m.text.includes(`/dashboard/events/${eventId}?tab=live`))
+/**
+ * The mail is fire and forget: wait for it to land, then a second more so a mail that should not exist has time to
+ * (four local round trips take milliseconds; the unit suite proves the "none" cases deterministically).
+ */
+async function settle(count = 0, who: { email: string }[] = []) {
+  for (let i = 0; i < 100 && mailedTo(who).length < count; i++) await new Promise((r) => setTimeout(r, 50))
+  await new Promise((r) => setTimeout(r, 1000))
 }
 
 beforeAll(() => {
@@ -78,7 +83,7 @@ beforeAll(() => {
 
 afterAll(async () => {
   global.fetch = realFetch
-  await db.email_suppressions.deleteMany({ where: { email: { in: users.map((u) => u.email).filter(Boolean) } } })
+  await db.email_suppressions.deleteMany({ where: { email: { in: users.map((u) => u.email) } } })
   await db.event_issues.deleteMany({ where: { event_id: { in: events } } })
   await db.presence_sessions.deleteMany({ where: { event_id: { in: events } } })
   await db.event_check_ins.deleteMany({ where: { event_id: { in: events } } })
@@ -86,7 +91,7 @@ afterAll(async () => {
   await db.organisation_members.deleteMany({ where: { org_id: { in: orgs } } })
   await cleanup([], events)
   await db.organisations.deleteMany({ where: { id: { in: orgs } } })
-  await cleanup(users.map((u) => u.id), [])
+  await cleanup([...users.map((u) => u.id), ...guestIds], [])
   await closeDb()
 })
 
@@ -124,8 +129,8 @@ describe("a room over its stated capacity", () => {
     expect(mail.tags).toEqual([{ name: "kind", value: "live_alert" }])
     expect(mail.headers?.["List-Unsubscribe"]).toBeUndefined()
 
-    const rows = await db.event_issues.findMany({ where: { event_id: eventId }, select: { kind: true, severity: true, opened_at: true } })
-    expect(rows).toEqual([{ kind: "over_capacity", severity: "critical", opened_at: now }])
+    const rows = await db.event_issues.findMany({ where: { event_id: eventId }, select: { kind: true, severity: true, opened_at: true, mailed_at: true } })
+    expect(rows).toEqual([{ kind: "over_capacity", severity: "critical", opened_at: now, mailed_at: now }])
 
     // Still over a minute later: bumped, not reopened, and nobody mailed again.
     expect((await recordIssuesFor(eventId, new Date(now.getTime() + MIN))).stillOpen).toBe(1)
@@ -152,20 +157,22 @@ describe("a room over its stated capacity", () => {
     await settle(1, [owner])
     expect(await db.event_issues.count({ where: { event_id: eventId, kind: "over_capacity" } })).toBe(2)
     expect(mailedTo([owner])).toHaveLength(1)
+    // Only the mailed opening carries the claim; the window counts from it.
+    expect(await db.event_issues.count({ where: { event_id: eventId, mailed_at: { not: null } } })).toBe(1)
 
     await capacity(eventId, 2)
     await recordIssuesFor(eventId, at(40))
     await settle(2, [owner])
     expect(await db.event_issues.count({ where: { event_id: eventId, kind: "over_capacity" } })).toBe(3)
     expect(mailedTo([owner])).toHaveLength(2)
+    expect(await db.event_issues.count({ where: { event_id: eventId, mailed_at: { not: null } } })).toBe(2)
   })
 
   it("an event with no organization records the issue and mails nobody", async () => {
-    const before = mails.length
     const eventId = await liveNight(null)
     expect((await recordIssuesFor(eventId)).opened).toBe(1)
     await settle()
-    expect(mails.length).toBe(before)
+    expect(aboutEvent(eventId)).toHaveLength(0)
     expect(await db.event_issues.count({ where: { event_id: eventId, kind: "over_capacity", severity: "critical" } })).toBe(1)
   })
 })

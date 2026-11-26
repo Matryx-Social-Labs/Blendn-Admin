@@ -23,7 +23,7 @@ import { recordIssuesFor } from "@/lib/event-issues"
 import { deriveAlerts, type LiveFigures } from "@/lib/live-metrics"
 import { logger } from "@/lib/logger"
 
-type Issue = { id: string; event_id: string; kind: string; severity: string; opened_at: Date; resolved_at: Date | null }
+type Issue = { id: string; event_id: string; kind: string; severity: string; opened_at: Date; resolved_at: Date | null; mailed_at: Date | null }
 type Sent = { to: string[]; subject: string; text: string; html: string; headers?: Record<string, string>; tags: { name: string; value: string }[] }
 
 const EVENT = "e0000000-0000-4000-8000-000000000009"
@@ -67,6 +67,10 @@ let sent: Sent[] = []
 let fetchImpl: (body: Sent) => Promise<Response> = async () => new Response(JSON.stringify({ id: "m" }), { status: 200 })
 const suppressions = new Map<string, string>()
 let event: { title: string; timezone: string; organizer_org_id: string | null } | null
+type Where = { id: string | { in: string[] }; mailed_at?: Date }
+const matches = (i: Issue, where: Where) =>
+  (typeof where.id === "string" ? i.id === where.id : where.id.in.includes(i.id)) &&
+  (where.mailed_at === undefined || i.mailed_at?.getTime() === where.mailed_at.getTime())
 
 function world(o: { figures?: LiveFigures; members?: { id: string; email: string }[] } = {}) {
   issues.length = 0
@@ -80,19 +84,21 @@ function world(o: { figures?: LiveFigures; members?: { id: string; email: string
   )
   // event_issues as the database keeps it, for one event and occurrence.
   mockDb.event_issues.findMany.mockImplementation(async () => issues.filter((i) => !i.resolved_at).map(({ id, kind }) => ({ id, kind })))
-  mockDb.event_issues.create.mockImplementation(async ({ data }: { data: Omit<Issue, "id" | "resolved_at"> }) => {
-    const row = { ...data, id: `i${issues.length + 1}`, resolved_at: null }
+  mockDb.event_issues.create.mockImplementation(async ({ data }: { data: Omit<Issue, "id" | "resolved_at" | "mailed_at"> }) => {
+    const row = { ...data, id: `i${issues.length + 1}`, resolved_at: null, mailed_at: null }
     issues.push(row)
     return { id: row.id }
   })
   mockDb.event_issues.update.mockResolvedValue({})
-  mockDb.event_issues.updateMany.mockImplementation(async ({ where, data }: { where: { id: { in: string[] } }; data: { resolved_at: Date } }) => {
-    for (const i of issues) if (where.id.in.includes(i.id)) i.resolved_at = data.resolved_at
-    return { count: where.id.in.length }
+  // As Postgres applies them: the resolve (id in), the claim (id) and the give-back (id and this claim's mailed_at).
+  mockDb.event_issues.updateMany.mockImplementation(async ({ where, data }: { where: Where; data: Partial<Issue> }) => {
+    const hit = issues.filter((i) => matches(i, where))
+    for (const i of hit) Object.assign(i, data)
+    return { count: hit.length }
   })
   mockDb.event_issues.count.mockImplementation(
-    async ({ where }: { where: { event_id: string; kind: string; id: { not: string }; opened_at: { gte: Date } } }) =>
-      issues.filter((i) => i.event_id === where.event_id && i.kind === where.kind && i.id !== where.id.not && i.opened_at >= where.opened_at.gte).length
+    async ({ where }: { where: { event_id: string; kind: string; mailed_at: { gt: Date } } }) =>
+      issues.filter((i) => i.event_id === where.event_id && i.kind === where.kind && !!i.mailed_at && i.mailed_at > where.mailed_at.gt).length
   )
 }
 const room = (figures: LiveFigures) =>
@@ -148,7 +154,21 @@ describe("which openings mail", () => {
     expect(mail.text).not.toMatch(/IST|Asia\/Kolkata|GMT|UTC|\+05/)
     expect(mail.html).toContain("Open the Live tab")
     expect(mail.html).toContain(`/dashboard/events/${EVENT}?tab=live`)
+    expect(mail.html).toContain("112 guests against capacity 100")
+    expect(mail.html).toContain("Friday at Toit, opened at 23:10.")
     expect(mail.tags).toEqual([{ name: "kind", value: "live_alert" }])
+    // The opening is claimed: the window counts from this mail.
+    expect(issues[0].mailed_at).toEqual(NOW)
+  })
+
+  it("two critical alerts opening in one pass each mail once", async () => {
+    await sweep(NOW, { ...OVER, categories: SAFETY.categories })
+    expect(sent.map((m) => m.subject).sort()).toEqual([
+      "Friday at Toit: Over stated capacity",
+      "Friday at Toit: Over stated capacity",
+      "Friday at Toit: Safety",
+      "Friday at Toit: Safety",
+    ])
   })
 
   it("a safety issue mails, with the safety alert's own body", async () => {
@@ -193,11 +213,28 @@ describe("which openings mail", () => {
     ])
   })
 
-  it("after 30 minutes with no opening of that kind, a new one mails again", async () => {
+  it("an opening 30 minutes or more after the last mail mails again, even inside a chain of openings", async () => {
     await sweep(NOW, OVER)
     await sweep(new Date(NOW.getTime() + 1 * MIN), UNDER)
-    await sweep(new Date(NOW.getTime() + 31 * MIN), OVER)
+    await sweep(new Date(NOW.getTime() + 20 * MIN), OVER)
+    await sweep(new Date(NOW.getTime() + 21 * MIN), UNDER)
+    expect(sent).toHaveLength(2)
+    // 30 minutes to the minute after the mail at NOW (the 20-minute opening was not mailed, so it does not count).
+    await sweep(new Date(NOW.getTime() + 30 * MIN), OVER)
     expect(sent).toHaveLength(4)
+    expect(issues.filter((i) => i.mailed_at).map((i) => i.opened_at)).toEqual([NOW, new Date(NOW.getTime() + 30 * MIN)])
+  })
+
+  it("an opening nobody was mailed about gives its claim back, and the next opening is mailed", async () => {
+    fetchImpl = async () => new Response("no", { status: 422 })
+    jest.spyOn(logger, "warn").mockImplementation(() => {})
+    jest.spyOn(logger, "error").mockImplementation(() => {})
+    await sweep(NOW, OVER)
+    expect(issues[0].mailed_at).toBeNull()
+    await sweep(new Date(NOW.getTime() + 1 * MIN), UNDER)
+    fetchImpl = async () => new Response(JSON.stringify({ id: "m" }), { status: 200 })
+    await sweep(new Date(NOW.getTime() + 2 * MIN), OVER)
+    expect(sent).toHaveLength(2)
   })
 
   it("an event with no organization, or that is not a real event (a venue day), mails nobody", async () => {
@@ -209,6 +246,17 @@ describe("which openings mail", () => {
     expect(mockDb.events.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ id: EVENT, kind: "event", deleted_at: null }) })
     )
+  })
+
+  it("an event the mail's read does not find (a venue day, a deleted event) mails nobody and is not an error", async () => {
+    event = null
+    const error = jest.spyOn(logger, "error")
+    const info = jest.spyOn(logger, "info").mockImplementation(() => {})
+    const r = await sweep(NOW)
+    expect(r.opened).toBe(1)
+    expect(sent).toHaveLength(0)
+    expect(error).not.toHaveBeenCalled()
+    expect(info).toHaveBeenCalledWith("Live alert not mailed: no organization", { eventId: EVENT, kind: "over_capacity" })
   })
 
   it("the time is told on the event's clock: Toronto's night says 12:40", async () => {
@@ -228,6 +276,18 @@ describe("who gets it", () => {
     })
   })
 
+  it("an organization with no owner or admin left: the issue is recorded, nobody mailed, and it says so", async () => {
+    world({ members: [] })
+    const error = jest.spyOn(logger, "error")
+    const warn = jest.spyOn(logger, "warn").mockImplementation(() => {})
+    const r = await sweep(NOW)
+    expect(r.opened).toBe(1)
+    expect(sent).toHaveLength(0)
+    expect(error).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith("Live alert mail reached nobody", expect.objectContaining({ eventId: EVENT, kind: "over_capacity", recipients: 0 }))
+    expect(issues[0].mailed_at).toBeNull()
+  })
+
   it("a bounced owner is skipped and the other owner still mailed", async () => {
     suppressions.set("owner@blendn.app", "bounce")
     await sweep(NOW)
@@ -240,6 +300,7 @@ describe("who gets it", () => {
     expect(sent.map((m) => m.to[0]).sort()).toEqual(["owner@blendn.app", "second.owner@blendn.app"])
     for (const m of sent) expect(Object.keys(m.headers ?? {})).not.toContain("List-Unsubscribe")
     expect(sent[0].text).not.toMatch(/unsubscribe/i)
+    expect(sent[0].html).not.toMatch(/unsubscribe/i)
   })
 
   it("the event title is escaped in the HTML", async () => {
@@ -265,6 +326,9 @@ describe("the sweep is never slowed or broken by the mail", () => {
     const r = await recordIssuesFor(EVENT, NOW)
     expect(r.opened).toBe(1)
     expect(issues).toHaveLength(1)
+    // And the mail was really on its way: the first owner's send hangs (sends are one at a time), not skipped.
+    await settle()
+    expect(global.fetch).toHaveBeenCalledTimes(1)
   })
 
   it("a failing recipient lookup: the issue is recorded and the failure logged with event and kind", async () => {
@@ -291,6 +355,6 @@ describe("the sweep is never slowed or broken by the mail", () => {
     jest.spyOn(logger, "error").mockImplementation(() => {})
     const r = await sweep(NOW)
     expect(r.opened).toBe(1)
-    expect(warn).toHaveBeenCalledWith("Live alert mail sent", expect.objectContaining({ eventId: EVENT, kind: "over_capacity", failed: 2 }))
+    expect(warn).toHaveBeenCalledWith("Live alert mail reached nobody", expect.objectContaining({ eventId: EVENT, kind: "over_capacity", failed: 2 }))
   })
 })

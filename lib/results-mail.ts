@@ -148,13 +148,15 @@ export async function mailOwnersAndAdmins(
       to: canonicalEmail(user.email),
       ...build(unsubscribe),
       tags: [{ name: "kind", value: kind }],
-      ...(lifecycle && {
-        stream: "lifecycle" as const,
-        headers: {
-          "List-Unsubscribe": `<${unsubscribe}>${replyTo ? `, <mailto:${replyTo}?subject=unsubscribe>` : ""}`,
-          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-        },
-      }),
+      ...(lifecycle
+        ? {
+            stream: "lifecycle" as const,
+            headers: {
+              "List-Unsubscribe": `<${unsubscribe}>${replyTo ? `, <mailto:${replyTo}?subject=unsubscribe>` : ""}`,
+              "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            },
+          }
+        : {}),
     })
     if (result.sent) sent++
     else if (result.reason === "provider_error") failed++
