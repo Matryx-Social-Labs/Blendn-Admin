@@ -1936,8 +1936,9 @@ model organisations {
   /// end of its first event with at least 8 people checked in, and that event
   /// (SCRUM-1269, lib/analytics-access.ts). Written ONCE, by the first read that
   /// finds such an event, and never re-derived: soft-deleting the event, or a
-  /// later re-count, cannot restart the window. Moved once, by 60 days, when
-  /// the window went from 30 to 90 (migration 20261126100000). A plain id, no foreign key:
+  /// later re-count, cannot restart the window. A window written under the old
+  /// 30-day rule is moved by 60 days in a data migration that lands after the
+  /// pilot (Sun 2026-11-29 14:00 IST; SCRUM-1269). A plain id, no foreign key:
   /// it is a record of a decision, kept if the event goes.
   analytics_free_until            DateTime?               @db.Timestamptz(6)
   first_free_event_id             String?                 @db.Uuid
