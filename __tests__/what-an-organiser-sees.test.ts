@@ -94,7 +94,6 @@ describe("the four parts", () => {
 })
 
 describe("W41 — the feedback digest stops naming whoever raised a concern", () => {
-
   it("counts distinct people per category, not messages", () => {
     /*
      * One upset attendee posting six complaints is one person. Counting

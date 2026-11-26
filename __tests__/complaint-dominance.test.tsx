@@ -66,7 +66,7 @@ describe("a category one person dominates", () => {
 
   it("is shown as today when the largest share is not known (a tally frozen before it was recorded)", () => {
     const t = tallyFeedback(rows("entry_queue", [20, 2, 1, 1, 1]))
-    expect(discloseCategories(t.categoryCounts, t.contributors, ROOM)).toEqual([{ category: "entry_queue", count: 25, suppressed: false }])
+    expect(discloseCategories(t.categoryCounts, t.contributors, ROOM, undefined)).toEqual([{ category: "entry_queue", count: 25, suppressed: false }])
   })
 })
 
@@ -101,7 +101,7 @@ describe("a category nobody dominates (ruling 5)", () => {
   it("is the same payload with the largest share as without it", () => {
     const t = tallyFeedback([...rows("entry_queue", [5, 5, 5, 5, 5]), ...rows("crowding", [1, 1, 1, 1, 1, 1])])
     expect(discloseCategories(t.categoryCounts, t.contributors, ROOM, t.topMessages)).toEqual(
-      discloseCategories(t.categoryCounts, t.contributors, ROOM)
+      discloseCategories(t.categoryCounts, t.contributors, ROOM, undefined)
     )
   })
 })

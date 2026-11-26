@@ -317,8 +317,11 @@ export function discloseCategories(
   /** Distinct people per category (`tallyFeedback`). */
   contributors: ReadonlyMap<string, number>,
   population: number,
-  /** The largest single person's messages per category (`tallyFeedback`). */
-  topMessages?: ReadonlyMap<string, number>
+  /**
+   * The largest single person's messages per category (`tallyFeedback`). Required, so no caller drops the rule by
+   * leaving it out: `undefined` only for a tally frozen before it was recorded.
+   */
+  topMessages: ReadonlyMap<string, number> | undefined
 ): DisclosedCategory[] {
   return Array.from(counts.entries())
     .map(([category, count]) => {
