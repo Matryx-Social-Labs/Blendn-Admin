@@ -44,13 +44,13 @@ describe("screenUserText", () => {
   })
 
   it("holds a message request to the chat rule", () => {
-    expect(screenUserText("u1", "message_request", { message: "you magi" })).toEqual({ field: "message" })
+    expect(screenUserText("u1", "message_request", { message: "you randi" })).toEqual({ field: "message" })
   })
 
   it("holds tonight's answer to the chat rule, as everything else said in that room is", () => {
-    expect(screenUserText("u1", "tonight_answer", { tonightAnswer: "you magi" })).toEqual({ field: "tonightAnswer" })
+    expect(screenUserText("u1", "tonight_answer", { tonightAnswer: "you randi" })).toEqual({ field: "tonightAnswer" })
     // Control: the identity rule would only have flagged it.
-    expect(screenUserText("u1", "profile", { bio: "you magi" })).toBeNull()
+    expect(screenUserText("u1", "profile", { bio: "you randi" })).toBeNull()
   })
 
   it("skips empty and absent fields, and records nothing when all pass", () => {

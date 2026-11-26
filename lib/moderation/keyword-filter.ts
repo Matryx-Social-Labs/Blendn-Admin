@@ -63,44 +63,45 @@ const ENGLISH_KEYWORDS = new Set([
 // ── Hindi (Devanagari) ──
 const HINDI_DEVANAGARI = new Set([
   "मादरचोद", "भोसडीके", "चूतिया", "गांड", "लौड़ा", "रंडी",
-  "बहनचोद", "हरामी", "कुत्ते", "साले", "कमीने",
+  "बहनचोद",
 ])
 
 // ── Hindi (transliterated / Latin script) ──
 const HINDI_TRANSLITERATED = new Set([
   "madarchod", "bhosadike", "bhosdi", "chutiya", "chutiye",
-  "gaand", "lauda", "laude", "randi", "behenchod", "bsdk",
-  "harami", "kamina", "kamine", "lodu",
+  "gaand", "lauda", "randi", "behenchod", "bsdk", "lodu",
+  "bhenchod", "benchod", "behnchod", "bhnchod", "bhosdike", "bhosdk",
+  "bhosdiwale", "bhosdiwala", "maderchod", "madarchodd", "madarjaat", "gaandu",
+  "chutiyapa", "chutiyap", "lavde", "lawde", "lavda", "lawda", "bhadwa", "bhadwe",
 ])
 
 // ── Tamil ──
 const TAMIL_KEYWORDS = new Set([
-  "ஒத்த", "தேவடியா", "பூல்", "கூதி", "சுன்னி",
-  "thevadiya", "otha", "punda", "sunni", "koodi", "myiru",
+  "தேவடியா", "பூல்", "கூதி",
+  "thevadiya", "punda", "myiru",
 ])
 
 // ── Telugu ──
 const TELUGU_KEYWORDS = new Set([
   "లంజ", "దెంగు", "పూకు", "మొడ్డ", "లంజకొడుకు",
-  "lanja", "dengu", "pooku", "modda", "lanjakoduku", "gudda",
+  "lanja", "dengu", "pooku", "modda", "lanjakoduku",
 ])
 
 // ── Kannada ──
 const KANNADA_KEYWORDS = new Set([
-  "ಸೂಳೆ", "ಮಗನೆ", "ಬೋಳಿ",
-  "sule", "magane", "boli", "tunne",
+  "ಸೂಳೆ",
 ])
 
 // ── Malayalam ──
 const MALAYALAM_KEYWORDS = new Set([
   "തായോളി", "കുണ്ണ", "പൂറ്",
-  "thayoli", "kunna", "poori", "myre", "thendi",
+  "thayoli", "kunna", "myre", "thendi",
 ])
 
 // ── Bengali ──
 const BENGALI_KEYWORDS = new Set([
-  "চোদ", "মাগি", "খানকি", "শালা", "বাল",
-  "chod", "magi", "khanki", "shala", "bal",
+  "চোদ", "মাগি", "খানকি",
+  "khanki",
 ])
 
 // ── Marathi ──
@@ -112,7 +113,7 @@ const MARATHI_KEYWORDS = new Set([
 // ── Gujarati ──
 const GUJARATI_KEYWORDS = new Set([
   "ભોસડી", "ચૂતિયો",
-  "ghando", "ghelchodo", "bhosadi", "chodyu",
+  "ghelchodo", "bhosadi", "chodyu",
 ])
 
 // Merge all keyword sets
@@ -142,9 +143,20 @@ function containsRun(haystack: string[], needle: string[]): boolean {
   return false
 }
 
-// Common abbreviations that are high-signal (exact match only)
-const ABBREVIATION_KEYWORDS = new Set([
-  "mc", "bc", "bsdk", "mc bc",
+/**
+ * Words that are abuse in one mouth and banter, a name or an ordinary word in
+ * another ("chod" = leave it, "shala" = brother-in-law, "magane" = O son). A
+ * whole-word hit is a flag for a human, never a hide, so it never counts toward
+ * a mute. Whole words only: "football" is not "bal".
+ */
+const REVIEW_ONLY_KEYWORDS = new Set([
+  "हरामी", "कुत्ते", "साले", "कमीने", "harami", "kamina", "kamine", "laude", "gandu",
+  "ஒத்த", "சுன்னி", "otha", "sunni", "koodi",
+  "gudda",
+  "ಮಗನೆ", "ಬೋಳಿ", "sule", "magane", "boli", "tunne",
+  "poori",
+  "শালা", "বাল", "chod", "magi", "shala", "bal",
+  "ghando",
 ])
 
 /**
@@ -200,14 +212,9 @@ export function checkKeywords(content: string): ModerationResult | null {
     }
   }
 
-  // Abbreviations are whole-word only and always have been; "mc bc" is a phrase.
-  for (const abbreviation of ABBREVIATION_KEYWORDS) {
-    const asWords = normalizeWords(abbreviation)
-    const hit = asWords.length === 1 ? wordSet.has(asWords[0]) : containsRun(words, asWords)
-    if (hit) exact.push(abbreviation)
-  }
+  const review = [...REVIEW_ONLY_KEYWORDS].filter((keyword) => wordSet.has(normalizeWords(keyword)[0]))
 
-  if (exact.length === 0 && evasive.length === 0) return null
+  if (exact.length === 0 && evasive.length === 0 && review.length === 0) return null
 
   /*
    * A whole-word slur is enough on its own to hide. A match that exists only
@@ -219,7 +226,7 @@ export function checkKeywords(content: string): ModerationResult | null {
   const confidence =
     exact.length > 0 ? Math.min(1, 0.85 + exact.length * 0.05) : 0.5
 
-  const matched = exact.length > 0 ? exact : evasive
+  const matched = exact.length > 0 ? exact : [...review, ...evasive]
 
   return {
     action: confidence >= AUTO_HIDE_THRESHOLD ? "hide" : "flag",
@@ -238,7 +245,7 @@ export function checkKeywords(content: string): ModerationResult | null {
  * identity text the same hit refuses a sign-up or an onboarding step, and the
  * lists carry words that are also names, ordinary words, places and a faith:
  * "Magi", "Shala", "Bal" (Bal Krishna), "Boli" (a language), "Otha" (Tamil
- * for "one"), "Sunni", "Randi", "Laude", "Poori", "Gudda", "BC". Everything
+ * for "one"), "Sunni", "Randi", "Laude", "Poori", "Gudda". Everything
  * not listed here is ALLOWED on identity text and flagged for a human
  * (`checkIdentityKeywords`).
  *
@@ -270,7 +277,7 @@ export const IDENTITY_SLURS: ReadonlySet<string> = new Set([
 ])
 
 /** Every keyword the chat filter knows, for the subset test. */
-export const CHAT_KEYWORDS: ReadonlySet<string> = new Set([...ALL_KEYWORDS.flatMap((s) => [...s]), ...ABBREVIATION_KEYWORDS])
+export const CHAT_KEYWORDS: ReadonlySet<string> = new Set([...ALL_KEYWORDS.flatMap((s) => [...s]), ...REVIEW_ONLY_KEYWORDS])
 
 /**
  * `checkKeywords` for identity text (a name, a bio, a crew card): `hide` only

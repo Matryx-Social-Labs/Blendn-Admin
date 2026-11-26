@@ -24,12 +24,24 @@ import type { ModerationResult } from "./types"
  * (`abuseHiddenCount` in `actions.ts`). A hide that carries a contact detail
  * and anything else counts.
  */
-export function preSaveCheck(content: string): { result: ModerationResult; autoMute: boolean } | null {
-  const keyword = checkKeywords(content)
+export function preSaveCheck(
+  content: string,
+  keyword: ModerationResult | null = checkKeywords(content)
+): { result: ModerationResult; autoMute: boolean } | null {
   if (keyword && keyword.action === "hide") return { result: keyword, autoMute: true }
   const contact = checkContactInfo(content)
   if (contact && contact.action === "hide") return { result: contact, autoMute: false }
   return null
+}
+
+/**
+ * What a send route records for review when its inline check examined a line
+ * and did not hide it: the model's flag and the keyword flag (`preSaveCheck`'s
+ * keyword result, reused), either or both. The line is still delivered.
+ * `moderateMessage` records these itself when it runs instead.
+ */
+export function inlineFlags(...results: (ModerationResult | null)[]): ModerationResult[] {
+  return results.filter((result): result is ModerationResult => result?.action === "flag")
 }
 
 /**

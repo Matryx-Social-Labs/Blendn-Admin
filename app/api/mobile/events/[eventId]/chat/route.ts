@@ -36,7 +36,8 @@ import {
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { answerRoomRetry, findRoomSend, replayRoomRetry } from "@/lib/room-retry"
 import { claimAnonymousName } from "@/lib/anonymous-names"
-import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
+import { moderateMessage, checkSpam, preSaveCheck, inlineFlags } from "@/lib/moderation"
+import { checkKeywords } from "@/lib/moderation/keyword-filter"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { idForViewer } from "@/lib/room-handle"
 import { roomMuteState } from "@/lib/room-mute"
@@ -797,7 +798,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // --- Pre-save moderation: keywords and contact details (sync, <1ms) ---
-    const preSave = preSaveCheck(content)
+    const keyword = checkKeywords(content)
+    const preSave = preSaveCheck(content, keyword)
     if (preSave) {
       // Save but immediately mark as hidden — never emitted to other users
       let message
@@ -899,6 +901,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * found nothing. A room message is words only (R9, SCRUM-626).
      */
     let examinedInline = false
+    let flaggedInline = false
 
     // --- Pre-emit moderation: OpenAI check with 1s timeout ---
     try {
@@ -953,9 +956,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           },
         })
       }
-      if (openaiResult && openaiResult.action === "flag") {
-        void flagForReview(message.id, chatGroup.id, authUser.userId, openaiResult)
-      }
+      // Delivered, and recorded for review: the model's flag and a keyword one.
+      const flags = examinedInline ? inlineFlags(openaiResult, keyword) : []
+      flaggedInline = flags.length > 0
+      for (const flag of flags) void flagForReview(message.id, chatGroup.id, authUser.userId, flag)
       /*
        * Anything the inline check did not examine goes to the full pipeline,
        * which owns the verdict and will record `unchecked` if it cannot get
@@ -989,6 +993,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      */
     if (
       examinedInline &&
+      !flaggedInline &&
       (!message.moderation_status || message.moderation_status === "pending")
     ) {
       void db.chat_messages
