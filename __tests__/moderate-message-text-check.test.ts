@@ -1,19 +1,20 @@
 const mockCheck = jest.fn()
 const mockHide = jest.fn()
 const mockRecord = jest.fn()
+const mockFlag = jest.fn()
 jest.mock("@/lib/moderation/openai-moderation", () => ({
   checkTextContent: (...a: unknown[]) => mockCheck(...a),
   checkImageContent: jest.fn(),
 }))
 jest.mock("@/lib/moderation/actions", () => ({
   hideMessage: (...a: unknown[]) => mockHide(...a),
-  flagForReview: jest.fn(),
+  flagForReview: (...a: unknown[]) => mockFlag(...a),
   checkAndAutoMute: jest.fn(),
   recordExamined: (...a: unknown[]) => mockRecord(...a),
 }))
 jest.mock("@/lib/tigris", () => ({ readableUrl: jest.fn() }))
 
-import { moderateMessage } from "@/lib/moderation"
+import { inlineFlags, moderateMessage } from "@/lib/moderation"
 import type { ModerationCheck } from "@/lib/moderation/openai-moderation"
 
 /**
@@ -61,4 +62,19 @@ describe("moderateMessage with the send route's in-flight check", () => {
     await run()
     expect(mockCheck).toHaveBeenCalledTimes(1)
   })
+})
+
+describe("a keyword flag on the async path (SCRUM-1167)", () => {
+  it("records an ordinary word on the review list for a human, does not hide it, and does not call it clean", async () => {
+    await moderateMessage("m1", "chod yaar, let's go", "text", "u1", "g1", undefined, Promise.resolve(CLEAN))
+    expect(mockHide).not.toHaveBeenCalled()
+    expect(mockFlag).toHaveBeenCalledWith("m1", "g1", "u1", expect.objectContaining({ action: "flag", source: "keyword", matched: ["chod"] }))
+    expect(mockRecord).not.toHaveBeenCalled()
+  })
+})
+
+it("inlineFlags keeps only the flags, in order, and drops a hide or nothing (SCRUM-1167)", () => {
+  const flag = (source: "keyword" | "openai_text") => ({ action: "flag" as const, source, categories: {}, confidence: 0.5 })
+  expect(inlineFlags(flag("openai_text"), flag("keyword"))).toEqual([flag("openai_text"), flag("keyword")])
+  expect(inlineFlags({ ...flag("keyword"), action: "hide" }, null)).toEqual([])
 })

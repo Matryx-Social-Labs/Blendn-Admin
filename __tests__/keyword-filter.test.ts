@@ -38,8 +38,7 @@ describe("checkKeywords", () => {
   })
 
   it("detects abbreviation keywords", () => {
-    const result = checkKeywords("bc tu pagal hai")
-    expect(result).not.toBeNull()
+    expect(checkKeywords("bsdk tu pagal hai")?.action).toBe("hide")
   })
 
   it("handles leetspeak evasion", () => {

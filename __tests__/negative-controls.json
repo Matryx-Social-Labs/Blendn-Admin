@@ -2602,9 +2602,21 @@
       "observed": "Final file, 25 tests: M1701: 3 failing. M1702: 1. M1703: 1. M1704: 1. M1705: 6. M1706: 3. M1707: 3. M1708: 3. M1709: 3. M1710: 1. M1711: 1. M1713: 2. M1715: 4. M1716: survives (see above). Each reverted; 25 of 25.",
       "date": "2026-10-22"
     },
+    "keyword-banter.test.ts": {
+      "guards": "SCRUM-1167: 30 lines of ordinary banter (chod yaar, bc the MC is late, BC and Ontario, boli maga, shala, magane, harami, Sunni, gandu hudga, हरामी, साले, ...) never hide (null or a flag for a human); 30 abusive lines in Latin and native scripts hide; a review-only word matches as a whole word only (football, imagine, tunnel, symbolic say nothing); mc and bc are not keywords; a slur beside banter still hides and names only the slur.",
+      "mutation": "M1167a: the review-only hits pushed into the hide list again (`exact.push(...review)` in checkKeywords).",
+      "observed": "Red before the fix: 43 of 65 failing. M1167a: 26 of 65 failing (every banter line hides again). Reverted; 65 of 65 (66 with the one-word invariant added in review, M1167a 26 of 66).",
+      "date": "2026-11-26"
+    },
+    "inline-flag-recorded.itest.ts": {
+      "guards": "SCRUM-1167: on both room send routes, when the inline 1 s check answered, a line with a keyword flag (an ordinary word on the review list) or the model's flag is delivered (201, emitted), gets a pending moderation_flags row (auto_keyword or auto_text, auto_action none) and moderation_status flagged, never clean; an ordinary line is clean with no flag; three keyword flags in an hour leave the sender active, muted_by NULL.",
+      "mutation": "M1167b: the event route's inlineFlags call reverted to the old `if (openaiResult?.action === \"flag\") void flagForReview(...)` with the clean write unguarded.",
+      "observed": "Red before the fix: 6 of 8 failing (the keyword line hidden, 200; the model flag recorded clean). M1167b: 2 of 8 failing, both on the event route (no keyword flag row; status clean). Reverted; 8 of 8 (10 with the both-flags case added in review). M1167c (review pass): the same revert on the group route: 3 of 10 failing, all on the group route. M1167d (review pass): message-requests reads `preSaveCheck(message)` without `.hide` (an object, always truthy): message-request-moderated.itest.ts 1 of 3 failing (the clean intro refused). Both reverted.",
+      "date": "2026-11-26"
+    },
     "keyword-filter-indic.test.ts": {
-      "guards": "SCRUM-650: Indic words are not split at their combining marks. Hindi words sharing a consonant skeleton with a banned one (लड़का, गाड़ी, गड़बड़, गांव, कमीज़, ...) are not hidden or matched, while the banned words (चूतिया, हरामी, लौड़ा, रंडी, गांड) are, with the nukta typed precomposed or decomposed; zero-width joiners neither hide a banned word nor split a harmless one; Telugu/Bengali/Tamil near-misses stay clean; Hinglish true and false positives; a slur followed by ! is still a slur while f@gg0t/r3t4rd still read as letters; 'mc bc' matches as a phrase.",
-      "mutation": "M1720 combining marks removed from the word class (words split at vowel signs again). M1721 zero-width characters not removed before tokenising. M1722 NFC not applied to words. M1723 `@ $ !` mapped to letters even after a word (a trailing '!' read as i). M1724 the multi-word abbreviation never matches.",
+      "guards": "SCRUM-650: Indic words are not split at their combining marks. Hindi words sharing a consonant skeleton with a banned one (लड़का, गाड़ी, गड़बड़, गांव, कमीज़, ...) are not hidden or matched, while the banned words (चूतिया, लौड़ा, रंडी, गांड) are, with the nukta typed precomposed or decomposed; zero-width joiners neither hide a banned word nor split a harmless one; Telugu/Bengali/Tamil near-misses stay clean; Hinglish true and false positives; a slur followed by ! is still a slur while f@gg0t/r3t4rd still read as letters; mc and bc are not keywords (SCRUM-1167).",
+      "mutation": "M1720 combining marks removed from the word class (words split at vowel signs again). M1721 zero-width characters not removed before tokenising. M1722 NFC not applied to words. M1723 `@ $ !` mapped to letters even after a word (a trailing '!' read as i). M1724 the multi-word abbreviation never matches (retired with mc/bc, SCRUM-1167).",
       "observed": "M1720: 5 of 50 failing. M1721: 1 of 50. M1722: 1 of 49 (the nukta spellings). M1723: 2 of 49. M1724: 1 of 50. Each reverted; 50 of 50 (plus keyword-filter.test.ts and keyword-identity.test.ts unchanged).",
       "date": "2026-10-27"
     },
