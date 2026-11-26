@@ -8,7 +8,7 @@ const info = jest.fn()
 const logError = jest.fn()
 jest.mock("@/lib/logger", () => ({ logger: { info: (...a: unknown[]) => info(...a), warn: jest.fn(), error: (...a: unknown[]) => logError(...a) } }))
 
-import { beat, checkLoops, staleLoops } from "@/lib/heartbeat"
+import { beat, checkLoops, staleLoops, startWatchdog, stopWatchdog } from "@/lib/heartbeat"
 
 const MIN = 60_000
 const T0 = Date.UTC(2026, 10, 27, 12, 0, 0)
@@ -71,4 +71,29 @@ it("never throws, even when the logger does", () => {
     throw new Error("logger down")
   })
   expect(() => checkLoops(T0 + 10 * MIN)).not.toThrow()
+})
+
+it("the watchdog checks every minute, keeps checking, and stops when told", async () => {
+  jest.useFakeTimers({ now: T0 })
+  try {
+    beat("sentiment", MIN)
+    startWatchdog()
+    startWatchdog() // a second start is not a second watchdog
+    await jest.advanceTimersByTimeAsync(3 * MIN)
+    expect(logError).not.toHaveBeenCalled()
+    await jest.advanceTimersByTimeAsync(MIN) // minute four: 4 × the interval since the last beat
+    expect(logError).toHaveBeenCalledTimes(1)
+    expect(logError).toHaveBeenCalledWith("Background loop stalled: sentiment", expect.objectContaining({ loop: "sentiment" }))
+
+    beat("sentiment", MIN)
+    await jest.advanceTimersByTimeAsync(MIN)
+    expect(info).toHaveBeenCalledTimes(1)
+
+    stopWatchdog()
+    await jest.advanceTimersByTimeAsync(10 * MIN)
+    expect(logError).toHaveBeenCalledTimes(1)
+  } finally {
+    stopWatchdog()
+    jest.useRealTimers()
+  }
 })

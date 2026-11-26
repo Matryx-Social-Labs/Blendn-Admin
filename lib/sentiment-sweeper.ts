@@ -45,6 +45,12 @@ import { BATCH_SIZE, classifyMessages } from "./sentiment/classify"
  */
 
 export const SWEEP_INTERVAL_MS = 60 * 1000
+/**
+ * The heartbeat's interval (lib/heartbeat.ts reports a loop after 3 of them), not the sweep's. With the model timing
+ * out, one pass is up to 10 batches × (20 s + 2 s + 20 s) ≈ 7 min and still finishes on the word list: 3 × 3 min
+ * clears that plus the minute between passes, so a slow OpenAI is not reported as a stalled loop.
+ */
+const BEAT_INTERVAL_MS = 3 * 60 * 1000
 
 /**
  * Ten batches of 20. The ceiling exists so the first pass after a quiet deploy
@@ -256,7 +262,7 @@ export function startSentimentSweeper(): void {
   const run = async () => {
     try {
       const result = await sweepSentiment()
-      beat("sentiment", SWEEP_INTERVAL_MS)
+      beat("sentiment", BEAT_INTERVAL_MS)
       if (result.classified > 0) {
         logger.info("Sentiment sweep", { ...result })
       }
@@ -271,7 +277,7 @@ export function startSentimentSweeper(): void {
   }
 
   timer = setTimeout(() => void run(), SWEEP_INTERVAL_MS)
-  beat("sentiment", SWEEP_INTERVAL_MS)
+  beat("sentiment", BEAT_INTERVAL_MS)
 }
 
 export function stopSentimentSweeper(): void {

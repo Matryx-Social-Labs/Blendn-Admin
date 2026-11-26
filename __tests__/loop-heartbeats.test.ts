@@ -28,9 +28,23 @@ jest.mock("@/lib/push-notifications", () => ({
 jest.mock("@/lib/logger", () => ({ logger: { info: jest.fn(), warn: jest.fn(), error: (...a: unknown[]) => logError(...a) } }))
 jest.mock("@/lib/env", () => ({ ticketingOn: () => ticketingOn() }))
 jest.mock("@/lib/ticket-holds", () => ({ releaseExpiredHolds: async () => ({ released: 0 }) }))
+const findLiveEvents = jest.fn()
+const readLiveSnapshot = jest.fn()
+const executeRaw = jest.fn()
+jest.mock("@/lib/db", () => ({
+  db: { events: { findMany: () => findLiveEvents() }, $executeRaw: (...a: unknown[]) => executeRaw(...a) },
+}))
+jest.mock("@/lib/live-snapshot", () => ({ readLiveSnapshot: (...a: unknown[]) => readLiveSnapshot(...a) }))
+jest.mock("@/lib/live-alert-mail", () => ({ mailLiveAlert: jest.fn() }))
+jest.mock("@/lib/deleted-account-records", () => ({ purgeDeletedAccountRecords: async () => 0 }))
+jest.mock("@/lib/leads", () => ({ purgeLeadPii: async () => 0 }))
 
 import { reminderPassInFlight, startReminderSweeper, stopReminderSweeper } from "@/lib/reminder-sweeper"
 import { startTicketHoldSweeper, stopTicketHoldSweeper } from "@/lib/ticket-hold-sweeper"
+import { startTicketReconciler, stopTicketReconciler } from "@/lib/ticket-reconcile"
+import { startPayoutReleaser, stopPayoutReleaser } from "@/lib/payout-release"
+import { startIssueSweeper, stopIssueSweeper } from "@/lib/event-issues"
+import { runSweep as runRetentionSweep } from "@/lib/notification-retention"
 
 const SWEEP_MS = 5 * 60_000
 
@@ -43,6 +57,9 @@ beforeEach(() => {
 afterEach(() => {
   stopReminderSweeper()
   stopTicketHoldSweeper()
+  stopTicketReconciler()
+  stopPayoutReleaser()
+  stopIssueSweeper()
   jest.useRealTimers()
 })
 
@@ -88,10 +105,70 @@ it("reminderPassInFlight waits for the pass that is sending, and is settled when
   expect(settled).toBe(true)
 })
 
-it("a loop that starts nothing while TICKETING is off never registers", () => {
+it.each([
+  ["ticket-holds", startTicketHoldSweeper],
+  ["ticket-reconcile", startTicketReconciler],
+  ["payout-release", startPayoutReleaser],
+])("%s starts nothing and never registers while TICKETING is off", (_name, start) => {
   ticketingOn.mockReturnValue(false)
-  startTicketHoldSweeper()
+  start()
   expect(beat).not.toHaveBeenCalled()
+})
+
+it("with TICKETING on, the ticket-hold loop registers and beats after its pass (the positive control)", async () => {
+  ticketingOn.mockReturnValue(true)
+  startTicketHoldSweeper()
+  expect(beat).toHaveBeenCalledWith("ticket-holds", 60_000)
+  await jest.advanceTimersByTimeAsync(0)
+  expect(beat).toHaveBeenCalledTimes(2)
+  ticketingOn.mockReturnValue(false)
+})
+
+describe("the issues loop", () => {
+  const live = [{ id: "e1", start_time: new Date(0) }, { id: "e2", start_time: new Date(0) }]
+
+  it("a pass where every live event failed is a failed pass: an error, and no beat", async () => {
+    findLiveEvents.mockResolvedValue(live)
+    readLiveSnapshot.mockRejectedValue(new Error("snapshot broken"))
+    startIssueSweeper()
+    beat.mockClear()
+    await jest.advanceTimersByTimeAsync(60_000)
+    expect(logError).toHaveBeenCalledWith("Issue sweep failed", { error: "every live event failed (2)" })
+    expect(beat).not.toHaveBeenCalled()
+  })
+
+  it("one event failing is that event's problem: the pass still beats", async () => {
+    findLiveEvents.mockResolvedValue(live)
+    readLiveSnapshot.mockRejectedValueOnce(new Error("one bad event")).mockResolvedValueOnce(null)
+    startIssueSweeper()
+    beat.mockClear()
+    await jest.advanceTimersByTimeAsync(60_000)
+    expect(beat).toHaveBeenCalledWith("issues", 60_000)
+  })
+
+  it("a quiet night with no live events beats", async () => {
+    findLiveEvents.mockResolvedValue([])
+    startIssueSweeper()
+    beat.mockClear()
+    await jest.advanceTimersByTimeAsync(60_000)
+    expect(beat).toHaveBeenCalledWith("issues", 60_000)
+  })
+})
+
+describe("the retention loop beats only when both drains did not throw", () => {
+  it("a notifications batch that throws: no beat", async () => {
+    jest.useRealTimers()
+    executeRaw.mockRejectedValueOnce(new Error("statement timeout")).mockResolvedValue(0)
+    await runRetentionSweep()
+    expect(beat).not.toHaveBeenCalled()
+  })
+
+  it("both drained: one beat", async () => {
+    jest.useRealTimers()
+    executeRaw.mockResolvedValue(0)
+    await runRetentionSweep()
+    expect(beat).toHaveBeenCalledWith("notification-retention", 6 * 60 * 60 * 1000)
+  })
 })
 
 describe("every loop beats (structural)", () => {
@@ -107,7 +184,7 @@ describe("every loop beats (structural)", () => {
     ["lib/notification-retention.ts", "notification-retention", "SWEEP_INTERVAL_MS"],
     ["lib/presence-sweeper.ts", "presence", "SWEEP_INTERVAL_MS"],
     ["lib/presence-sweeper.ts", "go-live-expiry", "EXPIRY_INTERVAL_MS"],
-    ["lib/sentiment-sweeper.ts", "sentiment", "SWEEP_INTERVAL_MS"],
+    ["lib/sentiment-sweeper.ts", "sentiment", "BEAT_INTERVAL_MS"],
     ["lib/event-issues.ts", "issues", "SWEEP_MS"],
     ["lib/reminder-sweeper.ts", "reminders", "SWEEP_MS"],
     ["lib/photo-sweeper.ts", "photo-moderation", "SWEEP_INTERVAL_MS"],
@@ -125,11 +202,25 @@ describe("every loop beats (structural)", () => {
     expect(calls).toBe(2)
   })
 
+  // The pass's beat sits in the pass's `try`, after the work: never in a `catch` or `finally`, where a failing pass would
+  // beat too. Retention beats after its drains' own catches, on their result; its behavioural test above covers it.
+  it.each(LOOPS.filter(([file]) => file !== "lib/notification-retention.ts"))(
+    "%s's pass beat for %s is inside a try, not a catch or finally",
+    (file, name, interval) => {
+      const src = code(file)
+      const inTry = src.split(`beat("${name}", ${interval})`).slice(0, -1).filter((before) => {
+        const last = [...before.matchAll(/\btry \{|\bcatch\b|\bfinally\b/g)].pop()
+        return last?.[0] === "try {"
+      })
+      expect(inTry).toHaveLength(1)
+    }
+  )
+
   it("covers every loop background.ts starts", () => {
     // Every module background.ts imports a start function from is in LOOPS, so a new loop cannot skip the watchdog.
     const bg = code("lib/background.ts")
     const loopModules = [...bg.matchAll(/import\s*\{([^}]*)\}\s*from\s*"\.\/([\w-]+)"/g)]
-      .filter((m) => /\bstart\w+/.test(m[1]))
+      .filter((m) => /\bstart\w+/.test(m[1]) && m[2] !== "heartbeat")
       .map((m) => `lib/${m[2]}.ts`)
     expect(loopModules).toHaveLength(13)
     expect(new Set(loopModules)).toEqual(new Set(LOOPS.map(([file]) => file).filter((f) => f !== "lib/sponsored-scheduler.ts")))
@@ -137,7 +228,7 @@ describe("every loop beats (structural)", () => {
 
   it("background.ts runs the watchdog and stops it", () => {
     const bg = code("lib/background.ts")
-    expect(bg).toMatch(/checkLoops\(/)
-    expect(bg).toMatch(/clearTimeout\(watchdog\)/)
+    expect(bg).toMatch(/^\s*startWatchdog\(\)/m)
+    expect(bg).toMatch(/^\s*stopWatchdog\(\)/m)
   })
 })

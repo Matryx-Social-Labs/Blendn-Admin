@@ -135,10 +135,10 @@ app.prepare().then(() => {
      * - `flushProductEvents`: `product_events` batches for ten seconds, so a deploy discarded up to one window of
      *   first-opens, the people using the app right now.
      * - `reminderPassInFlight`: reminders are claimed before they are sent; capped at 8 s.
-     * - `closeDb` after both, not `$disconnect`: that does not close a pool the driver adapter created, so the old
-     *   container kept its connections while the new one opened its own.
-     * - `io.close()` also closes the HTTP server (socket.io 4.8.4 `dist/index.js` `close`), so there is no second
-     *   `httpServer.close`.
+     * - `io.close()` also closes the HTTP server (socket.io 4.8.4 `dist/index.js` `close`), which waits for the
+     *   requests still running; there is no second `httpServer.close`.
+     * - `closeDb` after all three, not `$disconnect`: that does not close a pool the driver adapter created, so the
+     *   old container kept its connections while the new one opened its own.
      */
     const at = () => `[${new Date().toISOString()}] >`
     void drainAndExit({

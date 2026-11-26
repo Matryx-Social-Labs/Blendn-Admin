@@ -615,8 +615,10 @@ not be two processes either: `.railway/railway.ts` sets `overlapSeconds: 0` (the
 old process stops when the new one is healthy) and `drainingSeconds: 15` (15 s from
 SIGTERM to SIGKILL, over `server.ts`'s own 10 s force-exit, so the shutdown gets to
 finish the reminder pass in flight (up to 8 s), flush, close the pool and print
-"Database pool closed", "Socket.io and HTTP server closed" and "Exiting (0)";
-"Forced shutdown after timeout" means a drain hung and the process exited 1). **Those
+"Socket.io and HTTP server closed", "Database pool closed" and "Exiting (0)";
+"Forced shutdown after timeout" means a drain hung and the process exited 1, "Shutdown
+stopped waiting for the reminder pass" that claimed reminders may be unsent, and
+"Shutdown step failed" names the step). **Those
 two are not applied yet:** the file reaches Railway only through `railway config
 apply` ([The deploy settings are on the Railway service](#the-deploy-settings-are-on-the-railway-service));
 staging after 2026-11-29, production with the production promotion. Until then
@@ -681,7 +683,7 @@ either a dead timer or every pass failing: the loop's own error line
 | `reminders` | the hour-before reminder, rating requests, push receipts, results mails | 5 min |
 | `chat-lifecycle` | rooms closing; Lobby and gesture retention | 15 min |
 | `notification-retention` | the bell and `product_events` retention | 6 h |
-| `sentiment` | the live screen's mood and categories | 1 min |
+| `sentiment` | the live screen's mood and categories | 1 min (stalled after 9 min, not 3: a pass with the model timing out runs about 7) |
 | `issues` | host alerts in `event_issues` | 1 min |
 | `staff-alert` | new reports and severe flags told to staff | 1 min |
 | `moderation-recheck` | room lines OpenAI could not check when sent | 1 min |
