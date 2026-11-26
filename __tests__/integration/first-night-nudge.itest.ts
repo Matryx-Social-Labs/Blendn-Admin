@@ -40,14 +40,14 @@ type Role = "organizer" | "venue_owner" | "sponsor"
 async function approved(
   k: number,
   members: [{ id: string }, "owner" | "admin" | "staff"][],
-  o: { role?: Role; city?: string | null; at?: Date; suspended?: boolean; nudgedAt?: Date | null } = {}
+  o: { role?: Role; city?: string | null; at?: Date; status?: "verified" | "suspended"; suspendedAt?: Date | null; nudgedAt?: Date | null } = {}
 ) {
   const org = await db.organisations.create({
     data: {
       kind: "company",
       display_name: testId("fn-org"),
-      status: o.suspended ? "suspended" : "verified",
-      suspended_at: o.suspended ? new Date() : null,
+      status: o.status ?? "verified",
+      suspended_at: o.suspendedAt ?? null,
       next_event_nudged_at: o.nudgedAt ?? null,
     },
   })
@@ -154,6 +154,17 @@ describe("the sweep", () => {
     expect(await nudgedAt(orgId)).toBeNull()
   })
 
+  it("approved at 10:01 is due the fourth morning, and a pass 23 h 59 min after that still sends", async () => {
+    const owner = await person("ten-oh-one")
+    // 10:01 IST: 72 h on is 10:01 on day 3, so due is 10:00 on day 4, almost five days after approval.
+    await approved(9, [[owner, "owner"]], { at: new Date(approvedAt(9).getTime() + 2 * 3600_000 + 60_000) })
+    const due = new Date(dueAt(9).getTime() + DAY)
+    await sendFirstNightNudges(new Date(due.getTime() - 60_000))
+    expect(mailedTo([owner])).toEqual([])
+    await sendFirstNightNudges(new Date(due.getTime() + DAY - 60_000))
+    expect(mailedTo([owner])).toEqual([owner.email])
+  })
+
   it("a Toronto organization at 10:00 EST across the clock change", async () => {
     const owner = await person("toronto")
     // Approved 08:00 EDT Thu 2033-11-03; clocks go back at 02:00 Sun 2033-11-06, so 10:00 that day is 15:00Z.
@@ -194,14 +205,18 @@ describe("who never gets it", () => {
     expect(mailedTo([venue, sponsor, host])).toEqual([host.email])
   })
 
-  it("a suspended organization, and one nudged before", async () => {
-    const [suspended, nudged] = [await person("suspended"), await person("nudged")]
-    const suspendedOrg = await approved(6, [[suspended, "owner"]], { suspended: true })
+  it("a suspended organization, by either mark alone, and one nudged before", async () => {
+    const [both, statusOnly, dateOnly, nudged] = [await person("suspended"), await person("status-only"), await person("date-only"), await person("nudged")]
+    const ids = [
+      await approved(6, [[both, "owner"]], { status: "suspended", suspendedAt: new Date() }),
+      await approved(6, [[statusOnly, "owner"]], { status: "suspended" }),
+      await approved(6, [[dateOnly, "owner"]], { suspendedAt: new Date() }),
+    ]
     const before = new Date(dueAt(6).getTime() - 40 * DAY)
     const nudgedOrg = await approved(6, [[nudged, "owner"]], { nudgedAt: before })
     await sendFirstNightNudges(dueAt(6))
-    expect(mailedTo([suspended, nudged])).toEqual([])
-    expect(await nudgedAt(suspendedOrg)).toBeNull()
+    expect(mailedTo([both, statusOnly, dateOnly, nudged])).toEqual([])
+    for (const id of ids) expect(await nudgedAt(id)).toBeNull()
     expect(await nudgedAt(nudgedOrg)).toEqual(before)
   })
 
@@ -223,7 +238,8 @@ describe("with 04c's nudge", () => {
     expect(mailedTo([nudgedHost])).toEqual([nudgedHost.email])
 
     // The control: an organization with the same night and no first-night nudge (approved earlier, already listing).
-    const freshOrg = await approved(8, [[freshHost, "owner"]], { at: new Date(approvedAt(8).getTime() - 30 * DAY) })
+    // Approved 9 days before case 8: between case 7's and case 8's sweep windows, so no other case's pass reaches it.
+    const freshOrg = await approved(8, [[freshHost, "owner"]], { at: new Date(approvedAt(8).getTime() - 9 * DAY) })
     // Both hold a night that ends at 01:30 IST two days after the nudge; 04c's 10:00 is a week on, inside 30 days of it.
     const ended = new Date(dueAt(8).getTime() + 2 * DAY - 8 * 3600_000 - 30 * 60_000)
     await event(nudgedOrg, { status: "published", endedAt: ended })

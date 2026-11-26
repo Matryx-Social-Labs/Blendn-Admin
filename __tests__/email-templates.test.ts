@@ -127,6 +127,7 @@ describe("the approval email", () => {
     it("a sponsor keeps the Members line: they create no events and hold no venue", () => {
       const t = approvedEmail("Asha", "Byg Brewski", "asha@byg.in", link, "sponsor")
       expect(t.text).toContain("You can invite colleagues from Organisation → Members.")
+      expect(t.html).toContain("invite your colleagues from Your organisation &rarr; Members.")
       for (const part of [t.text, t.html]) expect(part).not.toMatch(/events\/new|first event|dashboard\/venues/)
     })
 

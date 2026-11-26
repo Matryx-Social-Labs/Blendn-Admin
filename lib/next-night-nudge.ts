@@ -78,7 +78,8 @@ const FALLBACK_ZONE = "Asia/Kolkata"
 export async function sendFirstNightNudges(now: Date = new Date()): Promise<number> {
   let sent = 0
   try {
-    // Due is within 25 h of approval + 3 days and in (now - 1 day, now], so approval is in (now - 5 days 1 h, now - 3 days].
+    // Due is within 25 h of approval + 3 days and in (now - 1 day, now], so approval is in (now - 5 days 1 h, now - 3 days];
+    // the read reaches back 6 days, and the due check below is the bound.
     // Approval is the application's `reviewed_at`: `organisations.verified_at` is cleared and reset by an admin's toggle.
     // ponytail: an event created between this read and the claim still gets the mail; a one-pass window, accepted.
     const approvals = await db.organiser_onboarding_requests.findMany({

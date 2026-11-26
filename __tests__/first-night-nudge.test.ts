@@ -148,6 +148,15 @@ describe("when", () => {
     expect(await sendFirstNightNudges(new Date("2026-11-01T15:00:00Z"))).toBe(2)
   })
 
+  it("a full 72 hours across the spring-forward change, not three wall-clock days", async () => {
+    // Approved 09:30 EST Thu 2026-03-05; clocks go forward at 02:00 Sun 2026-03-08, so 72 h on is 10:30 EDT Sunday and
+    // the first 10:00 after it is Monday's (14:00Z), not Sunday's.
+    world({ approvals: [{ ...APPROVAL, city: "Toronto", reviewed_at: new Date("2026-03-05T14:30:00Z") }] })
+    expect(await sendFirstNightNudges(new Date("2026-03-08T14:00:00Z"))).toBe(0)
+    expect(await sendFirstNightNudges(new Date("2026-03-09T13:59:00Z"))).toBe(0)
+    expect(await sendFirstNightNudges(new Date("2026-03-09T14:00:00Z"))).toBe(2)
+  })
+
   it.each([null, "Atlantis"])("an application with city %p reads as India's clock", async (cityName) => {
     world({ approvals: [{ ...APPROVAL, city: cityName }] })
     expect(await sendFirstNightNudges(new Date(DAY3_TEN.getTime() - 60_000))).toBe(0)
@@ -211,6 +220,14 @@ describe("who", () => {
     expect(await sendFirstNightNudges(new Date(DAY3_TEN.getTime() + 5 * 60_000))).toBe(2)
   })
 
+  it("a mail Resend refused for everyone gives the claim back, and the next pass sends it", async () => {
+    fetchStatus = () => 422
+    expect(await sendFirstNightNudges(DAY3_TEN)).toBe(0)
+    expect(nudgedAt()).toBeNull()
+    fetchStatus = () => 200
+    expect(await sendFirstNightNudges(new Date(DAY3_TEN.getTime() + 5 * 60_000))).toBe(2)
+  })
+
   it("never throws", async () => {
     mockDb.organiser_onboarding_requests.findMany.mockRejectedValue(new Error("db down"))
     await expect(sendFirstNightNudges(DAY3_TEN)).resolves.toBe(0)
@@ -226,7 +243,7 @@ describe("the mail", () => {
     expect(m.subject).toBe("List your first night on Blend’n")
     expect(m.text).toContain("Byg Brewski is set up on Blend’n, and nothing is listed yet.")
     expect(m.text).toContain(
-      "The morning after each night, you’ll get an email with how it went: how many people checked in, the average rating once 5 people have rated, and the room’s mood on the results page."
+      "The morning after each night, you’ll get an email with how it went: how many people checked in, the average rating once 5 people have rated, and, once people have chatted, the room’s mood on the results page."
     )
     expect(m.text).toContain("Create your first event:\nhttps://dashboard.blendn.app/dashboard/events/new")
     expect(m.html).toContain('href="https://dashboard.blendn.app/dashboard/events/new"')
@@ -244,7 +261,8 @@ describe("the mail", () => {
     // No lever, no price, no programme, no figure we do not have.
     expect(`${m.subject}\n${m.text}\n${m.html}`).not.toMatch(/Plus|free|founding|price|₹|\$/i)
     // The only figure in the copy is 5, the rating rule's own floor (04b); no percentage or count we do not have.
-    expect(m.text.match(/\d+/g)?.filter((n) => !m.headers["List-Unsubscribe"].includes(n))).toEqual(["5"])
+    const copy = m.text.replace(/https:\/\/\S+/g, "")
+    expect(copy.match(/\d+/g)).toEqual(["5"])
   })
 
   it("a long organization name, escaped in the HTML", async () => {

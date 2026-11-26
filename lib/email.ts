@@ -630,7 +630,7 @@ export function nextNightEmail(r: { title: string; checkedIn: number | null; nex
 export function firstNightEmail(r: { orgName: string; nextUrl: string; unsubscribeUrl: string }) {
   const lines = [
     `${r.orgName} is set up on Blend’n, and nothing is listed yet.`,
-    "The morning after each night, you’ll get an email with how it went: how many people checked in, the average rating once 5 people have rated, and the room’s mood on the results page.",
+    "The morning after each night, you’ll get an email with how it went: how many people checked in, the average rating once 5 people have rated, and, once people have chatted, the room’s mood on the results page.",
   ]
   const label = "Create your first event"
   const why = "You get this once, three days after your organization was approved, if nothing is listed yet."

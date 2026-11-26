@@ -209,6 +209,9 @@ it.each([
   const result = await approveOnboardingRequest(await application(email, { requested_role: role }))
   orgs.push(result.orgId)
   users.push((await db.user.findUniqueOrThrow({ where: { email }, select: { id: true } })).id)
+  // The approval time the first-night nudge counts its three days from (lib/next-night-nudge.ts).
+  const reviewed = await db.organiser_onboarding_requests.findFirstOrThrow({ where: { contact_email: email }, select: { reviewed_at: true } })
+  expect(Date.now() - reviewed.reviewed_at!.getTime()).toBeLessThan(60_000)
   const mail = sent.find((m) => m.to === email)!
   expect(mail.text).toMatch(new RegExp(`${line}\\n\\S+${path}$`, "m"))
   expect(mail.html).toMatch(new RegExp(`href="\\S+${path}"[^>]*>${label}</a>`))
