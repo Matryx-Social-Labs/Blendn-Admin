@@ -3952,7 +3952,7 @@ and only the second is worth blocking.
 | kind | who | media |
 |---|---|---|
 | `announcement` | `canEdit` — the organising org, or an `app_admin`. **Not** the venue owner | no |
-| `sponsored` | one organisation holding `may_sponsor` **and** an approved placement at this event, or an `app_admin` | **yes** |
+| `sponsored` | one organisation holding `may_sponsor` **and** an approved placement at this event, or an `app_admin` | not yet: refused with 400 (nothing stores it) |
 | `system` | `app_admin` only — it speaks as Blend'n | no |
 
 **This route used to compare two user ids.** `event.organizer_id !== caller.id`,

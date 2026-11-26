@@ -301,8 +301,9 @@ and that sponsors had no surface. Both stopped being true; what exists now:
   brand accepts it (`proposed` → `approved`). Posting `sponsored` needs one
   organisation holding both the flag and an approved placement at the event
   (`resolveSponsorGrant` + `canBroadcast`).
-- **A person reviews every creative** (`/dashboard/creative-review`), and the
-  scheduler sends at most one sponsored post per room per 20 minutes.
+- **A person reviews every campaign creative** (`/dashboard/creative-review`)
+  before the scheduler sends it, and the scheduler sends at most one sponsored
+  post per room per 20 minutes (`SPONSORSHIP.ROOM_MIN_GAP_MINUTES`).
 - **Money:** an admin prices the placement, marks it agreed and sends a Razorpay
   Payment Link; `payment_link.paid` settles it (`lib/charge-actions.ts`,
   `docs/BILLING-RUNBOOK.md`). Reach is counted privately after the night.

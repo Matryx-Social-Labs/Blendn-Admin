@@ -1133,9 +1133,10 @@ describe("final review: prices, references and the paid states nothing expects",
 
 /*
  * Stage 0 of the sponsor plan sells a night through this path by hand
- * (SCRUM-1454, register D-047/D-048). Every test above enters it with a
+ * (SCRUM-1454). Every test above enters it with a
  * charge row already written; these walk it from the admin's first action,
- * and prove the sponsor's organisation may then post at the night it paid for.
+ * and pin the gate on posting `sponsored`: one organisation with the flag and
+ * an approved placement at the event. Payment is not part of that gate.
  */
 describe("Stage 0: one sold night, end to end (SCRUM-1454)", () => {
   it("price → agreed → link → payment_link.paid → settled, each step through the admin's own actions", async () => {
@@ -1150,8 +1151,9 @@ describe("Stage 0: one sold night, end to end (SCRUM-1454)", () => {
     expect(priced).toMatchObject({ status: "draft", amount_minor: 300_000, currency: "INR", priced_by: admin, agreed_at: null })
 
     await advanceCharge(priced.id, "agreed")
-    expect((await chargeRow(priced.id)).status).toBe("agreed")
-    expect((await chargeRow(priced.id)).agreed_at).not.toBeNull()
+    const agreed = await chargeRow(priced.id)
+    expect(agreed.status).toBe("agreed")
+    expect(agreed.agreed_at).not.toBeNull()
 
     const { linkId } = await sendPaymentLink(priced.id)
     expect(await db.billing_checkouts.findFirstOrThrow({ where: { charge_id: priced.id } })).toMatchObject({ provider_ref: linkId, org_id: sponsorOrg, amount_minor: 300_000, status: "created" })
@@ -1194,6 +1196,12 @@ describe("Stage 0: one sold night, end to end (SCRUM-1454)", () => {
     expect(await mayPost(elsewhere)).toBe(false)
     // The same organisation without the flag an admin grants.
     await db.organisations.update({ where: { id: org.id }, data: { may_sponsor: false } })
+    expect(await mayPost(placedAt)).toBe(false)
+    // Nor a second organisation of theirs that holds the flag and no placement:
+    // both facts must come from one organisation.
+    const flagged = await db.organisations.create({ data: { kind: "company", display_name: testId("pl-flag-only-org"), status: "verified", may_sponsor: true } })
+    orgs.push(flagged.id)
+    await db.organisation_members.create({ data: { org_id: flagged.id, user_id: member, role: "owner" } })
     expect(await mayPost(placedAt)).toBe(false)
   })
 })
