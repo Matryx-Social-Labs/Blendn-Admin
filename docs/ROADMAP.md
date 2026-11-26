@@ -288,31 +288,28 @@ starts. "App" in a row means the work is client-side and tracked in
 | 18 | **Admin and public screens to the kit**, including the venue claim page from step 1 | §10 |
 
 
-### Sponsors have no surface at all — backlog, after the app
+### Sponsors: sold by hand through the admin path (corrected 2026-11-27)
 
-`organisations.may_sponsor` shipped in #259 and has **one reader and zero
-writers**. Nothing is broken — it fails closed, which is correct — but the flag
-is currently ungrantable except by a direct database write, so `sponsored`
-messages cannot be sent by anybody except an `app_admin`.
+This section said `organisations.may_sponsor` had "one reader and zero writers"
+and that sponsors had no surface. Both stopped being true; what exists now:
 
-What is missing, and none of it is designed:
+- **The flag has writers.** An admin grants or revokes it on the Organisations
+  screen (`setOrganisationMaySponsor`, audited), and approving a sponsor's
+  application sets it (`approveOnboardingRequest`).
+- **Placement is an object.** An organizer attaches a brand to an event
+  (`event_sponsors`, at most `SPONSORSHIP.MAX_PLACEMENTS_PER_EVENT`); a claimed
+  brand accepts it (`proposed` → `approved`). Posting `sponsored` needs one
+  organisation holding both the flag and an approved placement at the event
+  (`resolveSponsorGrant` + `canBroadcast`).
+- **A person reviews every creative** (`/dashboard/creative-review`), and the
+  scheduler sends at most one sponsored post per room per 20 minutes.
+- **Money:** an admin prices the placement, marks it agreed and sends a Razorpay
+  Payment Link; `payment_link.paid` settles it (`lib/charge-actions.ts`,
+  `docs/BILLING-RUNBOOK.md`). Reach is counted privately after the night.
 
-- **An admin control to grant `may_sponsor`** per organisation. The smallest
-  useful thing, and the only one blocking the feature from working at all.
-- **A sponsor surface**: which events an org may place into, what ran, when, and
-  how it performed. Today a sponsored message is fire-and-forget with no record
-  beyond the `chat_messages` row.
-- **Placement as an object.** A sponsored message is currently a message. If
-  placements are ever sold, they need a lifecycle — drafted, approved, scheduled,
-  run, reported — and that is a different model, not a flag.
-- **Who approves the creative.** Media rides on `sponsored` alone (#259), so a
-  sponsor can put an image in a pseudonymous room. Nothing reviews it.
-
-Deliberately not designed yet: the app side comes first, and the shape of this
-depends on whether placement is sold per-event, per-venue or per-city — a
-commercial decision, not an engineering one. **Decided 2026-10-01 by the
-owner:** placements are priced by delivered reach band and paid by Razorpay
-payment link (plan v2 §9.1b, steps 0 and 17).
+Not built: a GST invoice (a charge is not one), any record of Blend'n's cut or
+of a payout to the venue or organizer from sponsor money, and the brand's name
+in the room (the client shows "Partner").
 
 
 ### The bio is a hole in the pseudonym
