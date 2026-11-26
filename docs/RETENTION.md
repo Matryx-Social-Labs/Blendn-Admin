@@ -184,13 +184,3 @@ server's sealed copy (`sealUpload`), stored with `Cache-Control: no-cache`, so
 deleting it (account deletion, a removed photo, a moderation takedown) stops it
 being served at once. Objects sealed before SCRUM-445 keep the storage default
 and stay fetchable at the edge for up to an hour after a delete.
-
-**Known gaps, not yet fixed:**
-
-- **User file deletes.** `DELETE /api/mobile/uploads/delete` lets a user delete
-  their own files in `profile/`, `chat/` and `events/` whatever their moderation
-  state. That includes images in hidden or reported messages.
-- **Delisted events.** After an admin delists an event, the organizer can still
-  edit its title and description, and its `visibility` too
-  (`PUT /api/events/[id]`). The delisting's audit entry keeps only the subject
-  id, so nothing keeps the original text.

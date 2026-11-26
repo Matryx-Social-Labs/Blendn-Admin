@@ -323,8 +323,7 @@ describe("room handles (SCRUM-371)", () => {
   })
 
   it("keys the ten-minute window on the real pair, so a new room is not a new window", async () => {
-    // The residual, recorded in SECURITY_BACKLOG: linking two rooms' handles
-    // this way needs both people to move rooms within ten minutes.
+    // Pins today's behaviour (SCRUM-1385).
     expect((await wave(inRoom(THEM), EVENT)).status).toBe(200)
     expect((await wave(inRoom(THEM, OTHER_EVENT), OTHER_EVENT)).status).toBe(429)
   })
