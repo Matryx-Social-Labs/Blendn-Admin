@@ -28,6 +28,9 @@ export const GST_RATE_PERCENT = 18
  */
 export const PLAN_MARKET = "IN"
 
+/** What the Plan page says in place of a price and Buy where plans are not sold (SCRUM-1151). */
+export const FREE_WHILE_LAUNCHING = "Free while we launch in your city."
+
 export type BillingPlanKey =
   | "analytics_monthly"
   | "analytics_yearly"
