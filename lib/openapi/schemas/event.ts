@@ -103,6 +103,13 @@ export const RatingRequestSchema = z
 export const RsvpRequestSchema = z
   .object({
     status: z.enum(["going", "maybe", "not_going"]).default("going"),
+    source: z
+      .string()
+      .optional()
+      .describe(
+        "Where the RSVP came from: `door`, `link`, `invite`, `web` or `share` (SCRUM-1273). Written on the first RSVP only; " +
+          "a later change keeps it. Unknown values are ignored (stored as none), never refused."
+      ),
   })
   .openapi("RsvpRequest")
 

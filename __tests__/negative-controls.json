@@ -2751,6 +2751,18 @@
       "mutation": "(C1) the two unit files run on dev abbe1844, before the change; (M1) VENUE_DATA_DAYS back to 28; (M2) chargeable `now > chargeableFrom`; (M3) the meter's Math.min cap removed; (M4) the card back to `{VENUE_DATA_DAYS / 7} weeks`; (M5) the dated refusal back to 'four weeks after people first went live here'.",
       "observed": "C1: venue-three-months 10 of 10 failing, venue-plan-row 7 of 8. M1: 11 of 18 failing. M2: 1 of 18 (day 90). M3: 1 of 18 (day 400 read 400). M4: 3 of 18. M5: 2 of 18. Restored each; 18 of 18.",
       "date": "2026-11-26"
+    },
+    "acquisition-source.test.ts": {
+      "guards": "SCRUM-1273 (insights/02): acquisitionSource accepts exactly door, link, invite, web, share and reads anything else (DOOR, 'door ', 200 characters, non-strings) as null; record() writes { source } to props, no props key without one, and the first source of the day is the one kept; profileForSelfResponse drops signup_source; the CHECK in each of the two migrations (event_rsvps_source, profiles_signup_source) lists exactly ACQUISITION_SOURCES.",
+      "mutation": "(C1) run on dev 4f434e6f, before the change; (M1) 'share' removed from the profiles migration's IN list; (M2) the parser lower-cases its input.",
+      "observed": "C1: 25 of 26 failing (no export, no props, no migrations; only 'no props key without one' passed). M1: 'migration 1 names the same five values' fails, 1 of 26. M2: 'reads \"DOOR\" as no source' fails, 1 of 26. Restored each; 26 of 26.",
+      "date": "2026-11-26"
+    },
+    "integration/acquisition-source.itest.ts": {
+      "guards": "SCRUM-1273 (insights/02): GET /events/:id?s= records the source on event_viewed only after attendeeEventAccess (a refused view writes no row); POST /events/:id/rsvp { source } writes event_rsvps.source on the first insert and a later not_going keeps it; PUT /profiles/:id { source } writes signup_source only WHERE it IS NULL (door then link leaves door); an unknown source is 200 and NULL on all three; a request with no source answers exactly as one with a source, and the self profile never reads signup_source back. Companions: acquisition-source.test.ts and event-share.test.tsx (the QR decodes to ?s=door, the copy field is ?s=link).",
+      "mutation": "(C1) record() put back above attendeeEventAccess, as on dev 4f434e6f; (M2) placeRsvp also writes source on the upsert's update branch; (M3) the profile write's WHERE without signup_source: null; (M4) profileForSelfResponse no longer drops signup_source.",
+      "observed": "Against blendn_t02 (db:migrate, pg17). C1: 'counts no view the person was refused' failing, the refused view wrote [{ props: null }]; 2 of 19 failing with the tagged-view test. M2: 1 of 19 failing (not_going overwrote door with link). M3: 1 of 19 failing (link replaced door). M4: 1 of 19 failing (signup_source in the self response). Restored each; 19 of 19.",
+      "date": "2026-11-26"
     }
   },
   "grandfathered": [

@@ -42,6 +42,7 @@ import { signPairRefusal, updateProfileSchema } from "@/lib/validations/profile"
 import { homeStateLabel, isHomeStateIn, languageLabels, listCountry, profileListsFor, signLabel, westernSignFor } from "@/lib/about-you"
 import { normalizeLocationToCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
+import { acquisitionSource } from "@/lib/product-events"
 import { notifyFriendsHere } from "@/lib/room-friends"
 import { screenUserText, textNotAllowedResponse } from "@/lib/moderation/user-text"
 
@@ -878,6 +879,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       const now = (friends_see_me_in_rooms ?? before?.friends_see_me_in_rooms) === true && (show_online ?? before?.show_online ?? true) === true
       if (was || now) void notifyFriendsHere(userId, { force: true })
     }
+
+    // Where the account came from (SCRUM-1273): the first source the app sends wins, and an unknown one is none.
+    const source = acquisitionSource((body as { source?: unknown }).source)
+    if (source) await db.profiles.updateMany({ where: { id: userId, signup_source: null }, data: { signup_source: source } })
 
     // The blur this write replaced or cleared leaves storage once moderation has passed it (SCRUM-520).
     // `storedBlur` is set only to a freshly sealed URL or null, so it is never the old one.
