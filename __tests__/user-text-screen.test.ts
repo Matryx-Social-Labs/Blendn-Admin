@@ -44,13 +44,19 @@ describe("screenUserText", () => {
   })
 
   it("holds a message request to the chat rule", () => {
-    expect(screenUserText("u1", "message_request", { message: "you magi" })).toEqual({ field: "message" })
+    expect(screenUserText("u1", "message_request", { message: "you randi" })).toEqual({ field: "message" })
   })
 
   it("holds tonight's answer to the chat rule, as everything else said in that room is", () => {
-    expect(screenUserText("u1", "tonight_answer", { tonightAnswer: "you magi" })).toEqual({ field: "tonightAnswer" })
+    expect(screenUserText("u1", "tonight_answer", { tonightAnswer: "you randi" })).toEqual({ field: "tonightAnswer" })
     // Control: the identity rule would only have flagged it.
-    expect(screenUserText("u1", "profile", { bio: "you magi" })).toBeNull()
+    expect(screenUserText("u1", "profile", { bio: "you randi" })).toBeNull()
+  })
+
+  it.each(["message_request", "tonight_answer"] as const)("lets banter through on %s and records it for review (SCRUM-1167)", (surface) => {
+    expect(screenUserText("u1", surface, { message: "chod yaar, see you there" })).toBeNull()
+    const entry = (auditLog as jest.Mock).mock.calls[0][0]
+    expect(entry).toMatchObject({ action: "moderation.text_flagged", details: { surface, field: "message", source: "keyword", matched: ["chod"] } })
   })
 
   it("skips empty and absent fields, and records nothing when all pass", () => {

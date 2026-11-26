@@ -96,6 +96,10 @@ describe("what the deterministic checks do to a direct message", () => {
     })
   })
 
+  it("delivers banter and flags it for a person, never hides it (SCRUM-1167)", async () => {
+    await expect(screen("chod yaar, see you there")).resolves.toEqual({ verdict: "allow", status: "flagged" })
+  })
+
   it("flags contact details and delivers them", async () => {
     /*
      * Never refused. Refusing teaches the sender exactly where the boundary is,
