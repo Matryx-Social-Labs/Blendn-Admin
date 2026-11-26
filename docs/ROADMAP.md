@@ -206,9 +206,6 @@ that function. It is now `lib/events-cache-key.ts`, out of the route so it can
 be tested, and `__tests__/events-cache-key.test.ts` asserts the property
 directly: two requests that would compute different lists never share a key.
 
-**Since fixed:** the geocoder's country restriction in `app/api/geocode/route.ts`
-is configuration, `GEOCODE_COUNTRY_CODES` (default `in`; empty means none).
-
 
 **Onboarding, and the age that goes stale underneath it.** The app has one
 "about you" screen; the Figma *🕓 Updates* canvas has nine, with per-step save
