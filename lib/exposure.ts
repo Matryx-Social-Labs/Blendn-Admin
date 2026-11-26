@@ -40,8 +40,14 @@ type RedisLike = {
   mGet(keys: string[]): Promise<(string | null)[]>
 }
 
+/** Longest the deck waits on Redis, and how long a stall leaves it alone (as `rate-limit-store.ts`). */
+const COMMAND_BOUND_MS = 500
+const STALL_BACKOFF_MS = 5_000
+const PING_INTERVAL_MS = 10_000
+
 let client: (RedisLike & { isReady: boolean }) | null = null
 let starting: Promise<void> | null = null
+let stalledUntil = 0
 
 /**
  * The client when it can answer now, else null, and never a wait on Redis:
@@ -53,7 +59,28 @@ async function getRedis(): Promise<RedisLike | null> {
   if (!url) return null
   starting ??= startRedis(url)
   await starting
-  return client?.isReady ? client : null
+  return client?.isReady && Date.now() >= stalledUntil ? client : null
+}
+
+/**
+ * Redis's answer, or a rejection after COMMAND_BOUND_MS: a stalled Redis keeps
+ * `isReady` and would hold the deck (SCRUM-1378). An overrun leaves Redis alone
+ * for STALL_BACKOFF_MS. See `bounded` in `rate-limit-store.ts`.
+ */
+async function bounded<T>(command: Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  const overrun = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      stalledUntil = Date.now() + STALL_BACKOFF_MS
+      reject(new Error(`Redis did not answer within ${COMMAND_BOUND_MS} ms`))
+    }, COMMAND_BOUND_MS)
+    timer.unref()
+  })
+  try {
+    return await Promise.race([command, overrun])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 async function startRedis(url: string): Promise<void> {
@@ -63,7 +90,7 @@ async function startRedis(url: string): Promise<void> {
     })
   try {
     const { createClient } = await import("redis")
-    const created = createClient({ url })
+    const created = createClient({ url, pingInterval: PING_INTERVAL_MS })
     // An unhandled 'error' event takes the process down, and a ranking
     // heuristic must never do that.
     created.on("error", (error: unknown) => {
@@ -113,12 +140,14 @@ export async function recordImpressions(eventId: string, userIds: string[]): Pro
   try {
     const redis = await getRedis()
     if (redis) {
-      await Promise.all(
-        userIds.map(async (id) => {
-          const key = keyFor(eventId, id)
-          await redis.incrBy(key, 1)
-          await redis.pExpire(key, TTL_MS)
-        })
+      await bounded(
+        Promise.all(
+          userIds.map(async (id) => {
+            const key = keyFor(eventId, id)
+            await redis.incrBy(key, 1)
+            await redis.pExpire(key, TTL_MS)
+          })
+        )
       )
       return
     }
@@ -158,7 +187,7 @@ export async function exposuresFor(
   try {
     const redis = await getRedis()
     if (redis) {
-      const values = await redis.mGet(userIds.map((id) => keyFor(eventId, id)))
+      const values = await bounded(redis.mGet(userIds.map((id) => keyFor(eventId, id))))
       userIds.forEach((id, i) => out.set(id, Number(values[i] ?? 0) || 0))
       return out
     }

@@ -55,6 +55,7 @@ const mockClient = {
 }
 jest.mock("redis", () => ({ createClient: () => mockClient }))
 
+type Store = typeof import("@/lib/rate-limit-store")
 const load = async () => ({ store: await import("@/lib/rate-limit-store"), exposure: await import("@/lib/exposure") })
 
 beforeAll(() => {
@@ -193,12 +194,17 @@ describe("Redis stalls with the socket open (isReady stays true)", () => {
     expect(Date.now() - started).toBeLessThan(BOUND_SLACK)
   }, QUICK)
 
-  it("the plain commands are bounded too: rolling, peek, release and forget", async () => {
+  // Each on a fresh process: the first overrun trips the back-off, and a later
+  // command would then never reach the stalled Redis at all.
+  it.each([
+    ["hitRolling", (s: Store) => s.hitRolling("rl:burst:u1", 10_000, 5)],
+    ["peek", (s: Store) => s.peek("rl:checkin:u1")],
+    ["release", (s: Store) => s.release("rl:checkin:u1")],
+    ["forget", (s: Store) => s.forget("rl:checkin:u1")],
+  ])("%s is bounded too", async (_name, command) => {
     const { store } = await load()
-    expect((await store.hitRolling("rl:burst:u1", 10_000, 5)).allowed).toBe(true)
-    expect(await store.peek("rl:checkin:u1")).toBe(0)
-    await store.release("rl:checkin:u1")
-    await store.forget("rl:checkin:u1")
+    const { ms } = await timed(() => command(store))
+    expect(ms).toBeLessThan(BOUND_SLACK)
   }, QUICK)
 
   it("once one command has timed out, the next callers do not ask Redis at all", async () => {
