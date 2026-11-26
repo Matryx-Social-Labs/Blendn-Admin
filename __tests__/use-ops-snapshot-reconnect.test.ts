@@ -16,7 +16,9 @@
  * stops listening, then listens again on the same port.
  *
  * Real time throughout (fake timers would replace the transport's own): the
- * cases run concurrently, about two minutes in all.
+ * cases run concurrently, about two minutes in all. That the hook leaves no
+ * timer behind is counted in `use-ops-snapshot.test.ts`, where its timers are
+ * the only ones.
  */
 import { createServer, type Server as HttpServer } from "node:http"
 import type { AddressInfo, Socket as NetSocket } from "node:net"
@@ -68,25 +70,7 @@ jest.mock("socket.io-client", () => {
 
 import { useOpsSnapshot } from "@/lib/use-ops-snapshot"
 
-// Every quiet timer the hook starts, so the end can say none outlived its screen.
-const quietTimers = new Set<unknown>()
-const realSetTimeout = global.setTimeout
-const realClearTimeout = global.clearTimeout
-jest.spyOn(global, "setTimeout").mockImplementation(((fn: (...a: unknown[]) => void, ms?: number, ...args: unknown[]) => {
-  if (ms !== QUIET_MS) return realSetTimeout(fn, ms, ...args)
-  const handle = realSetTimeout(() => {
-    quietTimers.delete(handle)
-    fn(...args)
-  }, ms)
-  quietTimers.add(handle)
-  return handle
-}) as typeof setTimeout)
-jest.spyOn(global, "clearTimeout").mockImplementation((handle) => {
-  quietTimers.delete(handle)
-  realClearTimeout(handle)
-})
-
-const sleep = (ms: number) => new Promise((resolve) => realSetTimeout(resolve, ms))
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function waitFor(what: string, check: () => boolean, ms = 15_000) {
   const until = Date.now() + ms
@@ -96,7 +80,7 @@ async function waitFor(what: string, check: () => boolean, ms = 15_000) {
   }
 }
 
-type Join = "snapshot" | "SERVER_ERROR" | "OPS_FORBIDDEN"
+type Join = "snapshot" | "silent" | "SERVER_ERROR" | "OPS_FORBIDDEN"
 
 /** One event's live operations, as `joinEventOps` and the broadcast loop serve them. */
 // Whatever a case leaves open when it fails is closed here, so a red run ends.
@@ -111,6 +95,8 @@ function opsServer() {
     emitting: true,
     // How the next joins are answered, in order; then with a snapshot.
     answers: [] as Join[],
+    // Handshakes to refuse as the middleware does when its database read throws ("Authentication failed").
+    refuse: 0,
     http: undefined as HttpServer | undefined,
     io: undefined as Server | undefined,
     tick: undefined as ReturnType<typeof setInterval> | undefined,
@@ -125,6 +111,13 @@ function opsServer() {
       s.on("close", () => world.tcp.delete(s))
     })
     const io = new Server(http)
+    io.use((_socket, next) => {
+      if (world.refuse > 0) {
+        world.refuse--
+        return next(new Error("Authentication failed"))
+      }
+      next()
+    })
     io.on("connection", (socket) => {
       world.connections++
       socket.on("join:eventOps", () => {
@@ -132,6 +125,8 @@ function opsServer() {
         // As `joinEventOps`: out of the room first, whatever the answer is now.
         socket.leave("ops")
         const answer = world.answers.shift() ?? "snapshot"
+        // A join that never answers: a check that hangs, a snapshot that never comes.
+        if (answer === "silent") return
         if (answer !== "snapshot") {
           socket.emit("error", { message: "no", code: answer })
           return
@@ -172,14 +167,22 @@ function opsServer() {
 
 type Ops = ReturnType<typeof opsServer>
 
-async function mount(server: Ops): Promise<Seen> {
+/** The Live tab opened on this server: the hook's effect run once, its setters recorded. */
+function openScreen(server: Ops): Seen {
   mockUrl = `http://127.0.0.1:${server.world.port}`
   mockSeen = { status: undefined, snapshots: 0, unmount: () => {}, client: undefined as unknown as Socket }
   mockSlot = 0
   const seen = mockSeen
+  // React is stood in for above, so the hook runs outside a component on purpose.
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   useOpsSnapshot("e1", true)
   seen.client = mockClient!
   screens.add(() => seen.unmount())
+  return seen
+}
+
+async function mount(server: Ops): Promise<Seen> {
+  const seen = openScreen(server)
   await waitFor("the first snapshot", () => seen.status === "live" && seen.snapshots > 0)
   return seen
 }
@@ -201,10 +204,10 @@ async function unmountLeavesNothing(server: Ops, seen: Seen) {
   expect(server.world.connections).toBe(connections)
 }
 
-/** Reconnect attempts the client makes, counted from the manager. */
+/** Failed connection attempts, Socket.io's own and any the hook makes by hand. */
 function countAttempts(seen: Seen) {
   const counter = { attempts: 0 }
-  seen.client.io.on("reconnect_attempt", () => counter.attempts++)
+  seen.client.on("connect_error", () => counter.attempts++)
   return counter
 }
 
@@ -232,8 +235,6 @@ describe("useOpsSnapshot against a real Socket.io server (SCRUM-1444)", () => {
   afterAll(async () => {
     screens.forEach((unmount) => unmount())
     await Promise.all([...servers].map((stop) => stop()))
-    // Every quiet timer either fired or was cleared by its screen.
-    expect(quietTimers.size).toBe(0)
   })
 
   test.concurrent("a 4 s outage: snapshots resume", () => outage(4_000), 60_000)
@@ -296,13 +297,7 @@ describe("useOpsSnapshot against a real Socket.io server (SCRUM-1444)", () => {
     const server = opsServer()
     await server.start()
     server.world.answers = ["SERVER_ERROR"]
-    mockUrl = `http://127.0.0.1:${server.world.port}`
-    mockSeen = { status: undefined, snapshots: 0, unmount: () => {}, client: undefined as unknown as Socket }
-    mockSlot = 0
-    const seen = mockSeen
-    useOpsSnapshot("e1", true)
-    seen.client = mockClient!
-    screens.add(() => seen.unmount())
+    const seen = openScreen(server)
 
     await waitFor("the line", () => seen.status === "error", 5_000)
     await recovers(seen, 0, QUIET_MS + 5_000)
@@ -323,6 +318,58 @@ describe("useOpsSnapshot against a real Socket.io server (SCRUM-1444)", () => {
     await waitFor("denied", () => seen.status === "denied", 5_000)
     await sleep(QUIET_MS + 2_000)
     expect(seen.status).toBe("denied")
+    expect(server.world.joins).toBe(2)
+
+    await unmountLeavesNothing(server, seen)
+    await server.stop()
+  }, 60_000)
+
+  test.concurrent("a reopen the server refuses once (its database read threw) is opened again", async () => {
+    const server = opsServer()
+    await server.start()
+    const seen = await mount(server)
+
+    // Socket.io gives up on a refused handshake (CONNECT_ERROR destroys the socket).
+    server.world.refuse = 1
+    server.evict()
+    await waitFor("the line", () => seen.status === "error", 5_000)
+    const before = seen.snapshots
+    await recovers(seen, before, QUIET_MS + 10_000)
+    expect(server.world.connections).toBe(2)
+
+    await unmountLeavesNothing(server, seen)
+    await server.stop()
+  }, 60_000)
+
+  test.concurrent("a join that never answers is asked again until one does", async () => {
+    const server = opsServer()
+    await server.start()
+    const seen = await mount(server)
+
+    // The quiet timer's own join goes unanswered too, so it must keep asking.
+    server.world.emitting = false
+    server.world.answers = ["silent"]
+    await sleep(QUIET_MS + 1_000)
+    expect(seen.status).toBe("error")
+    expect(server.world.joins).toBe(2)
+    const before = seen.snapshots
+    server.world.emitting = true
+    await recovers(seen, before, QUIET_MS + 5_000)
+    expect(server.world.joins).toBe(3)
+    expect(server.world.connections).toBe(1)
+
+    await unmountLeavesNothing(server, seen)
+    await server.stop()
+  }, 90_000)
+
+  test.concurrent("a first join that never answers shows the line, and is asked again", async () => {
+    const server = opsServer()
+    await server.start()
+    server.world.answers = ["silent"]
+    const seen = openScreen(server)
+
+    await waitFor("the line", () => seen.status === "error", QUIET_MS + 2_000)
+    await recovers(seen, 0, 5_000)
     expect(server.world.joins).toBe(2)
 
     await unmountLeavesNothing(server, seen)
