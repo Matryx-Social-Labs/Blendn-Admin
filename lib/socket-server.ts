@@ -479,7 +479,8 @@ export const JOIN_RETRY_MESSAGE = "Could not join right now. Try again."
  * "not allowed" in the doors-open burst. No retry here: the client asks again.
  */
 function joinCheckFailed(socket: AuthenticatedSocket, room: string, error: unknown): void {
-  logger.warn("Socket join check failed", {
+  // An error line reaches Sentry, one issue for the burst: a saturated pool at doors-open must be seen.
+  logger.error("Socket join check failed", {
     room,
     userId: socket.data.userId,
     error: error instanceof Error ? error.message : String(error),
@@ -522,6 +523,58 @@ export async function guardJoin(
   }
   socket.join(room)
   logger.debug("Socket joined room", { room, userId: socket.data.userId })
+}
+
+/** The dashboard's Live tab joins its copy of an event's live operations (`event:<id>:ops:<view>`). */
+export async function joinEventOps(socket: AuthenticatedSocket, rawEventId: string): Promise<void> {
+  // A uuid or nothing: the id names the room and keys the broadcast loop,
+  // so an object or a second spelling would start a loop of its own.
+  if (!isUuid(rawEventId) || socket.data.principal !== "dashboard" || !socket.data.role) {
+    // An attendee token must never reach ops aggregates, even if the user
+    // behind it also happens to hold a dashboard role.
+    socket.emit("error", { message: "Not authorized", code: "OPS_FORBIDDEN" })
+    return
+  }
+  const eventId = rawEventId.toLowerCase()
+  const principal = {
+    userId: socket.data.userId,
+    email: socket.data.email,
+    role: socket.data.role,
+  }
+  /*
+   * Not `guardJoin`: which room is decided by who is asking. Whoever runs
+   * the event and the venue it is held at are sent different copies of the
+   * snapshot, to different rooms (SCRUM-516). A refusal carries the code
+   * the dashboard hook reads as "denied"; a check that threw is "try again"
+   * (`joinCheckFailed`), which the hook reads as "connection lost" and asks
+   * again.
+   */
+  // Out of both first: a socket asking again after its access changed keeps
+  // neither copy it had, whatever the answer is now -- or if there is none.
+  socket.leave(opsRoom(eventId, "host"))
+  socket.leave(opsRoom(eventId, "venue"))
+  let view: OpsView | null
+  try {
+    view = await eventOpsView(principal, eventId)
+  } catch (error) {
+    joinCheckFailed(socket, `event:${eventId}:ops`, error)
+    return
+  }
+  if (!view) {
+    socket.emit("error", { message: "Not authorized to watch this event", code: "OPS_FORBIDDEN" })
+    return
+  }
+  socket.join(opsRoom(eventId, view))
+  startOpsBroadcast(eventId)
+  // One snapshot now, so the screen is populated on open rather than blank
+  // until the first tick -- read through the loop's hold, so a crowd of
+  // dashboards opening at once costs one read of "Meeting tonight", not one each.
+  const snapshot = await buildLiveSnapshot(eventId, opsTimers.get(eventId)?.held, { social: view === "host" }).catch((error: unknown) => {
+    // The 5 s tick sends the next one; this says why the screen waited for it.
+    logger.warn("Initial ops snapshot failed", { eventId, error: error instanceof Error ? error.message : String(error) })
+    return null
+  })
+  if (snapshot) socket.emit("ops:snapshot", asSeenBy(view, snapshot))
 }
 
 async function readTypingMembership(userId: string, chatGroupId: string) {
@@ -1112,52 +1165,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
      * carries attendee-facing traffic including check-in names, and a host must
      * not receive it. This one carries aggregates only.
      */
-    authSocket.on("join:eventOps", async (rawEventId) => {
-      // A uuid or nothing: the id names the room and keys the broadcast loop,
-      // so an object or a second spelling would start a loop of its own.
-      if (!isUuid(rawEventId) || authSocket.data.principal !== "dashboard" || !authSocket.data.role) {
-        // An attendee token must never reach ops aggregates, even if the user
-        // behind it also happens to hold a dashboard role.
-        authSocket.emit("error", { message: "Not authorized", code: "OPS_FORBIDDEN" })
-        return
-      }
-      const eventId = rawEventId.toLowerCase()
-      const principal = {
-        userId: authSocket.data.userId,
-        email: authSocket.data.email,
-        role: authSocket.data.role,
-      }
-      /*
-       * Not `guardJoin`: which room is decided by who is asking. Whoever runs
-       * the event and the venue it is held at are sent different copies of the
-       * snapshot, to different rooms (SCRUM-516). A refusal carries the code
-       * the dashboard hook reads as "denied"; a check that threw is "try again"
-       * (`joinCheckFailed`), which the hook reads as "connection lost" and asks
-       * again.
-       */
-      // Out of both first: a socket asking again after its access changed keeps
-      // neither copy it had, whatever the answer is now -- or if there is none.
-      authSocket.leave(opsRoom(eventId, "host"))
-      authSocket.leave(opsRoom(eventId, "venue"))
-      let view: OpsView | null
-      try {
-        view = await eventOpsView(principal, eventId)
-      } catch (error) {
-        joinCheckFailed(authSocket, `event:${eventId}:ops`, error)
-        return
-      }
-      if (!view) {
-        authSocket.emit("error", { message: "Not authorized to watch this event", code: "OPS_FORBIDDEN" })
-        return
-      }
-      authSocket.join(opsRoom(eventId, view))
-      startOpsBroadcast(eventId)
-      // One snapshot now, so the screen is populated on open rather than blank
-      // until the first tick -- read through the loop's hold, so a crowd of
-      // dashboards opening at once costs one read of "Meeting tonight", not one each.
-      const snapshot = await buildLiveSnapshot(eventId, opsTimers.get(eventId)?.held, { social: view === "host" }).catch(() => null)
-      if (snapshot) authSocket.emit("ops:snapshot", asSeenBy(view, snapshot))
-    })
+    authSocket.on("join:eventOps", (rawEventId) => void joinEventOps(authSocket, rawEventId))
 
     authSocket.on("leave:eventOps", (eventId) => {
       authSocket.leave(opsRoom(eventId, "host"))

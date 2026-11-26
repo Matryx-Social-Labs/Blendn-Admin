@@ -45,6 +45,7 @@ export function useOpsSnapshot(eventId: string, enabled: boolean) {
     // Dropped and opened again, by the close listener below: so "reconnecting"
     // is true, and does not wait the 85 s for Socket.io's ping to notice.
     const armQuiet = () => {
+      clearTimeout(quiet)
       quiet = setTimeout(() => {
         if (!cancelled) socket?.disconnect()
       }, QUIET_MS)
@@ -59,7 +60,6 @@ export function useOpsSnapshot(eventId: string, enabled: boolean) {
       if (cancelled || data.eventId !== eventId) return
       setSnapshot(data)
       setStatus("live")
-      clearTimeout(quiet)
       armQuiet()
     })
 

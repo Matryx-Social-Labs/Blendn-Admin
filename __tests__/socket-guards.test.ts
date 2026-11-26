@@ -15,10 +15,17 @@ const mockDb = {
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("socket.io", () => ({ Server: class {} }))
 jest.mock("@/lib/mobile-auth", () => ({ verifyAccessToken: jest.fn() }))
+const mockEventOpsView = jest.fn()
+jest.mock("@/lib/socket-ops-auth", () => ({
+  ...jest.requireActual("@/lib/socket-ops-auth"),
+  eventOpsView: (...args: unknown[]) => mockEventOpsView(...args),
+}))
+jest.mock("@/lib/live-snapshot", () => ({ buildLiveSnapshot: jest.fn().mockResolvedValue(null) }))
 
 import { startSponsoredScheduler, stopSponsoredScheduler } from "@/lib/sponsored-scheduler"
 import {
   guardJoin,
+  joinEventOps,
   JOIN_RETRY_MESSAGE,
   emitChatTyping,
   emitPrivateTyping,
@@ -27,6 +34,7 @@ import {
 import type { AuthenticatedSocket } from "@/lib/socket-server"
 import { roomHandle } from "@/lib/room-handle"
 import { logger } from "@/lib/logger"
+import { opsRoom } from "@/lib/socket-ops-auth"
 
 const USER = "user_self"
 const CHAT_ID = "11111111-1111-1111-1111-111111111111"
@@ -72,6 +80,7 @@ function makeSocket() {
     id: "sock-self",
     data: { userId: USER, email: `${EMAIL_LOCAL_PART}@example.com` },
     join: jest.fn(),
+    leave: jest.fn(),
     emit: jest.fn(),
     to: jest.fn(() => broadcast),
     nsp: { in: jest.fn(() => chatRoom) },
@@ -89,6 +98,8 @@ function makeSocket() {
 beforeEach(() => {
   jest.clearAllMocks()
 })
+
+afterEach(() => jest.restoreAllMocks())
 
 describe("guardJoin", () => {
   it("joins the room when the check authorizes", async () => {
@@ -122,7 +133,7 @@ describe("guardJoin", () => {
     ["a cancelled statement (57014)", Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" })],
   ])("answers try-again, not FORBIDDEN, when the check throws %s", async (_, failure) => {
     const { socket, raw } = makeSocket()
-    const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined)
+    const logged = jest.spyOn(logger, "error").mockImplementation(() => undefined)
 
     // Socket.io does not await listeners: an escaping rejection would take the process down.
     await expect(
@@ -134,8 +145,8 @@ describe("guardJoin", () => {
     expect(raw.join).not.toHaveBeenCalled()
     expect(raw.emit).toHaveBeenCalledTimes(1)
     expect(raw.emit).toHaveBeenCalledWith("error", { message: JOIN_RETRY_MESSAGE, code: "SERVER_ERROR" })
-    expect(warn).toHaveBeenCalledTimes(1)
-    warn.mockRestore()
+    // An error line, so a saturated pool reaches Sentry; once per join.
+    expect(logged).toHaveBeenCalledTimes(1)
   })
 
   it("denies a room whose id is not a uuid, without asking the check (SCRUM-940)", async () => {
@@ -160,6 +171,59 @@ describe("guardJoin", () => {
     await guardJoin(refused.socket, `chat:${CHAT_ID}`, "Not authorized to join this chat", async () => false)
 
     expect(malformed.raw.emit.mock.calls).toEqual(refused.raw.emit.mock.calls)
+  })
+})
+
+describe("joinEventOps (the Live tab's join)", () => {
+  const dashboard = () => {
+    const made = makeSocket()
+    Object.assign(made.raw.data, { principal: "dashboard", role: "organizer" })
+    return made
+  }
+
+  it("answers try-again, not OPS_FORBIDDEN, when the access check throws, and leaves both copies (SCRUM-1402)", async () => {
+    const { socket, raw } = dashboard()
+    jest.spyOn(logger, "error").mockImplementation(() => undefined)
+    mockEventOpsView.mockRejectedValue(new Error("timeout exceeded when trying to connect"))
+
+    await joinEventOps(socket, EVENT_ID)
+
+    expect(raw.emit).toHaveBeenCalledTimes(1)
+    expect(raw.emit).toHaveBeenCalledWith("error", { message: JOIN_RETRY_MESSAGE, code: "SERVER_ERROR" })
+    expect(raw.join).not.toHaveBeenCalled()
+    expect(raw.leave).toHaveBeenCalledWith(opsRoom(EVENT_ID, "host"))
+    expect(raw.leave).toHaveBeenCalledWith(opsRoom(EVENT_ID, "venue"))
+  })
+
+  it("still refuses with OPS_FORBIDDEN when the check says no", async () => {
+    const { socket, raw } = dashboard()
+    mockEventOpsView.mockResolvedValue(null)
+
+    await joinEventOps(socket, EVENT_ID)
+
+    expect(raw.emit).toHaveBeenCalledWith("error", { message: "Not authorized to watch this event", code: "OPS_FORBIDDEN" })
+    expect(raw.join).not.toHaveBeenCalled()
+  })
+
+  it("is out of both copies before it asks, so a failed re-check keeps neither", async () => {
+    const { socket, raw } = dashboard()
+    let answer: (view: string | null) => void = () => undefined
+    mockEventOpsView.mockReturnValue(new Promise((resolve) => (answer = resolve)))
+
+    const joining = joinEventOps(socket, EVENT_ID)
+    expect(raw.leave).toHaveBeenCalledTimes(2)
+    answer("host")
+    await joining
+
+    expect(raw.join).toHaveBeenCalledWith(opsRoom(EVENT_ID, "host"))
+    expect(raw.emit).not.toHaveBeenCalled()
+  })
+
+  it("never asks for a phone socket", async () => {
+    const { socket, raw } = makeSocket()
+    await joinEventOps(socket, EVENT_ID)
+    expect(raw.emit).toHaveBeenCalledWith("error", { message: "Not authorized", code: "OPS_FORBIDDEN" })
+    expect(mockEventOpsView).not.toHaveBeenCalled()
   })
 })
 
