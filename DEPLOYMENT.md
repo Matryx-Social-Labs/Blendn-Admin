@@ -415,6 +415,7 @@ so it is never related to session or login state.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `MOBILE_MIN_APP_VERSION`, `MOBILE_MIN_APP_BUILD_IOS`, `MOBILE_MIN_APP_BUILD_ANDROID` | No | The oldest app version, or store build number per platform, the mobile API serves; older builds get 426 `UPDATE_REQUIRED`. Unset: no minimum. Set only once the fixed build is live (Operating production, step 5; `docs/API.md`) |
 | `DATABASE_POOL_MAX` | No | Connections this process may hold (default 20), shared by every request, Socket.io and every background loop (`lib/background.ts`). A query waiting for one fails after 5 s ("timeout exceeded when trying to connect") instead of queueing for ever (SCRUM-1221); `/api/health` reports `pool.waiting` |
 | `HEALTH_METRICS_TOKEN` | Production: yes, before the ops monitor | 32+ characters (`openssl rand -hex 32`). `/api/health` adds `pool`, `eventLoopDelayMs` and `sockets` only for `Authorization: Bearer <this>`; anyone else gets the plain payload, still 200, so Railway's healthcheck is unaffected. Unset: the numbers are omitted on Railway `production` and shown to anyone elsewhere (staging, local). Set but under 32 characters, `validateEnv` fails. Not set by an agent: the owner sets it (SCRUM-1221) |
 | `DATABASE_STATEMENT_TIMEOUT_MS` | No | Postgres `statement_timeout` for the server's connections. `server.ts` sets **8000** when unset, so a runaway statement is cancelled (`57014`) rather than holding its connection; `0` turns the cap off. Scripts that import `lib/db` (seeds, backfills, imports) do not set it and have no cap. Not whole milliseconds: the server refuses to boot (SCRUM-1221) |
@@ -567,9 +568,11 @@ Do step 1, then the first of steps 2 to 6 that matches.
    If the redeploy's pre-deploy step fails, or health is not 200 within 15 minutes,
    stop and call the owner. How long a rollback takes is not measured yet.
 5. **A client build caused it.** Ship a fixed build (Hotfix path, below). Only once it is
-   live in both stores, set `MOBILE_MIN_APP_VERSION` (console: Blendn-Admin, production,
-   Variables; a plain version like `1.0.3`, checked twice; saving redeploys): every
-   older build that sends its version then gets 426 "update required".
+   live in both stores, retire the bad one (console: Blendn-Admin, production, Variables;
+   checked twice; saving redeploys): `MOBILE_MIN_APP_VERSION` (a version like `1.0.3`)
+   if the fix has a higher version, else `MOBILE_MIN_APP_BUILD_IOS` / `_ANDROID` (the
+   store build number). Older builds then get 426 "update required"; a build that sends
+   no version or build header is never refused (`docs/API.md`, Update required).
 6. **Data lost.** There is no tested restore yet: the backups and restore section will
    be written by the backups task and **does not exist yet**. Change nothing more and
    call the owner.
@@ -590,25 +593,27 @@ After an S1, the post-incident note on the ticket: **what** happened, **when**
 **One replica.** Production runs one process (`.railway/railway.ts`, one
 replica in `asia-southeast1-eqsg3a`). Polling clients, the ops broadcast loop and the sweepers are not
 safe on two: there is no shared Socket.io adapter, so a second process splits a
-room. A crash is restarted at most 3 times (`restartPolicyMaxRetries: 3`, live on
-both environments), then the service stays down until someone acts. A deploy must
+room. A crash is restarted at most 3 times (`restartPolicyMaxRetries: 3`, applied to
+both environments on 2026-11-25), then the service stays down until someone acts. A deploy must
 not be two processes either: `.railway/railway.ts` sets `overlapSeconds: 0` (the
 old process stops when the new one is healthy) and `drainingSeconds: 15` (15 s from
-SIGTERM to SIGKILL, over `server.ts`'s own 10 s force-exit, so the shutdown flushes,
-closes the pool and prints "Socket.io closed" and "HTTP server closed"). **Those
+SIGTERM to SIGKILL, over `server.ts`'s own 10 s force-exit, so the shutdown gets to
+flush, close the pool and print "Socket.io closed" and "HTTP server closed"). **Those
 two are not applied yet:** the file reaches Railway only through `railway config
 apply` ([The deploy settings are on the Railway service](#the-deploy-settings-are-on-the-railway-service));
 staging after 2026-11-29, production with the production promotion. Until then
 Railway's default, 0 s of draining, kills the old process at once. So: **no deploy
 or promotion while a room is live** (an S1 rollback excepted). Before one, open
 `railway connect Postgres` for that environment, run
-`SET default_transaction_read_only = on;`, then this; all three must be 0:
+`SET default_transaction_read_only = on;`, then this; both must be 0:
 
 ```sql
-SELECT count(*) FILTER (WHERE e.kind = 'event') AS live_events, count(*) FILTER (WHERE e.kind = 'venue_day') AS live_venue_days, (SELECT count(*) FROM event_check_ins WHERE status = 'checked_in' AND (expires_at IS NULL OR expires_at > now())) AS checked_in_now FROM event_occurrences o JOIN events e ON e.id = o.event_id WHERE o.cancelled_at IS NULL AND e.deleted_at IS NULL AND e.status = 'published' AND now() BETWEEN o.start_time - interval '90 minutes' AND o.end_time;
+SELECT count(DISTINCT o.id) FILTER (WHERE e.kind = 'event') AS live_events, count(c.id) FILTER (WHERE c.status = 'checked_in' AND (c.expires_at IS NULL OR c.expires_at > now())) AS checked_in_now FROM event_occurrences o JOIN events e ON e.id = o.event_id LEFT JOIN event_check_ins c ON c.occurrence_id = o.id WHERE o.cancelled_at IS NULL AND e.deleted_at IS NULL AND e.status <> 'draft' AND now() BETWEEN o.start_time - interval '90 minutes' AND o.end_time;
 ```
 
-(Live is from doors, 90 minutes before the start, to the end.)
+(Live is from doors, 90 minutes before the start, to the end. A venue day is open
+all day, so it counts only through the people checked in. The room's 24 hours of
+chat after the end are not gated: a deploy then costs a reconnect, not a night.)
 
 **Pool budget.** Processes × `DATABASE_POOL_MAX` (default 20, `lib/db.ts`) stays
 under 80% of `SHOW max_connections`. Read 2026-11-26: production 500, staging 500,
@@ -618,7 +623,7 @@ so the ceiling is 400 and one replica uses 20.
 `expo-updates`). A client defect is fixed by a new store build (the client repo's
 `docs/RELEASING.md`; the owner holds the store accounts): Apple, request an
 expedited review in App Store Connect; Play has no expedited review, submit to the
-production track. Then `MOBILE_MIN_APP_VERSION` once it is live (step 5). A server defect is a
+production track. Then retire the bad build once the fix is live (step 5). A server defect is a
 normal merge and promotion, or the rollback above.
 
 **Monitoring.** Sentry, org `matryx-social-labs-private-lim`, project
