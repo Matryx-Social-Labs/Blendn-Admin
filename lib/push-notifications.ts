@@ -702,9 +702,11 @@ export async function sendBulkPushNotifications(
   const badges = options.badge === undefined && tokenMap.size > 0 ? await badgesFor([...tokenMap.keys()]) : new Map<string, number>()
   const messages: ExpoPushMessage[] = []
 
+  const reached = new Set<string>()
   for (const [userId, pushTokens] of tokenMap) {
     for (const { token: pushToken, channelSet } of pushTokens) {
       if (Expo.isExpoPushToken(pushToken)) {
+        reached.add(userId)
         const payload = payloadFor(data, channelSet)
         messages.push({
           to: pushToken,
@@ -721,8 +723,8 @@ export async function sendBulkPushNotifications(
     }
   }
 
-  // People, not devices: nobody with a token the gates let through (none, or push off).
-  const noDevice = new Set(userIds).size - tokenMap.size
+  // People, not devices: no valid token the gates let through (none, push off, or malformed).
+  const noDevice = new Set(userIds).size - reached.size
   if (messages.length === 0) {
     return { sent: 0, failed: 0, noDevice }
   }
@@ -746,10 +748,11 @@ async function sendChunks(messages: ExpoPushMessage[], platformOf: ReadonlyMap<s
     try {
       const tickets = await expo.sendPushNotificationsAsync(chunk)
       for (const [i, ticket] of tickets.entries()) {
-        const token = chunk[i]?.to as string
+        const to = chunk[i]?.to
+        const token = typeof to === "string" ? to : null
         if (ticket.status === "ok") {
           sent++
-          rememberTicket(ticket.id, token, platformOf.get(token) ?? "unknown")
+          if (token) rememberTicket(ticket.id, token, platformOf.get(token) ?? "unknown")
           continue
         }
         failed++
@@ -790,7 +793,8 @@ const pendingTickets = (): Map<string, SentTicket> => {
 
 function rememberTicket(id: string, token: string, platform: string): void {
   const pending = pendingTickets()
-  if (pending.size >= MAX_TICKETS) pending.delete(pending.keys().next().value as string)
+  const oldest = pending.size >= MAX_TICKETS ? pending.keys().next().value : undefined
+  if (oldest !== undefined) pending.delete(oldest)
   pending.set(id, { token, platform, at: Date.now() })
 }
 
@@ -802,25 +806,31 @@ function rememberTicket(id: string, token: string, platform: string): void {
  * per code and platform per pass, to the log and to Sentry. A receipt not ready
  * yet, or a request that throws, leaves its tickets for the next pass.
  */
-export async function checkPushReceipts(now = Date.now()): Promise<{ checked: number; removed: number }> {
+export async function checkPushReceipts(now = Date.now()): Promise<ReceiptPass> {
   const pending = pendingTickets()
   const due: string[] = []
+  let expired = 0
   for (const [id, t] of pending) {
-    if (now - t.at > RECEIPT_KEPT_MS) pending.delete(id)
-    else if (now - t.at >= PUSH_RECEIPT_DELAY_MS) due.push(id)
+    if (now - t.at > RECEIPT_KEPT_MS) {
+      pending.delete(id)
+      expired++
+    } else if (now - t.at >= PUSH_RECEIPT_DELAY_MS) due.push(id)
   }
 
   let checked = 0
   let removed = 0
-  const errors = new Map<string, { error: string; platform: string; count: number }>()
+  const errors = new Map<string, ReceiptError>()
   for (const ids of expo.chunkPushNotificationReceiptIds(due)) {
     let receipts: Awaited<ReturnType<typeof expo.getPushNotificationReceiptsAsync>>
     try {
       receipts = await expo.getPushNotificationReceiptsAsync(ids)
     } catch (error) {
-      logger.error("Push receipt request failed", { tickets: ids.length, error: error instanceof Error ? error.message : String(error) })
+      const message = error instanceof Error ? error.message : String(error)
+      logger.error("Push receipt request failed", { tickets: ids.length, error: message })
+      captureMessage("Push receipt request failed", { level: "error", fingerprint: ["push-receipt-request"], extra: { tickets: ids.length, error: message } })
       continue
     }
+    // An id Expo leaves out is not ready yet: its ticket waits for the next pass.
     for (const [id, receipt] of Object.entries(receipts)) {
       const ticket = pending.get(id)
       pending.delete(id)
@@ -829,25 +839,47 @@ export async function checkPushReceipts(now = Date.now()): Promise<{ checked: nu
       if (receipt.status === "ok") continue
       const error = receipt.details?.error ?? "unknown"
       if (error === "DeviceNotRegistered") {
-        await removeInvalidPushToken(ticket.token)
-        removed++
+        removed += await removeInvalidPushToken(ticket.token, new Date(ticket.at))
         continue
       }
       const key = `${error}:${ticket.platform}`
-      errors.set(key, { error, platform: ticket.platform, count: (errors.get(key)?.count ?? 0) + 1 })
+      errors.set(key, { error, platform: ticket.platform, count: (errors.get(key)?.count ?? 0) + 1, message: receipt.message })
     }
   }
 
-  for (const { error, platform, count } of errors.values()) {
-    logger.error("Push receipt errors", { error, platform, count })
+  reportReceiptErrors(errors.values())
+  return { checked, removed, expired, pending: pending.size }
+}
+
+/** What one receipt pass did; logged every pass, so `checked: 0, pending: N` reads differently from nothing sent. */
+export interface ReceiptPass {
+  checked: number
+  removed: number
+  /** Tickets a day old with no receipt: dropped unread. */
+  expired: number
+  /** Tickets still waiting, in this process. */
+  pending: number
+}
+
+interface ReceiptError {
+  error: string
+  platform: string
+  count: number
+  /** One receipt's own words, e.g. which FCM key Expo could not use. */
+  message: string
+}
+
+/** One log line and one Sentry event per code and platform, so a bad FCM key and a bad APNs key are separate issues. */
+function reportReceiptErrors(errors: Iterable<ReceiptError>): void {
+  for (const { error, platform, count, message } of errors) {
+    logger.error("Push receipt errors", { error, platform, count, message })
     captureMessage(`Push receipt errors: ${error} (${platform})`, {
       level: "error",
       tags: { push_error: error, platform },
       fingerprint: ["push-receipt", error, platform],
-      extra: { count },
+      extra: { count, message },
     })
   }
-  return { checked, removed }
 }
 
 /** The app re-registers its token on every launch (`lib/push-token.ts`), so one untouched this long is a phone gone quiet. */
@@ -863,14 +895,19 @@ export async function pruneIdlePushTokens(now = new Date()): Promise<number> {
 /**
  * Remove an invalid push token from the database
  */
-async function removeInvalidPushToken(token: string): Promise<void> {
+async function removeInvalidPushToken(token: string, sentAt?: Date): Promise<number> {
+  // Never an empty filter: `deleteMany({ where: { token: undefined } })` deletes every row.
+  if (!token) return 0
   try {
-    await db.push_tokens.deleteMany({
-      where: { token },
+    const { count } = await db.push_tokens.deleteMany({
+      // A late receipt must not delete a row the app registered again after the send.
+      where: sentAt ? { token, updated_at: { lte: sentAt } } : { token },
     })
-    logger.debug("Removed invalid push token", { tokenPrefix: token.slice(0, 12) })
+    logger.debug("Removed invalid push token", { tokenPrefix: token.slice(0, 12), count })
+    return count
   } catch (error) {
     logger.error("Failed to remove invalid push token", { error: error instanceof Error ? error.message : String(error) })
+    return 0
   }
 }
 

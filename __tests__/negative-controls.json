@@ -2718,14 +2718,14 @@
     },
     "push-receipts.test.ts": {
       "guards": "SCRUM-1270: an ok Expo ticket is kept (globalThis map) and its receipt read once 15 minutes old; DeviceNotRegistered in a receipt deletes that token; InvalidCredentials (or any other code) is one logger.error and one Sentry captureMessage per code and platform per pass, token kept; a receipt request that throws keeps its tickets for the next pass; the single-user send keeps going after a chunk throws; bulk returns noDevice for recipients with no device instead of counting them failed; tokens not refreshed in 90 days are pruned. Companion: reminder-sweeper-receipts.test.ts (the loop calls both every pass).",
-      "mutation": "(C1) the file run on dev abbe1844, before the change; (M2) the receipt path does not call removeInvalidPushToken; (M3) captureMessage removed; (M4) noDevice hard-coded 0; (M5a) PUSH_TOKEN_IDLE_DAYS 88; (M5b) 92; (M7) the 15-minute delay ignored; (M8) a throwing receipt request swallowed as an empty answer.",
-      "observed": "C1: 8 of 8 failing; the thrown-chunk case received false (today the single-user send drops every chunk after a throw). M2 1, M3 1, M4 2, M5a 1, M5b 1, M7 1, M8 1. Restored each; 8 of 8.",
+      "mutation": "(C1) the file run on dev abbe1844, before the change; (M2) the receipt path does not call removeInvalidPushToken; (M3) captureMessage removed; (M4) noDevice hard-coded 0; (M5a) PUSH_TOKEN_IDLE_DAYS 88; (M5b) 92; (M7) the 15-minute delay ignored; (M8) a throwing receipt request swallowed as an empty answer. After review: (N1) the late-receipt guard (updated_at <= sent) dropped from the DeviceNotRegistered delete; (N2) the empty-token guard and the `to` narrowing removed (an extra ticket stores an undefined token, whose delete has no filter); (N3) noDevice from tokenMap.size (a malformed-only person counted nowhere); (N5) receipt errors grouped by code only; (N6) every asked id dropped after the request (a receipt not ready yet is lost); (N7) no Sentry event for a failed receipt request.",
+      "observed": "C1: 8 of 8 failing; the thrown-chunk case received false (today the single-user send drops every chunk after a throw). M2 1, M3 1, M4 2, M5a 1, M5b 1, M7 1, M8 1. Restored each; 8 of 8. After review (14 cases): N1 1, N2 1, N3 1, N5 1, N6 5, N7 1. Restored each; 14 of 14.",
       "date": "2026-11-26"
     },
     "reminder-sweeper-receipts.test.ts": {
-      "guards": "SCRUM-1270: one reminder-sweeper pass calls checkPushReceipts and pruneIdlePushTokens and logs the receipt pass line every pass (the staging proof reads it from the Railway log).",
-      "mutation": "(M6) the sweeper stops calling checkPushReceipts.",
-      "observed": "M6: 1 of 1 failing. Restored; 1 of 1.",
+      "guards": "SCRUM-1270: one reminder-sweeper pass calls checkPushReceipts and pruneIdlePushTokens and logs the receipt pass line every pass (the staging proof reads it from the Railway log); both run first and each is caught, so a reminder step that throws, or a receipt read that throws, does not stop the other.",
+      "mutation": "(M6) the sweeper stops calling checkPushReceipts; (N4) the push upkeep moved after the reminder steps.",
+      "observed": "M6: 1 of 1 failing. N4: 1 of 3 failing (the rating step throws, receipts never read). Restored; 3 of 3.",
       "date": "2026-11-26"
     }
   },

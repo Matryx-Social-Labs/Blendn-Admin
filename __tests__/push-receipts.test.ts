@@ -25,8 +25,8 @@ jest.mock("@/lib/db", () => ({
 }))
 jest.mock("expo-server-sdk", () => ({
   Expo: class {
-    static isExpoPushToken() {
-      return true
+    static isExpoPushToken(t: string) {
+      return !t.startsWith("malformed")
     }
     // One message per chunk, so a test can fail the first and watch the second.
     chunkPushNotifications(m: unknown[]) {
@@ -59,6 +59,8 @@ const data = { type: "announcement" as const, eventId: "e1" }
 const device = (token: string, platform = "android") => ({ user_id: "u1", token, platform, channel_set: null })
 const later = () => Date.now() + PUSH_RECEIPT_DELAY_MS + 60_000
 
+const pass = (checked: number, removed: number, pending = 0) => ({ checked, removed, expired: 0, pending })
+
 let ticket = 0
 beforeEach(() => {
   delete (globalThis as { __blendnPushTickets?: unknown }).__blendnPushTickets
@@ -75,39 +77,75 @@ describe("receipts", () => {
       Object.fromEntries(ids.map((id) => [id, { status: "error", message: "gone", details: { error: "DeviceNotRegistered" } }]))
     )
 
-    await expect(checkPushReceipts(later())).resolves.toEqual({ checked: 1, removed: 1 })
-    expect(deleteTokens).toHaveBeenCalledWith({ where: { token: "dead" } })
+    await expect(checkPushReceipts(later())).resolves.toEqual(pass(1, 1))
+    // Only a row not registered again since the send: a late receipt must not delete a live token.
+    expect(deleteTokens).toHaveBeenCalledWith({ where: { token: "dead", updated_at: { lte: expect.any(Date) } } })
     expect(capture).not.toHaveBeenCalled()
 
-    await expect(checkPushReceipts(later())).resolves.toEqual({ checked: 0, removed: 0 })
+    await expect(checkPushReceipts(later())).resolves.toEqual(pass(0, 0))
+  })
+
+  it("keeps a ticket whose receipt is not ready yet, and reads it on a later pass", async () => {
+    tokens.mockResolvedValue([
+      { ...device("a1"), user_id: "a" },
+      { ...device("b1"), user_id: "b" },
+    ])
+    await sendBulkPushNotifications({ userIds: ["a", "b"], title: "t", body: "b", data })
+    getReceipts.mockImplementationOnce(async (ids: string[]) => ({ [ids[0]]: { status: "ok" } }))
+
+    await expect(checkPushReceipts(later())).resolves.toEqual(pass(1, 0, 1))
+    getReceipts.mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, { status: "ok" }])))
+    await expect(checkPushReceipts(later())).resolves.toEqual(pass(1, 0, 0))
+  })
+
+  it("drops a ticket unanswered after a day, and counts it", async () => {
+    tokens.mockResolvedValue([device("old")])
+    await sendPushNotification({ userId: "u1", title: "t", body: "b", data })
+    await expect(checkPushReceipts(Date.now() + 25 * 60 * 60_000)).resolves.toEqual({ checked: 0, removed: 0, expired: 1, pending: 0 })
+    expect(getReceipts).not.toHaveBeenCalled()
+  })
+
+  it("never deletes with an empty filter when Expo answers with more tickets than messages", async () => {
+    tokens.mockResolvedValue([device("only")])
+    sendChunk.mockResolvedValueOnce([
+      { status: "ok", id: "t-only" },
+      { status: "ok", id: "t-extra" },
+    ])
+    await sendPushNotification({ userId: "u1", title: "t", body: "b", data })
+    getReceipts.mockImplementation(async (ids: string[]) =>
+      Object.fromEntries(ids.map((id) => [id, { status: "error", message: "gone", details: { error: "DeviceNotRegistered" } }]))
+    )
+
+    await checkPushReceipts(later())
+    expect(deleteTokens).toHaveBeenCalledTimes(1)
+    expect(deleteTokens.mock.calls[0][0].where.token).toBe("only")
   })
 
   it("asks nothing for a ticket younger than the receipt delay", async () => {
     tokens.mockResolvedValue([device("fresh")])
     await sendPushNotification({ userId: "u1", title: "t", body: "b", data })
 
-    await expect(checkPushReceipts(Date.now())).resolves.toEqual({ checked: 0, removed: 0 })
+    await expect(checkPushReceipts(Date.now() + PUSH_RECEIPT_DELAY_MS - 1)).resolves.toEqual(pass(0, 0, 1))
     expect(getReceipts).not.toHaveBeenCalled()
   })
 
-  it("reports InvalidCredentials as an error with its code and platform, once per pass, and keeps the token", async () => {
+  it("reports InvalidCredentials once per platform per pass, with its code, and keeps the tokens", async () => {
     tokens.mockResolvedValue([
       { ...device("a1"), user_id: "a" },
       { ...device("a2"), user_id: "b" },
       { ...device("i1", "ios"), user_id: "c" },
+      { ...device("i2", "ios"), user_id: "d" },
     ])
-    await sendBulkPushNotifications({ userIds: ["a", "b", "c"], title: "t", body: "b", data })
-    getReceipts.mockImplementation(async (ids: string[]) =>
-      Object.fromEntries(
-        ids.map((id, i) => [id, i < 2 ? { status: "error", message: "bad FCM key", details: { error: "InvalidCredentials" } } : { status: "ok" }])
-      )
-    )
+    await sendBulkPushNotifications({ userIds: ["a", "b", "c", "d"], title: "t", body: "b", data })
+    const bad = { status: "error", message: "bad key", details: { error: "InvalidCredentials" } }
+    getReceipts.mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map((id, i) => [id, i < 3 ? bad : { status: "ok" }])))
 
     await checkPushReceipts(later())
 
-    expect(error).toHaveBeenCalledTimes(1)
-    expect(error).toHaveBeenCalledWith("Push receipt errors", { error: "InvalidCredentials", platform: "android", count: 2 })
-    expect(capture).toHaveBeenCalledTimes(1)
+    expect(error).toHaveBeenCalledTimes(2)
+    expect(error).toHaveBeenCalledWith("Push receipt errors", { error: "InvalidCredentials", platform: "android", count: 2, message: "bad key" })
+    expect(error).toHaveBeenCalledWith("Push receipt errors", { error: "InvalidCredentials", platform: "ios", count: 1, message: "bad key" })
+    expect(capture).toHaveBeenCalledTimes(2)
     expect(capture).toHaveBeenCalledWith(
       "Push receipt errors: InvalidCredentials (android)",
       expect.objectContaining({ level: "error", tags: { push_error: "InvalidCredentials", platform: "android" } })
@@ -120,11 +158,12 @@ describe("receipts", () => {
     await sendPushNotification({ userId: "u1", title: "t", body: "b", data })
     getReceipts.mockRejectedValueOnce(new Error("503"))
 
-    await expect(checkPushReceipts(later())).resolves.toEqual({ checked: 0, removed: 0 })
+    await expect(checkPushReceipts(later())).resolves.toEqual(pass(0, 0, 1))
     expect(error).toHaveBeenCalledWith("Push receipt request failed", expect.objectContaining({ error: "503" }))
+    expect(capture).toHaveBeenCalledWith("Push receipt request failed", expect.objectContaining({ level: "error" }))
 
     getReceipts.mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, { status: "ok" }])))
-    await expect(checkPushReceipts(later())).resolves.toEqual({ checked: 1, removed: 0 })
+    await expect(checkPushReceipts(later())).resolves.toEqual(pass(1, 0))
   })
 })
 
@@ -136,6 +175,29 @@ describe("a chunk that throws", () => {
     await expect(sendPushNotification({ userId: "u1", title: "t", body: "b", data })).resolves.toBe(true)
     expect(sendChunk).toHaveBeenCalledTimes(2)
     expect(sendChunk.mock.calls[1][0]).toEqual([expect.objectContaining({ to: "second" })])
+    expect(error).toHaveBeenCalledWith("Failed to send push notification chunk", { error: "socket hang up" })
+  })
+
+  it("counts a thrown bulk chunk as failed and sends the rest", async () => {
+    tokens.mockResolvedValue([
+      { ...device("x"), user_id: "a" },
+      { ...device("y"), user_id: "b" },
+    ])
+    sendChunk.mockRejectedValueOnce(new Error("502"))
+    await expect(sendBulkPushNotifications({ userIds: ["a", "b"], title: "t", body: "b", data })).resolves.toEqual({ sent: 1, failed: 1, noDevice: 0 })
+  })
+
+  it("deletes the token of a refused ticket in a later chunk, and only that one", async () => {
+    tokens.mockResolvedValue([
+      { ...device("live"), user_id: "a" },
+      { ...device("dead"), user_id: "b" },
+    ])
+    sendChunk
+      .mockResolvedValueOnce([{ status: "ok", id: "t-live" }])
+      .mockResolvedValueOnce([{ status: "error", message: "gone", details: { error: "DeviceNotRegistered" } }])
+    await sendBulkPushNotifications({ userIds: ["a", "b"], title: "t", body: "b", data })
+    expect(deleteTokens).toHaveBeenCalledTimes(1)
+    expect(deleteTokens).toHaveBeenCalledWith({ where: { token: "dead" } })
   })
 })
 
@@ -143,6 +205,15 @@ describe("bulk counts", () => {
   it("counts recipients with no device as noDevice, not failed", async () => {
     tokens.mockResolvedValue([])
     await expect(sendBulkPushNotifications({ userIds: ["a", "b"], title: "t", body: "b", data })).resolves.toEqual({
+      sent: 0,
+      failed: 0,
+      noDevice: 2,
+    })
+  })
+
+  it("counts a person whose only token is malformed as noDevice, and each person once", async () => {
+    tokens.mockResolvedValue([{ ...device("malformed-1"), user_id: "a" }])
+    await expect(sendBulkPushNotifications({ userIds: ["a", "a", "b"], title: "t", body: "b", data })).resolves.toEqual({
       sent: 0,
       failed: 0,
       noDevice: 2,
@@ -179,7 +250,7 @@ describe("idle tokens", () => {
     })
 
     await expect(pruneIdlePushTokens(now)).resolves.toBe(1)
-    const { where } = deleteTokens.mock.calls[0][0]
-    expect(rows.filter((r) => r.updated_at < where.updated_at.lt).map((r) => r.token)).toEqual(["old"])
+    expect(deleteTokens).toHaveBeenCalledWith({ where: { updated_at: { lt: daysAgo(90) } } })
+    expect(PUSH_TOKEN_IDLE_DAYS).toBe(90)
   })
 })
