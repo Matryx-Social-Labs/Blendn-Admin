@@ -25,10 +25,11 @@ jest.mock("@/lib/tigris", () => ({
       next: start + 1000 < keys.length ? String(start + 1000) : undefined,
     }
   }),
-  deleteFile: jest.fn(async (key: string) => {
+  deleteFile: jest.fn(async (key: string, only?: string) => {
     if (failOn === key) throw new Error("storage down")
-    bucket.delete(key)
-    chatBucket.delete(key)
+    const { bucketFor } = jest.requireActual("@/lib/tigris")
+    if (!only || only === bucketFor("profile")) bucket.delete(key)
+    if (!only || only === bucketFor("chat")) chatBucket.delete(key)
     deleted.push(key)
   }),
 }))
@@ -451,7 +452,7 @@ describe("the unsent chat upload sweep", () => {
 
   it("refuses the pass when a row names chat/ in a form it cannot read: that is a reference it would miss", async () => {
     const uid = await sender()
-    const unreadable = `https://media.example/chat/${uid}`
+    const unreadable = `${privateHost}/chat/${uid}/1790641297767-cfg6ta-x%ZZ.jpg`
     await dm(uid, unreadable)
     putChat(rawKey(uid))
     const error = jest.spyOn(logger, "error")
@@ -459,7 +460,8 @@ describe("the unsent chat upload sweep", () => {
       const result = await chatPass()
       expect(result).toMatchObject({ refused: true, deleted: 0 })
       expect(chatBucket.has(rawKey(uid))).toBe(true)
-      expect(error).toHaveBeenCalledWith(expect.stringContaining("refused"), expect.anything())
+      // Which row, so the refusal can be acted on rather than sticking.
+      expect(error).toHaveBeenCalledWith(expect.stringContaining("refused"), expect.objectContaining({ rows: [expect.stringMatching(/^private_messages /)] }))
     } finally {
       await db.private_messages.deleteMany({ where: { media_url: unreadable } })
     }
@@ -477,7 +479,7 @@ describe("the unsent chat upload sweep", () => {
 
     const first = await sweepAllOrphans({ now: NOW, mode: "delete" })
     expect(first.profile!.deleted + first.chat!.deleted).toBe(MAX_DELETES_PER_PASS)
-    expect(first.chat!.deleted).toBe(0)
+    expect(first.chat).toMatchObject({ orphans: 5, refused: false, deleted: 0 })
     stopOrphanPhotoSweeper()
     const second = await sweepAllOrphans({ now: NOW, mode: "delete" })
     expect(second.chat!.deleted).toBe(5)
@@ -489,5 +491,86 @@ describe("the unsent chat upload sweep", () => {
     expect(await sweepOrphanPhotos({ now: NOW, mode: "log" })).toMatchObject({ complete: false })
     putChat(rawKey(uid))
     expect(await chatPass("log")).toMatchObject({ listed: 1, complete: true })
+  })
+
+  it("deletes no more than the budget it is handed, and nothing on a budget below zero", async () => {
+    const uid = await sender()
+    // slice(0, -2) of six would take four: a budget below zero must take none.
+    for (let i = 0; i < 6; i++) putChat(rawKey(uid, `q${i}.jpg`))
+    expect(await sweepOrphanChatUploads({ now: NOW, mode: "delete", maxDeletes: -2 })).toMatchObject({ orphans: 6, deleted: 0 })
+    expect(await sweepOrphanChatUploads({ now: NOW, mode: "delete", maxDeletes: 2 })).toMatchObject({ deleted: 2 })
+  })
+
+  it("deletes only in the bucket it listed: an old public copy under the same key is not its to judge", async () => {
+    const uid = await sender()
+    const key = rawKey(uid)
+    putChat(key)
+    bucket.set(key, YOUNG)
+    await chatPass()
+    expect(chatBucket.has(key)).toBe(false)
+    expect(bucket.has(key)).toBe(true)
+  })
+
+  it("counts and names a delete that failed", async () => {
+    const uid = await sender()
+    const key = rawKey(uid)
+    putChat(key)
+    failOn = key
+    const error = jest.spyOn(logger, "error")
+    expect(await chatPass()).toMatchObject({ orphans: 1, deleted: 0, failed: 1 })
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("not deleted"), expect.objectContaining({ key, bucket: bucketFor("chat") }))
+  })
+
+  it("reads a key followed by punctuation, a query, or a full stop", async () => {
+    const uid = await sender()
+    const [amp, comma, stop] = ["amp.jpg", "comma.jpg", "stop.jpg"].map((n) => rawKey(uid, n))
+    await dm(uid, `${privateHost}/${amp}&x=1`)
+    await roomMessage(uid, { note: `(${comma}), and see ${stop}.` })
+    for (const k of [amp, comma, stop]) putChat(k)
+    await keepsAllBut(uid)
+  })
+
+  it("reads a key whose slashes are JSON-escaped or percent-encoded twice", async () => {
+    const uid = await sender()
+    const [escaped, twice] = [rawKey(uid, "escaped.jpg"), rawKey(uid, "twice.jpg")]
+    await dm(uid, `${privateHost}/${escaped}`.replace(/\//g, "\\/"))
+    await dm(uid, `${privateHost}/${encodeURIComponent(encodeURIComponent(twice))}`)
+    putChat(escaped)
+    putChat(twice)
+    await keepsAllBut(uid)
+  })
+
+  it("reads a raw key in a row that also names a sealed copy", async () => {
+    const uid = await sender()
+    const key = rawKey(uid, "mixed.jpg")
+    await dm(uid, `${privateHost}/${key}?from=chat/sealed/0b4a7c9e-1d2f-4a3b-8c5d-6e7f8a9b0c1d`)
+    putChat(key)
+    await keepsAllBut(uid)
+  })
+
+  it("is not stopped by a chat/ that names no key, such as a deep link", async () => {
+    const uid = await sender()
+    await roomMessage(uid, { link: `blendn://chat/${uid}`, folder: "https://x.example/chat/" })
+    await keepsAllBut(uid)
+  })
+
+  it("a failure in one sweep is logged and the other still runs; neither rejects into the scheduler", async () => {
+    const uid = await sender()
+    putChat(rawKey(uid))
+    listFails = true
+    const error = jest.spyOn(logger, "error")
+    await expect(sweepAllOrphans({ now: NOW, mode: "delete" })).resolves.toEqual({ profile: null, chat: null })
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("sweep failed"), expect.objectContaining({ error: "storage down" }))
+    listFails = false
+
+    await db.$executeRawUnsafe(`ALTER TABLE retained_report_media RENAME COLUMN object_key TO itest_object_key`)
+    try {
+      const result = await sweepAllOrphans({ now: NOW, mode: "delete" })
+      expect(result.profile).not.toBeNull()
+      expect(result.chat).toBeNull()
+    } finally {
+      await db.$executeRawUnsafe(`ALTER TABLE retained_report_media RENAME COLUMN itest_object_key TO object_key`)
+    }
+    expect(chatBucket.has(rawKey(uid))).toBe(true)
   })
 })

@@ -36,7 +36,7 @@ import { bucketFor, deleteFile, extractKeyFromUrl, listPublicObjects } from "./t
  * ## Raw chat uploads (SCRUM-1387)
  *
  * The same pass, the same switch, grace and budget, over `chat/<uid>/` in the
- * chat bucket: an upload that was never sent. What a message keeps is its
+ * private bucket (`bucketFor("chat")`): an upload that was never sent. What a message keeps is its
  * sealed copy, so these are judged against every stored string that can still
  * name a raw key (`chatReferences`). The share refusal does not fit there (an
  * old raw upload is unsent by construction); instead a key is only taken when
@@ -69,6 +69,8 @@ export interface OrphanPass {
   judged: number
   orphans: number
   deleted: number
+  /** Deletes that failed; each is logged with its key. */
+  failed: number
   refused: boolean
   /** The whole bucket has been read; the next pass starts again. */
   complete: boolean
@@ -127,7 +129,7 @@ interface Target {
 const cursors = new Map<string, string | undefined>()
 
 async function sweepTarget(target: Target, now: Date, mode: OrphanMode, maxDeletes: number): Promise<OrphanPass> {
-  const pass: OrphanPass = { mode, listed: 0, judged: 0, orphans: 0, deleted: 0, refused: false, complete: false }
+  const pass: OrphanPass = { mode, listed: 0, judged: 0, orphans: 0, deleted: 0, failed: 0, refused: false, complete: false }
   if (mode === "off") return pass
 
   const old: Judged[] = []
@@ -157,10 +159,17 @@ async function sweepTarget(target: Target, now: Date, mode: OrphanMode, maxDelet
   if (mode === "delete") {
     for (const { key, uid } of orphans.slice(0, Math.max(0, maxDeletes))) {
       try {
-        await deleteFile(key)
+        // Only where it was listed and judged: `deleteFile` alone would also reach a bucket this pass never read.
+        await deleteFile(key, target.bucket)
         pass.deleted++
       } catch (error) {
-        logger.error(`Orphan ${target.label} not deleted`, { userId: uid, error: error instanceof Error ? error.message : String(error) })
+        pass.failed++
+        logger.error(`Orphan ${target.label} not deleted`, {
+          userId: uid,
+          key,
+          bucket: target.bucket,
+          error: error instanceof Error ? error.message : String(error),
+        })
       }
     }
   }
@@ -169,6 +178,7 @@ async function sweepTarget(target: Target, now: Date, mode: OrphanMode, maxDelet
     judged: pass.judged,
     orphans: pass.orphans,
     deleted: pass.deleted,
+    failed: pass.failed,
     complete: pass.complete,
   })
   return pass
@@ -220,9 +230,32 @@ const chatOwnerOf = (key: string): string | null => {
   return m && m[1] !== "sealed" && !m[2].endsWith("-sealed") ? m[1] : null
 }
 
-/** Every `chat/<a>/<b>` a stored string names, as written and percent-decoded. */
-const CHAT_KEY_IN_TEXT = /chat\/[^/?#"\s\\]+\/[^/?#"\s\\]+/g
-const chatKeysIn = (ref: string): string[] => [...`${ref} ${decodeKey(ref)}`.matchAll(CHAT_KEY_IN_TEXT)].map((m) => m[0])
+/**
+ * The keys a stored string names, or null when it names `chat/` in a form this
+ * cannot read. The separators are undone (`\/`, `%2F`, `%252F`); nothing else
+ * needs decoding, because the alphabet `chatOwnerOf` judges is never
+ * percent-encoded. Every `chat/` then runs to the first character outside that
+ * alphabet and `/`. A `%` or `\` there is an encoding left over, so the string
+ * is unreadable; any other character ends it. `chat/<seg>/<name>` names a key
+ * (and, ending a sentence, the same without its trailing dots); a bare
+ * `chat/<id>`, such as a deep link, names none.
+ */
+function chatKeysIn(ref: string): string[] | null {
+  const text = ref.replace(/\\+\//g, "/").replace(/%(?:25)*2f/gi, "/")
+  const keys: string[] = []
+  for (const m of text.matchAll(/chat\/([A-Za-z0-9._/-]*)(.?)/g)) {
+    if (m[2] === "%" || m[2] === "\\") return null
+    const [seg, name] = m[1].split("/")
+    if (seg && name) keys.push(`chat/${seg}/${name}`, `chat/${seg}/${name.replace(/\.+$/, "")}`)
+  }
+  return keys
+}
+
+/** The one audit action that stores an object key (`lib/moderation/sexual-image-hold.ts`; `git grep "details: {"`). A new one that does goes here. */
+const AUDIT_ACTIONS_WITH_KEYS = ["moderation.sexual_image_hold"]
+
+/** `chat`, a separator (`/`, `\/`, `%2F` at any depth), and not a sealed copy's `sealed/`. */
+const NAMES_RAW_CHAT = "chat(\\\\*/|%(25)*2f)(?!sealed(/|\\\\|%))"
 
 /**
  * Every stored string that can name a raw chat upload (SCRUM-1387). Since
@@ -230,27 +263,25 @@ const chatKeysIn = (ref: string): string[] => [...`${ref} ${decodeKey(ref)}`.mat
  * upload, so only older rows name one, and before SCRUM-426 a message could
  * carry anybody's URL: read globally, not per sender. JSON is read as text, so
  * a key under any field counts. Moderation flags and reports point at these
- * messages by id.
+ * messages by id. Text a person typed is not read: a pasted link is not an
+ * attachment, and keeping an object for one is the free hosting this sweep ends.
  *
- * ponytail: these are full scans, once a pass and only when an old upload is
- * waiting; production runs them hourly in log mode too. An index on a
- * legacy-reference flag, or a table of raw keys still named, if they show up.
+ * ponytail: full scans, once a pass and only when an old upload is waiting,
+ * under the server's statement timeout. A cancelled read deletes nothing and is
+ * logged as a failed sweep; a `SET LOCAL statement_timeout` or a partial index on
+ * the legacy rows when that is seen.
  */
-const chatReferences = () => db.$queryRaw<{ ref: string }[]>`
-  SELECT media_url AS ref FROM private_messages
-   WHERE (media_url LIKE '%chat/%' OR media_url ILIKE '%chat\\%2f%') AND media_url NOT LIKE '%chat/sealed/%'
+const chatReferences = () => db.$queryRaw<{ src: string; id: string; ref: string }[]>`
+  SELECT 'private_messages' AS src, id::text AS id, media_url AS ref FROM private_messages WHERE media_url ~* ${NAMES_RAW_CHAT}
   UNION ALL
-  SELECT metadata::text FROM chat_messages
-   WHERE metadata::text LIKE '%chat/%' OR metadata::text ILIKE '%chat\\%2f%'
+  SELECT 'chat_messages', id::text, metadata::text FROM chat_messages WHERE metadata::text ~* ${NAMES_RAW_CHAT}
   UNION ALL
-  SELECT photo_url FROM board_posts
-   WHERE (photo_url LIKE '%chat/%' OR photo_url ILIKE '%chat\\%2f%') AND photo_url NOT LIKE '%chat/sealed/%'
+  SELECT 'board_posts', id::text, photo_url FROM board_posts WHERE photo_url ~* ${NAMES_RAW_CHAT}
   UNION ALL
-  SELECT object_key FROM retained_report_media
-   WHERE object_key LIKE '%chat/%' OR object_key ILIKE '%chat\\%2f%'
+  SELECT 'retained_report_media', id::text, object_key FROM retained_report_media WHERE object_key ~* ${NAMES_RAW_CHAT}
   UNION ALL
-  SELECT details::text FROM audit_logs
-   WHERE action = 'moderation.sexual_image_hold' AND (details::text LIKE '%chat/%' OR details::text ILIKE '%chat\\%2f%')
+  SELECT 'audit_logs', id::text, details::text FROM audit_logs
+   WHERE action = ANY(${AUDIT_ACTIONS_WITH_KEYS}) AND details::text ~* ${NAMES_RAW_CHAT}
 `
 
 const chatTarget: Target = {
@@ -263,19 +294,22 @@ const chatTarget: Target = {
     const [users, refs] = await Promise.all([db.user.findMany({ where: { id: { in: uids } }, select: { id: true } }), chatReferences()])
 
     const referenced = new Set<string>()
-    let unreadable = 0
-    for (const { ref } of refs) {
+    const unreadable: string[] = []
+    for (const { src, id, ref } of refs) {
       const keys = chatKeysIn(ref)
-      if (keys.length === 0) unreadable++
-      keys.forEach((k) => referenced.add(k))
+      if (keys) keys.forEach((k) => referenced.add(k))
+      else unreadable.push(`${src} ${id}`)
     }
     /*
      * A row that names chat/ in a form this cannot read is a reference it
      * would miss. The share test the profile sweep uses cannot stand in: an
      * old raw upload is unsent by construction, so nearly all of them are.
      */
-    if (unreadable > 0) {
-      logger.error("Orphan chat upload sweep refused: a stored reference to chat/ could not be read", { unreadable })
+    if (unreadable.length > 0) {
+      logger.error("Orphan chat upload sweep refused: a stored reference to chat/ could not be read", {
+        unreadable: unreadable.length,
+        rows: unreadable.slice(0, 5),
+      })
       return { orphans: [], refused: true }
     }
 
@@ -296,7 +330,7 @@ export async function sweepOrphanPhotos(opts: { now?: Date; mode?: OrphanMode } 
   return sweepTarget(profileTarget, opts.now ?? new Date(), opts.mode ?? orphanModeFromEnv(), MAX_DELETES_PER_PASS)
 }
 
-/** Raw chat uploads that were never sent, out of the chat bucket (SCRUM-1387). Same switch, grace and budget as photos. */
+/** Raw chat uploads that were never sent, out of the private bucket (SCRUM-1387). Same switch, grace and budget as photos. */
 export async function sweepOrphanChatUploads(opts: { now?: Date; mode?: OrphanMode; maxDeletes?: number } = {}): Promise<OrphanPass> {
   return sweepTarget(chatTarget, opts.now ?? new Date(), opts.mode ?? orphanModeFromEnv(), opts.maxDeletes ?? MAX_DELETES_PER_PASS)
 }

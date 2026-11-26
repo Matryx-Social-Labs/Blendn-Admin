@@ -350,9 +350,10 @@ function isNotFound(error: unknown): boolean {
 /**
  * Delete a file from Tigris
  */
-export async function deleteFile(key: string): Promise<void> {
+export async function deleteFile(key: string, onlyBucket?: string): Promise<void> {
   const client = getS3Client()
-  for (const Bucket of bucketsHolding(key.split("/")[0] as UploadFolder)) {
+  // `onlyBucket`: a caller that judged the object in one bucket deletes it there and nowhere else.
+  for (const Bucket of onlyBucket ? [onlyBucket] : bucketsHolding(key.split("/")[0] as UploadFolder)) {
     // A deadline, like the prefix sweep's: erasure now deletes one sealed chat
     // copy at a time (SCRUM-448), and one hung call must not stall the purge.
     await client.send(new DeleteObjectCommand({ Bucket, Key: key }), {
