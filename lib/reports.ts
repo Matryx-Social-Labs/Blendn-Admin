@@ -244,9 +244,13 @@ export async function reportScope(role: user_role, userId: string): Promise<Repo
   }
 }
 
-/** Every event this actor may report on. */
+/**
+ * The events whose guests this person may list one by one: the ones their
+ * organisation runs (`hosted`), never a venue's arms. A venue sees how many
+ * came, never who (SCRUM-501), whatever the viewer's User.role (SCRUM-1246).
+ */
 export async function eventScopeFor(role: user_role, userId: string): Promise<Prisma.eventsWhereInput> {
-  return (await reportScope(role, userId)).all
+  return (await reportScope(role, userId)).hosted
 }
 
 /**
@@ -401,8 +405,9 @@ export async function buildReport(
     }
 
     case "attendees": {
+      // Per guest, so the events they run only (`hosted`), never the venue arms of `all` (SCRUM-1246).
       // A host's: check-ins of settled nights up to each settle, never a late one (`checkedInBy`).
-      const settled = host ? (await hostNights(scope, inWindow)).settled : null
+      const settled = host ? (await hostNights(scopes.hosted, inWindow)).settled : null
       const fetched = await db.event_check_ins.findMany({
         /*
          * A host's by whole settled nights, never by check-in time (SCRUM-887,
@@ -414,7 +419,7 @@ export async function buildReport(
          */
         where: {
           status: { in: ["checked_in", "checked_out"] },
-          ...(settled ? checkedInBy(settled) : { event: scope, created_at: inWindow }),
+          ...(settled ? checkedInBy(settled) : { event: scopes.hosted, created_at: inWindow }),
         },
         select: { user_id: true, event_id: true, kind: true, event: { select: { organizer_org_id: true, start_time: true } } },
         /*

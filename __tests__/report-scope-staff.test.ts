@@ -2,7 +2,7 @@ const mockDb = { organisation_members: { findMany: jest.fn() } }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/event-visibility", () => ({ claimedVenueEventsWhere: jest.fn(async () => []), hostsEvent: jest.fn() }))
 
-import { reportScope } from "@/lib/reports"
+import { eventScopeFor, reportScope } from "@/lib/reports"
 
 /**
  * The reports and the organisation's audience (`attendeeRoster`, through
@@ -45,4 +45,20 @@ it("gives an organizer-role member of a venue-owning org the venue's events, not
   const { all, venueOnly } = await reportScope("organizer", "u1")
   expect(JSON.stringify(all)).toContain("venue-1")
   expect(JSON.stringify(venueOnly)).toContain("venue-1")
+})
+
+it("never gives a venue org's member another host's guests one by one: the per-guest scope is the hosted arm (SCRUM-1246)", async () => {
+  const { claimedVenueEventsWhere } = jest.requireMock("@/lib/event-visibility") as { claimedVenueEventsWhere: jest.Mock }
+  claimedVenueEventsWhere.mockResolvedValue([{ venue_id: "venue-1", start_time: { gte: new Date(0) } }])
+  mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: "org-venue", role: "owner" }])
+  expect(JSON.stringify(await eventScopeFor("organizer", "u1"))).not.toContain("venue-1")
+  claimedVenueEventsWhere.mockResolvedValue([])
+})
+
+it("reads the Attendees export from the hosted arm, never `all` (SCRUM-1246)", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const src: string = require("fs").readFileSync(require("path").join(__dirname, "../lib/reports.ts"), "utf8")
+  const block = src.slice(src.indexOf('case "attendees": {'), src.indexOf('case "check-ins": {'))
+  expect(block).toContain("scopes.hosted")
+  expect(block).not.toMatch(/\bscope\b/)
 })

@@ -116,6 +116,8 @@ The API:
 
 Build the actor with `actorFor(user)` from `lib/org-membership.ts` — it loads memberships, and `PermissionActor.orgIds` and `editOrgIds` (the owner/admin subset) are required precisely so a bare session user cannot typecheck into the resolver and silently deny everyone.
 
+`User.role` grants no event, venue or billing right and revokes none (SCRUM-1246): to take someone's rights away, remove the membership, suspend the organisation, or suspend the user. Per-guest views (the Attendees export, the organisation's audience) read `reportScope(...).hosted` — events the person's org runs — never a venue's arms.
+
 Mobile routes must read the role from the database, not the JWT: the token carries no role, and a 30-day refresh cycle would outlive any role change baked into it.
 
 `__tests__/authz-scoping-boundary.test.ts` fails the build on a hand-rolled `organizer_id !==` or `owner_id:` outside the resolver. If it fires, you want `eventPermissions`.

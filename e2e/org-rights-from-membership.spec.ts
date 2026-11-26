@@ -151,12 +151,12 @@ test("an organizer-role member of the venue's org gets the room, the count and t
   await ownerContext.close()
 
   // Read back: both memberships, the venue's owning org and its claim, and the night unchanged.
-  expect(
-    await db.organisation_members.findMany({ where: { user_id: userId }, select: { org_id: true, role: true }, orderBy: { created_at: "asc" } })
-  ).toEqual([
+  const memberships = await db.organisation_members.findMany({ where: { user_id: userId }, select: { org_id: true, role: true } })
+  expect(memberships).toHaveLength(2)
+  expect(memberships).toEqual(expect.arrayContaining([
     { org_id: venueOrg, role: "staff" },
     { org_id: hostOrg, role: "staff" },
-  ])
+  ]))
   expect(await db.venues.findUniqueOrThrow({ where: { id: venue.id }, select: { owner_org_id: true, claimed_at: true } })).toEqual({
     owner_org_id: venueOrg,
     claimed_at: venue.claimed_at,
