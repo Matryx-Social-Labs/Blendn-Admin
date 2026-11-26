@@ -70,13 +70,15 @@ export function DoorCodeScreen({
       role="dialog"
       aria-modal="true"
       aria-labelledby="door-code-title"
-      className="@container fixed inset-0 z-50 flex flex-col items-center justify-[safe_center] gap-4 overflow-auto bg-white px-5 pt-[72px] pb-7 text-center text-black"
+      className="@container fixed inset-0 z-50 flex flex-col items-center gap-4 overflow-auto bg-white px-5 pt-[72px] pb-7 text-center text-black"
+      // Centred like the mockup, and still scrollable from the top when it overflows (200% text, a short landscape phone).
+      style={{ justifyContent: "safe center" }}
     >
       {/* Fixed, not absolute: at 400% zoom the dialog scrolls and Close must not scroll away with it. */}
       <Button
         variant="outline"
         onClick={onClose}
-        className="fixed top-4 right-4 z-10 min-h-11 min-w-11 border-black/55 bg-white px-4 text-[0.9375rem] text-black hover:bg-black/5 hover:text-black"
+        className="fixed top-4 right-4 z-10 min-h-11 min-w-11 border-black/55 bg-white px-4 text-[0.9375rem] text-black shadow-none hover:bg-black/5 hover:text-black dark:border-black/55 dark:bg-white dark:hover:bg-black/5"
       >
         Close
       </Button>

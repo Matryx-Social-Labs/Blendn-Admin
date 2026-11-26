@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { IconMaximize } from "@tabler/icons-react"
+import { IconMaximize, IconUserMinus } from "@tabler/icons-react"
 import { toast } from "sonner"
 
 import { Callout, Panel } from "@/components/dashboard/kit"
@@ -209,13 +209,13 @@ function ArrivalRow({ arrival, timezone, fresh, onRemove }: { arrival: DoorArriv
       </span>
       <span className="min-w-0 flex-1 text-[0.9375rem] [overflow-wrap:anywhere]">
         {arrival.pseudonym}
-        {fresh ? <span className="text-[0.8125rem] font-medium text-foreground dark:text-success"> · just now</span> : null}
+        {fresh ? <span className="text-[0.8125rem] font-medium whitespace-nowrap text-foreground dark:text-success"> · just now</span> : null}
       </span>
       <time dateTime={arrival.at} className="shrink-0 text-[0.9375rem] tabular-nums text-muted-foreground">
         {clockTime(at, timezone)}
       </time>
-      <Button variant="ghost" size="sm" onClick={onRemove} aria-label={`Remove ${arrival.pseudonym} from the room`} className="shrink-0 text-muted-foreground pointer-coarse:h-11">
-        Remove
+      <Button variant="ghost" size="icon" onClick={onRemove} aria-label={`Remove ${arrival.pseudonym} from the room`} title="Remove from the room" className="shrink-0 text-muted-foreground pointer-coarse:size-11">
+        <IconUserMinus aria-hidden className="size-4" />
       </Button>
     </li>
   )

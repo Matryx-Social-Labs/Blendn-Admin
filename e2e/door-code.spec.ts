@@ -23,7 +23,8 @@ const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.
 const LAT = 12.9784
 const LNG = 77.6408
 const HOUR = 3_600_000
-const shot = (page: Page, name: string) => page.screenshot({ path: `test-results/screens/${name}.png`, fullPage: true })
+// Full page for the tab; the viewport for the full-screen view, which is fixed to it.
+const shot = (page: Page, name: string, fullPage = true) => page.screenshot({ path: `test-results/screens/${name}.png`, fullPage })
 
 let eventId: string | undefined
 let guestId: string | undefined
@@ -90,7 +91,7 @@ test("the host shows the code full screen; a guest 400 m out checks in with it; 
   const code = spelled.replace("Door code: ", "").split(", ").join("")
   expect(code).toMatch(/^[A-HJ-NP-Z2-9]{6}$/)
   await expect(dialog.getByText(/^Changes in \d+ s$/)).toBeVisible()
-  await shot(page, "door-fs-1280")
+  await shot(page, "door-fs-1280", false)
 
   // A QA attendee, 400 m north of the fence, with the code on the screen.
   const guest = await db.user.create({ data: { id: `e2e_door_${randomUUID()}`, email: `door-${randomUUID().slice(0, 8)}@e2e.invalid`, name: "E2E Door Guest", role: "attendee" } })
@@ -112,7 +113,7 @@ test("the host shows the code full screen; a guest 400 m out checks in with it; 
   const pseudonym = (await db.chat_group_members.findFirstOrThrow({ where: { user_id: guest.id, chat_group: { event_id: event.id } }, select: { anonymous_name: true } })).anonymous_name!
   await expect(dialog.getByText("1 just came in")).toBeVisible({ timeout: 40_000 })
   await expect(dialog.getByText(pseudonym)).toHaveCount(0)
-  await shot(page, "door-fs-1280-echo")
+  await shot(page, "door-fs-1280-echo", false)
 
   // Close returns focus to "Show the door code"; the tab names the arrival by pseudonym, never an identity.
   await dialog.getByRole("button", { name: "Close" }).click()
@@ -128,10 +129,12 @@ test("the host shows the code full screen; a guest 400 m out checks in with it; 
   // A phone held up at the door.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.reload()
-  await expect(page.getByText(pseudonym)).toBeVisible()
+  // Scoped to the page's main: a streamed render can hold a second, hidden copy for a moment.
+  await expect(page.locator("#main").getByText(pseudonym)).toBeVisible()
   await shot(page, "door-tab-390")
-  await page.getByRole("button", { name: "Show the door code" }).click()
-  await expect(page.getByRole("dialog")).toBeVisible()
-  await expect(page.getByText(/^Door code: /)).toHaveCount(1)
-  await shot(page, "door-fs-390")
+  await page.locator("#main").getByRole("button", { name: "Show the door code" }).click()
+  const phoneDialog = page.getByRole("dialog", { name: /Door code, Neon Nights at Toit/ })
+  await expect(phoneDialog).toBeVisible()
+  await expect(phoneDialog.getByText(/^Door code: /)).toHaveCount(1)
+  await shot(page, "door-fs-390", false)
 })
