@@ -4252,6 +4252,9 @@ model event_issues {
   /// one worth asking about afterwards.
   acknowledged_at DateTime? @db.Timestamptz(6)
   acknowledged_by String?
+  /// The organizer's owners and admins were mailed about this opening (SCRUM-1286, `lib/live-alert-mail.ts`): claimed
+  /// before the send, given back if nobody got it. A critical kind mails again only 30 minutes after the last of these.
+  mailed_at DateTime? @db.Timestamptz(6)
 
   event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
   ///
