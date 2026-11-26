@@ -242,8 +242,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * without a code change — the withholding is the deliberate part, and it
      * is one name long.
      */
-    // `tier_b_changes` is the cooldown's ledger (lib/tier-b.ts), withheld with the birth date.
-    const { date_of_birth: _dob, tier_b_changes: _ledger, home_city_id: homeCityId, ...selfProfileFields } = {
+    // `tier_b_changes` is the cooldown's ledger (lib/tier-b.ts), withheld with the birth date; `signup_source` is
+    // analytics (SCRUM-1273), withheld so installed builds read the shape they always did.
+    const { date_of_birth: _dob, tier_b_changes: _ledger, home_city_id: homeCityId, signup_source: _source, ...selfProfileFields } = {
       ...p,
       age: profileAge,
       // The editor's prefill, never stored until they pick it (lib/about-you.ts).
@@ -881,8 +882,13 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     // Where the account came from (SCRUM-1273): the first source the app sends wins, and an unknown one is none.
+    // After the save has committed, so a failure here is logged, never a 500 for a save that worked.
     const source = acquisitionSource((body as { source?: unknown }).source)
-    if (source) await db.profiles.updateMany({ where: { id: userId, signup_source: null }, data: { signup_source: source } })
+    if (source) {
+      await db.profiles
+        .updateMany({ where: { id: userId, signup_source: null }, data: { signup_source: source } })
+        .catch((error) => logger.warn("signup source not recorded", { error: error instanceof Error ? error.message : String(error) }))
+    }
 
     // The blur this write replaced or cleared leaves storage once moderation has passed it (SCRUM-520).
     // `storedBlur` is set only to a freshly sealed URL or null, so it is never the old one.

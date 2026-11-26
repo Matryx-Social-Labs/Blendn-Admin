@@ -107,8 +107,8 @@ export const RsvpRequestSchema = z
       .string()
       .optional()
       .describe(
-        "Where the RSVP came from: `door`, `link`, `invite`, `web` or `share` (SCRUM-1273). Written on the first RSVP only; " +
-          "a later change keeps it. Unknown values are ignored (stored as none), never refused."
+        "Where the RSVP came from: `door`, `link`, `invite`, `web` or `share` (SCRUM-1273). Written when the RSVP is created; a later " +
+          "status change keeps it (a withdrawal before the doors deletes the RSVP, so the next one is new). Unknown values are ignored, never refused."
       ),
   })
   .openapi("RsvpRequest")

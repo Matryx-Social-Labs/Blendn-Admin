@@ -98,8 +98,9 @@ test("a door arrival is recorded on the view, the RSVP and the profile, and a re
   // SELECT signup_source FROM profiles WHERE id = <guest>
   const profile = await db.profiles.findUniqueOrThrow({ where: { id: guest }, select: { signup_source: true } })
   // SELECT entity_id, props FROM product_events WHERE name = 'event_viewed' AND user_id = <guest>, after the 10 s flush
+  // The refused view was recorded (if at all) before the live one, so it is flushed no later than the live row appears.
   const viewed = () => db.product_events.findMany({ where: { name: "event_viewed", user_id: guest }, select: { entity_id: true, props: true } })
-  await expect.poll(async () => (await viewed()).length, { timeout: 20_000 }).toBeGreaterThan(0)
+  await expect.poll(async () => (await viewed()).some((v) => v.entity_id === live), { timeout: 30_000 }).toBe(true)
   const views = await viewed()
 
   console.log(`READBACK ${JSON.stringify({ live, draft, guest, rsvp, profile, views })}`)
@@ -129,6 +130,7 @@ test("the QR & link tab: the link to copy says ?s=link, the code scans to ?s=doo
 
   const link = page.getByLabel("Event link")
   await expect(link).toHaveValue(new RegExp(`/event/${live}\\?s=link$`))
+  // The tab's own code; the door slide's (same value) is portaled after it.
   const qr = page.locator(`svg[role="img"][aria-label="QR code for ${tag} live"]`).first()
   const scanned = decode(await qr.evaluate((el) => el.outerHTML))
   console.log(`READBACK ${JSON.stringify({ linkField: await link.inputValue(), qr: scanned })}`)

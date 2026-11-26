@@ -1097,7 +1097,7 @@ encodes `/event/<id>?s=door` in the code and the door slide, and
 | Where | Field | Kept |
 |---|---|---|
 | `GET /events/:eventId` | query `s` | on the day's first `event_viewed` for this person and event (`product_events.props`); a refused view is not recorded |
-| `POST /events/:eventId/rsvp` | body `source` | `event_rsvps.source`, on the row's first insert; a later status change keeps it |
+| `POST /events/:eventId/rsvp` | body `source` | `event_rsvps.source`, when the RSVP is created; a later status change keeps it (a withdrawal before the doors deletes the RSVP, so the next one is new) |
 | `PUT /profiles/:userId` | body `source` | `profiles.signup_source`, the first one sent; later ones are ignored |
 
 Unknown values are ignored: the request answers exactly as it would without
