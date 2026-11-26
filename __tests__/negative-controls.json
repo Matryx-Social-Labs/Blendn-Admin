@@ -35,6 +35,18 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "live-tab-stale.test.tsx": {
+      "guards": "With a snapshot and status error the Live tab shows 'Connection lost at <time>. These figures are from then; reconnecting.' in a status region rendered before it is filled, drops '· live' from the hero on the host and venue copies, keeps the last alerts, and says 'Nothing needed attention at <time>.' rather than the present-tense all-clear (SCRUM-1348)",
+      "mutation": "A: replace the `stale ? <Callout … /> : null` child of the role=status div in components/dashboard/live-tab.tsx with `null`. B: delete the `stale={stale}` line passed to OccupancyHero. E: change the Alerts empty line's `{stale ? (` to `{false ? (`",
+      "observed": "A: 4 failing (the line, the filled status region, kept alerts, the venue copy). B: 2 failing (host and venue still read '· live'). E: 1 failing ('makes no present-tense all-clear'). Each reverted green, 11/11",
+      "date": "2026-11-26"
+    },
+    "use-ops-snapshot.test.ts": {
+      "guards": "The Live tab's socket rule: a drop that comes back on Socket.io's first retry never flashes; the first failed retry (connect_error) goes stale; a close Socket.io will not retry (socket.active false) goes stale at once and is reconnected by hand; four missed 5 s ticks with no snapshot (a socket that never closed, out of wifi) go stale and drop the socket so it is reopened, and a slow tick does not; a refusal (OPS_FORBIDDEN) stays denied rather than being turned into 'connection lost' by the quiet timer; another event's snapshot does not clear it; the next ops:snapshot clears it (SCRUM-1348)",
+      "mutation": "C: delete the `socket.on(\"disconnect\", …)` listener from lib/use-ops-snapshot.ts. D: change its guard `if (cancelled || socket?.active) return` to `if (cancelled) return` (every disconnect goes stale). F: delete the `quiet = setTimeout(…, QUIET_MS)` arming in the ops:snapshot handler. G: `const QUIET_MS = OPS_INTERVAL_MS` (one tick instead of four). H: delete `clearTimeout(quiet)` from the `error` handler. I: the quiet timer sets `error` instead of `socket?.disconnect()`",
+      "observed": "C: 1 failing ('goes stale at once on a close Socket.io will not retry'). D: 1 failing ('does not flash on a drop that comes back on its first retry'). F: 1 failing ('goes stale after four missed ticks'). G: 2 failing (that, and 'is not stale while the ticks keep coming', which first passed against G because it read the status after each snapshot; it now reads it just before). H: 1 failing ('a rejoin the server refuses stays denied'; found by the code and React reviewers). I: 1 failing ('goes stale after four missed ticks': no reconnect). Each reverted green, 9/9",
+      "date": "2026-11-26"
+    },
     "domain-email-gate.test.ts": {
       "guards": "SCRUM-1280: every failed domain-verification send (suppressed, provider error, not configured) gets one answer, another address or the DNS record, never 'try again', and never says whether the address bounced or complained.",
       "mutation": "lib/org-actions.ts: the old message (\"Could not send just now. Try again, or use the DNS record.\") put back.",
