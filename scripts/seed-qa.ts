@@ -1327,6 +1327,16 @@ async function main() {
     { user: users.secondVenueOwner, org: secondVenue.id, joined: hoursFromNow(-24 * 45) },
     { user: users.outsider, org: outsiderOrg.id, joined: hoursFromNow(-24 * 20) },
   ]
+  // The second venue owner's organisation has no venue: it is one approved as a venue owner that has not claimed one
+  // yet, and the approved application is what makes its members venue owners until it does (SCRUM-1247).
+  if (!(await db.organiser_onboarding_requests.findFirst({ where: { org_id: secondVenue.id, status: "approved" }, select: { id: true } }))) {
+    await db.organiser_onboarding_requests.create({
+      data: {
+        org_id: secondVenue.id, display_name: PERSONA_ORGS.secondVenue, contact_name: "Kabir Shah", contact_email: "kabir.venue@blendn.app",
+        requested_role: "venue_owner", status: "approved", reviewed_at: hoursFromNow(-24 * 46),
+      },
+    })
+  }
   for (const m of PERSONA_MEMBERSHIPS) {
     await db.organisation_members.upsert({
       where: { org_id_user_id: { org_id: m.org, user_id: m.user } },
