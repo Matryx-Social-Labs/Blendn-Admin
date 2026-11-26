@@ -148,9 +148,9 @@ describe("visibleEventsWhere", () => {
  * exports and the venue page, keyed on what the person runs, not their role.
  */
 describe("reachedThroughBuilding", () => {
-  const actor = { id: "u1", orgIds: ["org-venue"] }
-  const theirs = { organizer_id: "someone", organizer_org_id: "org-host" }
-  const ours = { organizer_id: "someone", organizer_org_id: "org-venue" }
+  const actor = { orgIds: ["org-venue"] }
+  const theirs = { organizer_org_id: "org-host" }
+  const ours = { organizer_org_id: "org-venue" }
 
   it("holds back another host's event for any non-admin, organizer role included", () => {
     for (const role of ["venue_owner", "organizer", "attendee", "sponsor"] as const) {
@@ -163,8 +163,9 @@ describe("reachedThroughBuilding", () => {
   })
 
   it("holds back one they created but their org does not run: creating a row is not running it (SCRUM-942)", () => {
-    expect(reachedThroughBuilding("organizer", actor, { organizer_id: "u1", organizer_org_id: null })).toBe(true)
-    expect(reachedThroughBuilding("organizer", actor, { organizer_id: "u1", organizer_org_id: "org-host" })).toBe(true)
+    // The function cannot even see the creator: the type takes the organising org alone.
+    expect(reachedThroughBuilding("organizer", actor, { organizer_org_id: null })).toBe(true)
+    expect(reachedThroughBuilding("organizer", actor, { organizer_org_id: "org-host" })).toBe(true)
   })
 
   it("never for the platform's admin", () => {

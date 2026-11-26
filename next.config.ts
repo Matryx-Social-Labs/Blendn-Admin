@@ -9,24 +9,6 @@ const cspReportUri = sentryCspReportUri(
 );
 
 const nextConfig: NextConfig = {
-  // Image optimization
-  images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "**.amazonaws.com",
-      },
-      {
-        protocol: "https",
-        hostname: "**.googleusercontent.com",
-      },
-      {
-        protocol: "https",
-        hostname: "**.cloudinary.com",
-      },
-    ],
-  },
-
   // Disable x-powered-by header
   poweredByHeader: false,
 

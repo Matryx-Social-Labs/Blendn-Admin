@@ -4396,13 +4396,14 @@ Chat is unaffected: posting a message is its own choice to be seen.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/uploads/presigned-url` | Get S3 presigned upload URL |
-| DELETE | `/uploads/delete` | Delete uploaded file |
+| DELETE | `/uploads/delete` | Delete your own `profile` or `chat` upload; any other URL is `403` |
 
 ### POST /uploads/presigned-url
 ```json
-{ "filename": "photo.jpg", "contentType": "image/jpeg", "folder": "profile|chat|events", "size": 183422 }
+{ "filename": "photo.jpg", "contentType": "image/jpeg", "folder": "profile|chat", "size": 183422 }
 ```
-Note: `events` folder requires organizer/admin role.
+`folder` is `profile` or `chat`; anything else is `400`. Event media is uploaded
+from the dashboard (`POST /api/uploads/presigned-url`), never from the app.
 
 `size` is the file's byte length. When sent it is signed into the URL as
 `content-length`, so storage refuses a PUT of any other size; a `size` above the

@@ -109,7 +109,7 @@ export function mayUseConversation(
 export async function canJoinEvent(userId: string, eventId: string): Promise<boolean> {
   const event = await db.events.findFirst({
     where: { id: eventId, deleted_at: null },
-    select: { visibility: true, status: true, organizer_id: true, ...eventPermissionSelect },
+    select: { visibility: true, status: true, ...eventPermissionSelect },
   })
   if (!event) return false
   // A hidden event has no counter either (SCRUM-8) — see `canJoinChat`.
@@ -127,14 +127,11 @@ export async function canJoinEvent(userId: string, eventId: string): Promise<boo
   /*
    * Staff access is organisation-shaped, like everywhere else: a colleague at
    * the organisation running the event, or at the venue hosting it, operates
-   * it and may watch its counter. `organizer_id` stays as the legacy creator
-   * fallback `visibleEventsWhere` keeps for the same reason — a row created
-   * before organisations existed must not vanish from its creator — and goes
-   * when that one does. This function is now also what `attendeeEventAccess`
+   * it and may watch its counter. Never who created the row (SCRUM-1250), as
+   * `visibleEventsWhere`. This function is also what `attendeeEventAccess`
    * asks about a private event, so answering by creator alone would have told
    * the creator's own colleagues "not found" through the mobile API.
    */
-  if (event.organizer_id === userId) return true
   const user = await db.user.findUnique({ where: { id: userId }, select: { role: true } })
   if (user && eventPermissions(await actorFor({ id: userId, role: user.role }), event).canOperate) {
     return true

@@ -13,8 +13,8 @@ import {
 } from "@/lib/api-response"
 import { readJson } from "@/lib/api-input"
 
-/** What a person may delete of their own: their photos, their chat media, their event media. */
-const DELETABLE_FOLDERS: UploadFolder[] = ["profile", "chat", "events"]
+/** What a person may delete of their own: their photos and their chat media. Event media is the dashboard's. */
+const DELETABLE_FOLDERS: UploadFolder[] = ["profile", "chat"]
 
 const deleteSchema = z.object({
   url: z.string().url(),

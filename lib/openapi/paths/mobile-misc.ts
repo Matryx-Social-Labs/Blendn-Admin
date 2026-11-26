@@ -758,6 +758,7 @@ registry.registerPath({
   path: "/api/mobile/uploads/delete",
   tags: ["Mobile Uploads"],
   summary: "Delete uploaded file",
+  description: "Only your own `profile` or `chat` upload (`<folder>/<yourId>/…` on our bucket); any other URL is 403.",
   security: bearerAuth,
   request: {
     body: { content: { "application/json": { schema: DeleteUploadRequestSchema } } },
