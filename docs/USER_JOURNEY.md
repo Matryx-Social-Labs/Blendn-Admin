@@ -318,8 +318,7 @@ p22 masks, and shows the photo anyway.
 **Decided: anonymity by default, opt in to be public.** Already how the API works
 — `reveal_by_default` false, per-event `revealed`, enforced inside `rankMatches`.
 
-So the **design changes**, not the build. That is a real ask of the designer and
-`DESIGN_HANDOFF.md` explains why rather than announcing it.
+So the **design changes**, not the build. That is a real ask of the designer.
 
 ---
 
@@ -329,4 +328,4 @@ Every gap from this document lands in exactly one roadmap:
 
 - **API side** → `docs/ROADMAP.md` here
 - **App side** → `blendn/ROADMAP.md`
-- **Design** → `docs/DESIGN_HANDOFF.md`
+- **Design** → Jira, the design Epic (SCRUM-1129); a dashboard screen goes through `docs/DESIGN-CHAIN.md`

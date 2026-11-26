@@ -220,12 +220,11 @@ export interface AdminOverview {
 /* -------------------------------------------------------------------------- */
 
 /**
- * A venue, derived by grouping events on `events.venue_name`.
- *
- * There is no `venues` table — see docs/DASHBOARD_REDESIGN.md. Consequences
- * that show up in the UI: `capacity` is the largest capacity any event at this
+ * A venue: the events linked to one `venues` row, or, for events with no
+ * venue, those sharing a normalised `events.venue_name`. Consequences that
+ * show up in the UI: `capacityProxy` is the largest capacity any event at this
  * venue declared (a proxy, not the room's real capacity), and two spellings of
- * the same room are two venues.
+ * the same unlinked room are two venues.
  */
 export interface VenueRow {
   /**

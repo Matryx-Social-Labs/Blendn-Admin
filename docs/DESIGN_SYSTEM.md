@@ -267,10 +267,6 @@ organisation, and `events.venue_id` links to it.
 places that are not on the platform — `venue_id` is null for those, and the name
 is all there is. Any screen showing venues has to handle both.
 
-One thing has not caught up: `components/event-editor.tsx` never sets
-`venue_id`, so an event created through the dashboard does not link to a claimed
-venue and its owner never sees it. See `docs/CLAUDE_DESIGN_BRIEF.md` §2.4.
-
 ## Navigation and roles
 
 `lib/dashboard-nav.ts` holds the nav config and `visibleNavFor(role)`, outside
