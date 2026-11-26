@@ -30,6 +30,12 @@ describe("openaiKeyProblem", () => {
     expect(openaiKeyProblem(key, "production")).toMatch(/^OPENAI_API_KEY /)
   })
 
+  it("says what is required and where to set it", () => {
+    expect(openaiKeyProblem(undefined, "production")).toBe(
+      "OPENAI_API_KEY is required in production: set it on the Railway production service"
+    )
+  })
+
   it("allows production with a key", () => {
     expect(openaiKeyProblem("sk-test", "production")).toBeNull()
   })

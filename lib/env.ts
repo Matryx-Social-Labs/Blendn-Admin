@@ -282,7 +282,7 @@ export function openaiKeyProblem(
   environmentName: string | undefined
 ): string | null {
   if (environmentName !== "production" || key?.trim()) return null
-  return "OPENAI_API_KEY is required in production: without it moderation is the keyword list alone"
+  return "OPENAI_API_KEY is required in production: set it on the Railway production service"
 }
 
 const DEFAULT_SITE_ORIGIN = "https://www.blendn.app"
