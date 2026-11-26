@@ -292,8 +292,8 @@ const chatTarget: Target = {
   },
 }
 
-export async function sweepOrphanPhotos(opts: { now?: Date; mode?: OrphanMode; maxDeletes?: number } = {}): Promise<OrphanPass> {
-  return sweepTarget(profileTarget, opts.now ?? new Date(), opts.mode ?? orphanModeFromEnv(), opts.maxDeletes ?? MAX_DELETES_PER_PASS)
+export async function sweepOrphanPhotos(opts: { now?: Date; mode?: OrphanMode } = {}): Promise<OrphanPass> {
+  return sweepTarget(profileTarget, opts.now ?? new Date(), opts.mode ?? orphanModeFromEnv(), MAX_DELETES_PER_PASS)
 }
 
 /** Raw chat uploads that were never sent, out of the chat bucket (SCRUM-1387). Same switch, grace and budget as photos. */
@@ -316,20 +316,16 @@ export async function sweepAllOrphans(opts: { now?: Date; mode?: OrphanMode } = 
 let timer: ReturnType<typeof setTimeout> | null = null
 let stopped = false
 
-async function run(): Promise<void> {
-  await sweepAllOrphans()
-}
-
 /** Self-scheduling, like the other sweepers. */
 export function startOrphanPhotoSweeper(): void {
   if (timer) return
   stopped = false
   const schedule = () => {
     if (stopped) return
-    timer = setTimeout(() => void run().finally(schedule), ORPHAN_SWEEP_INTERVAL_MS)
+    timer = setTimeout(() => void sweepAllOrphans().finally(schedule), ORPHAN_SWEEP_INTERVAL_MS)
     timer.unref?.()
   }
-  void run().finally(schedule)
+  void sweepAllOrphans().finally(schedule)
 }
 
 /** Stops the loop, and the next start reads the bucket from the top again. */
