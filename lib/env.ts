@@ -56,8 +56,9 @@ const envSchema = z.object({
   /// secret: anyone holding the URL can post to that channel.
   LEADS_SLACK_WEBHOOK_URL: z.string().url().optional(),
   /// Where staff hear about new reports and severe flags (`lib/staff-alert.ts`,
-  /// every minute; counts and a link only). Same two free channels as the lead
-  /// alert, both optional: unset means a log line, never a throw. The webhook
+  /// every minute: counts and a link; a pulled sexual image's page adds its storage
+  /// key and user id). Same two free channels as the lead alert, both optional:
+  /// unset means a log line (an error in production), never a throw. The webhook
   /// URL is a bearer secret and is never logged.
   STAFF_ALERT_SLACK_WEBHOOK_URL: z.string().url().optional(),
   STAFF_ALERT_EMAIL: z.string().email().optional(),

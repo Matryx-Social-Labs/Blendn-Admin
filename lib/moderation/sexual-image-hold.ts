@@ -18,10 +18,8 @@ const PAGE_COOLDOWN_MS = 10 * 60 * 1000
 const lastPaged = new Map<string, number>()
 
 /**
- * A sexual image that moderation pulled goes to a person (SCRUM-1163).
- *
- * Every sexual image that is pulled goes to a person, who looks for a minor or
- * a non-consensual image.
+ * A sexual image that moderation pulled goes to a person, who looks for a minor
+ * or a non-consensual image (SCRUM-1163).
  *
  * Called by each image path AFTER its own pull (profile and blur photos are
  * withdrawn to the private bucket, a Lobby photo is rejected and stays in it):

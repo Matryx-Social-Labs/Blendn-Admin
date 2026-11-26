@@ -45,7 +45,7 @@ const HOUR_MS = 60 * 60 * 1000
 
 export type StaffNotice = "sent" | "unconfigured" | "failed"
 
-/** Tell staff something now, in counts and links only (task 03 pages through this). Never throws. */
+/** Tell staff something now: the sweep's counts, or a pulled image's page (`moderation/sexual-image-hold.ts`). Never throws. */
 export async function notifyStaff(text: string): Promise<StaffNotice> {
   const channels = channelsFrom("STAFF_ALERT_SLACK_WEBHOOK_URL", "STAFF_ALERT_EMAIL")
   if (!channels) {
