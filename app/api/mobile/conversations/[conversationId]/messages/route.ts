@@ -19,7 +19,7 @@ import {
 } from "@/lib/api-response"
 import { z } from "zod"
 import { httpsUrl } from "@/lib/https-url"
-import { beganAsRequest, displayNameInConversation, mayShowRealName } from "@/lib/conversation-identity"
+import { displayNameInConversation, mayShowRealName } from "@/lib/conversation-identity"
 import { screenDirectMessage, VISIBLE_DM } from "@/lib/dm-moderation"
 import { emitPrivateMessage } from "@/lib/socket-server"
 import { isReadForViewer } from "@/lib/read-receipts"
@@ -470,7 +470,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * name of someone the recipient only knows by a pseudonym -- and a lock
      * screen is not an authenticated surface. A conversation that began as a
      * request has real names for good, so its push carries neither the name
-     * nor the words (`fromRequest`, SCRUM-1266); a friends' DM keeps both.
+     * nor the words (`notifyPrivateMessage` reads the conversation, SCRUM-1266);
+     * a friends' DM keeps both.
      */
     const senderName = displayNameInConversation(
       conversation,
@@ -496,7 +497,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             preview: messagePreview,
             conversationId,
             unread,
-            fromRequest: beganAsRequest(conversation),
+            conversation,
           })
         )
         .catch((err) =>

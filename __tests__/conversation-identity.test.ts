@@ -159,6 +159,11 @@ describe("beganAsRequest", () => {
     expect(beganAsRequest({ ...conv({ user1_revealed: true, user2_revealed: true }), origin_friendship: false })).toBe(false)
     expect(beganAsRequest({ ...conv(never), origin_friendship: true })).toBe(false)
   })
+
+  it("is false with one pseudonym on either side: one side set means it was pseudonymous", () => {
+    expect(beganAsRequest({ ...conv({ user2_pseudonym: null }), origin_friendship: false })).toBe(false)
+    expect(beganAsRequest({ ...conv({ user1_pseudonym: null }), origin_friendship: false })).toBe(false)
+  })
 })
 
 describe("no path names a participant without going through the resolver", () => {

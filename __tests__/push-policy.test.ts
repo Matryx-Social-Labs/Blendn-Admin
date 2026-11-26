@@ -191,6 +191,11 @@ describe("where each kind lands", () => {
   })
 })
 
+/** A match's conversation: pseudonymous, so its push keeps the name its caller resolved. */
+const MATCH = { user1_pseudonym: "Quiet Otter", user2_pseudonym: "Amber Fox", origin_friendship: false }
+/** An accepted message request's: never pseudonymous, not opened between friends. */
+const REQUEST = { user1_pseudonym: null, user2_pseudonym: null, origin_friendship: false }
+
 describe("a burst of DMs is one alert", () => {
   const dm = (unread: number, preview = "hey") =>
     notifyPrivateMessage({
@@ -199,7 +204,7 @@ describe("a burst of DMs is one alert", () => {
       preview,
       conversationId: "c1",
       unread,
-      fromRequest: false,
+      conversation: MATCH,
     })
 
   it("the first unread message rings, with its words", async () => {
@@ -240,7 +245,7 @@ describe("a burst of DMs is one alert", () => {
 
   it("one conversation's burst does not silence another's", async () => {
     await dm(1)
-    await notifyPrivateMessage({ recipientId: "r", senderName: "Cosmic Panda", preview: "hi", conversationId: "c2", unread: 1, fromRequest: false })
+    await notifyPrivateMessage({ recipientId: "r", senderName: "Cosmic Panda", preview: "hi", conversationId: "c2", unread: 1, conversation: MATCH })
     expect(mockSent).toHaveLength(2)
   })
 })
@@ -252,18 +257,18 @@ describe("a DM in a conversation that began as a request carries no name and no 
    * 100 characters, on a lock screen anybody can read. The app shows both
    * behind sign-in; the push says only that a message came.
    */
-  const dm = (unread: number, fromRequest: boolean) =>
+  const dm = (unread: number, conversation: Parameters<typeof notifyPrivateMessage>[0]["conversation"]) =>
     notifyPrivateMessage({
       recipientId: "r",
       senderName: "Priya Raman",
       preview: "meet me by the back door at 9",
       conversationId: "c1",
       unread,
-      fromRequest,
+      conversation,
     })
 
   it("the first unread message says a message came, and nothing of who or what", async () => {
-    await dm(1, true)
+    await dm(1, REQUEST)
     expect(mockSent).toHaveLength(1)
     expect(mockSent[0]).toMatchObject({ title: "New message", body: "Open Blend’n to read it", collapseId: "dm:c1", channelId: "messages" })
     expect(JSON.stringify(mockSent[0])).not.toMatch(/Priya|back door/)
@@ -271,18 +276,22 @@ describe("a DM in a conversation that began as a request carries no name and no 
 
   it("a burst after the window is counted, under the same title", async () => {
     jest.useFakeTimers({ now: new Date("2026-11-26T20:00:00Z") })
-    await dm(1, true)
+    await dm(1, REQUEST)
     jest.setSystemTime(Date.now() + DM_PUSH_WINDOW_MS + 1)
-    await dm(3, true)
+    await dm(3, REQUEST)
     expect(mockSent.map((m) => [m.title, m.body])).toEqual([
       ["New message", "Open Blend’n to read it"],
       ["New message", "3 new messages"],
     ])
   })
 
-  it("control: any other conversation keeps the name its caller resolved and the words", async () => {
-    await dm(1, false)
-    expect(mockSent[0]).toMatchObject({ title: "Priya Raman", body: "meet me by the back door at 9" })
+  it("control: a match's and a friends' DM keep the name their caller resolved and the words", async () => {
+    await dm(1, MATCH)
+    await dm(1, { ...REQUEST, origin_friendship: true })
+    expect(mockSent.map((m) => [m.title, m.body])).toEqual([
+      ["Priya Raman", "meet me by the back door at 9"],
+      ["Priya Raman", "meet me by the back door at 9"],
+    ])
   })
 })
 
@@ -293,7 +302,7 @@ describe("messages live in their inbox, not the bell", () => {
    * only the bell carries — a friend request, a cancelled event.
    */
   it("a DM push writes no bell row", async () => {
-    await notifyPrivateMessage({ recipientId: "r", senderName: "x", preview: "y", conversationId: "c1", unread: 1, fromRequest: false })
+    await notifyPrivateMessage({ recipientId: "r", senderName: "x", preview: "y", conversationId: "c1", unread: 1, conversation: MATCH })
     expect(created).not.toHaveBeenCalled()
   })
 
@@ -368,7 +377,7 @@ describe("a bell row reaches an open app at once", () => {
   })
 
   it("says nothing for a message, which writes no row", async () => {
-    await notifyPrivateMessage({ recipientId: "r", senderName: "x", preview: "y", conversationId: "c1", unread: 1, fromRequest: false })
+    await notifyPrivateMessage({ recipientId: "r", senderName: "x", preview: "y", conversationId: "c1", unread: 1, conversation: MATCH })
     expect(emitted).toHaveLength(0)
   })
 

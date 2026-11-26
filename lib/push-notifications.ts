@@ -10,6 +10,7 @@ import { hit } from "./rate-limit-store"
 import { isRoomMuted } from "./room-mute"
 import { badgeCountsFor } from "./badge-count"
 import { characters, clipCharacters } from "./utils"
+import { beganAsRequest } from "./conversation-identity"
 
 // Create a new Expo SDK client
 const expo = new Expo()
@@ -996,7 +997,7 @@ export function clip(text: string, max: number): string {
  * notification for it, updated, rather than a column.
  *
  * The body is still the message on the first alert, except in a conversation
- * that began as a message request (`fromRequest`, from `beganAsRequest`): that
+ * that began as a message request (`beganAsRequest`): that
  * one shows real names for good, so its push is "New message" with neither the
  * name nor the words (launch gate 7, SCRUM-1266). A match keeps the name its
  * caller resolved, which is a pseudonym until both swap.
@@ -1011,16 +1012,18 @@ export async function notifyPrivateMessage(dm: {
   preview: string
   conversationId: string
   unread: number
-  fromRequest: boolean
+  /** The conversation's origin, read here so no caller can decide the name and words onto a lock screen. */
+  conversation: Parameters<typeof beganAsRequest>[0]
 }): Promise<boolean> {
   const fresh = await firstInWindow(`push:dm:${dm.conversationId}:${dm.recipientId}`, DM_PUSH_WINDOW_MS)
   if (dm.unread > 1 && !fresh) return false
 
+  const named = !beganAsRequest(dm.conversation)
+  const body = dm.unread > 1 ? `${dm.unread} new messages` : named ? clip(dm.preview, 100) : "Open Blend’n to read it"
   return sendPushNotification({
     userId: dm.recipientId,
-    title: dm.fromRequest ? "New message" : dm.senderName,
-    body:
-      dm.unread > 1 ? `${dm.unread} new messages` : dm.fromRequest ? "Open Blend’n to read it" : clip(dm.preview, 100),
+    title: named ? dm.senderName : "New message",
+    body,
     data: { type: "private_message", conversationId: dm.conversationId },
   })
 }
