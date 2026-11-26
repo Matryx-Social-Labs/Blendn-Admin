@@ -50,8 +50,24 @@ async function signedInAdmin() {
   return id
 }
 
+async function anotherAdmin() {
+  return person("lock-admin-b@matrixsociallabs.com", "app_admin")
+}
+
 const roleOf = async (id: string) => (await db.user.findUniqueOrThrow({ where: { id }, select: { role: true } })).role
-const auditRows = (id: string) => db.audit_logs.findMany({ where: { resource_id: id }, select: { action: true, details: true, user_id: true } })
+const auditRows = (id: string) =>
+  db.audit_logs.findMany({ where: { resource_id: id }, select: { action: true, details: true, user_id: true }, orderBy: { created_at: "asc" } })
+const roleChanges = async (id: string) => (await auditRows(id)).filter((r) => r.action === "user.role_changed")
+const stateOf = (id: string) =>
+  db.user.findUniqueOrThrow({ where: { id }, select: { role: true, admin_requested_by: true, admin_requested_at: true } })
+const NO_REQUEST = { role: "attendee", admin_requested_by: null, admin_requested_at: null }
+const HOUR = 60 * 60 * 1000
+/** A request recorded by `by` just now: `new Date()`, because some cases mock Date.now. */
+async function expectFreshRequest(id: string, by: string) {
+  const state = await stateOf(id)
+  expect(state).toMatchObject({ role: "attendee", admin_requested_by: by })
+  expect(Math.abs(state.admin_requested_at!.getTime() - new Date().getTime())).toBeLessThan(60_000)
+}
 
 describe("making someone an admin", () => {
   it("refuses an address off the company domain, and writes nothing", async () => {
@@ -74,17 +90,22 @@ describe("making someone an admin", () => {
     expect(await auditRows(id)).toEqual([])
   })
 
-  it("works for a company address, with exactly one role_changed row", async () => {
-    const adminId = await signedInAdmin()
+  it("works for a company address once a second admin confirms, with exactly one role_changed row", async () => {
+    const a = await signedInAdmin()
+    const b = await anotherAdmin()
     const id = await person("x@matrixsociallabs.com")
 
     await updateUserRole(id, "app_admin")
+    session = { user: { id: b, role: "app_admin" } }
+    await updateUserRole(id, "app_admin")
 
     expect(await roleOf(id)).toBe("app_admin")
-    expect(await auditRows(id)).toEqual([{ action: "user.role_changed", details: { from: "attendee", to: "app_admin" }, user_id: adminId }])
+    expect(await roleChanges(id)).toEqual([
+      { action: "user.role_changed", details: { from: "attendee", to: "app_admin", requestedBy: a, approvedBy: b }, user_id: b },
+    ])
   })
 
-  it("changes nothing when the audit row cannot be written", async () => {
+  it("records nothing when the request's audit row cannot be written", async () => {
     await signedInAdmin()
     const id = await person("y@matrixsociallabs.com")
     jest.mocked(auditInTx).mockRejectedValueOnce(new Error("audit write failed"))
@@ -92,7 +113,7 @@ describe("making someone an admin", () => {
     await expect(updateUserRole(id, "app_admin")).rejects.toThrow("audit write failed")
 
     expect(auditInTx).toHaveBeenCalled()
-    expect(await roleOf(id)).toBe("attendee")
+    expect(await stateOf(id)).toEqual(NO_REQUEST)
     expect(await auditRows(id)).toEqual([])
   })
 
@@ -146,6 +167,250 @@ describe("the last admin", () => {
 
     expect(await roleOf(second)).toBe("organizer")
     expect(await roleOf(adminId)).toBe("app_admin")
+  })
+})
+
+/*
+ * Promotion to admin needs a second admin (SCRUM-1240, launch gate 10). The first
+ * admin's save records a request; a different, live admin confirms it within 24 h.
+ */
+describe("a second admin", () => {
+  const as = (id: string) => {
+    session = { user: { id, role: "app_admin" } }
+  }
+  async function requested(by: string, at: Date) {
+    const id = await person("p@matrixsociallabs.com")
+    await db.user.update({ where: { id }, data: { admin_requested_by: by, admin_requested_at: at } })
+    return id
+  }
+
+  it("A's save is a request: the role is unchanged, the request and one audit row are recorded", async () => {
+    const a = await signedInAdmin()
+    const id = await person("p@matrixsociallabs.com")
+
+    await expect(updateUserRole(id, "app_admin")).resolves.toEqual({ success: true, pending: true })
+
+    const state = await stateOf(id)
+    expect(state).toMatchObject({ role: "attendee", admin_requested_by: a })
+    expect(Math.abs(state.admin_requested_at!.getTime() - Date.now())).toBeLessThan(60_000)
+    expect(await auditRows(id)).toEqual([{ action: "user.admin_promotion_requested", details: { to: "app_admin" }, user_id: a }])
+  })
+
+  it("refuses promoting someone who is already an admin, and records nothing", async () => {
+    await signedInAdmin()
+    const id = await anotherAdmin()
+
+    await expect(updateUserRole(id, "app_admin")).rejects.toThrow("already an admin")
+
+    expect(await stateOf(id)).toEqual({ role: "app_admin", admin_requested_by: null, admin_requested_at: null })
+    expect(await auditRows(id)).toEqual([])
+  })
+
+  it("A confirming A's own request is still a request", async () => {
+    const a = await signedInAdmin()
+    const id = await person("p@matrixsociallabs.com")
+
+    await updateUserRole(id, "app_admin")
+    await expect(updateUserRole(id, "app_admin")).resolves.toEqual({ success: true, pending: true })
+
+    expect(await stateOf(id)).toMatchObject({ role: "attendee", admin_requested_by: a })
+    expect(await roleChanges(id)).toEqual([])
+  })
+
+  it("B confirming A's request makes the admin, clears the request, and the row names both", async () => {
+    const a = await signedInAdmin()
+    const b = await anotherAdmin()
+    const id = await person("p@matrixsociallabs.com")
+
+    await updateUserRole(id, "app_admin")
+    as(b)
+    await expect(updateUserRole(id, "app_admin")).resolves.toEqual({ success: true })
+
+    expect(await stateOf(id)).toEqual({ role: "app_admin", admin_requested_by: null, admin_requested_at: null })
+    expect(await auditRows(id)).toEqual([
+      { action: "user.admin_promotion_requested", details: { to: "app_admin" }, user_id: a },
+      { action: "user.role_changed", details: { from: "attendee", to: "app_admin", requestedBy: a, approvedBy: b }, user_id: b },
+    ])
+  })
+
+  it("a request 25 h old has lapsed: A's save restarts it as A's own", async () => {
+    const a = await signedInAdmin()
+    const b = await anotherAdmin()
+    const id = await requested(b, new Date(Date.now() - 25 * HOUR))
+
+    await expect(updateUserRole(id, "app_admin")).resolves.toEqual({ success: true, pending: true })
+
+    await expectFreshRequest(id, a)
+    expect(await roleChanges(id)).toEqual([])
+  })
+
+  describe("the 24 h window (ADMIN_REQUEST_MS): a request exactly 24 h old has lapsed", () => {
+    const at = new Date("2026-11-20T10:00:00.000Z")
+    afterEach(() => jest.restoreAllMocks())
+
+    it("1 ms short of 24 h it is confirmed", async () => {
+      await signedInAdmin()
+      const b = await anotherAdmin()
+      const id = await requested(b, at)
+      jest.spyOn(Date, "now").mockReturnValue(at.getTime() + 24 * HOUR - 1)
+
+      await expect(updateUserRole(id, "app_admin")).resolves.toEqual({ success: true })
+      expect(await roleOf(id)).toBe("app_admin")
+    })
+
+    it("at exactly 24 h it restarts as a request", async () => {
+      const a = await signedInAdmin()
+      const b = await anotherAdmin()
+      const id = await requested(b, at)
+      jest.spyOn(Date, "now").mockReturnValue(at.getTime() + 24 * HOUR)
+
+      await expect(updateUserRole(id, "app_admin")).resolves.toEqual({ success: true, pending: true })
+      await expectFreshRequest(id, a)
+    })
+  })
+
+  describe("a requester who is no longer a live admin does not count: the save restarts as the approver's request", () => {
+    it.each([
+      ["demoted", { role: "organizer" as const }],
+      ["suspended", { suspended_at: new Date() }],
+      ["erased", { deletedAt: new Date() }],
+    ])("%s", async (_, change) => {
+      const a = await signedInAdmin()
+      const b = await anotherAdmin()
+      const id = await requested(b, new Date())
+      await db.user.update({ where: { id: b }, data: change })
+
+      await expect(updateUserRole(id, "app_admin")).resolves.toEqual({ success: true, pending: true })
+
+      await expectFreshRequest(id, a)
+      expect(await roleChanges(id)).toEqual([])
+    })
+  })
+
+  it("refuses an approver who was suspended after signing in, checked inside the transaction", async () => {
+    const a = await signedInAdmin()
+    const b = await anotherAdmin()
+    const id = await requested(a, new Date())
+    as(b)
+    // B passes requireAdmin; another admin suspends B before the write.
+    const read = appDb.user.findUnique.bind(appDb.user)
+    const spy = jest.spyOn(appDb.user, "findUnique").mockImplementation((async (args: { where: { id?: string } }) => {
+      const row = await read(args as never)
+      if (args.where.id === id) await db.user.update({ where: { id: b }, data: { suspended_at: new Date() } })
+      return row
+    }) as never)
+    try {
+      await expect(updateUserRole(id, "app_admin")).rejects.toThrow("Forbidden")
+    } finally {
+      spy.mockRestore()
+    }
+
+    expect(await stateOf(id)).toMatchObject({ role: "attendee", admin_requested_by: a })
+    expect(await roleChanges(id)).toEqual([])
+  })
+
+  describe("a target that changed between the request and the approval is never promoted", () => {
+    it("suspended since the request: refused", async () => {
+      const a = await signedInAdmin()
+      const b = await anotherAdmin()
+      const id = await requested(a, new Date())
+      await db.user.update({ where: { id }, data: { suspended_at: new Date() } })
+      as(b)
+
+      await expect(updateUserRole(id, "app_admin")).rejects.toThrow("A suspended account can't be made an admin")
+      expect(await stateOf(id)).toMatchObject({ role: "attendee" })
+      expect(await roleChanges(id)).toEqual([])
+    })
+
+    it("erased since the request: refused", async () => {
+      const a = await signedInAdmin()
+      const b = await anotherAdmin()
+      const id = await requested(a, new Date())
+      await db.user.update({ where: { id }, data: { deletedAt: new Date() } })
+      as(b)
+
+      await expect(updateUserRole(id, "app_admin")).rejects.toThrow("User not found")
+      expect(await stateOf(id)).toMatchObject({ role: "attendee" })
+      expect(await roleChanges(id)).toEqual([])
+    })
+
+    it.each([
+      ["re-addressed", (id: string) => ({ email: `moved${id.slice(-8)}@gmail.com` })],
+      ["suspended", () => ({ suspended_at: new Date() })],
+      ["erased", () => ({ deletedAt: new Date() })],
+    ])("%s after the approver's read, before the write: fails closed", async (_, change) => {
+      const a = await signedInAdmin()
+      const b = await anotherAdmin()
+      const id = await requested(a, new Date())
+      as(b)
+      const read = appDb.user.findUnique.bind(appDb.user)
+      const spy = jest.spyOn(appDb.user, "findUnique").mockImplementation((async (args: { where: { id?: string } }) => {
+        const row = await read(args as never)
+        if (args.where.id === id) await db.user.update({ where: { id }, data: change(id) })
+        return row
+      }) as never)
+      try {
+        await expect(updateUserRole(id, "app_admin")).rejects.toThrow()
+      } finally {
+        spy.mockRestore()
+      }
+
+      expect(await stateOf(id)).toMatchObject({ role: "attendee", admin_requested_by: a })
+      expect(await roleChanges(id)).toEqual([])
+    })
+  })
+
+  it("two admins confirming at the same moment make one admin and one role_changed row", async () => {
+    const a = await signedInAdmin()
+    const b = await anotherAdmin()
+    const c = await anotherAdmin()
+    const id = await requested(a, new Date())
+
+    as(b)
+    const first = updateUserRole(id, "app_admin")
+    as(c)
+    const second = updateUserRole(id, "app_admin")
+    const results = await Promise.allSettled([first, second])
+
+    expect(results.filter((r) => r.status === "fulfilled")).toEqual([{ status: "fulfilled", value: { success: true } }])
+    expect(await stateOf(id)).toEqual({ role: "app_admin", admin_requested_by: null, admin_requested_at: null })
+    expect(await roleChanges(id)).toHaveLength(1)
+  })
+
+  it("promotes nothing when the approval's audit row cannot be written", async () => {
+    const a = await signedInAdmin()
+    const b = await anotherAdmin()
+    const id = await requested(a, new Date())
+    as(b)
+    jest.mocked(auditInTx).mockRejectedValueOnce(new Error("audit write failed"))
+
+    await expect(updateUserRole(id, "app_admin")).rejects.toThrow("audit write failed")
+
+    expect(auditInTx).toHaveBeenCalled()
+    expect(await stateOf(id)).toMatchObject({ role: "attendee", admin_requested_by: a })
+    expect(await auditRows(id)).toEqual([])
+  })
+
+  it("demotion needs no second admin, and leaves a request on another row alone", async () => {
+    const a = await signedInAdmin()
+    const b = await anotherAdmin()
+    const pending = await requested(b, new Date())
+
+    await expect(updateUserRole(b, "organizer")).resolves.toEqual({ success: true })
+
+    expect(await roleOf(b)).toBe("organizer")
+    expect(await roleChanges(b)).toEqual([{ action: "user.role_changed", details: { from: "app_admin", to: "organizer" }, user_id: a }])
+    // Another row's request is untouched by it.
+    expect(await stateOf(pending)).toMatchObject({ admin_requested_by: b })
+  })
+
+  it("a role change to anything but admin clears a pending request on that row", async () => {
+    const a = await signedInAdmin()
+    const id = await requested(a, new Date())
+
+    await expect(updateUserRole(id, "organizer")).resolves.toEqual({ success: true })
+
+    expect(await stateOf(id)).toEqual({ role: "organizer", admin_requested_by: null, admin_requested_at: null })
   })
 })
 
