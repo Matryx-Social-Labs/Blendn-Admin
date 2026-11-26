@@ -255,10 +255,13 @@ describe("a door code at the check-in door", () => {
   it("refuses the code path when the counters cannot be read, and leaves GPS alone", async () => {
     const e = await event()
     const p = await person("entry")
-    const down = () => Promise.reject(new store.StoreUnavailable("down"))
-    jest.spyOn(store, "peekWindow").mockImplementation(down)
-    jest.spyOn(store, "peek").mockImplementation(down)
-    jest.spyOn(store, "hit").mockImplementation(down)
+    // Redis down as a fail-closed key sees it; the route's own fail-open `safety` limiter counts in memory as it would.
+    const { hit, peek, peekWindow } = store
+    const down = <A extends unknown[], R>(real: (key: string, ...rest: A) => Promise<R>) =>
+      (key: string, ...rest: A) => (key.startsWith("entry-") ? Promise.reject(new store.StoreUnavailable("down")) : real(key, ...rest))
+    jest.spyOn(store, "peekWindow").mockImplementation(down(peekWindow))
+    jest.spyOn(store, "peek").mockImplementation(down(peek))
+    jest.spyOn(store, "hit").mockImplementation(down(hit))
     const res = await checkIn(p.token, e.id, { ...fix(NEAR, 30), doorCode: code(e) })
     expect(res.status).toBe(503)
     expect(await res.json()).toMatchObject({ errorCode: "DOOR_CODE_UNAVAILABLE", error: "The door code isn't available right now. Try GPS." })
@@ -376,7 +379,8 @@ describe("the host's Door", () => {
     const member = await db.chat_group_members.findFirstOrThrow({ where: { user_id: guest.id, chat_group: { event_id: e.id } } })
     expect(view.arrivals[0].pseudonym).toBe(member.anonymous_name)
     const text = JSON.stringify(view)
-    for (const leak of [guest.id, `${guest.id}@itest.invalid`, "Test entry"]) expect(text).not.toContain(leak)
+    const account = await db.user.findUniqueOrThrow({ where: { id: guest.id }, select: { name: true, email: true } })
+    for (const leak of [guest.id, account.email, account.name!]) expect(text).not.toContain(leak)
 
     // The tab asks without the code.
     const tab = await readDoor(e.id, false)

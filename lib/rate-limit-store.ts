@@ -334,6 +334,32 @@ export async function peek(key: string, opts: StoreOptions = {}): Promise<number
 }
 
 /**
+ * `peek` with when the window ends (epoch ms; `now` when there is none): a
+ * lock that names its time ("Try again at 10:52 PM"). Same rules as `hit`,
+ * `failClosed` included.
+ */
+export async function peekWindow(key: string, opts: StoreOptions = {}): Promise<HitResult> {
+  const now = Date.now()
+  const redis = await redisFor(key, opts)
+  if (redis) {
+    try {
+      const [value, ttl] = (await bounded(
+        (redis.multi() as unknown as { get(k: string): { pTTL(k: string): { exec(): Promise<unknown> } } }).get(key).pTTL(key).exec()
+      )) as [string | null, number]
+      return { count: value ? Number(value) || 0 : 0, resetAt: now + (ttl > 0 ? ttl : 0) }
+    } catch (error) {
+      if (opts.failClosed) {
+        logger.warn("Fail-closed limiter refused: Redis read failed", { key, error: error instanceof Error ? error.message : String(error) })
+        throw new StoreUnavailable("rate limit store unavailable")
+      }
+      logger.warn("Rate limit Redis peek failed, falling back to memory", { error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  const existing = memory.get(key)
+  return existing && now <= existing.resetAt ? { count: existing.count, resetAt: existing.resetAt } : { count: 0, resetAt: now }
+}
+
+/**
  * Give back one hit: for a caller that reserves before it knows the outcome
  * (`hit`, do the work, `release` on success), so that concurrent callers cannot
  * all read "under the cap" before any of them counts. Never goes below zero and
