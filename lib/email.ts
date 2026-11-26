@@ -497,9 +497,9 @@ export function resultsEmail(r: NightResults) {
   const lines = [
     r.checkedIn === null ? "Fewer than 5 people checked in on Blend’n." : `${count(r.checkedIn)} people checked in on Blend’n.`,
     r.averageRating === null
-      ? "Guests are asked to rate the night today. The average shows on the Overview once 5 people have rated."
+      ? "Guests are asked to rate the night today. The average shows on the results page once 5 people have rated."
       : `${r.averageRating.toFixed(1)} average rating from ${count(r.ratingCount)} people.`,
-    ...(r.moodMessages > 0 ? [`${count(r.moodMessages)} room messages read for the night’s mood.`] : []),
+    ...(r.moodMessages > 0 ? [`The room’s mood, from ${count(r.moodMessages)} chat message${r.moodMessages === 1 ? "" : "s"}, is on the results page.`] : []),
   ]
   const note = r.checkedIn === null ? "Counts under 5 show as “fewer than 5”, so nobody can be picked out." : null
   const subject = `${r.title}: your night in numbers`

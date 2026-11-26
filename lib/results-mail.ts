@@ -4,6 +4,7 @@ import { db } from "./db"
 import { discloseHeadcount, discloseStars, spreadsByEventId } from "./disclosure"
 import { canonicalEmail, dashboardUrl, noCheckInsEmail, resultsEmail, sendEmail } from "./email"
 import { emailReplyTo } from "./env"
+import { buildFeedbackDigest } from "./feedback-digest"
 import { realEventsWhere } from "./event-kind"
 import { nextLocalTime } from "./event-wall-clock"
 import { logger } from "./logger"
@@ -71,7 +72,7 @@ export async function sendResultsMails(now: Date = new Date()): Promise<number> 
 async function mailResults(event: MailedEvent): Promise<{ sent: number; failed: number }> {
   const orgId = event.organizer_org_id
   if (!orgId) return { sent: 0, failed: 0 }
-  const [members, checkIns, ratingGroups, moodMessages] = await Promise.all([
+  const [members, checkIns, ratingGroups, mood] = await Promise.all([
     // Organization membership, never `events.organizer_id`: a member who left gets nothing (CLAUDE.md RBAC).
     db.organisation_members.findMany({
       where: { org_id: orgId, role: { in: ["owner", "admin"] }, user: { deletedAt: null, suspended_at: null } },
@@ -80,8 +81,9 @@ async function mailResults(event: MailedEvent): Promise<{ sent: number; failed: 
     // The Overview's "Checked in" for an ended event: people, not rows, staff left out (`distinctAttendees`).
     db.event_check_ins.findMany({ where: { event_id: event.id, check_in_time: { not: null } }, select: { user_id: true, kind: true } }),
     publishedRatingGroups({ id: event.id }),
-    // The Overview's mood panel's "classified msgs" for a host: every row.
-    db.event_feedback.count({ where: { event_id: event.id } }),
+    // The Overview's "Mood — whole night" panel, built by the same call the event page makes (host view, no quotes),
+    // so the mail's count is the panel's "classified msgs" and can never show what the panel holds back.
+    buildFeedbackDigest(event, "host", null),
   ])
 
   const attended = distinctAttendees(checkIns)
@@ -109,7 +111,7 @@ async function mailResults(event: MailedEvent): Promise<{ sent: number; failed: 
             checkedIn: discloseHeadcount(attended),
             averageRating: stars.averageRating,
             ratingCount: stars.ratingCount,
-            moodMessages,
+            moodMessages: typeof mood.total === "number" ? mood.total : 0,
             overviewUrl: `${base}/dashboard/events/${event.id}`,
             nextUrl,
             unsubscribeUrl: unsubscribe,

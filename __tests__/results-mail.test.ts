@@ -9,13 +9,14 @@ const mockDb = {
   events: { findMany: jest.fn(), updateMany: jest.fn(), count: jest.fn() },
   organisation_members: { findMany: jest.fn() },
   event_check_ins: { findMany: jest.fn() },
-  event_feedback: { count: jest.fn() },
   email_suppressions: { findUnique: jest.fn() },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 
 const mockRatingGroups = jest.fn()
 jest.mock("@/lib/rating-batches", () => ({ publishedRatingGroups: (...a: unknown[]) => mockRatingGroups(...a) }))
+const mockDigest = jest.fn()
+jest.mock("@/lib/feedback-digest", () => ({ buildFeedbackDigest: (...a: unknown[]) => mockDigest(...a) }))
 
 import { sendResultsMails } from "@/lib/results-mail"
 import { RATING_REQUEST_ENDED_WITHIN_MS } from "@/lib/services/event-notifications.service"
@@ -58,7 +59,8 @@ function world(o: { attendees?: number; raters?: [number, number, number, number
   mockRatingGroups.mockResolvedValue(
     spread.flatMap((n, i) => (n ? [{ event_id: EVENT.id, rating: i + 1, _count: { _all: n } }] : []))
   )
-  mockDb.event_feedback.count.mockResolvedValue(o.feedback ?? 0)
+  // The host's view of the Overview's mood panel: its total is exact for a host at any size (moodSplit, "host").
+  mockDigest.mockResolvedValue({ total: o.feedback ?? 0 })
   mockDb.email_suppressions.findUnique.mockResolvedValue(null)
 }
 
@@ -226,7 +228,7 @@ describe("what", () => {
     expect(sent[0].text).toContain("6 people checked in on Blend’n.")
     expect(mockDb.event_check_ins.findMany.mock.calls[0][0].where).toEqual({ event_id: EVENT.id, check_in_time: { not: null } })
     // No mood messages: no mood line.
-    expect(sent[0].text).not.toContain("room messages")
+    expect(sent[0].text).not.toContain("room’s mood")
   })
 
   it("escapes the title in the HTML and links the footer's unsubscribe", async () => {
@@ -247,7 +249,7 @@ describe("what", () => {
     expect(mail.subject).toBe(`${title}: your night in numbers`)
     expect(mail.text).toContain("12,480 people checked in on Blend’n")
     expect(mail.text).toContain("4.1 average rating from 12 people")
-    expect(mail.text).toContain("318 room messages read for the night’s mood")
+    expect(mail.text).toContain("The room’s mood, from 318 chat messages, is on the results page.")
     expect(mail.text).toContain(`https://dashboard.blendn.app/dashboard/events/${EVENT.id}\n`)
     expect(mail.text).toContain("https://dashboard.blendn.app/dashboard/events/new")
     expect(mail.html).toContain("12,480")
@@ -265,9 +267,25 @@ describe("what", () => {
     expect(mail.text).not.toMatch(/\b3 people/)
     // Two raters: no average, and the count is not said either.
     expect(mail.text).not.toMatch(/average rating from/)
-    expect(mail.text).toContain("Guests are asked to rate the night today. The average shows on the Overview once 5 people have rated")
+    expect(mail.text).toContain("Guests are asked to rate the night today. The average shows on the results page once 5 people have rated")
     expect(mail.text).toContain("“fewer than 5”, so nobody can be picked out")
     expect(mail.html).toContain("Fewer than 5 people")
+  })
+
+  it("the mood count is the Overview's own: the same builder, host view, no quotes, and its figure as is", async () => {
+    // A three-person night with three classified messages: the host's Mood panel prints "3 classified msgs" (exact for
+    // a host by the owner's ruling of 2026-11-13), so the mail may say 3; a panel that held it back would hold it here.
+    world({ attendees: 3, feedback: 3 })
+    await sendResultsMails(TEN_IST)
+    expect(mockDigest).toHaveBeenCalledWith(expect.objectContaining({ id: EVENT.id, title: EVENT.title, timezone: EVENT.timezone }), "host", null)
+    expect(sent[0].text).toContain("The room’s mood, from 3 chat messages, is on the results page.")
+    // A total the builder holds back (a venue's shape) is never printed.
+    mockDigest.mockResolvedValue({ total: { atLeast: 20 } })
+    world({ attendees: 3 })
+    mockDigest.mockResolvedValue({ total: { atLeast: 20 } })
+    sent = []
+    await sendResultsMails(TEN_IST)
+    expect(sent[0].text).not.toContain("room’s mood")
   })
 
   it("carries one-click unsubscribe headers, the lifecycle tag, and no mailto without a reply inbox", async () => {

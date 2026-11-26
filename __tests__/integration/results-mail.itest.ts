@@ -120,6 +120,8 @@ describe("the sweep", () => {
     const body = mails.find((m) => m.to === owner1.email)!
     expect(body.subject).toBe("Results night: your night in numbers")
     expect(body.text).toContain("6 people checked in on Blend’n.")
+    // The Overview's mood builder, run for real: no classified messages, so no mood line.
+    expect(body.text).not.toContain("room’s mood")
     expect(body.text).toContain(`/dashboard/events/${id}\n`)
     expect((await db.events.findUnique({ where: { id }, select: { results_mailed_at: true } }))?.results_mailed_at).toEqual(NOW)
 
