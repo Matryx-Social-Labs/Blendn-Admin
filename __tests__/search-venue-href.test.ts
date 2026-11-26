@@ -7,7 +7,7 @@
  * dead end visible to every host.
  */
 jest.mock("@/lib/auth", () => ({
-  getAuth: () => Promise.resolve({ user: { id: "u1", role: "venue_owner", signedInAt: 0 } }),
+  getAuth: () => Promise.resolve({ user: { id: "u1", role: "venue_owner", signedInAt: Date.now() } }),
 }))
 jest.mock("@/lib/rate-limit", () => ({ rateLimit: () => Promise.resolve(null), userLimit: () => ({}) }))
 jest.mock("@/lib/event-visibility", () => ({ visibleEventsWhere: () => Promise.resolve({}) }))

@@ -18,13 +18,13 @@ const input = { sponsorId: "s1", evidence: { authorisation: "https://example.com
 
 describe("fileSponsorClaim by role", () => {
   it("tells an admin that filing is for a sponsor account, before anything else", async () => {
-    mockAuth.mockResolvedValue({ user: { id: "admin", role: "app_admin", signedInAt: 0 } })
+    mockAuth.mockResolvedValue({ user: { id: "admin", role: "app_admin", signedInAt: Date.now() } })
     await expect(fileSponsorClaim(input as never)).rejects.toThrow("Only a sponsor account can claim a brand.")
     expect(mockDb.sponsors.findUnique).not.toHaveBeenCalled()
   })
 
   it("still refuses an organiser the same way", async () => {
-    mockAuth.mockResolvedValue({ user: { id: "o", role: "organizer", signedInAt: 0 } })
+    mockAuth.mockResolvedValue({ user: { id: "o", role: "organizer", signedInAt: Date.now() } })
     await expect(fileSponsorClaim(input as never)).rejects.toThrow("Only a sponsor account can claim a brand.")
   })
 })

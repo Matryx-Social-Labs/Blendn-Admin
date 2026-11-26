@@ -4,10 +4,10 @@
  * integration suite drives it through NextAuth; these are the boundaries a
  * real clock rarely lands on.
  */
-import { isRevoked, provenAt } from "@/lib/session-revocation"
+import { ADMIN_SESSION_MS, isRevoked, provenAt } from "@/lib/session-revocation"
 
 const CHANGED = Date.parse("2026-10-11T09:30:00.000Z")
-const live = { deletedAt: null, suspended_at: null, password_changed_at: null, sessions_revoked_at: null }
+const live = { role: "organizer" as const, deletedAt: null, suspended_at: null, password_changed_at: null, sessions_revoked_at: null }
 const changed = { ...live, password_changed_at: new Date(CHANGED) }
 
 it("a session with no user is ended, however good the rest", () => {
@@ -46,4 +46,43 @@ it("ending every session is judged like a password change, and either one ends i
   expect(isRevoked({ sub: "u1", signedInAt: CHANGED - 1 }, both)).toBe(true)
   expect(isRevoked({ sub: "u1", signedInAt: CHANGED - 1 }, { ...both, password_changed_at: new Date(CHANGED), sessions_revoked_at: new Date(CHANGED - 60_000) })).toBe(true)
   expect(isRevoked({ sub: "u1", signedInAt: CHANGED + 1 }, both)).toBe(false)
+})
+
+describe("an admin's session ends 12 hours after it proved the password; nobody else's does (SCRUM-1238)", () => {
+  const HOUR = 3_600_000
+  const DAY = 24 * HOUR
+  const admin = { ...live, role: "app_admin" as const }
+  const ago = (ms: number) => ({ sub: "u1", signedInAt: Date.now() - ms })
+
+  it("ends an admin proven 12 h and a minute ago, and keeps one proven 11 h ago", () => {
+    expect(isRevoked(ago(12 * HOUR + 60_000), admin)).toBe(true)
+    expect(isRevoked(ago(11 * HOUR), admin)).toBe(false)
+    // A session from before signedInAt existed is judged by its first iat, the same way.
+    expect(isRevoked({ sub: "u1", iat: Math.floor((Date.now() - 13 * HOUR) / 1000) }, admin)).toBe(true)
+  })
+
+  it("keeps an admin at exactly 12 hours and ends it a millisecond later", () => {
+    const now = Date.parse("2026-11-26T12:00:00.000Z")
+    const clock = jest.spyOn(Date, "now").mockReturnValue(now)
+    expect(isRevoked({ sub: "u1", signedInAt: now - ADMIN_SESSION_MS }, admin)).toBe(false)
+    expect(isRevoked({ sub: "u1", signedInAt: now - ADMIN_SESSION_MS - 1 }, admin)).toBe(true)
+    expect(ADMIN_SESSION_MS).toBe(12 * HOUR)
+    clock.mockRestore()
+  })
+
+  it.each(["organizer", "venue_owner", "sponsor", "attendee"] as const)("never ends a %s's session for its age", (role) => {
+    for (const age of [13 * HOUR, 3 * DAY, 29 * DAY]) expect(isRevoked(ago(age), { ...live, role })).toBe(false)
+  })
+
+  it("keeps a non-admin session minted before this change, which carries no new field", () => {
+    const minted = { sub: "u1", role: "organizer", signedInAt: Date.now() - 29 * DAY, inviteOnly: false }
+    expect(isRevoked(minted, { ...live, role: "organizer" })).toBe(false)
+    const legacy = { sub: "u1", role: "venue_owner", iat: Math.floor((Date.now() - 3 * DAY) / 1000) }
+    expect(isRevoked(legacy, { ...live, role: "venue_owner" })).toBe(false)
+  })
+
+  it("ends a session whose read forgot the role, since it cannot say whether the 12 hours apply", () => {
+    const unselected = Object.fromEntries(Object.entries(live).filter(([key]) => key !== "role"))
+    expect(isRevoked(ago(60_000), unselected as unknown as typeof live)).toBe(true)
+  })
 })

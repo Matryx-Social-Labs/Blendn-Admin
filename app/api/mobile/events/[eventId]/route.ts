@@ -5,7 +5,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import { distinctAttendeeCounts, hereCountFor } from "@/lib/attendee-counts"
-import { eventHost } from "@/lib/event-host"
+import { hostPayload } from "@/lib/event-host"
 import { eventTallies } from "@/lib/event-tallies"
 import { offersClaim } from "@/lib/curation"
 import { dashboardUrl } from "@/lib/email"
@@ -93,18 +93,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const eventRead = db.events.findUnique({
       where: { id: eventId, deleted_at: null },
       include: {
-        organizer: {
-          select: {
-            id: true,
-            name: true,
-            image: true,
-            // No email. A host's public identity is their name and picture;
-            // their address is not part of an event listing, and the list
-            // endpoint never included it — only this one did.
-          },
-        },
-        // What `eventHost` reads. Named rather than spread from
-        // `eventHostSelect`, which claims `organizer` with a narrower shape.
+        // What `hostPayload` reads besides the row's own columns: never the creating user's id or picture.
+        organizer: { select: { name: true } },
         organizer_org: { select: { display_name: true } },
         details: true,
         // `eventArea` reads the venue's area, and `eventVenue` its link test.
@@ -302,22 +292,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       isRecurring: event.is_recurring,
       externalLink: event.external_link,
       createdAt: event.created_at,
-      /*
-       * The host, resolved — org, then the platform, then the creating user.
-       *
-       * The list went through `eventHost` (T83) and this route still passed
-       * `event.organizer` through, so the one screen an attendee reads
-       * carried the curating admin's real name and avatar as the host of
-       * every curated event, and the creating user's name instead of the
-       * organisation's on everyone else's. Found by reading the same event
-       * through both routes. Same shape as the list, so no client release.
-       */
-      organizer: (() => {
-        const host = eventHost(event)
-        return host.isPlatform
-          ? { id: null, name: host.name, image: null, kind: host.kind }
-          : { id: event.organizer.id, name: host.name, image: event.organizer.image, kind: host.kind }
-      })(),
+      // The org, never the creating user (`hostPayload`, SCRUM-1146).
+      organizer: hostPayload(event),
       /*
        * "Running this event? Claim it" — null unless this is a curated event
        * nobody has claimed (`offersClaim`). The URL is built here, on the
