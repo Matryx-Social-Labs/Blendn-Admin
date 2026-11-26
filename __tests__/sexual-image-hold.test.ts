@@ -312,6 +312,14 @@ describe("one page per user per 10 minutes", () => {
     expect(page).toHaveBeenCalledTimes(2)
   })
 
+  it("a pull whose audit row was not written pages even inside the window", async () => {
+    await holdSexualImage(SEXUAL_HIDE, "profile", PROFILE_KEY, USER)
+    audit.mockRejectedValueOnce(new Error("audit down"))
+    await holdSexualImage(SEXUAL_HIDE, "blur", BLUR_KEY, USER)
+
+    expect(page).toHaveBeenCalledTimes(2)
+  })
+
   it("a page that failed does not start the cooldown", async () => {
     page.mockResolvedValueOnce("failed")
     await holdSexualImage(SEXUAL_HIDE, "profile", PROFILE_KEY, USER)

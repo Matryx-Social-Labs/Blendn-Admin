@@ -43,12 +43,17 @@ export async function holdSexualImage(check: ModerationCheck, path: ImagePath, o
     if (!category) return
     if (!objectKey) logger.error("Sexual image hold: the object key could not be resolved", context)
     // No actor: the platform did this (lib/audit-log.ts `actsFor`). Awaited, so a lost row is logged here, with whose it was.
-    await db
+    const audited = await db
       .$transaction((tx) => auditInTx(tx, { action: "moderation.sexual_image_hold", resource: "user", resourceId: userId, details: { objectKey, path, category } }))
-      .catch((error: unknown) => logger.error("Sexual image hold: audit row not written", { ...context, error: error instanceof Error ? error.message : String(error) }))
+      .then(() => true)
+      .catch((error: unknown) => {
+        logger.error("Sexual image hold: audit row not written", { ...context, error: error instanceof Error ? error.message : String(error) })
+        return false
+      })
     const now = Date.now()
     for (const [id, at] of lastPaged) if (now - at >= PAGE_COOLDOWN_MS) lastPaged.delete(id)
-    if (lastPaged.has(userId)) return
+    // The cooldown leaves a pull to its audit row; one whose row was lost is paged regardless.
+    if (audited && lastPaged.has(userId)) return
     // Taken before the send, so a second pull arriving during it waits out the window too; given back unless a page went.
     lastPaged.set(userId, now)
     const result = await notifyStaff(
