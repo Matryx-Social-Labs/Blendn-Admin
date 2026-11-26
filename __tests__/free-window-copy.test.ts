@@ -52,7 +52,7 @@ describe("payment copy", () => {
   // SCRUM-1340: Blend'n+ is out of 1.0 (DECISIONS gate 5) and one event's product is "Event Insights".
   it.each(PAYMENT_COPY)("%s sells no Blend'n+ and names no Event Pass", (file) => {
     const text = read(file)
-    expect(text).not.toMatch(/Blend(&apos;|'|’)?n\+/i)
+    expect(text).not.toMatch(/Blend(&[a-z#0-9]+;|['’])?n\s*(\+|plus\b)/i)
     expect(text).not.toMatch(/Event\s+Pass/i)
   })
 })

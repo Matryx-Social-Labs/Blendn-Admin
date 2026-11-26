@@ -174,7 +174,7 @@ test("/pricing says three months for venues", async ({ baseURL }) => {
 })
 
 // SCRUM-1340: Blend'n+ is out of 1.0 (DECISIONS gate 5), and one event's product has one name.
-const NOT_SOLD = /Blend['’]?n\+|Event\s+Pass/i
+const NOT_SOLD = /Blend['’]?n\s*(\+|plus\b)|Event\s+Pass/i
 
 test("/pricing and the Venue Pro card sell no Blend'n+ and name Event Insights only", async ({ baseURL }) => {
   for (const width of [1280, 768] as const) {
@@ -193,7 +193,7 @@ test("/pricing and the Venue Pro card sell no Blend'n+ and name Event Insights o
     const plan = await ctx.newPage()
     await plan.goto("/dashboard/plan")
     await expect(plan.getByText("Blind offers to your regulars, with a monthly send quota (coming)")).toBeVisible()
-    expect(await plan.locator("main").innerText()).not.toMatch(NOT_SOLD)
+    expect(await plan.locator("body").innerText()).not.toMatch(NOT_SOLD)
     expect(await overflow(plan), `plan overflow at ${width}`).toBeLessThanOrEqual(0)
     await ctx.close()
   }
