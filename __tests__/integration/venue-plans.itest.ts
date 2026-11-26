@@ -2,7 +2,7 @@
  * Venue plans against real Postgres (step 17 part B; TQ-DV06: MN-I05 for a
  * venue, the no-charge rule, founding grants, insights by tier).
  *
- *   - No charge before four weeks of venue-day data: the checkout action
+ *   - No charge before three months of venue-day data: the checkout action
  *     refuses, with nothing written and nothing asked of Razorpay; past it, a
  *     purchase names its venue and grants nothing until the webhook.
  *   - One open subscription per venue, and an organisation may hold Pro on two.
@@ -240,22 +240,28 @@ afterAll(async () => {
   await closeDb()
 })
 
-describe("no charge before four weeks of venue-day data", () => {
+describe("no charge before three months of venue-day data", () => {
   it("counts from the first person who went live there", async () => {
     const fresh = await venue("vp-fresh")
     expect(await venueReadiness(fresh)).toMatchObject({ dataSince: null, chargeable: false, dataDays: 0 })
     await liveSince(fresh, 10)
     expect(await venueReadiness(fresh)).toMatchObject({ chargeable: false, dataDays: 10 })
     const ready = await venue("vp-ready")
-    await liveSince(ready, 29)
-    expect(await venueReadiness(ready)).toMatchObject({ chargeable: true, dataDays: 28 })
+    await liveSince(ready, 91)
+    expect(await venueReadiness(ready)).toMatchObject({ chargeable: true, dataDays: 90 })
+    // SCRUM-1320: day 40 is no longer past it (it was under the four-week rule).
+    const forty = await venue("vp-forty")
+    await liveSince(forty, 40)
+    expect(await venueReadiness(forty)).toMatchObject({ chargeable: false, dataDays: 40 })
   })
 
   it("refuses to start Venue Pro before then: no row, nothing asked of Razorpay", async () => {
     const young = await venue("vp-young")
-    await liveSince(young, 20)
+    await liveSince(young, 40)
+    const first = (await venueReadiness(young)).dataSince!
+    const from = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(first.getTime() + 90 * DAY))
     as(owner, "venue_owner")
-    await expect(actions.startVenueProCheckout(young, "monthly")).rejects.toThrow(/Venue Pro can be bought from .*four weeks after people first went live here/)
+    await expect(actions.startVenueProCheckout(young, "monthly")).rejects.toThrow(`Venue Pro can be bought from ${from}: three months after people first went live here.`)
     expect(await db.billing_checkouts.count({ where: { venue_id: young } })).toBe(0)
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(0)
   })
@@ -271,12 +277,12 @@ describe("no charge before four weeks of venue-day data", () => {
   it("refuses a venue nobody has gone live at yet", async () => {
     const empty = await venue("vp-empty")
     as(owner, "venue_owner")
-    await expect(actions.startVenueProCheckout(empty, "monthly")).rejects.toThrow("four weeks after people first go live")
+    await expect(actions.startVenueProCheckout(empty, "monthly")).rejects.toThrow("Venue Pro can be bought three months after people first go live at this venue.")
   })
 
-  it("past four weeks: a purchase for that venue, at the table’s price, and no entitlement yet", async () => {
+  it("past three months: a purchase for that venue, at the table’s price, and no entitlement yet", async () => {
     const v = await venue("vp-buy")
-    await liveSince(v, 35)
+    await liveSince(v, 95)
     as(owner, "venue_owner")
     const out = await actions.startVenueProCheckout(v, "monthly")
     const row = await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: out.subscriptionId } })
@@ -286,7 +292,7 @@ describe("no charge before four weeks of venue-day data", () => {
     // A second start resumes it; a second venue of the same organisation opens its own.
     expect((await actions.startVenueProCheckout(v, "monthly")).subscriptionId).toBe(out.subscriptionId)
     const v2 = await venue("vp-buy2")
-    await liveSince(v2, 35)
+    await liveSince(v2, 95)
     const out2 = await actions.startVenueProCheckout(v2, "monthly")
     expect(out2.subscriptionId).not.toBe(out.subscriptionId)
   })
@@ -297,7 +303,7 @@ describe("no charge before four weeks of venue-day data", () => {
     ["an organiser of the same organisation", () => organiser, "organizer", "Only an owner or admin"],
   ] as const)("refuses %s", async (_label, who, role, sentence) => {
     const v = await venue("vp-refuse")
-    await liveSince(v, 35)
+    await liveSince(v, 95)
     as(who(), role)
     await expect(actions.startVenueProCheckout(v, "monthly")).rejects.toThrow(sentence)
     expect(await db.billing_checkouts.count({ where: { venue_id: v } })).toBe(0)
@@ -305,7 +311,7 @@ describe("no charge before four weeks of venue-day data", () => {
 
   it("refuses while Venue Pro is already live from a founding grant", async () => {
     const v = await venue("vp-granted")
-    await liveSince(v, 35)
+    await liveSince(v, 95)
     as(admin, "app_admin")
     await actions.grantVenuePro(v, 3, "Founding venue, claimed in Bengaluru")
     as(owner, "venue_owner")
@@ -607,7 +613,7 @@ describe("a venue changing hands (review M7)", () => {
      */
     async function unpaidThenTransferred(label: string) {
       const v = await venue(label, { org: payerOrg })
-      await liveSince(v, 35)
+      await liveSince(v, 95)
       as(payerOwner, "venue_owner")
       const unpaid = (await actions.startVenueProCheckout(v, "monthly")).subscriptionId
       const claim = await db.venue_claims.create({ data: { venue_id: v, org_id: newOrg, filed_by: newOwner, status: "pending", is_dispute: true } })

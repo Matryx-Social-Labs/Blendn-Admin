@@ -12,11 +12,11 @@ import type { VenuePlanRow } from "@/lib/venue-plan"
 /*
  * SCRUM-609: a venue's row says "Venue Pro can be bought", and offers Buy,
  * only when the checkout would take it (lib/billing-actions.ts): Listed, past
- * its 28 days of data, and no mandate past `created` open. A venue on Venue Pro
+ * its 90 days of data, and no mandate past `created` open. A venue on Venue Pro
  * (paid or a founding grant) said it too, and a paused mandate offered a Buy
  * the server refuses.
  */
-const READY = { dataSince: new Date("2026-08-01T00:00:00Z"), chargeableFrom: new Date("2026-08-29T00:00:00Z"), dataDays: 28, chargeable: true }
+const READY = { dataSince: new Date("2026-08-01T00:00:00Z"), chargeableFrom: new Date("2026-10-30T00:00:00Z"), dataDays: 90, chargeable: true }
 const UNTIL = new Date("2026-11-12T00:00:00Z")
 
 function row(overrides: Partial<VenuePlanRow>): VenuePlanRow {
@@ -54,9 +54,9 @@ const offersBuy = (html: string) => html.includes('type="radio"')
 it.each([
   ["a Listed venue", row({})],
   ["a venue whose earlier checkout was abandoned (a `created` mandate, replaced by a new one)", row({ subscriptions: [subscription("created")] })],
-])("%s past its 28 days says Venue Pro can be bought, and offers Buy", (_label, venue) => {
+])("%s past its 90 days says Venue Pro can be bought, and offers Buy", (_label, venue) => {
   const html = render(venue)
-  expect(html).toContain("28 of 28 days of data · Venue Pro can be bought")
+  expect(html).toContain("90 of 90 days of data · Venue Pro can be bought")
   expect(offersBuy(html)).toBe(true)
 })
 
@@ -69,7 +69,7 @@ it.each([
   const html = render(venue)
   expect(html).not.toContain("can be bought")
   expect(offersBuy(html)).toBe(false)
-  expect(html).toContain("28 of 28 days of data")
+  expect(html).toContain("90 of 90 days of data")
 })
 
 it("review L7: another organisation's mandate still open here: a neutral line in place of Buy, and nothing about it", () => {
@@ -79,4 +79,13 @@ it("review L7: another organisation's mandate still open here: a neutral line in
   expect(offersBuy(html)).toBe(false)
   // Whose, which plan, or how much is never said.
   expect(html).not.toMatch(/sub_|renews|cancel/i)
+})
+
+it("SCRUM-1320: a venue 40 days in reads 40 of 90 days and its no-charge date, offers no Buy, and the card says three months", () => {
+  const html = render(row({ readiness: { dataSince: READY.dataSince, chargeableFrom: READY.chargeableFrom, dataDays: 40, chargeable: false } }))
+  expect(html).toContain("40 of 90 days of data · no charge before 30 Oct 2026")
+  expect(html).toContain('aria-valuemax="90"')
+  expect(html).toContain("Nothing is charged until a venue has three months of data from people going live there.")
+  expect(html).not.toContain("weeks")
+  expect(offersBuy(html)).toBe(false)
 })
