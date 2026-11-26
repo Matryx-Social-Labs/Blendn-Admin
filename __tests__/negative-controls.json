@@ -35,6 +35,18 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "email-send.test.ts": {
+      "guards": "SCRUM-1280: sendEmail retries a 429, a 5xx or a network throw once (about 1 s with jitter, one Idempotency-Key), never a 4xx; sends reply_to only with EMAIL_REPLY_TO; makes every header value one line; skips a suppressed address by the scope table (bounce blocks all, complaint all but the reset, unsubscribe only lifecycle); sends and warns when the lookup throws.",
+      "mutation": "lib/email.ts: M1 one attempt only; M2 a complaint blocks the reset; M3 an unsubscribe blocks every stream; M4 a throwing lookup suppresses; M5 headers passed raw; M6 a 4xx retried.",
+      "observed": "Before the change 18 of 24 failing. M1 6 of 24; M2 1; M3 2; M4 1; M5 1; M6 1 failing. Restored; 24/24.",
+      "date": "2026-11-26"
+    },
+    "integration/resend-webhook.itest.ts": {
+      "guards": "SCRUM-1280: POST /api/webhooks/resend writes nothing and answers non-2xx unless the Svix signature over the raw body verifies within five minutes; rate-limits a failing network (429); writes one row for a hard bounce or a complaint, none for a soft bounce, by the canonical address; a replay stays one row; bounce outranks complaint outranks unsubscribe.",
+      "mutation": "app/api/webhooks/resend/route.ts: W1 signature check skipped; W2 timestamp tolerance removed; W3 any bounce type written; W4 the upsert's WHERE removed (last writer wins); W5 addresses not normalised.",
+      "observed": "Before the route existed the suite failed to load. W1 6 of 16 failing; W2 2; W3 2; W4 1; W5 1. Restored; 16/16 on a db:migrate database.",
+      "date": "2026-11-26"
+    },
     "server-statement-cap.test.ts": {
       "guards": "SCRUM-1221: server.ts sets DATABASE_STATEMENT_TIMEOUT_MS to 8000 when unset or blank, and checks it with statementTimeoutMs(), before app.prepare, initSocketServer and startBackgroundWork can open a connection; scripts that import lib/db never set it and keep no cap.",
       "mutation": "M2268 the default line deleted from server.ts; M2269 the default line moved to after startBackgroundWork().",

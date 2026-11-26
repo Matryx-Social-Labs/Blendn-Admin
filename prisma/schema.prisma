@@ -1292,6 +1292,15 @@ model event_occurrences {
   @@index([start_time])
 }
 
+/// An address Blend'n does not mail (SCRUM-1280). `reason` is `bounce` or `complaint` (the Resend webhook) or
+/// `unsubscribe` (a lifecycle mail's List-Unsubscribe); CHECK `email_suppressions_reason_known` in migration SQL.
+/// Which sends each stops: `blocks` in lib/email.ts. `email` is trimmed and lower-cased (`canonicalEmail`).
+model email_suppressions {
+  email      String   @id
+  reason     String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+}
+
 model mobile_refresh_tokens {
   id             String    @id @default(uuid()) @db.Uuid
   user_id        String

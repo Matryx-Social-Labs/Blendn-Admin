@@ -360,7 +360,8 @@ export async function inviteMember(
     })
     sent = result.sent
     if (!result.sent) {
-      emailFailure = result.reason ?? "provider_error"
+      // A suppressed address (it bounced or complained, SCRUM-1280) reads as refused: check it, or pass the link on.
+      emailFailure = result.reason === "not_configured" ? "not_configured" : "provider_error"
       logger.error("Invite email failed", { inviteId: invite.id, reason: result.reason })
     }
   }

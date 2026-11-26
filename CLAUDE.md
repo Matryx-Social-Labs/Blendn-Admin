@@ -235,6 +235,7 @@ and therefore in every deployed environment:
 | `ticket_orders_refunded_range` / `ticket_orders_refunded_has_refund` | the refunded amount is 0 to `total_minor`; a `refunded` order has Razorpay's refund id, time and an amount ≥ 1 — refunded only on Razorpay's word |
 | `ticket_payouts_status_shape` | a payout `pending` or `on_hold` has a linked account, and `on_hold` has Razorpay's transfer id; `releasing` and `released` have the transfer id and their time (`releasing_at`, `released_at`); `no_account` has neither. Transfers are held at Razorpay with no end and released only by `lib/payout-release.ts`, at GREATEST(`release_floor`, the event's holdFloor now); `release_floor` is set at payment and only raised (trigger `ticket_payouts_release_floor_only_up`, migration SQL) |
 | `ticket_payouts_amount_positive` / `…_reversed_range` / `…_currency_shape` / `…_linked_account_shape` | a payout is ≥ 1 minor unit; reversed 0 to its amount; an org debit ≥ 0; ISO currency; `acc_` account |
+| `email_suppressions_reason_known` | a suppressed address's reason is `bounce`, `complaint` (both from the Resend webhook) or `unsubscribe`; which sends each stops is `blocks` in `lib/email.ts` (SCRUM-1280) |
 
 Nor can it express a partial index, a trigger or a data row, and these exist
 only in migration SQL too: `events_one_venue_day_per_day` (one venue day per
