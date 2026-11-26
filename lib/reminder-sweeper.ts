@@ -40,6 +40,10 @@ async function pass(): Promise<void> {
   // never throws, so a reminder step that does cannot cost a host their morning mail.
   const mailed = await sendResultsMails()
   if (mailed > 0) logger.info("Results mails sent", { mailed })
+  // A week on, "list your next" to the hosts with nothing coming up (SCRUM-1284). Here, not after the reminders: a step
+  // below that throws ends the pass, and this mail has a one-day window. Never throws, like the results mail.
+  const nudged = await sendNextNightNudges()
+  if (nudged > 0) logger.info("Next-night nudges sent", { nudged })
 
   // 60 minutes, matching the cron route's argument. The client schedules no local reminder: this is the only one.
   const notified = await sendEventReminders(60)
@@ -56,11 +60,6 @@ async function pass(): Promise<void> {
 
   const pruned = await cleanupExpiredTokens()
   if (pruned > 0) logger.info("Expired refresh tokens pruned", { pruned })
-
-  // A week on, "list your next" to the hosts with nothing coming up (SCRUM-1284). After the reminders and ratings, which
-  // are due to the minute; never throws, like the results mail.
-  const nudged = await sendNextNightNudges()
-  if (nudged > 0) logger.info("Next-night nudges sent", { nudged })
 
   // Last, and caught here (SCRUM-1275): a failing mail never stops or delays the pilot's reminders and ratings above.
   await sendFreeWindowEndingMail().then(
