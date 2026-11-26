@@ -3,9 +3,17 @@
 import { useEffect, useState } from "react"
 import { io, type Socket } from "socket.io-client"
 
-import type { LiveSnapshot, VenueLiveSnapshot } from "@/lib/live-metrics"
+import { OPS_INTERVAL_MS, type LiveSnapshot, type VenueLiveSnapshot } from "@/lib/live-metrics"
 
 export type OpsStatus = "connecting" | "live" | "denied" | "error"
+
+/**
+ * Four of the server's ticks with no snapshot. A socket that stops answering
+ * without closing (out of the venue's wifi) is otherwise noticed only by
+ * Socket.io's ping, 85 s on (measured, SCRUM-1348). Not three: a slow snapshot
+ * in a large room must not trip it.
+ */
+const QUIET_MS = 4 * OPS_INTERVAL_MS
 
 /**
  * Subscribe to one event's live operations room.
@@ -28,6 +36,7 @@ export function useOpsSnapshot(eventId: string, enabled: boolean) {
 
     let socket: Socket | null = null
     let cancelled = false
+    let quiet: ReturnType<typeof setTimeout> | undefined
 
     // Same-origin: server.ts attaches Socket.io to the same HTTP server that
     // serves the dashboard, so there is no separate host to configure.
@@ -42,6 +51,10 @@ export function useOpsSnapshot(eventId: string, enabled: boolean) {
       if (cancelled || data.eventId !== eventId) return
       setSnapshot(data)
       setStatus("live")
+      clearTimeout(quiet)
+      quiet = setTimeout(() => {
+        if (!cancelled) setStatus("error")
+      }, QUIET_MS)
     })
 
     socket.on("error", (payload: { message: string; code?: string }) => {
@@ -70,6 +83,7 @@ export function useOpsSnapshot(eventId: string, enabled: boolean) {
 
     return () => {
       cancelled = true
+      clearTimeout(quiet)
       socket?.emit("leave:eventOps", eventId)
       socket?.disconnect()
     }

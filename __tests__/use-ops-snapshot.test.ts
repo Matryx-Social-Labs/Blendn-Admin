@@ -7,7 +7,10 @@
  * fails is a `connect_error`, and that is when the screen says so. A close
  * Socket.io will not retry (`socket.active` false: the server sent DISCONNECT,
  * as `evictUserSockets` does) is stale at once, and is retried by hand so
- * "reconnecting" stays true. The next `ops:snapshot` clears it either way.
+ * "reconnecting" stays true. And a socket that stops answering without
+ * closing (walking out of the venue's wifi) is only noticed by Socket.io's
+ * ping, 85 s on (measured): snapshots come every tick, so four missed ticks
+ * (20 s) go stale too. The next `ops:snapshot` clears it, whichever it was.
  *
  * There is no DOM test renderer in this repo (jest runs in node), so React's
  * two hooks are stood in for: the effect runs once, the setters are recorded.
@@ -48,11 +51,14 @@ const socket = {
 }
 jest.mock("socket.io-client", () => ({ io: () => socket }))
 
+import { OPS_INTERVAL_MS } from "@/lib/live-metrics"
 import { useOpsSnapshot } from "@/lib/use-ops-snapshot"
 
+const mockStatus = () => state.status
 const snapshot = { eventId: "e1", at: "2026-11-26T17:11:00.000Z" }
 
 beforeEach(() => {
+  jest.useFakeTimers()
   socket.handlers.clear()
   socket.active = true
   socket.connect.mockClear()
@@ -62,7 +68,10 @@ beforeEach(() => {
   expect(state.status).toBe("live")
 })
 
-afterEach(() => cleanups.splice(0).forEach((c) => c()))
+afterEach(() => {
+  cleanups.splice(0).forEach((c) => c())
+  jest.useRealTimers()
+})
 
 describe("useOpsSnapshot after the first snapshot", () => {
   it("does not flash on a drop that comes back on its first retry", () => {
@@ -93,6 +102,24 @@ describe("useOpsSnapshot after the first snapshot", () => {
     expect(state.status).toBe("live")
   })
 
+  it("goes stale after four missed ticks on a socket that never closed", () => {
+    jest.advanceTimersByTime(4 * OPS_INTERVAL_MS - 1)
+    expect(mockStatus()).toBe("live")
+    jest.advanceTimersByTime(1)
+    expect(mockStatus()).toBe("error")
+    socket.fire("ops:snapshot", snapshot)
+    expect(mockStatus()).toBe("live")
+  })
+
+  it("is not stale while the ticks keep coming", () => {
+    // A slow tick (a large room's query) is late, not lost: still live just before each lands.
+    for (let tick = 0; tick < 10; tick++) {
+      jest.advanceTimersByTime(3 * OPS_INTERVAL_MS)
+      expect(mockStatus()).toBe("live")
+      socket.fire("ops:snapshot", snapshot)
+    }
+  })
+
   it("keeps the old figures while stale: the screen says they are from then", () => {
     socket.fire("connect_error", new Error("timeout"))
     expect(state.snapshot).toBe(snapshot)
@@ -100,6 +127,7 @@ describe("useOpsSnapshot after the first snapshot", () => {
 
   it("says nothing once the screen has closed it", () => {
     cleanups.splice(0).forEach((c) => c())
+    jest.advanceTimersByTime(10 * OPS_INTERVAL_MS)
     socket.active = false
     socket.fire("disconnect", "io client disconnect")
     expect(state.status).toBe("live")

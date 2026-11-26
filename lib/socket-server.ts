@@ -21,7 +21,7 @@ import { mayEmitTyping } from "./typing-gate"
 import { isUuid } from "./api-input"
 import { createEventBudget } from "./socket-budget"
 import { namesInRoom, recognisedInRoomBy } from "./identity"
-import { forVenue, type LiveSnapshot, type VenueLiveSnapshot } from "./live-metrics"
+import { forVenue, OPS_INTERVAL_MS, type LiveSnapshot, type VenueLiveSnapshot } from "./live-metrics"
 import type { Prisma, user_role } from "@prisma/client"
 
 /** `error.data.code` on a refused handshake, by the account's state. */
@@ -362,7 +362,6 @@ const opsTimers = new Map<string, OpsLoop>()
 const SOCKET_EVENT_BUDGET = 120
 const SOCKET_EVENT_WINDOW_MS = 10_000
 
-const OPS_INTERVAL_MS = 5000
 
 export function startOpsBroadcast(eventId: string): void {
   const io = currentIo()

@@ -42,9 +42,9 @@
       "date": "2026-11-26"
     },
     "use-ops-snapshot.test.ts": {
-      "guards": "The Live tab's socket rule: a drop that comes back on Socket.io's first retry never flashes; the first failed retry (connect_error) goes stale; a close Socket.io will not retry (socket.active false) goes stale at once and is reconnected by hand; the next ops:snapshot clears it (SCRUM-1348)",
-      "mutation": "C: delete the `socket.on(\"disconnect\", …)` listener from lib/use-ops-snapshot.ts. D: change its guard `if (cancelled || socket?.active) return` to `if (cancelled) return` (every disconnect goes stale)",
-      "observed": "C: 1 failing ('goes stale at once on a close Socket.io will not retry'). D: 1 failing ('does not flash on a drop that comes back on its first retry'). Each reverted green, 11/11",
+      "guards": "The Live tab's socket rule: a drop that comes back on Socket.io's first retry never flashes; the first failed retry (connect_error) goes stale; a close Socket.io will not retry (socket.active false) goes stale at once and is reconnected by hand; four missed 5 s ticks with no snapshot (a socket that never closed, out of wifi) go stale, and a slow tick does not; the next ops:snapshot clears it (SCRUM-1348)",
+      "mutation": "C: delete the `socket.on(\"disconnect\", …)` listener from lib/use-ops-snapshot.ts. D: change its guard `if (cancelled || socket?.active) return` to `if (cancelled) return` (every disconnect goes stale). F: delete the `quiet = setTimeout(…, QUIET_MS)` arming in the ops:snapshot handler. G: `const QUIET_MS = OPS_INTERVAL_MS` (one tick instead of four)",
+      "observed": "C: 1 failing ('goes stale at once on a close Socket.io will not retry'). D: 1 failing ('does not flash on a drop that comes back on its first retry'). F: 1 failing ('goes stale after four missed ticks'). G: 2 failing (that, and 'is not stale while the ticks keep coming', which first passed against G because it read the status after each snapshot; it now reads it just before). Each reverted green, 7/7",
       "date": "2026-11-26"
     },
     "server-statement-cap.test.ts": {
