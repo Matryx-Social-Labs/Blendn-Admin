@@ -810,6 +810,7 @@ async function staleRows(data: Array<NotificationData | null>, now: Date): Promi
     conversationIds.length > 0
       ? db.private_conversations.findMany({ where: { id: { in: conversationIds }, closed_at: { not: null } }, select: { id: true } })
       : [],
+    // any-kind: by the ids the held rows name; a venue day already under way is as stale as an event that began.
     eventIds.length > 0 ? db.events.findMany({ where: { id: { in: eventIds }, start_time: { lte: now } }, select: { id: true } }) : [],
   ]).catch((error: unknown) => {
     logger.warn("Held pushes: staleness unread; sending", { error: error instanceof Error ? error.message : String(error) })
