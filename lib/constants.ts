@@ -115,9 +115,9 @@ export const SPONSORSHIP = {
    * Below this, a per-option breakdown or a sponsor-facing figure identifies
    * people rather than describing them.
    *
-   * `docs/DESIGN_HANDOFF.md` guarantees small rooms are normal: check-in never
-   * refuses, so capacity is a signal and not a door. In a room of six, "1 vote
-   * · Leaving early" names that person to everyone still there.
+   * Small rooms are normal: check-in never refuses, so capacity is a signal
+   * and not a door. In a room of six, "1 vote · Leaving early" names that
+   * person to everyone still there.
    *
    * Suppression is not per-cell. Hiding one option while publishing the total
    * leaks it by subtraction, and hiding all but one leaves the survivor

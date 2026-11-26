@@ -465,7 +465,5 @@ door's own count is "N of M in" on the door page.
 
 - **No client yet sends presence pings.** The endpoint and sweeper are live; the
   mobile app has to start calling it for the loop to close.
-- **The attendance panel has no UI.** `docs/CLAUDE_DESIGN_BRIEF_ATTENDANCE.md`
-  is written and waiting on a design round.
 - **`events.current_capacity` still exists.** Nothing writes it and nothing
   reads it; drop it once production logs confirm that.
