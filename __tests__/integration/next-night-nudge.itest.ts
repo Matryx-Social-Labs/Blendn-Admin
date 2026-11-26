@@ -22,6 +22,8 @@ const orgs: string[] = []
 const events: string[] = []
 const mails: { to: string; subject: string; text: string; tags: { name: string; value: string }[] }[] = []
 let realFetch: typeof fetch
+/** Who created the fixture nights (`organizer_id`); never a member, so never a recipient. */
+let creator: { id: string; email: string }
 
 async function person(label: string) {
   const id = testId(label)
@@ -54,7 +56,7 @@ async function night(orgId: string, o: { title?: string; endedAt?: Date; startsA
       end_time: end,
       timezone: o.timezone ?? "Asia/Kolkata",
       status: o.status ?? "published",
-      organizer_id: users[0].id,
+      organizer_id: creator.id,
       organizer_org_id: orgId,
     },
   })
@@ -75,7 +77,8 @@ const mailedTo = (who: { email: string }[]) => mails.filter((m) => who.some((u) 
 const nudgedAt = async (orgId: string) =>
   (await db.organisations.findUnique({ where: { id: orgId }, select: { next_event_nudged_at: true } }))?.next_event_nudged_at ?? null
 
-beforeAll(() => {
+beforeAll(async () => {
+  creator = await person("creator")
   process.env.RESEND_API_KEY = "re_itest"
   process.env.EMAIL_FROM = "Blend'n <hello@blendn.app>"
   realFetch = global.fetch
@@ -217,6 +220,25 @@ describe("who", () => {
     await night(orgId)
     await sendNextNightNudges(NOW)
     expect(mailedTo([left, bounced, kept])).toEqual([kept.email])
+  })
+
+  it("a deleted owner is not mailed; the other owner is", async () => {
+    const [gone, kept] = [await person("deleted"), await person("kept2")]
+    const orgId = await org([[gone, "owner"], [kept, "owner"]])
+    await db.user.update({ where: { id: gone.id }, data: { deletedAt: new Date() } })
+    await night(orgId)
+    await sendNextNightNudges(NOW)
+    expect(mailedTo([gone, kept])).toEqual([kept.email])
+  })
+
+  it("a suspended organization is never nudged or claimed", async () => {
+    const owner = await person("suspended-org")
+    const orgId = await org([[owner, "owner"]])
+    await db.organisations.update({ where: { id: orgId }, data: { status: "suspended" } })
+    await night(orgId)
+    await sendNextNightNudges(NOW)
+    expect(mailedTo([owner])).toEqual([])
+    expect(await nudgedAt(orgId)).toBeNull()
   })
 
   it("a night nobody checked in at quotes no number", async () => {
