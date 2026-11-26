@@ -231,6 +231,8 @@ const envSchema = z.object({
    * value as unset, but boot never gets that far.)
    */
   SHARE_PROXY_SECRET: z.string().min(32, "SHARE_PROXY_SECRET must be at least 32 characters").optional(),
+  /** Bearer token for /api/health's pool, loop-delay and socket numbers (SCRUM-1221). Same rule as above: set means 32+. */
+  HEALTH_METRICS_TOKEN: z.string().min(32, "HEALTH_METRICS_TOKEN must be at least 32 characters").optional(),
 
   /** The public site links are built on (door QR, friend and crew links, mail). Unset = www. `publicSiteOrigin()` below. */
   PUBLIC_SITE_ORIGIN: z.string().optional(),
@@ -522,6 +524,12 @@ export function plusGatedAnywhere(): boolean {
 export function shareProxySecret(): string | null {
   const secret = process.env.SHARE_PROXY_SECRET?.trim()
   return secret && secret.length >= 32 ? secret : null
+}
+
+/** Who may read the process gauges on /api/health (SCRUM-1221), or null when unset or too short to be ours. */
+export function healthMetricsToken(): string | null {
+  const token = process.env.HEALTH_METRICS_TOKEN?.trim()
+  return token && token.length >= 32 ? token : null
 }
 
 /** RevenueCat's secret API key, or null when the server's own RevenueCat calls are off. */

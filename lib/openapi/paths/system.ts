@@ -2,12 +2,20 @@ import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
 import { standardErrors } from "@/lib/openapi/schemas/common"
 
+// Process gauges (SCRUM-1221): only for `Authorization: Bearer HEALTH_METRICS_TOKEN`, or off Railway production while it is unset.
+const healthGauges = {
+  pool: z.object({ total: z.number(), idle: z.number(), waiting: z.number() }).nullable().optional(),
+  eventLoopDelayMs: z.object({ p50: z.number(), p99: z.number(), max: z.number() }).nullable().optional(),
+  sockets: z.number().nullable().optional(),
+}
+
 registry.registerPath({
   method: "get",
   path: "/api/health",
   tags: ["System"],
   summary: "Health check",
-  description: "Returns service health status including database connectivity.",
+  description:
+    "Returns service health status including database connectivity. With `Authorization: Bearer <HEALTH_METRICS_TOKEN>` it adds the pool counts, the event-loop delay over the last full minute (null for the first) and the connected socket count; without it the same 200 carries none of them.",
   responses: {
     200: {
       description: "Service healthy",
@@ -19,6 +27,7 @@ registry.registerPath({
             service: z.literal("blendn-admin"),
             version: z.string(),
             database: z.enum(["connected", "disconnected", "unknown"]),
+            ...healthGauges,
           }),
         },
       },
@@ -33,6 +42,7 @@ registry.registerPath({
             service: z.literal("blendn-admin"),
             version: z.string(),
             database: z.literal("disconnected"),
+            ...healthGauges,
           }),
         },
       },
