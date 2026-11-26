@@ -10,6 +10,8 @@ import {
   type FenceRow,
   type RollbackFile,
 } from "../../scripts/backfill-venue-fences"
+import { Prisma } from "@prisma/client"
+
 import { closeDb, db, testId } from "./helpers"
 
 /*
@@ -67,7 +69,7 @@ afterAll(async () => {
 describe("the export reads only the scope", () => {
   it("lists a seeded, unclaimed circle or fence-less venue, and no claimed, drawn, deleted or hand-added one", async () => {
     const inScope = await venue("export-in", {})
-    const bare = await venue("export-bare", { geofence: undefined })
+    const bare = await venue("export-bare", { geofence: Prisma.DbNull })
     const claimed = await venue("export-claimed", { claimed_at: new Date() })
     const drawn = await venue("export-drawn", { geofence: building })
     const deleted = await venue("export-deleted", { deleted_at: new Date() })
@@ -85,7 +87,7 @@ describe("apply", () => {
 
   beforeAll(async () => {
     inScope = await venue("in", {})
-    bare = await venue("bare", { geofence: undefined })
+    bare = await venue("bare", { geofence: Prisma.DbNull })
     excluded = await venue("excluded", {})
     raced = await venue("raced", {})
     // As exported, then claimed, outlined by hand or deleted before the apply.
@@ -151,7 +153,7 @@ describe("apply", () => {
   })
 
   it("puts a fence-less venue back to no fence at all", async () => {
-    const id = await venue("bare-revert", { geofence: undefined })
+    const id = await venue("bare-revert", { geofence: Prisma.DbNull })
     const path = join(dir, "bare.json")
     await applyFences(db, file([await rowFor(id)]), { write: true, exclude: new Set(), rollbackPath: path })
     expect(await fenceOf(id)).toEqual(building)

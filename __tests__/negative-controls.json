@@ -2865,6 +2865,18 @@
       "mutation": "(M12) the region/tabIndex/aria-label spread removed from the container.",
       "observed": "M12: 1 of 2 failing (the named case). Restored; 2 of 2.",
       "date": "2026-11-26"
+    },
+    "backfill-venue-fences.itest.ts": {
+      "guards": "SCRUM-1150: the Overture fence backfill writes only a seeded (overture:), unclaimed, undeleted venue with no fence or a circle, and only while its fence is still the one exported (a venue claimed, outlined or moved after the export is skipped); --exclude is honoured; an apply refuses a database holding the pilot venue unless it is excluded; a second apply changes 0 rows; --revert restores exactly the rows whose fence is still the one written, a fence-less venue back to SQL NULL.",
+      "mutation": "(M1) the scope predicate replaced by TRUE in the dry-run and apply statements; (M2) the `geofence IS NOT DISTINCT FROM was` check removed; (M3) the pilot guard removed; (M4) --exclude ignored.",
+      "observed": "M1: 3 of 7 failing (dry run; the write that must skip the claimed, outlined and deleted venues; revert). M2: 3 of 7. M3: 1 of 7 (the pilot). M4: 4 of 7. Restored; 7 of 7.",
+      "date": "2026-11-26"
+    },
+    "backfill-venue-fences.test.ts": {
+      "guards": "SCRUM-1150: fenceFromCandidates applies pickBuilding's rule (lib/outline.ts pickShape) to Overture buildings: contained, smallest, stadium wins, nearest within 25 m, MultiPolygon largest part, self-intersecting refused, >200 points simplified, validateGeofence with DEFAULT_BUFFER_M; over 20,000 m2 refused for the food & drink and nightlife types.",
+      "mutation": "(M5) the 20,000 m2 size rule removed.",
+      "observed": "M5: 7 of 18 failing (every food & drink and nightlife type). Restored; 18 of 18. RED against a do-nothing stub: 17 of 18 failing.",
+      "date": "2026-11-26"
     }
   },
   "grandfathered": [
