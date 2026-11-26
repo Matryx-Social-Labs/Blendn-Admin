@@ -300,12 +300,9 @@ describe("the rate-who-you-met push", () => {
     // Checked out by the end, as most people are: attendance, not presence.
     await db.event_check_ins.updateMany({ where: { event_id: ended, user_id: b.id }, data: { status: "checked_out" } })
 
-    // 01:05 and 09:55 IST: ended, not yet asked. Read this test's rows, not the pass's count: the count is every event in
-    // the shared database, and after 10:00 IST another suite's night that ended this morning is due at 01:05 tomorrow.
-    await sendRatingRequests(new Date(ten.getTime() - 9 * H + 5 * 60_000))
-    await sendRatingRequests(new Date(ten.getTime() - 5 * 60_000))
-    const asked = () => db.notifications.count({ where: { user_id: { in: [a.id, b.id, late.id] }, kind: "rating_request" } })
-    expect(await asked()).toBe(0)
+    // 01:05 and 09:55 IST: ended, not yet asked.
+    expect(await sendRatingRequests(new Date(ten.getTime() - 9 * H + 5 * 60_000))).toBe(0)
+    expect(await sendRatingRequests(new Date(ten.getTime() - 5 * 60_000))).toBe(0)
     const before = await db.events.findUniqueOrThrow({ where: { id: ended }, select: { rating_requested_at: true } })
     expect(before.rating_requested_at).toBeNull()
 
