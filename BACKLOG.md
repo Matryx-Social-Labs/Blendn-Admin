@@ -127,30 +127,6 @@ list-and-scan workaround around it.
 - **File(s)**: `lib/socket-server.ts` — `guardJoin()` (~line 302) plus `canJoinChat`/`canJoinEvent`/`canJoinConversation`, called from the `join:chat`/`join:event`/`join:conversation` handlers.
 - **Resolved (verified 2026-09-10)**: every `join:*` handler now awaits a DB-backed membership check via `guardJoin()` before calling `socket.join()`, and denies with a `FORBIDDEN` error event (fail-closed, including on a thrown/malformed-ID check). This entry was stale — kept for history; do not re-open without re-reading the current code.
 
-### 2.2 Socket.io CORS allows wildcard origin
-- **Priority**: High
-- **Category**: Broken Logic / Production Readiness
-- **File(s)**: `lib/socket-server.ts:245-246`
-- **Evidence**: `cors: { origin: "*" }`, with an inline comment acknowledging it should be restricted in production. Combined with 2.1, this widens the attack surface for unauthorized real-time access.
-- **Suggested Fix**: Restrict Socket.io CORS to the same allow-list `middleware.ts` already uses for HTTP CORS.
-- **Estimated Effort**: S
-
-### 2.3 Typing indicator handlers skip membership re-check
-- **Priority**: Low
-- **Category**: Broken Logic
-- **File(s)**: `lib/socket-server.ts:316-350`
-- **Evidence**: `chat:startTyping`/`chat:stopTyping` emit to the whole room without re-verifying the emitting user is still an active (non-removed/non-muted) member, which can leak typing state for users who were just removed.
-- **Suggested Fix**: Check membership status is active before emitting; no-op otherwise.
-- **Estimated Effort**: XS
-
-### 2.4 CRON endpoint auth is permissive when `CRON_SECRET` is unset
-- **Priority**: High
-- **Category**: Broken Logic / Backend-API
-- **File(s)**: `app/api/cron/event-reminders/route.ts:6-11`
-- **Evidence**: `if (cronSecret && authHeader !== ...)` — if `CRON_SECRET` is not configured, the check is skipped entirely and the endpoint accepts unauthenticated requests.
-- **Suggested Fix**: Fail closed — require `CRON_SECRET` to be set; reject all requests if it's missing rather than defaulting to open.
-- **Estimated Effort**: S
-
 ### 2.5 Non-null assertions on potentially-undefined JWT/DB fields
 - **Priority**: Medium
 - **Category**: Broken Logic
@@ -292,14 +268,6 @@ list-and-scan workaround around it.
 - **Suggested Fix**: Remove.
 - **Estimated Effort**: XS
 
-### 4.4 Raw error objects logged in catch blocks (potential sensitive-data leak)
-- **Priority**: Medium
-- **Category**: Code Quality / Production Readiness
-- **File(s)**: `app/api/events/route.ts:182`, `app/api/events/[id]/route.ts:39-40`, and similar pattern repeated across many route handlers
-- **Evidence**: `console.error('Error:', error)` logs the full error object, which can include raw Prisma query text/params — risk of leaking schema/data details into log aggregators.
-- **Suggested Fix**: Log `error.message`/`error.code` only; keep full error server-side only behind the structured logger, never to stdout unfiltered.
-- **Estimated Effort**: M
-
 ### 4.5 Inconsistent error response shape: dashboard vs mobile API
 - **Priority**: Medium
 - **Category**: Code Quality / Backend-API
@@ -350,30 +318,6 @@ list-and-scan workaround around it.
 - **Suggested Fix**: Apply `lib/pagination.ts` consistently to every list endpoint.
 - **Estimated Effort**: S
 
-### 5.4 No rate limiting on dashboard write endpoints
-- **Priority**: Medium
-- **Category**: Backend-API / Production Readiness
-- **File(s)**: `app/api/events/[id]/announcements/route.ts` (POST), `app/api/events/[id]/sponsored-messages/route.ts` (POST)
-- **Evidence**: Organizer-authenticated endpoints that broadcast to all event attendees have no rate limit — a compromised organizer session could spam announcements.
-- **Suggested Fix**: Apply `lib/rate-limit.ts` per-user on these write paths (same caveat as the existing rate-limit module: in-memory/single-process only).
-- **Estimated Effort**: M
-
-### 5.5 RBAC helper exists but enforcement at the route level is unverified
-- **Priority**: High
-- **Category**: Backend-API
-- **File(s)**: `lib/rbac.ts:17-25` (`canModerateChat`); `app/api/events/[id]/chat/moderation*` routes
-- **Evidence**: `canModerateChat()` correctly scopes by organizer/admin, but it needs to be confirmed every moderation route actually calls it before acting — same class of bug already fixed once for the emit-before-moderation issue.
-- **Suggested Fix**: Audit each moderation route handler for an explicit `canModerateChat()`/ownership check before mutation.
-- **Estimated Effort**: S
-
-### 5.6 Zero test coverage on highest-risk auth/authorization modules
-- **Priority**: High
-- **Category**: Backend-API / Production Readiness
-- **File(s)**: `lib/mobile-auth.ts`, `lib/socket-server.ts`, `lib/rbac.ts`, `lib/moderation/actions.ts` — none have a corresponding file in `__tests__/`
-- **Evidence**: Only 5 test files exist total (`keyword-filter`, `api-response`, `rate-limit`, `spam-detector`, `logger`); the modules controlling token issuance, socket room access, and moderation actions — the most security-sensitive code in the repo — have no regression protection.
-- **Suggested Fix**: Add test files for these four modules, prioritizing token expiry/rotation and socket join authorization (ties directly to issue 2.1).
-- **Estimated Effort**: M (per module)
-
 ---
 
 ## 6. Performance
@@ -392,14 +336,6 @@ list-and-scan workaround around it.
 ---
 
 ## 7. Production Readiness
-
-### 7.1 Sentry config has no PII filtering or noise suppression
-- **Priority**: Medium
-- **Category**: Production Readiness
-- **File(s)**: `sentry.server.config.ts`, `sentry.client.config.ts`, `sentry.edge.config.ts`
-- **Evidence**: No `beforeSend`, `ignoreErrors`, or `denyUrls` — risk of PII (user IDs, emails in error context) reaching Sentry, plus quota burn from expected/noisy errors.
-- **Suggested Fix**: Add `beforeSend` scrubbing and an `ignoreErrors` list for known benign errors.
-- **Estimated Effort**: S
 
 ### 7.2 Sentry sourcemap upload silently no-ops without `SENTRY_AUTH_TOKEN`
 - **Priority**: Medium
@@ -431,19 +367,13 @@ list-and-scan workaround around it.
 
 - [ ] Real-time / Socket.io
     - [x] Room authorization on join (chat/event/conversation) — fixed, see 2.1
-    - [ ] CORS origin restriction (currently wildcard)
     - [ ] Scheduler graceful shutdown
-    - [ ] Typing-indicator membership re-check
     - [ ] Structured logging (replace console.*)
-    - [ ] Test coverage
 
 - [ ] Mobile Auth & RBAC
     - [ ] Non-null assertion cleanup (jti, lastReadAt)
-    - [ ] Test coverage for token issuance/rotation
-    - [ ] Verify RBAC enforcement on every moderation route
 
 - [ ] Moderation
-    - [ ] Test coverage for auto-mute/unmute logic
     - [ ] Doc/config threshold reconciliation
     - [x] OPENAI_API_KEY documented in env example — already present in `.env.example`
 
@@ -474,12 +404,9 @@ list-and-scan workaround around it.
     - [ ] Replace console.* with logger.* repo-wide
     - [ ] Standardize error response shape (dashboard vs mobile)
     - [ ] zod validation on sponsored-message PATCH and message-request fields
-    - [ ] CRON endpoint fail-closed when secret unset
-    - [ ] Rate limiting on announcement/sponsored-message writes
     - [ ] Replace hardcoded limits with `lib/constants.ts`
 
 - [ ] Observability / Production Readiness
-    - [ ] Sentry beforeSend/ignoreErrors PII scrubbing
     - [ ] Fail-loud (or document) missing SENTRY_AUTH_TOKEN in CI
     - [ ] Reconcile docs/SOCKET_EVENTS.md and docs/chat-moderation.md with actual code
 
@@ -489,18 +416,13 @@ list-and-scan workaround around it.
 
 **Phase 1 — Critical security/crash risk**
 - ~~Socket room authorization on join (2.1)~~ — done
-- Socket CORS wildcard (2.2)
-- CRON endpoint fail-closed (2.4)
-- RBAC enforcement audit on moderation routes (5.5)
-- Test coverage for mobile-auth, socket-server, rbac, moderation actions (5.6)
 
 **Phase 2 — Backend correctness & hygiene**
 - Non-null assertion cleanup (2.5)
 - Unawaited DB write logging (2.6)
 - zod validation gaps (5.1, 5.2)
 - Unbounded queries / pagination (5.3, 6.1)
-- Rate limiting on write endpoints (5.4)
-- console.* → logger.* sweep (4.2, 4.3, 4.4)
+- console.* → logger.* sweep (4.2, 4.3)
 - Error response standardization (4.5)
 - Hardcoded limits → constants (4.6)
 
@@ -518,10 +440,8 @@ list-and-scan workaround around it.
 - ~~Resolve unused `data-table.tsx` and dependent deps (1.3, 4.7)~~ — done
 - ~~Design tokens for colors (3.5)~~ — done; spacing scale (3.6) still open; ~~Tabs standardization (3.7)~~ — done
 - Scheduler graceful shutdown (1.2)
-- Typing indicator membership check (2.3)
 
 **Phase 5 — Observability & docs polish**
-- Sentry PII scrubbing and ignoreErrors (7.1)
 - SENTRY_AUTH_TOKEN build behavior (7.2)
 - Docs reconciliation: SOCKET_EVENTS.md, chat-moderation.md (7.3, 7.4)
 - .env.example completeness (1.1)

@@ -136,10 +136,9 @@ its own seed.
 | Suggestions | Venue unowned | unit → `[]` | yes | own list, no suggestions |
 | Neighbourhood | Local-language / odd granularity | fixtures per city | yes — override | whatever they typed |
 
-**Critical gap:** the backfill has no schedule, no retry and no monitoring in this
-plan. It is the one path with a real failure that is currently silent. The repo
-already runs a self-scheduling sweeper, so the pattern exists — but "add a
-backfill job" is not yet a plan, and it should not ship as one.
+**Closed by not building it:** the plan's backfill had no schedule, no retry and
+no monitoring, so it was not built (`docs/ROADMAP.md`, amenities). The
+reverse-geocode stays best-effort and a null renders the city, as today.
 
 ## NOT in scope
 
