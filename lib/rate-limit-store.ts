@@ -73,9 +73,21 @@ type RedisLike = {
 
 /** How long the first callers wait for a healthy Redis to connect. */
 const CONNECT_GRACE_MS = 250
+/** Longest a limited request waits on one Redis command (staging's round trip is ~165 ms). */
+const COMMAND_BOUND_MS = 500
+/** After a command overruns the bound, how long Redis is left alone before it is asked again. */
+const STALL_BACKOFF_MS = 5_000
+/**
+ * A PING this often, so an idle connection the path has dropped is written to
+ * and fails (reset, or the retransmit timeout) and reconnects, rather than
+ * looking healthy. It does not end a stall: a PING that overruns node-redis's
+ * 5 s command timeout only emits 'error' (logged below). The bound does that.
+ */
+const PING_INTERVAL_MS = 10_000
 
 let client: (RedisLike & { isReady: boolean }) | null = null
 let starting: Promise<void> | null = null
+let stalledUntil = 0
 
 /**
  * The client when it can answer now, else null, and never a wait on Redis.
@@ -90,7 +102,36 @@ async function getRedis(): Promise<RedisLike | null> {
   if (!url) return null
   starting ??= startRedis(url)
   await starting
-  return client?.isReady ? client : null
+  return client?.isReady && Date.now() >= stalledUntil ? client : null
+}
+
+/**
+ * One Redis command, or a rejection after COMMAND_BOUND_MS. A Redis that
+ * stalls with its socket open (a paused or swapping process, a path dropping
+ * packets without a reset) still reads `isReady`, and in node-redis 6.2 a
+ * MULTI has no command timeout at all, so without this a stall holds every
+ * limited request (SCRUM-1378). An overrun also stops `getRedis` handing out
+ * the client for STALL_BACKOFF_MS, so a stall costs one bound per back-off,
+ * not one per request. The callers' catch blocks fall back as for any error.
+ *
+ * The abandoned command still runs if Redis resumes, so a hit can be counted
+ * both here in memory and later in Redis. Over-counting is the safe side.
+ * `Promise.race` keeps a handler on it, so its late rejection is not unhandled.
+ */
+async function bounded<T>(command: Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  const overrun = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      stalledUntil = Date.now() + STALL_BACKOFF_MS
+      reject(new Error(`Redis did not answer within ${COMMAND_BOUND_MS} ms`))
+    }, COMMAND_BOUND_MS)
+    timer.unref()
+  })
+  try {
+    return await Promise.race([command, overrun])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 async function startRedis(url: string): Promise<void> {
@@ -100,7 +141,7 @@ async function startRedis(url: string): Promise<void> {
     })
   try {
     const { createClient } = await import("redis")
-    const created = createClient({ url })
+    const created = createClient({ url, pingInterval: PING_INTERVAL_MS })
     // Without a handler an emitted 'error' is an unhandled exception that
     // takes the process down — a rate limiter must never do that.
     created.on("error", (error: unknown) => {
@@ -179,12 +220,14 @@ export async function hit(key: string, windowMs: number, opts: StoreOptions = {}
      * rather than sliding forward with every request (a steady caller would
      * otherwise never reset); INCR keeps the TTL. MULTI makes the three atomic.
      */
-    const [, count, ttl] = (await redis
-      .multi()
-      .set(key, "0", { expiration: { type: "PX", value: windowMs }, condition: "NX" })
-      .incr(key)
-      .pTTL(key)
-      .exec()) as [unknown, number, number]
+    const [, count, ttl] = (await bounded(
+      redis
+        .multi()
+        .set(key, "0", { expiration: { type: "PX", value: windowMs }, condition: "NX" })
+        .incr(key)
+        .pTTL(key)
+        .exec()
+    )) as [unknown, number, number]
     return { count, resetAt: now + (ttl > 0 ? ttl : windowMs) }
   } catch (error) {
     if (opts.failClosed) {
@@ -248,10 +291,12 @@ export async function hitRolling(key: string, windowMs: number, limit: number): 
   if (!redis) return hitRollingMemory(key, windowMs, limit, now)
   try {
     const oldest = Number(
-      await (redis as unknown as { eval(script: string, opts: { keys: string[]; arguments: string[] }): Promise<unknown> }).eval(ROLLING_SCRIPT, {
-        keys: [key],
-        arguments: [String(windowMs), String(limit), randomUUID()],
-      })
+      await bounded(
+        (redis as unknown as { eval(script: string, opts: { keys: string[]; arguments: string[] }): Promise<unknown> }).eval(ROLLING_SCRIPT, {
+          keys: [key],
+          arguments: [String(windowMs), String(limit), randomUUID()],
+        })
+      )
     )
     return oldest === 0 ? { allowed: true } : { allowed: false, retryAt: oldest + windowMs }
   } catch (error) {
@@ -270,7 +315,7 @@ export async function peek(key: string, opts: StoreOptions = {}): Promise<number
   const redis = await redisFor(key, opts)
   if (redis) {
     try {
-      const value = await (redis as unknown as { get(k: string): Promise<string | null> }).get(key)
+      const value = await bounded((redis as unknown as { get(k: string): Promise<string | null> }).get(key))
       return value ? Number(value) || 0 : 0
     } catch (error) {
       if (opts.failClosed) {
@@ -298,9 +343,11 @@ export async function release(key: string): Promise<void> {
   const redis = await getRedis()
   if (redis) {
     try {
-      await (redis as unknown as { eval(script: string, opts: { keys: string[] }): Promise<unknown> }).eval(
-        "local n = redis.call('GET', KEYS[1]) if n and tonumber(n) > 0 then return redis.call('DECR', KEYS[1]) end return 0",
-        { keys: [key] }
+      await bounded(
+        (redis as unknown as { eval(script: string, opts: { keys: string[] }): Promise<unknown> }).eval(
+          "local n = redis.call('GET', KEYS[1]) if n and tonumber(n) > 0 then return redis.call('DECR', KEYS[1]) end return 0",
+          { keys: [key] }
+        )
       )
       return
     } catch (error) {
@@ -333,7 +380,7 @@ export async function forget(key: string): Promise<void> {
   const redis = await getRedis()
   if (!redis) return
   try {
-    await (redis as unknown as { del(k: string): Promise<unknown> }).del(key)
+    await bounded((redis as unknown as { del(k: string): Promise<unknown> }).del(key))
   } catch (error) {
     logger.warn("Rate limit Redis delete failed", {
       error: error instanceof Error ? error.message : String(error),
