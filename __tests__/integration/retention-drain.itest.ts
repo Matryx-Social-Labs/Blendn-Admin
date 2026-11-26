@@ -70,16 +70,24 @@ describe("a notification backlog", () => {
     expect(kept).toBe(KEPT)
   })
 
-  it("keeps an unread row until 90 days, then removes it", async () => {
-    const user = await person("drain-unread")
-    await bell(user, 3, { created: ago(100), read: null })
-    await bell(user, 2, { created: ago(40), read: null })
+  it("applies each rule at its edge: read 30 days, unread 90 days, whenever the row was created", async () => {
+    const user = await person("drain-edges")
+    const go = [
+      { created: ago(32), read: ago(31) },
+      { created: ago(100), read: null },
+    ]
+    const stay = [
+      { created: ago(30), read: ago(29) },
+      { created: ago(100), read: ago(1) }, // old, but read yesterday: the read rule, not the age, decides
+      { created: ago(89), read: null },
+    ]
+    for (const at of [...go, ...stay]) await bell(user, 1, at)
 
     await runSweep()
 
-    const left = await db.notifications.findMany({ where: { user_id: user }, select: { created_at: true } })
-    expect(left).toHaveLength(2)
-    for (const row of left) expect(row.created_at.getTime()).toBeGreaterThan(ago(90).getTime())
+    const left = await db.notifications.findMany({ where: { user_id: user }, select: { created_at: true, read_at: true } })
+    const key = (r: { created_at: Date; read_at: Date | null }) => `${Math.round((Date.now() - r.created_at.getTime()) / DAY)}:${r.read_at === null}`
+    expect(left.map(key).sort()).toEqual(stay.map((s) => key({ created_at: s.created, read_at: s.read })).sort())
   })
 })
 

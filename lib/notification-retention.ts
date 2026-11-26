@@ -99,44 +99,41 @@ export async function pruneProductEvents(now: Date = new Date()): Promise<number
 }
 
 /**
- * Batches until one comes back short, or the cap, then one log line. A capped pass (20 batches, a minute, or the
- * sweeper stopping) may leave rows for the next one, so it is a warning rather than a count.
+ * Batches until one comes back short, or a bound, then one log line; never throws.
+ *
+ * - Drained: info with the count.
+ * - Bounded at 20 batches or a minute: an error, so Sentry sees it. Rows are left for the next pass, which means the
+ *   table grew faster than 400,000 rows a day: the drain is not keeping up (launch gate 3).
+ * - Stopped (shutdown): info, nothing is wrong.
+ * - A batch threw (the pool's statement timeout, a lock, a lost connection): an error that still says how many went.
  */
-async function drain(message: string, prune: (now: Date) => Promise<number>): Promise<void> {
+async function drain(table: string, prune: (now: Date) => Promise<number>): Promise<void> {
   const now = new Date()
   const started = Date.now()
   let deleted = 0
-  for (let batches = 1; ; batches++) {
-    const count = await prune(now)
-    deleted += count
-    if (count < BATCH_LIMIT) {
-      if (deleted > 0) logger.info(message, { deleted, batches, capped: false })
-      return
+  let batches = 0
+  try {
+    while (!stopped) {
+      const count = await prune(now)
+      batches++
+      deleted += count
+      if (count < BATCH_LIMIT) break
+      if (batches >= MAX_BATCHES || Date.now() - started >= MAX_DRAIN_MS) {
+        logger.error(`Pruning ${table} could not keep up`, { deleted, batches, reason: batches >= MAX_BATCHES ? "batches" : "time" })
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, BATCH_PAUSE_MS))
     }
-    if (stopped || batches >= MAX_BATCHES || Date.now() - started >= MAX_DRAIN_MS) {
-      logger.warn(message, { deleted, batches, capped: true })
-      return
-    }
-    await new Promise((resolve) => setTimeout(resolve, BATCH_PAUSE_MS))
+    if (deleted > 0) logger.info(`Pruned ${table}`, { deleted, batches, ...(stopped && { reason: "stopped" }) })
+  } catch (error) {
+    logger.error(`Pruning ${table} failed`, { deleted, batches, error: String(error) })
   }
 }
 
 export async function runSweep(): Promise<void> {
-  try {
-    await drain("Pruned notifications", pruneNotifications)
-  } catch (error) {
-    logger.error("Notification prune failed", { error: String(error) })
-  }
-
-  /*
-   * Its own try, so one table's failure does not skip the other's sweep. They
-   * are unrelated and share only a cadence.
-   */
-  try {
-    await drain("Pruned product events", pruneProductEvents)
-  } catch (error) {
-    logger.error("Product event prune failed", { error: String(error) })
-  }
+  // One drain at a time and each catches its own failure, so one table's failure does not skip the other's sweep.
+  await drain("notifications", pruneNotifications)
+  await drain("product events", pruneProductEvents)
 
   /*
    * Registration records of deleted accounts, past their 180 days (IT Rules

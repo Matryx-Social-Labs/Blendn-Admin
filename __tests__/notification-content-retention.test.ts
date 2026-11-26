@@ -168,17 +168,17 @@ describe("the table stops growing forever", () => {
 describe("one sweep drains the backlog, within a bound (SCRUM-1224)", () => {
   const BATCH = 5_000
   let info: jest.SpyInstance
-  let warn: jest.SpyInstance
+  let error: jest.SpyInstance
 
   beforeEach(() => {
     jest.useFakeTimers()
     info = jest.spyOn(logger, "info").mockImplementation(() => {})
-    warn = jest.spyOn(logger, "warn").mockImplementation(() => {})
+    error = jest.spyOn(logger, "error").mockImplementation(() => {})
   })
   afterEach(() => {
     jest.useRealTimers()
     info.mockRestore()
-    warn.mockRestore()
+    error.mockRestore()
   })
 
   /** Notification batches return what `batch` says; product events find nothing. */
@@ -188,6 +188,8 @@ describe("one sweep drains the backlog, within a bound (SCRUM-1224)", () => {
       strings.join("").includes("FROM notifications") ? batch(n++) : 0
     )
   }
+  const productEventBatches = () =>
+    mockDb.$executeRaw.mock.calls.filter(([strings]) => (strings as TemplateStringsArray).join("").includes("FROM product_events")).length
 
   async function sweep() {
     const done = runSweep()
@@ -198,14 +200,14 @@ describe("one sweep drains the backlog, within a bound (SCRUM-1224)", () => {
   it("repeats while a batch comes back full, and stops at the first short one", async () => {
     notificationBatches((n) => [BATCH, BATCH, 2_000][n] ?? 0)
     await sweep()
-    expect(info).toHaveBeenCalledWith("Pruned notifications", { deleted: 12_000, batches: 3, capped: false })
-    expect(warn).not.toHaveBeenCalled()
+    expect(info).toHaveBeenCalledWith("Pruned notifications", { deleted: 12_000, batches: 3 })
+    expect(error).not.toHaveBeenCalled()
   })
 
-  it("stops at 20 batches and warns that rows are left", async () => {
+  it("stops at 20 batches, and says so as an error: the drain is not keeping up", async () => {
     notificationBatches(() => BATCH)
     await sweep()
-    expect(warn).toHaveBeenCalledWith("Pruned notifications", { deleted: 100_000, batches: 20, capped: true })
+    expect(error).toHaveBeenCalledWith("Pruning notifications could not keep up", { deleted: 100_000, batches: 20, reason: "batches" })
   })
 
   it("stops after a minute however many batches that is", async () => {
@@ -214,14 +216,40 @@ describe("one sweep drains the backlog, within a bound (SCRUM-1224)", () => {
       return BATCH
     })
     await sweep()
-    expect(warn).toHaveBeenCalledWith("Pruned notifications", { deleted: 20_000, batches: 4, capped: true })
+    expect(error).toHaveBeenCalledWith("Pruning notifications could not keep up", { deleted: 20_000, batches: 4, reason: "time" })
   })
 
   it("logs nothing when nothing is stale", async () => {
     notificationBatches(() => 0)
     await sweep()
     expect(info).not.toHaveBeenCalled()
-    expect(warn).not.toHaveBeenCalled()
+    expect(error).not.toHaveBeenCalled()
+  })
+
+  it("a batch that throws still reports what went before it, and the other table is still swept", async () => {
+    notificationBatches((n) => {
+      if (n === 1) throw new Error("canceling statement due to statement timeout")
+      return BATCH
+    })
+    await sweep()
+    expect(error).toHaveBeenCalledWith("Pruning notifications failed", {
+      deleted: BATCH,
+      batches: 1,
+      error: "Error: canceling statement due to statement timeout",
+    })
+    expect(productEventBatches()).toBe(1)
+  })
+
+  // Last in this describe: `stopped` is module state, and only the next describe's `start` clears it.
+  it("stops between batches when the sweeper is stopped, as a shutdown, not a failure", async () => {
+    notificationBatches(() => {
+      stopNotificationRetentionSweeper()
+      return BATCH
+    })
+    await sweep()
+    expect(info).toHaveBeenCalledWith("Pruned notifications", { deleted: BATCH, batches: 1, reason: "stopped" })
+    expect(error).not.toHaveBeenCalled()
+    expect(productEventBatches()).toBe(0)
   })
 })
 
