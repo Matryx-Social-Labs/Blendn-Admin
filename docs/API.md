@@ -4321,6 +4321,20 @@ doors answer **403** to any move out of `draft` or any venue link for the
 organisation `scripts/seed-razorpay-review.ts` made; it also cannot add a
 venue, invite, send a domain email or file an event claim.
 
+**A moderator's delisting sticks** (SCRUM-1394). The report queue's `delist`
+sets the event `unlisted` and records when and by whom (`events.delisted_at`,
+`delisted_by`); its audit row (`report.delist`) keeps the title and
+description as they were when it was delisted. From then on
+`PATCH /api/events/:id` answers **403** with *"A moderator set this event to
+Unlisted, so its visibility can’t be changed. Contact support to ask for a
+review."* to anybody but an `app_admin` whose save changes `visibility`, and
+writes nothing of that save; a save that sends the same `unlisted` goes
+through. An admin's change to `public` lifts the delisting (both columns
+cleared, audited `event.relist` in the same transaction). A second delist
+keeps the first one's time and moderator. `GET` and `PATCH` answer without
+`delisted_by` to anybody but an admin. Duplicate (`/dashboard/events/new?from=`)
+of a delisted event opens the plain form.
+
 Set by the organizer in the dashboard event form, bounded 13–25.
 
 **A suspended organizer's events are drafts** (SCRUM-8). Suspending an

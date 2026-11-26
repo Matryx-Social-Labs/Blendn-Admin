@@ -123,6 +123,14 @@ describe("events' time, venue, status and visibility are written through updateE
     expect(offenders).toEqual([])
   })
 
+  it("an allowance is for what it names: visibility and the delisting are the delist action's alone", () => {
+    const offenders = Object.keys(ALLOWED)
+      .filter((rel) => rel !== "app/dashboard/moderation/reports/actions.ts")
+      .flatMap((rel) => offendersIn(rel, readFileSync(join(ROOT, rel), "utf8")))
+      .filter((offence) => /visibility|delisted_/.test(offence))
+    expect(offenders).toEqual([])
+  })
+
   it("every allowance is still needed, so the list shrinks when the code does", () => {
     for (const rel of Object.keys(ALLOWED)) {
       expect(offendersIn(rel, readFileSync(join(ROOT, rel), "utf8")).length).toBeGreaterThan(0)

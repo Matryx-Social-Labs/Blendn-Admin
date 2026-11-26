@@ -2465,9 +2465,9 @@
       "date": "2026-10-22"
     },
     "event-change-writers.test.ts": {
-      "guards": "Nothing writes an event's start_time, end_time, venue_name, address or status except through updateEventTracked (lib/event-change.ts): a ratchet over events.update/updateMany and raw UPDATE events in app/ and lib/, with a named allowance (org suspension, venue unlink) that must still be needed, and a self-test of the scanner.",
-      "mutation": "M1559 updateEventStatus's `updateEventTracked` replaced by a bare `db.events.update` writing status.",
-      "observed": "M1559: 2 failing ('no file outside lib/event-change.ts writes them' naming lib/admin-role-actions.ts, and 'the converted doors really go through it'). Reverted; 7 of 7. The first run of the ratchet also found a real writer nobody had listed (venue unlink writes venue_name), now allowed with its reason.",
+      "guards": "Nothing writes an event's start_time, end_time, venue_name, address or status except through updateEventTracked (lib/event-change.ts): a ratchet over events.update/updateMany and raw UPDATE events in app/ and lib/, with a named allowance (org suspension, venue unlink) that must still be needed, and a self-test of the scanner. Since SCRUM-1394 also visibility, delisted_at and delisted_by: a moderator's delisting is held in updateEventTracked, so a bare visibility write is a way round it; only the delist action (app/dashboard/moderation/reports/actions.ts) is allowed, and an allowance for other columns does not cover them.",
+      "mutation": "M1559 updateEventStatus's `updateEventTracked` replaced by a bare `db.events.update` writing status. SCRUM-1394: (N9) the delist action's allowance removed. (N10) `visibility: \"public\"` added to venue-link-actions' confirm write (an allowed file). (N11) `visibility: \"public\"` added to ticketing-enable's write.",
+      "observed": "M1559: 2 failing ('no file outside lib/event-change.ts writes them' naming lib/admin-role-actions.ts, and 'the converted doors really go through it'). Reverted; 7 of 7. The first run of the ratchet also found a real writer nobody had listed (venue unlink writes venue_name), now allowed with its reason. SCRUM-1394 (2026-11-27): N9 1 failing ('no file outside … but the ones named below'); N10 1 failing ('an allowance is for what it names'; before that case was added it passed, which is why it exists); N11 1 failing ('no file outside …'). Restored each (cmp); 8 of 8.",
       "date": "2026-10-22"
     },
     "muted-rooms.itest.ts": {
@@ -3003,6 +3003,12 @@
       "mutation": "(A3) the call site passes 'organizer' for every application. (A5) the approval's reviewed_at write removed.",
       "observed": "A3: 1 of 8 failing (the venue owner). A5: 2 of 8. Restored each; 8 of 8 on blendn_growth09a.",
       "date": "2026-11-26"
+    },
+    "delisting-sticks.itest.ts": {
+      "guards": "SCRUM-1394 on a db:migrate database, through the real report action and the real PATCH/GET handlers: a delist records delisted_at/delisted_by and its audit row snapshots title and description; an organizer's PATCH that changes a delisted event's visibility is a 403 in the editor's words and writes nothing of the save; other edits save; a second delist keeps the first; Duplicate returns the plain form; an admin's move to public clears both columns with an event.relist audit row; an admin edit that stays unlisted keeps it; the organizer's GET and PATCH answers omit delisted_by.",
+      "mutation": "(RED) the suite on origin/dev 339403a1, then with only the migration. (N1) the EventDelistedError throw removed from updateEventTracked. (N2) the route stops passing relistBy. (N3) duplicateFor's delisted_at: null dropped. (N4) the audit row's ...delisted dropped. (N5) the delisted_at: null condition dropped from the delist's updateMany. (N6) the relist's column clear dropped. (N7) the PATCH answers with the whole row. (N8) the GET answers with the whole row.",
+      "observed": "RED: 7 of 7 failing (no columns), then 7 of 7 with the migration alone (organizer PATCH 200, columns null, Duplicate offered). N1: 1 of 7 (the organizer's 403). N2: 1 of 7 (the admin's relist). N3: 1 of 7 (Duplicate). N4: 3 of 7 (the three snapshots). N5: 1 of 7 (the second delist). N6: 1 of 7 (the relist). N7, N8: 1 of 8 each (who delisted). Restored each (cmp against copies); 8 of 8 on blendn_security_16.",
+      "date": "2026-11-27"
     }
   },
   "grandfathered": [

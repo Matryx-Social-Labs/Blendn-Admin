@@ -44,7 +44,7 @@ import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const eventRoute = require("@/app/api/events/[id]/route") as typeof import("@/app/api/events/[id]/route")
 
-const SENTENCE = "A moderator set this event to Unlisted, so its visibility can't be changed. Contact support to ask for a review."
+const SENTENCE = "A moderator set this event to Unlisted, so its visibility can’t be changed. Contact support to ask for a review."
 const users: string[] = []
 const events: string[] = []
 const orgs: string[] = []
@@ -192,4 +192,22 @@ it("an admin edit that leaves it unlisted leaves the delisting in place", async 
   expect(res.status).toBe(200)
   expect(await row(eventId)).toMatchObject({ visibility: "unlisted", delisted_by: admin })
   expect(await db.audit_logs.count({ where: { action: "event.relist", resource_id: eventId } })).toBe(0)
+})
+
+it("the organizer is never told which moderator delisted it; an admin is", async () => {
+  const eventId = await hostedEvent("Who did it", "x")
+  await delist(eventId, admin)
+  const read = (as: { id: string; role: "app_admin" | "organizer" }) => {
+    session = { user: as }
+    return eventRoute.GET(new Request(`http://localhost/api/events/${eventId}`), { params: Promise.resolve({ id: eventId }) })
+  }
+
+  const saved = await (await patch(eventId, { id: host, role: "organizer" }, { title: "Who did it, edited" })).json()
+  const shown = await (await read({ id: host, role: "organizer" })).json()
+  const staff = await (await read({ id: secondAdmin, role: "app_admin" })).json()
+
+  expect(saved).not.toHaveProperty("delisted_by")
+  expect(shown).not.toHaveProperty("delisted_by")
+  expect(shown.delisted_at).not.toBeNull()
+  expect(staff.delisted_by).toBe(admin)
 })
