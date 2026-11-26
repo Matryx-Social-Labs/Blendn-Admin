@@ -4,8 +4,13 @@ import { join } from "path"
 import { stripComments } from "./support/strip-comments"
 
 /**
- * Nothing writes the time, the venue or the status of an event except through
- * `updateEventTracked` (lib/event-change.ts).
+ * Nothing writes the time, the venue, the status or the visibility of an event
+ * except through `updateEventTracked` (lib/event-change.ts).
+ *
+ * Visibility is here for a different reason (SCRUM-1394): a moderator's delist
+ * (`delisted_at`) is held there, under the row lock, so an organizer cannot
+ * put a delisted event back in the feed. A door that writes `visibility` with
+ * a bare `events.update` would put it back with no refusal at all.
  *
  * "Changed while you're going" (Flow 3) is a record kept at the moment of the
  * write: `events.changed_at` and `changed_from`. A door that writes `start_time`,
@@ -28,7 +33,7 @@ import { stripComments } from "./support/strip-comments"
 
 const ROOT = join(__dirname, "..")
 const SEARCH_DIRS = ["app", "lib"]
-const TRACKED = ["start_time", "end_time", "venue_name", "address", "status"]
+const TRACKED = ["start_time", "end_time", "venue_name", "address", "status", "visibility", "delisted_at", "delisted_by"]
 
 /** The one place the record is made. */
 const THE_WRITER = "lib/event-change.ts"
@@ -39,6 +44,8 @@ const ALLOWED: Record<string, string> = {
     "Suspending an organisation takes its published events to draft (and restoring puts them back), remembering `pre_suspension_status`. Nobody is TOLD, by design: the event goes dark, and `ORGANISER_SUSPENDED` is what the link says (lib/event-access.ts).",
   "lib/venue-link-actions.ts":
     "Unlinking an event from a venue writes `venue_name: event.venue_name ?? venue.name`: it KEEPS the name the event already shows (\"the event was held there; only the link is wrong\"), so the venue people see does not move. Only the link does, and that is not a time, a place or a status.",
+  "app/dashboard/moderation/reports/actions.ts":
+    "The moderator's delist: it is what sets `visibility: unlisted` with `delisted_at` and `delisted_by`, the lock `updateEventTracked` then holds against everybody but an admin (SCRUM-1394). Not a change attendees are told about: the event leaves the feed, and people going keep it.",
 }
 
 function sourceFiles(dir: string, acc: string[] = []): string[] {
@@ -99,7 +106,7 @@ export function offendersIn(rel: string, raw: string): string[] {
   return out
 }
 
-describe("events' time, venue and status are written through updateEventTracked", () => {
+describe("events' time, venue, status and visibility are written through updateEventTracked", () => {
   const files = SEARCH_DIRS.flatMap((d) => sourceFiles(join(ROOT, d)))
     .map((abs) => abs.slice(ROOT.length + 1).split(/[\\/]/).join("/"))
     .filter((rel) => !rel.startsWith("lib/openapi/"))
@@ -143,7 +150,7 @@ describe("events' time, venue and status are written through updateEventTracked"
 
     it("lets through writes of other columns, other tables and a status that is only a value", () => {
       expect(offendersIn("x.ts", "await db.events.update({ where: { id }, data: { deleted_at: new Date() } })")).toEqual([])
-      expect(offendersIn("x.ts", "await db.events.updateMany({ where: { status: 'draft' }, data: { visibility: 'unlisted' } })")).toEqual([])
+      expect(offendersIn("x.ts", "await db.events.updateMany({ where: { status: 'draft', visibility: 'unlisted' }, data: { is_featured: false } })")).toEqual([])
       expect(offendersIn("x.ts", "await tx.payment_events.update({ where: { id }, data: { status: 'paid' } })")).toEqual([])
     })
   })
