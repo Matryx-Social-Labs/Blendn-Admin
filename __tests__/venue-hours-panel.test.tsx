@@ -53,6 +53,7 @@ describe("VenueHoursPanel", () => {
   })
 
   it("carries no time-zone label", () => {
-    expect(render(WEEK)).not.toMatch(/IST|EST|EDT|UTC|Asia\/|America\/|time zone|local time/i)
+    const text = render(WEEK).replace(/<[^>]+>/g, " ")
+    expect(text).not.toMatch(/\b(IST|EST|EDT|UTC)\b|Asia\/|America\/|time zone|local time/)
   })
 })

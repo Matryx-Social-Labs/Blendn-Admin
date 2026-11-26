@@ -3,6 +3,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockGetAuth(); return s?.user ? { ...s, user: { signedInAt: Date.now(), ...s.user } } : s } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
+import { isDeepStrictEqual } from "node:util"
 import { NextRequest } from "next/server"
 
 import { signAccessToken } from "@/lib/mobile-auth"
@@ -181,20 +182,25 @@ describe("setVenueHours: what it accepts", () => {
     expect(audits[1].details).toEqual({ before: WEEK, after: null })
   })
 
-  it("keeps both of two saves at once in the record: the last write wins, and each audit row's before is the other's after", async () => {
+  it("keeps every one of several saves at once in the record: the last write wins, and each audit row's before is the previous row's after", async () => {
     const owner = await person("vh-owner6", "venue_owner")
     const v = await venue({ owner_org_id: owner.orgId })
     owner.as()
-    const a = [WEEK[0]]
-    const b = [WEEK[1]]
-    await Promise.all([setVenueHours(v, a), setVenueHours(v, b)])
-    const audits = await auditsOf(v)
-    expect(audits).toHaveLength(2)
-    const [first, second] = [audits[0].details as { before: unknown; after: unknown }, audits[1].details as { before: unknown; after: unknown }]
-    expect(first.before).toBeNull()
-    expect(second.before).toEqual(first.after)
-    expect([first.after, second.after]).toEqual(expect.arrayContaining([a, b]))
-    expect(await hoursOf(v)).toEqual(second.after)
+    // Six different weeks (one day each), saved at the same moment.
+    const weeks = [1, 2, 3, 4, 5, 6].map((day) => [{ day, open: "18:00", close: "23:00" }])
+    await Promise.all(weeks.map((w) => setVenueHours(v, w)))
+    const audits = (await auditsOf(v)).map((a) => a.details as { before: unknown; after: unknown })
+    expect(audits).toHaveLength(weeks.length)
+    expect(audits.map((a) => a.after)).toEqual(expect.arrayContaining(weeks))
+    // One unbroken chain from NULL, followed by before → after (created_at is each transaction's start, not its commit).
+    const chain: unknown[] = []
+    let at: unknown = null
+    for (let next = audits.find((a) => isDeepStrictEqual(a.before, at)); next; next = audits.find((a) => isDeepStrictEqual(a.before, at) && !chain.includes(a))) {
+      chain.push(next)
+      at = next.after
+    }
+    expect(chain).toHaveLength(weeks.length)
+    expect(await hoursOf(v)).toEqual(at)
   })
 })
 

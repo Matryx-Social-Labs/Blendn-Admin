@@ -10,6 +10,7 @@ import { auditInTx, auditLog } from "@/lib/audit-log"
 import { haversineDistanceMeters } from "@/lib/geo"
 import { fenceCentre, validateGeofence, type Geofence } from "@/lib/geofence"
 import { GEOFENCE_MESSAGES } from "@/lib/geofence-input"
+import { hoursProblems, venueHoursSchema } from "@/lib/venue-hours"
 
 /**
  * How far a fence's centre may sit from the venue's pin.
@@ -36,7 +37,7 @@ function refuseIfFenceDrifted(fence: Geofence, pin: { lat: number; lng: number }
 }
 import { VENUE_TYPES, venueTypeLabel } from "@/lib/venue-types"
 import { defaultVenueFence, nearbyVenues, type NearbyVenue } from "@/lib/venue-rules"
-import { type Prisma, type venue_type } from "@prisma/client"
+import { Prisma, type venue_type } from "@prisma/client"
 import { homeOrgIdFor } from "@/lib/event-ownership"
 import { activeMembership } from "@/lib/org-membership"
 import { overUserLimit } from "@/lib/rate-limit"
@@ -478,6 +479,51 @@ export async function setVenueAmenities(id: string, amenityIds: string[]): Promi
     })
   })
   revalidatePath(`/dashboard/venues/${id}`)
+}
+
+/**
+ * The venue's opening hours (`venues.hours`, SCRUM-1154): what the app's venue
+ * page and Places card read (`venueHours`, `tonightHours`). The week as given
+ * replaces the old one, sorted by day; an empty week is NULL, "not given",
+ * which the readers cannot tell from an empty list anyway.
+ *
+ * Who: as for amenities, an admin or any active member of the owning
+ * organisation; the organisation that only added an unclaimed venue does not
+ * say when it is open. What: the stored shape, and nothing `hoursProblems`
+ * refuses, so every saved week is one the readers place right. The row and its
+ * audit entry, with the week before and after, are one transaction; the read
+ * of "before" locks the row, so of two saves at once the second records the
+ * first's week as its before. A save that changes nothing writes nothing.
+ */
+export async function setVenueHours(id: string, rows: unknown): Promise<void> {
+  const user = await requireUser()
+  const writable = await venueForWrite(id, user)
+  if (user.role !== "app_admin" && !writable.owner_org_id) {
+    throw new Refusal("Only the venue’s owner or an admin sets its hours.")
+  }
+  const parsed = venueHoursSchema.safeParse(rows)
+  if (!parsed.success) throw new Refusal("Those hours are not a day with an open and a close time. Pick them again.")
+  const { day_reset_hour } = await db.venues.findUniqueOrThrow({ where: { id }, select: { day_reset_hour: true } })
+  const [problem] = hoursProblems(parsed.data, day_reset_hour)
+  if (problem) throw new Refusal(problem.message)
+  const after = parsed.data.length === 0 ? null : [...parsed.data].sort((a, b) => a.day - b.day)
+
+  const changed = await db.$transaction(async (tx) => {
+    const [row] = await tx.$queryRaw<{ hours: unknown }[]>`SELECT hours FROM venues WHERE id = ${id}::uuid FOR UPDATE`
+    const before = row?.hours ?? null
+    if (isDeepStrictEqual(before, after)) return false
+    await tx.venues.update({ where: { id }, data: { hours: after ?? Prisma.DbNull } })
+    await auditInTx(tx, {
+      userId: user.id,
+      action: "venue.hours_updated",
+      resource: "venue",
+      resourceId: id,
+      details: { before, after } as Prisma.InputJsonObject,
+      orgId: writable.owner_org_id,
+    })
+    return true
+  })
+  if (changed) revalidatePath(`/dashboard/venues/${id}`)
 }
 
 /**

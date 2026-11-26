@@ -1845,7 +1845,7 @@ model venues {
   /// map's height. Set by the venue's owner or an admin; CHECK 1–200 in SQL.
   floors            Int?         @db.SmallInt
   /// Opening hours as the venue page shows them: `[{ day: 0-6 (Sun-Sat), open: "HH:MM", close: "HH:MM" }]`
-  /// in the venue's own timezone (`lib/venue-hours.ts`). Null: not given. No writer yet.
+  /// in the venue's own timezone (`lib/venue-hours.ts`). Null: not given. Written by `setVenueHours` (venue page, SCRUM-1154).
   hours             Json?
   /// A few lines about the place, shown on the venue page. Null: not given.
   description       String?
