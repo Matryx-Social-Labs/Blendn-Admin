@@ -115,7 +115,8 @@ test("the Plan page starts the window at the night of 8, not 6, and the row says
     const ctx = await browser.newContext({ baseURL, viewport: { width, height: 900 }, storageState: await sessionFor(baseURL!) })
     const page = await ctx.newPage()
     await page.goto("/dashboard/plan")
-    await expect(page.getByText(`Free · Analytics open until ${PLAN_DAY.format(until)}`)).toBeVisible()
+    // Visible only: React's streamed copy of the panel can sit in a hidden div until it is swapped in (CI run 45743334742).
+    await expect(page.getByText(`Free · Analytics open until ${PLAN_DAY.format(until)}`).filter({ visible: true })).toBeVisible()
     await expect(page.getByText("opened every Analytics view for 90 days", { exact: false })).toBeVisible()
     await expect(page.getByText("Payments are taken by Razorpay for Matryx Social Labs Private Limited")).toBeVisible()
     await expect(page.getByText(/invoice/i)).toHaveCount(0)

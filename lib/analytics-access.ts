@@ -3,6 +3,7 @@ import "server-only"
 import { distinctAttendeeCounts } from "./attendee-counts"
 import { MIN_ATTENDEES } from "./connection-metrics"
 import { db } from "./db"
+import { MIN_CELL } from "./disclosure"
 import { eventPassesFor, liveEntitlement } from "./entitlements"
 import { realEventsWhere } from "./event-kind"
 
@@ -23,7 +24,9 @@ import { realEventsWhere } from "./event-kind"
  *    never re-derived, so soft-deleting that event, or a check-in fixed later,
  *    cannot restart the window.
  * 3. **That first event's analytics stay free for good.**
- * 4. **An Event Pass** opens one event's pass features.
+ * 4. **An Event Pass** opens one event's pass features. It is sold only for
+ *    a night that has ended with at least `MIN_CELL` people checked in
+ *    (`worthAPass`): under that floor every pass feature is held back.
  *
  * Every paid figure is computed only after this says yes
  * (`lib/org-analytics.ts`); a locked screen is drawn from
@@ -66,6 +69,18 @@ export function decideAccess(input: {
 /** May this event's pass features be computed and shown? */
 export function mayOpenEvent(access: AnalyticsAccess, eventId: string): boolean {
   return access.org || access.firstFreeEventId === eventId || access.passEventIds.includes(eventId)
+}
+
+/**
+ * Which of these events Event Insights may be sold for: ended, with at least
+ * `MIN_CELL` people checked in. Every pass feature goes through
+ * `lib/disclosure.ts`, so a smaller night would buy only held-back tiles
+ * (SCRUM-1363). The Plan page's list and the checkout both ask this.
+ */
+export async function worthAPass(events: readonly { id: string; end_time: Date }[], now: Date): Promise<Set<string>> {
+  const ended = events.filter((e) => e.end_time < now)
+  const people = await distinctAttendeeCounts(ended.map((e) => e.id))
+  return new Set(ended.filter((e) => (people.get(e.id) ?? 0) >= MIN_CELL).map((e) => e.id))
 }
 
 /**
