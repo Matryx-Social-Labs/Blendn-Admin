@@ -98,4 +98,17 @@ describe("the categories are the report reasons, read from one list", () => {
       expect(suspendedMessageFor(value)).toBe(reads)
     }
   })
+
+  it("the phrases read word for word as they did", () => {
+    expect(SUSPENSION_CATEGORIES).toEqual({
+      harassment: "harassment",
+      hate_speech: "hate speech",
+      spam: "spam",
+      fake_profile: "a fake profile",
+      inappropriate_messages: "inappropriate messages",
+      inappropriate_photos: "inappropriate photos",
+      inappropriate_content: "inappropriate content",
+      guidelines: "breaking our community guidelines",
+    })
+  })
 })

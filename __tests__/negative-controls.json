@@ -1927,6 +1927,18 @@
       "observed": "M15: 1 of 2 failing. Restored; 2 of 2.",
       "date": "2026-11-27"
     },
+    "reports-queue-severity.itest.ts": {
+      "guards": "SCRUM-1176 on a db:migrate database: the staff reports queue (getReportQueue) shows a message report's kept excerpt once the message row is gone; orders S1 before S2 before S3 across the merged rows whatever their age, reading a padded, capitalised reason as reportReason does; and takes each table's page S1 first in the query, so a full page of older spam does not push a newer threat off it.",
+      "mutation": "(C1) the room/DM excerpt read from the live message only. (C2) the merged rows sorted by age alone. (C3) the page query ordered by created_at alone (severity applied after the cap). (C4) the SQL severity rank without lower(btrim()).",
+      "observed": "Before the change: 3 of 3 failing. C1: 1 of 3 (the kept words). C2: 1 of 3 (threat, harassment, spam). C3: 1 of 3 (the threat behind 100 older spam). C4: 1 of 3 (the same, for ' Threat '). Restored each; 3 of 3 on trust10a.",
+      "date": "2026-11-27"
+    },
+    "suspension-reason.test.ts": {
+      "guards": "SCRUM-1176: SUSPENSION_CATEGORIES is read from lib/report-reasons.ts: every category but guidelines is a report reason; each reason's suspension phrase is what its owner reads and a reason without one reads as guidelines; the seven phrases and the guidelines line read word for word as SCRUM-1174 shipped them.",
+      "mutation": "(C5) a category that is not a reason added. (C6) the hard-coded list put back beside the reasons, with one extra phrase. (C7) one phrase changed by a character. (C8) a reason without a phrase given one.",
+      "observed": "Before the change: 1 of 21 failing (the phrase test). C5: 1 of 22. C6: 1 of 22. C7: 1 of 22. C8: 1 of 22. Restored each; 22 of 22.",
+      "date": "2026-11-27"
+    },
     "deletion-erases-participation.itest.ts": {
       "guards": "SCRUM-481: DELETE /account ends every open check-in through performCheckout, so an erased person is not 'here now' in a live room (getOccupancy drops them) while the check-in row stays, closed, as the organiser's attendance, and their presence session is departed. Another attendee in the same room is untouched. Review pass: every open check-in goes (a second event's too), each session is closed as departed_source 'user', and a failure to read them never costs the storage erasure (account-deletion.test.ts: still 200, both folders deleted).",
       "mutation": "M322: the performCheckout call in the deletion route's open-check-in loop replaced with a no-op. Review pass: M368 the check-in read outside the try (a rejection skips the uploads). M369 only the first open row checked out. M370 the checkout reason left_area instead of manual.",
