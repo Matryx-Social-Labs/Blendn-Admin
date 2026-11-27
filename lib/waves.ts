@@ -2,7 +2,6 @@ import { Prisma } from "@prisma/client"
 
 import { chatWindowState } from "@/lib/chat-window"
 import { firstName } from "@/lib/conversation-identity"
-import { closedPairKeys } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { createdBefore, decodeKeyset, keysetPage, NEWEST_FIRST } from "@/lib/pagination"
 import { pseudonymsForEvent } from "@/lib/anonymous-names"
@@ -10,7 +9,7 @@ import { logCapHit } from "@/lib/rate-limit"
 import { hit } from "@/lib/rate-limit-store"
 import { roomHandle } from "@/lib/room-handle"
 import { notHostBannedFrom } from "@/lib/room-kind"
-import { LISTED_IN_ROSTER, notStrangersTo } from "@/lib/room-people"
+import { LISTED_IN_ROSTER, hiddenInRooms } from "@/lib/room-people"
 import { visibleInRoom } from "@/lib/identity"
 
 /**
@@ -238,31 +237,6 @@ export async function roomIsOpen(eventId: string, now: Date = new Date()): Promi
   return chatWindowState({ ...event, end_time: realEnd }, { status: event.chat_group?.status ?? "active" }, now).open
 }
 
-/**
- * Everybody whose waves `viewerId` must not see, whichever way: blocks both
- * ways, a pair that left each other, friends (never strangers), and anybody
- * the viewer reported. The deck's set (`matchesForEvent`).
- */
-async function hiddenFrom(viewerId: string): Promise<string[]> {
-  const [blocks, closed, friends, reported] = await Promise.all([
-    db.blocked_users.findMany({
-      where: { OR: [{ blocker_id: viewerId }, { blocked_id: viewerId }] },
-      select: { blocker_id: true, blocked_id: true },
-    }),
-    closedPairKeys(viewerId),
-    notStrangersTo(viewerId),
-    db.user_reports.findMany({ where: { reporter_id: viewerId }, select: { reported_id: true }, distinct: ["reported_id"] }),
-  ])
-  return [
-    ...new Set([
-      ...blocks.map((b) => (b.blocker_id === viewerId ? b.blocked_id : b.blocker_id)),
-      ...closed,
-      ...friends,
-      ...reported.map((r) => r.reported_id),
-    ]),
-  ]
-}
-
 /** The waves a viewer may see in one room: not from the hidden, the suspended, the unlisted or the banned. */
 function visibleWhere(viewerId: string, eventId: string, hidden: string[]): Prisma.event_wavesWhereInput {
   return {
@@ -286,7 +260,8 @@ function visibleWhere(viewerId: string, eventId: string, hidden: string[]): Pris
  * "may I answer?" becomes a way to ask whether a hidden person waved.
  */
 export async function hasVisibleWaveFrom(viewerId: string, eventId: string, fromId: string): Promise<boolean> {
-  const hidden = await hiddenFrom(viewerId)
+  // Whose waves this viewer must not see: the deck's list (`hiddenInRooms`).
+  const hidden = [...(await hiddenInRooms(viewerId))]
   if (hidden.includes(fromId)) return false
   const row = await db.event_waves.findFirst({
     where: { AND: [visibleWhere(viewerId, eventId, hidden), { from_id: fromId }] },
@@ -325,7 +300,8 @@ export async function receivedWaves(
   const after = opts.cursor ? decodeKeyset(opts.cursor) : null
   if (opts.cursor && !after) return { refused: "bad_cursor" }
 
-  const hidden = await hiddenFrom(viewerId)
+  // Whose waves this viewer must not see: the deck's list (`hiddenInRooms`).
+  const hidden = [...(await hiddenInRooms(viewerId))]
   const [mineOut, likedOut] = await Promise.all([
     db.event_waves.findMany({ where: { event_id: eventId, from_id: viewerId }, select: { to_id: true } }),
     db.event_likes.findMany({ where: { event_id: eventId, liker_id: viewerId }, select: { liked_id: true } }),

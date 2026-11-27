@@ -248,7 +248,7 @@ describe("arrivals and departures follow the same list: the hidden person's copy
     ["the person the viewer reported", () => c],
   ])("an arrival of %s reaches the viewer as the bare count: no handle, no room copy", async (_, arriver) => {
     await install([v, arriver(), s], eventId)
-    await emitEventCheckIn(eventId, arriver().id, "Otter", { name: "A", image: null }, [], true)
+    await emitEventCheckIn(eventId, arriver().id, "Otter", { name: "A", image: null }, true)
     expect(copies(v, "event:room:checkin")).toEqual([])
     expect(copies(v, "event:checkin")).toHaveLength(1)
     expect(copies(v, "event:checkin")[0].payload).not.toHaveProperty("userId")
@@ -258,7 +258,7 @@ describe("arrivals and departures follow the same list: the hidden person's copy
 
   it("the reporter's own arrival still reaches the reported person with its handle (they are told nothing)", async () => {
     await install([v, c], eventId)
-    await emitEventCheckIn(eventId, v.id, "Otter", { name: "V", image: null }, [], true)
+    await emitEventCheckIn(eventId, v.id, "Otter", { name: "V", image: null }, true)
     expect(copies(c, "event:room:checkin")).toHaveLength(1)
     expect(copies(c, "event:checkin")[0].payload.userId).toBe(roomHandle(eventId, v.id))
   })

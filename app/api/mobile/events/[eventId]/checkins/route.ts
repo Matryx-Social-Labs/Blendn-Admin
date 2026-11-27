@@ -11,11 +11,10 @@ import { inRoomWhere } from "@/lib/event-kind"
 import { roomPersonFacts } from "@/lib/room-person-facts"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { blockCounterparties } from "@/lib/conversations"
 import { geocodeBudget, normalizeLocationToCity } from "@/lib/location"
 import { idForViewer } from "@/lib/room-handle"
 import { visibleInRoom } from "@/lib/identity"
-import { notStrangersTo } from "@/lib/room-people"
+import { hiddenInRooms } from "@/lib/room-people"
 import {
   successResponse,
   unauthorizedResponse,
@@ -101,18 +100,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      */
     // At a venue day, only while live: you see who is here while you can be seen (`inRoomWhere`).
     // A host's ban closes the room's people as it closes its chat (`roomBanRefusal`).
-    // And friends, whatever their switch: two friends never meet as strangers
-    // (lib/room-people.ts). A friend who allows it is in "Friends here" instead.
-    // Four independent reads, one wave; the refusals below still go in their old order.
-    const [banned, attended, blocked, strangersTo] = await Promise.all([
+    // And whoever the deck hides (`hiddenInRooms`): blocks, closed pairs, the people the
+    // viewer reported, and friends whatever their switch (a friend who allows it is in
+    // "Friends here" instead). Three independent reads, one wave; the refusals below
+    // still go in their old order.
+    const [banned, attended, hiddenSet] = await Promise.all([
       roomBanRefusal(eventId, authUser.userId),
       db.event_check_ins.findFirst({
         where: { event_id: eventId, user_id: authUser.userId, ...inRoomWhere(authUser.userId) },
         orderBy: { check_in_time: "desc" },
         select: { kind: true },
       }),
-      blockCounterparties(authUser.userId),
-      notStrangersTo(authUser.userId),
+      hiddenInRooms(authUser.userId),
     ])
     if (banned) return banned
 
@@ -148,14 +147,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * present. That is the intended difference between "was here" and "is here".
      */
     /*
-     * Blocks reach the roster too.
+     * The deck's list, the deck's people (SCRUM-1386).
      *
-     * `/matches` has filtered on blocks since it shipped; this endpoint never
-     * did, so the one screen that names who is physically in the room with you
-     * would still list somebody you blocked. Both directions, and applied to the
-     * count as well, so a filtered page never sits under an unfiltered total.
+     * This hid blocks and friends while `/matches` also hid closed pairs and the
+     * people the viewer reported, so the roster minus the deck was the handle of
+     * the person you unmatched or reported. Applied to the count as well, so a
+     * filtered page never sits under an unfiltered total: the total is the rows.
      */
-    const hidden = [...blocked, ...strangersTo]
+    const hidden = [...hiddenSet]
 
     /*
      * "Show online status" off: in the room, counted, not listed (SCRUM-141).

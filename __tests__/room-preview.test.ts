@@ -19,6 +19,7 @@ const mockDb = {
   // Friends leave the count (lib/room-people.ts); none here.
   friendships: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
   ended_friendships: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
+  user_reports: { findMany: jest.fn(async () => []) },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 
@@ -32,7 +33,11 @@ jest.mock("@/lib/event-access", () => ({
 }))
 
 const mockBlocks = jest.fn()
-jest.mock("@/lib/conversations", () => ({ blockCounterparties: (...a: unknown[]) => mockBlocks(...a) }))
+// Blocks reach the count through `hiddenInRooms`; closed pairs and reports are empty here.
+jest.mock("@/lib/conversations", () => ({
+  blockCounterparties: (...a: unknown[]) => mockBlocks(...a),
+  closedPairKeys: async () => new Set<string>(),
+}))
 jest.mock("@/lib/rate-limit", () => ({ rateLimit: async () => null, userLimit: () => ({}) }))
 
 import { NextRequest } from "next/server"

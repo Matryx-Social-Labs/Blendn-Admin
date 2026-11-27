@@ -2,7 +2,6 @@ import { Prisma } from "@prisma/client"
 
 import { ageFrom } from "@/lib/age"
 import { chatClosesAt, eventHidesRoom } from "@/lib/chat-window"
-import { blockCounterparties, closedPairKeys } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { visibleInRoom } from "@/lib/identity"
 import { tierBBudget } from "@/lib/matching"
@@ -11,7 +10,7 @@ import { NO_TRAITS, personCard, traitHolders, viewerTierB } from "@/lib/overlaps
 import { roomPersonFacts, type RoomPersonFacts } from "@/lib/room-person-facts"
 import { idForViewer, roomMemberFromRef } from "@/lib/room-handle"
 import { eventRoomBan } from "@/lib/room-kind"
-import { notStrangersTo } from "@/lib/room-people"
+import { hiddenInRooms } from "@/lib/room-people"
 import { MIN_ROOM_FOR_WORK_FIELD } from "@/lib/work-fields"
 
 /**
@@ -31,8 +30,9 @@ import { MIN_ROOM_FOR_WORK_FIELD } from "@/lib/work-fields"
  *   (`idForViewer`), never an account id; their name and photo only where the
  *   room already shows them (`visibleInRoom`, the roster's rule), otherwise the
  *   pseudonym from their membership row and no photo.
- * - **Never a block, either way** (`blockCounterparties`), and never a pair
- *   that closed a conversation: leaving is permanent (`closedPairKeys`).
+ * - **Never a block, either way, never a pair that closed a conversation**
+ *   (leaving is permanent), **never anybody the viewer reported**: the deck's
+ *   list (`hiddenInRooms`), so the two never differ by a person.
  * - **Never a friend** — not as a stranger card, and not named. The owner's
  *   ruling (2026-10-22): friends never appear to each other as stranger cards
  *   (no like, wave or match between friends). A friend who lets friends see
@@ -127,12 +127,12 @@ export async function nightPeople(
   if (ban) return { refused: "banned", banned_by: ban.banned_by }
 
   /*
-   * Friends: every one, whatever their room setting, and anyone whose
-   * friendship ended in the last 24 hours — plans/friends-in-room.md D1 and
-   * B4, through the one helper every people surface asks (`notStrangersTo`).
+   * The deck's list (`hiddenInRooms`): blocks, closed pairs, the people the
+   * viewer reported, and friends — every one, whatever their room setting, and
+   * anyone whose friendship ended in the last 24 hours (plans/friends-in-room.md
+   * D1 and B4).
    */
-  const [blocked, closed, friends] = await Promise.all([blockCounterparties(viewerId), closedPairKeys(viewerId), notStrangersTo(viewerId)])
-  const hidden = [...new Set([viewerId, ...blocked, ...closed, ...friends])]
+  const hidden = [viewerId, ...(await hiddenInRooms(viewerId))]
 
   /*
    * Who may be listed, as SQL: one predicate for the page and the total, so

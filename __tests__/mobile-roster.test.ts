@@ -27,6 +27,8 @@ const mockDb = {
   // `eventRoomBan`: nobody here is banned from the room unless a case says so.
   chat_group_members: { findFirst: jest.fn().mockResolvedValue(null) },
   ended_friendships: { findMany: jest.fn(async () => []) },
+  // Whoever the viewer reported leaves the roster as the deck (`hiddenInRooms`). Empty unless a case sets it.
+  user_reports: { findMany: jest.fn(async () => []) },
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))

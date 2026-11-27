@@ -102,9 +102,12 @@ describe("every group-chat surface consults blocked_users", () => {
   })
 
   it("the live check-in roster does not announce someone you blocked", () => {
-    // Both doors (an event's check-in, Go Live) seat people through lib/check-in-core.ts.
-    const src = read("lib/check-in-core.ts")
-    expect(src).toContain("blockCounterparties")
+    // Both doors (an event's check-in, Go Live) seat people through lib/check-in-core.ts, which announces
+    // through `emitEventCheckIn`; the emitter reads who the arriver is hidden from (`viewersHiddenFromMany`:
+    // blocks either way, closed pairs, reports, friends — SCRUM-1386) and the helper reads the blocks.
+    expect(read("lib/check-in-core.ts")).toContain("emitEventCheckIn(")
+    expect(read("lib/socket-server.ts")).toMatch(/viewersHiddenFromMany\(\[userId\]\)/)
+    expect(read("lib/room-people.ts")).toMatch(/viewersHiddenFromMany[\s\S]*blockCounterpartiesMany\(ids\)/)
   })
 })
 

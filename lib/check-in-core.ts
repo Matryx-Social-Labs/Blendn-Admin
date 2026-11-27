@@ -2,7 +2,6 @@ import type { check_in_method, event_kind, Prisma } from "@prisma/client"
 
 import { outOfRangeMessage } from "@/lib/checkin-messages"
 import { logger } from "@/lib/logger"
-import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { ADULTS_ONLY, ageFrom, isAdult, minAgeRefusal, participationDenial, participationSelect, stripDating } from "@/lib/age"
 import { eventAccessResponse } from "@/lib/event-access"
@@ -559,7 +558,7 @@ export async function openSeatSession(input: ArrivalInput) {
 /** The arrival on the room's live roster: run by `seatAtTheDoor`, not awaited. */
 async function announceArrival(eventId: string, userId: string, chatGroupId: string, kind: "attendee" | "staff"): Promise<void> {
   // Their pseudonym, and who they are for the recipients whose roster would name them.
-  const [membership, arriver, blockedIds] = await Promise.all([
+  const [membership, arriver] = await Promise.all([
     db.chat_group_members.findUnique({
       where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: userId } },
       select: { anonymous_name: true },
@@ -568,12 +567,6 @@ async function announceArrival(eventId: string, userId: string, chatGroupId: str
       where: { id: userId },
       select: { name: true, profile: { select: { photos: true, show_online: true } } },
     }),
-    /*
-     * Whoever is in a block relationship with the arriver hears nothing of the
-     * arrival: not the live roster event, which reached them while the REST
-     * roster did not (SCRUM-338).
-     */
-    blockCounterparties(userId),
   ])
 
   // The pseudonym, except to whoever the roster lets recognise them (the
@@ -585,7 +578,6 @@ async function announceArrival(eventId: string, userId: string, chatGroupId: str
     userId,
     membership?.anonymous_name || "Someone",
     { name: arriver?.name ?? null, image: arriver?.profile?.photos?.[0] ?? null },
-    blockedIds,
     arriver?.profile?.show_online !== false
   )
   // An opted-in friend of the arriver's, here too, gets "your Friends here moved"

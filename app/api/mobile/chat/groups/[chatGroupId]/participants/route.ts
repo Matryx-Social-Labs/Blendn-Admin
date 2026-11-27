@@ -8,7 +8,7 @@ import { NOT_LIVE_MESSAGE } from "@/lib/chat-window"
 import { ownerRoster, withOwnerDoor, roomReadDenialFor, roomScope } from "@/lib/room-kind"
 import { bannedRefusal } from "@/lib/moderation/actions"
 import { idForViewer } from "@/lib/room-handle"
-import { notStrangersTo } from "@/lib/room-people"
+import { hiddenInRooms } from "@/lib/room-people"
 import { crewMemberImages, namesInRoom, visibleInRoom } from "@/lib/identity"
 import {
   successResponse,
@@ -92,16 +92,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * the count as well as the page: a filtered list under an unfiltered total
      * says "50 members" over 49 rows, which is its own quiet tell.
      */
-    // In a board post's room, a closed conversation too (`keptApartIn`, step 10 review H2).
-    const apart = await keptApartIn(authUser.userId, chatGroup.kind)
     /*
-     * An EVENT room's list applies the roster's rule (D24): friends are never
-     * strangers (`notStrangersTo`), and "Show online status" off is "counted, not
-     * listed" (SCRUM-141) — this list ignored it. Crews and Blends are unchanged:
-     * a crew's members ARE friends, and its room is named.
+     * An EVENT room's list is the roster's and the deck's (D24, SCRUM-1386): the
+     * one list (`hiddenInRooms`) — blocks, closed pairs, the people the viewer
+     * reported, friends — and "Show online status" off is "counted, not listed"
+     * (SCRUM-141). Anything less and this list minus the deck names the person
+     * the viewer unmatched or reported. Other kinds keep `keptApartIn` (blocks;
+     * a board post's room, closed pairs too, step 10 review H2): a crew's
+     * members ARE friends, and its room is named.
      */
-    const friends = chatGroup.kind === "event" ? [...(await notStrangersTo(authUser.userId))] : []
-    const hidden = [...apart, ...friends]
+    const hidden =
+      chatGroup.kind === "event" ? [...(await hiddenInRooms(authUser.userId))] : await keptApartIn(authUser.userId, chatGroup.kind)
     /*
      * In a room that is not an event's, only the people its owner admits: a
      * member row is not membership there (F8). Null for an event's room.

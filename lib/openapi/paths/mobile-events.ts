@@ -360,7 +360,7 @@ registry.registerPath({
   description:
     "The Recap's \"People from tonight\" deck (Flow 4 · 4.5): who checked in, as the room shows them, until the room's " +
     "chat closes 24 hours after the end; after that `open: false` and the count only. Never listed: you, staff, " +
-    "anyone in a block with you either way, anyone you closed a conversation with, your friends (whatever their " +
+    "anyone in a block with you either way, anyone you closed a conversation with, anyone you reported, your friends (whatever their " +
     "room setting — friends never meet as stranger cards), anyone with Show online status off, a member a host " +
     "banned from the room, a suspended or deleted account. `total` counts who may be listed.\n\n" +
     "Paged by `cursor`: send `nextCursor` (the last card's handle) back; it is valid in this room only. Ordered by " +
@@ -627,7 +627,11 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/checkins",
   tags: ["Mobile Events"],
   summary: "List event attendees",
-  description: ROOM_BAN_GATE,
+  description:
+    "Who is in the room now, by the name the room gives them. Leaves out who the deck leaves out (one list, " +
+    "`hiddenInRooms`): anyone in a block with you either way, anyone you closed a conversation with, anyone you " +
+    "reported, your friends; and Show online status off. `pagination.totalCount` is the people listed, not `hereCount`.\n\n" +
+    ROOM_BAN_GATE,
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),

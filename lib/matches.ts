@@ -1,7 +1,7 @@
 import { answersFor, operatesEvent, type PersonAnswers, type RoomLens, type WorkIntent } from "@/lib/tonight"
-import { ConversationClosedError, closedPairKeys, openConversation } from "@/lib/conversations"
+import { ConversationClosedError, openConversation } from "@/lib/conversations"
 import { lockPair, pairIsLinked } from "@/lib/friends"
-import { notStrangersTo } from "@/lib/room-people"
+import { hiddenInRooms } from "@/lib/room-people"
 import { exposuresFor, recordImpressions } from "./exposure"
 import { db } from "@/lib/db"
 import { inRoomWhere } from "@/lib/event-kind"
@@ -236,7 +236,7 @@ export async function matchesForEvent(
   // Staff are working, not mingling: no deck of their own room either (SCRUM-891, owner row A-6). The latest row decides.
   if (!viewerCheckIn || viewerCheckIn.kind === "staff") return null
 
-  const [viewerProfile, viewerInterests, checkIns, prefs, blocks, closedPairs, friends, likes, reported] =
+  const [viewerProfile, viewerInterests, checkIns, prefs, hidden, likes] =
     await Promise.all([
     db.profiles.findUnique({
       where: { id: viewerId },
@@ -307,46 +307,20 @@ export async function matchesForEvent(
       where: { event_id: eventId },
       select: { user_id: true, intent: true },
     }),
-    db.blocked_users.findMany({
-      where: { OR: [{ blocker_id: viewerId }, { blocked_id: viewerId }] },
-      select: { blocker_id: true, blocked_id: true },
-    }),
-    // Leaving is permanent: an unmatched pair never appears to each other
-    // again. Same `hidden` set as blocks below -- one exclusion, two reasons.
-    closedPairKeys(viewerId),
-    // Friends are not strangers (the owner's rule, 2026-10-22): they leave the
-    // deck whatever their switch (`notStrangersTo`).
-    notStrangersTo(viewerId).then((set) => [...set]),
+    /*
+     * Who this viewer never sees in a room: blocks either way, a closed
+     * conversation (leaving is permanent), every friend whatever their switch
+     * (the owner's rule, 2026-10-22), and whoever they reported (SCRUM-229). The
+     * one list every room people-list asks (`hiddenInRooms`), so the roster and
+     * this deck never differ by a person (SCRUM-1386).
+     */
+    hiddenInRooms(viewerId),
     db.event_likes.findMany({
       where: { event_id: eventId, liker_id: viewerId },
       select: { liked_id: true },
     }),
-    // Whoever the viewer reported stays off their own deck and grid, for good
-    // (SCRUM-229 ruling): a block on the reporter's side, without blocking.
-    // `user_reports` has no event column, so it holds in every room.
-    db.user_reports.findMany({
-      where: { reporter_id: viewerId },
-      select: { reported_id: true },
-      distinct: ["reported_id"],
-    }),
   ])
 
-  /*
-   * EVERY friend leaves the deck, whatever their switch (the owner's rule,
-   * 2026-10-22: two friends never meet as strangers). This used to remove only
-   * the friends you could recognise and keep the rest as pseudonymous cards, on
-   * the argument that "on the roster, not in the deck" would name the one handle
-   * that is your friend. That argument is gone with the roster: a friend leaves
-   * the roster the same way (`notStrangersTo`), and a friend who allows it is in
-   * "Friends here" instead, by real id. The deck now answers, for a friend, what
-   * it answers for someone with "Show online status" off: absent.
-   */
-  const hidden = new Set([
-    ...blocks.map((b) => (b.blocker_id === viewerId ? b.blocked_id : b.blocker_id)),
-    ...closedPairs,
-    ...friends,
-    ...reported.map((r) => r.reported_id),
-  ])
   const liked = new Set(likes.map((l) => l.liked_id))
 
   const prefsOf = new Map(prefs.map((p) => [p.user_id, p]))

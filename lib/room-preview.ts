@@ -1,6 +1,5 @@
-import { notStrangersTo } from "@/lib/room-people"
+import { hiddenInRooms } from "@/lib/room-people"
 import { hereCountFor } from "@/lib/attendee-counts"
-import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { expandInterests, interestParents } from "@/lib/matches"
 
@@ -65,8 +64,9 @@ export interface RoomPreview {
  *
  * `tasteMatchCount` is a bucket of the people **inside now** and visible to you, with
  * the roster's exclusions (`GET /events/:id/checkins`), because it is a
- * statement about that roster: not you, nobody in a block relationship with
- * you either way, nobody with "show online status" off (in the room, counted in
+ * statement about that roster: not you, nobody it hides (`hiddenInRooms`: a block
+ * either way, a closed pair, anybody you reported, a friend),
+ * nobody with "show online status" off (in the room, counted in
  * `hereCount`, never singled out), and no suspended account. "Share" is the
  * match deck's rule — parent-expanded, via `expandInterests` — so this number
  * and the deck agree about who has something in common.
@@ -82,10 +82,9 @@ export async function roomPreview(eventId: string, viewerId: string): Promise<Ro
   const hereCount = await hereCountFor(eventId)
   if (hereCount < MIN_ROOM_FOR_TASTE_COUNT) return { hereCount, tasteMatchCount: null }
 
-  const [hidden, friends, viewerInterests, inside] = await Promise.all([
-    blockCounterparties(viewerId),
-    // Friends are never strangers (lib/room-people.ts): not in the count either.
-    notStrangersTo(viewerId),
+  const [hiddenSet, viewerInterests, inside] = await Promise.all([
+    // The roster's list (`hiddenInRooms`): blocks, closed pairs, the reported, friends.
+    hiddenInRooms(viewerId),
     db.user_interests.findMany({ where: { user_id: viewerId }, select: { category_id: true } }),
     db.event_check_ins.findMany({
       where: {
@@ -105,7 +104,6 @@ export async function roomPreview(eventId: string, viewerId: string): Promise<Ro
   ])
 
   // One person per id: a multi-day event can hold more than one live row.
-  const hiddenSet = new Set([...hidden, ...friends])
   const people = new Map<string, string[]>()
   for (const row of inside) {
     if (hiddenSet.has(row.user_id)) continue

@@ -28,6 +28,9 @@ jest.mock("@/lib/db", () => ({
     // The leaver's switch (show_online) and blocks decide whether their departure names them.
     profiles: { findUnique: async () => ({ show_online: true }), findMany: async () => [] },
     blocked_users: { findMany: async () => [] },
+    // …and closed pairs and reports, the rest of who the roster hides (`viewersHiddenFromMany`).
+    private_conversations: { findMany: async () => [] },
+    user_reports: { findMany: async () => [] },
   },
 }))
 jest.mock("@/lib/mobile-auth", () => ({ verifyAccessToken: jest.fn(), accountBlockReason: jest.fn() }))
