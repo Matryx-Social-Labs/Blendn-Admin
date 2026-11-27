@@ -3952,7 +3952,7 @@ and only the second is worth blocking.
 | kind | who | media |
 |---|---|---|
 | `announcement` | `canEdit` — the organising org, or an `app_admin`. **Not** the venue owner | no |
-| `sponsored` | one organisation holding `may_sponsor` **and** an approved placement at this event, or an `app_admin` | **yes** |
+| `sponsored` | one organisation holding `may_sponsor` **and** an approved placement at this event, or an `app_admin` | not yet: refused with 400 (nothing stores it) |
 | `system` | `app_admin` only — it speaks as Blend'n | no |
 
 **This route used to compare two user ids.** `event.organizer_id !== caller.id`,
@@ -3973,8 +3973,9 @@ announces as one.
 everyone who can announce can also mark a message sponsored, the label stops
 meaning anything and becomes a styling choice — an organizer could dress an
 advertisement as an announcement or the reverse, and a reader has no way to tell
-which they are looking at. `organisations.may_sponsor` is off for every row and
-granted by an admin, because the word is only worth having if it is scarce.
+which they are looking at. `organisations.may_sponsor` is off by default and
+turned on only by an admin (the Organisations toggle, or approving a sponsor's
+application), because the word is only worth having if it is scarce.
 
 It is an **organisation** flag rather than a role: the permission belongs to the
 company with the commercial agreement, not to whichever of its staff is logged
@@ -4471,7 +4472,7 @@ Messages go through a **pre-emit** pipeline — moderation runs before the messa
 3. **OpenAI Moderation API** (pre-emit, 1s timeout) — Multilingual AI detection for hate, harassment, sexual, violence, self-harm. If caught within 1s, message hidden before broadcast. If timeout, emitted and falls back to async, except in an event room with more than 200 checked in, which waits for the verdict (up to 8s) and refuses the send (`503 MODERATION_UNAVAILABLE`) without one.
 4. **Image moderation** (async, if applicable) — OpenAI omni-moderation for images
 
-Thresholds: `>=0.70` confidence → auto-hide, `>=0.40` → flag for review. Auto-mute after 3 hidden abusive messages in 1 hour (a message hidden only for a contact detail does not count). Auto-unmute after 1 hour with no new violations (checked on next send attempt).
+Thresholds: `>=0.70` confidence → auto-hide, `>=0.40` → flag for review. Auto-mute after 3 hidden abusive messages in 1 hour (a message hidden only for a contact detail or a swear word does not count; a slur, or the model judging the line abusive, does). Auto-unmute after 1 hour with no new violations (checked on next send attempt).
 
 Requires `OPENAI_API_KEY` env var: Railway production refuses to boot without it; elsewhere the server boots with a warning.
 
