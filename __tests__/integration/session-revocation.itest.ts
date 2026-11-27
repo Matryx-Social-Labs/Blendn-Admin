@@ -97,9 +97,13 @@ afterAll(async () => {
   await db.push_tokens.deleteMany({ where: { user_id: { in: users } } })
   await db.mobile_refresh_tokens.deleteMany({ where: { user_id: { in: users } } })
   await db.password_reset_tokens.deleteMany({ where: { user_id: { in: users } } })
+  await db.organisation_members.deleteMany({ where: { org_id: { in: orgs } } })
+  await db.organisations.deleteMany({ where: { id: { in: orgs } } })
   await db.user.deleteMany({ where: { id: { in: users } } })
   await closeDb()
 })
+
+const orgs: string[] = []
 
 beforeEach(() => {
   resetMemoryStore()
@@ -107,9 +111,17 @@ beforeEach(() => {
   mockSession = undefined
 })
 
+/** A host is a member of an organisation: the dashboard is that membership (SCRUM-1247). */
+async function member(id: string) {
+  const org = await db.organisations.create({ data: { display_name: `M6 ${id}`, kind: "company", status: "verified" } })
+  orgs.push(org.id)
+  await db.organisation_members.create({ data: { org_id: org.id, user_id: id, role: "owner" } })
+}
+
 async function host() {
   const id = await makeUser("m6_host", "organizer")
   users.push(id)
+  await member(id)
   await db.user.update({ where: { id }, data: { password: await bcrypt.hash(OLD, 4) } })
   return id
 }
@@ -330,6 +342,7 @@ describe("Settings → Sessions ends what it says (SCRUM-603)", () => {
     await db.user.update({ where: { id }, data: { password: await bcrypt.hash(OLD, 4) } })
     const mine = await phone(id)
     await db.user.update({ where: { id }, data: { role: "organizer" } })
+    await member(id)
     const cookie = await signedInCookie(id)
     const browser = await live({ cookie })
     holding(cookie)
@@ -349,6 +362,7 @@ describe("Settings → Sessions ends what it says (SCRUM-603)", () => {
     users.push(id)
     const mine = await phone(id)
     await db.user.update({ where: { id }, data: { role: "organizer" } })
+    await member(id)
     const cookie = await signedInCookie(id)
     const browser = await live({ cookie })
     await new Promise((r) => setTimeout(r, 5))
@@ -423,12 +437,19 @@ describe("nothing revives an ended session", () => {
   })
 })
 
+/** The client behind `lib/db`'s lazy Proxy, built by now: a spy on the Proxy itself does not stick. */
+function realClient() {
+  void appDb.$queryRaw
+  return globalThis.prisma!
+}
+
 describe("a database that cannot answer grants nothing", () => {
   it("the jwt callback, getAuth and currentUser", async () => {
     const id = await host()
     const token = await signInToken(id)
     holding(await encode({ token, secret: SECRET }))
-    const read = jest.spyOn(appDb.user, "findUnique").mockRejectedValue(new Error("Connection terminated unexpectedly"))
+    // The one statement every session read is (`sessionAccount`, SCRUM-1247).
+    const read = jest.spyOn(realClient(), "$queryRaw").mockRejectedValue(new Error("Connection terminated unexpectedly"))
     try {
       await expect(jwt({ token })).rejects.toThrow()
       expect(await getAuth()).toBeNull()
@@ -442,7 +463,7 @@ describe("a database that cannot answer grants nothing", () => {
   it("currentUser's own read failing is an error, never a user built from the session", async () => {
     const id = await host()
     mockSession = { user: { id, role: "app_admin", signedInAt: Date.now() } }
-    const read = jest.spyOn(appDb.user, "findUnique").mockRejectedValue(new Error("Connection terminated unexpectedly"))
+    const read = jest.spyOn(realClient(), "$queryRaw").mockRejectedValue(new Error("Connection terminated unexpectedly"))
     try {
       await expect(currentUser()).rejects.toThrow()
     } finally {
@@ -463,10 +484,14 @@ describe("currentUser applies the rule to whatever session it is handed", () => 
   })
 
   it("takes the role from the database, not the session", async () => {
+    // The row's role decides app_admin; anyone else's is their home organisation's kind (SCRUM-1247).
     const id = await host()
     await db.user.update({ where: { id }, data: { role: "venue_owner" } })
     mockSession = { user: { id, role: "app_admin", signedInAt: Date.now() } }
-    expect(await currentUser()).toEqual({ id, role: "venue_owner" })
+    expect(await currentUser()).toEqual({ id, role: "organizer" })
+    await db.user.update({ where: { id }, data: { role: "app_admin" } })
+    mockSession = { user: { id, role: "organizer", signedInAt: Date.now() } }
+    expect(await currentUser()).toEqual({ id, role: "app_admin" })
   })
 })
 

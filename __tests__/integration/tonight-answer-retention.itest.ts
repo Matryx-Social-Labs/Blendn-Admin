@@ -2,33 +2,19 @@
  * Tonight's question answers go 30 days after the event ends (owner,
  * 2026-11-10), against real rows: the answer is set NULL, the person's other
  * preferences and the row stay, and anything inside the window is untouched.
- * Not behind LOBBY_PURGE, and not held by a report: no report copies an answer.
+ * Not held by a report: no report copies an answer.
  */
 import { purgeTonightAnswers, TONIGHT_ANSWER_DAYS } from "@/lib/lobby-retention"
-import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
+import { addPastNight, cleanup, closeDb, db, endedEvent, makeUser, testId } from "./helpers"
 
-const DAY = 86_400_000
 const users: string[] = []
 const events: string[] = []
 
 afterAll(async () => {
-  if (previousMode === undefined) delete process.env.LOBBY_PURGE
-  else process.env.LOBBY_PURGE = previousMode
   await db.user_reports.deleteMany({ where: { reporter_id: { in: users } } })
   await cleanup(users, events)
   await closeDb()
 })
-
-/** An event whose only occurrence ended `daysAgo` days ago. */
-async function endedEvent(daysAgo: number, host: string) {
-  const id = await makeEvent(host)
-  events.push(id)
-  const end = new Date(Date.now() - daysAgo * DAY)
-  const start = new Date(end.getTime() - 3 * 3_600_000)
-  await db.events.update({ where: { id }, data: { start_time: start, end_time: end } })
-  await db.event_occurrences.updateMany({ where: { event_id: id }, data: { start_time: start, end_time: end } })
-  return id
-}
 
 const answer = async (event_id: string, user_id: string) =>
   db.event_match_preferences.findUnique({
@@ -36,7 +22,6 @@ const answer = async (event_id: string, user_id: string) =>
     select: { tonight_answer: true, work_intent: true, intent: true, revealed: true },
   })
 
-let previousMode: string | undefined
 let host = ""
 let person = ""
 let reporter = ""
@@ -49,13 +34,14 @@ beforeAll(async () => {
   person = await makeUser(testId("tq-person"))
   reporter = await makeUser(testId("tq-reporter"))
   users.push(host, person, reporter)
-  old = await endedEvent(TONIGHT_ANSWER_DAYS + 1, host)
-  recent = await endedEvent(TONIGHT_ANSWER_DAYS - 1, host)
+  old = await endedEvent(host, TONIGHT_ANSWER_DAYS + 1)
+  events.push(old)
+  recent = await endedEvent(host, TONIGHT_ANSWER_DAYS - 1)
+  events.push(recent)
   // A run whose first night is long gone but whose latest night ended yesterday.
-  liveSeries = await endedEvent(TONIGHT_ANSWER_DAYS + 10, host)
-  await db.event_occurrences.create({
-    data: { event_id: liveSeries, occurs_on: new Date(Date.now() - DAY), start_time: new Date(Date.now() - DAY - 3_600_000), end_time: new Date(Date.now() - DAY) },
-  })
+  liveSeries = await endedEvent(host, TONIGHT_ANSWER_DAYS + 10)
+  events.push(liveSeries)
+  await addPastNight(liveSeries, 1)
   for (const event_id of [old, recent, liveSeries]) {
     await db.event_match_preferences.create({
       data: { event_id, user_id: person, intent: ["friendship"], revealed: true, tonight_answer: `answer for ${event_id}`, work_intent: "hire" },
@@ -65,9 +51,6 @@ beforeAll(async () => {
   await db.event_match_preferences.create({ data: { event_id: old, user_id: reporter, work_intent: "learn" } })
   // A pending report on the person: it quotes no answer, so it holds none.
   await db.user_reports.create({ data: { reporter_id: reporter, reported_id: person, reason: "harassment" } })
-
-  previousMode = process.env.LOBBY_PURGE
-  process.env.LOBBY_PURGE = "off"
 })
 
 describe("the answer purge", () => {
@@ -77,7 +60,7 @@ describe("the answer purge", () => {
     pass = await purgeTonightAnswers()
   })
 
-  it("clears the answer of an event that ended more than 30 days ago, whatever LOBBY_PURGE says and with a report open", async () => {
+  it("clears the answer of an event that ended more than 30 days ago, with a report open", async () => {
     expect(await answer(old, person)).toEqual({ tonight_answer: null, work_intent: null, intent: ["friendship"], revealed: true })
     expect((await answer(old, reporter))?.work_intent).toBeNull()
     expect(pass.answers).toBeGreaterThanOrEqual(1)

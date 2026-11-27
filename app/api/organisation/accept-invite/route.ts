@@ -4,13 +4,13 @@ import { db } from "@/lib/db"
 import { invitedUser } from "@/lib/current-user"
 import { logger } from "@/lib/logger"
 import { rateLimit } from "@/lib/rate-limit"
-import type { org_role, Prisma, user_role } from "@prisma/client"
+import type { org_role, Prisma } from "@prisma/client"
 
 import { auditInTx, getRequestIp } from "@/lib/audit-log"
 import { orgPermissions } from "@/lib/org-permissions"
 import { hashInviteToken, inviteState } from "@/lib/org-invites"
 import { readJson } from "@/lib/api-input"
-import { canAccessDashboard } from "@/lib/rbac"
+import { ORG_KIND_SQL } from "@/lib/org-membership"
 
 /**
  * Accepting an invitation to an organisation.
@@ -73,7 +73,6 @@ export async function POST(req: NextRequest) {
         accepted_at: true,
         revoked_at: true,
         invited_by: true,
-        grants_role: true,
         org: { select: { display_name: true, status: true } },
       },
     })
@@ -121,15 +120,9 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // An attendee comes out as the role fixed at send; an invite from before that column asks for a new one (SCRUM-984).
-    const grantsRole = invite.grants_role
-    if (user.role === "attendee" && !(grantsRole === "organizer" || grantsRole === "venue_owner" || grantsRole === "sponsor")) {
-      return NextResponse.json({ success: false, error: INVITE_STALE }, { status: 400 })
-    }
-
     await db.$transaction(async (tx) => {
       // Fail closed on who sent it: an invite carries its sender's standing, so it ends with it (SCRUM-984).
-      if (!(await senderStillStands(tx, invite.invited_by, invite.org_id, invite.role, invite.grants_role))) throw new Error("INVITE_STALE")
+      if (!(await senderStillStands(tx, invite.invited_by, invite.org_id, invite.role))) throw new Error("INVITE_STALE")
 
       // updateMany with accepted_at: null in the filter is the concurrency
       // guard — the second of two simultaneous clicks matches zero rows.
@@ -143,14 +136,17 @@ export async function POST(req: NextRequest) {
         data: { org_id: invite.org_id, user_id: user.id, role: invite.role },
       })
 
-      // An attendee accepting a host invite needs dashboard access, which is
-      // gated on the User role rather than on membership. Only ever a promotion
-      // out of `attendee` — an existing organizer is not demoted or changed.
-      // To the role fixed when the invite was sent (SCRUM-984).
-      // Only out of `attendee`: `where` holds that against whatever changed since the read above.
-      const promoted = user.role === "attendee"
-        ? await tx.user.updateMany({ where: { id: user.id, role: "attendee" }, data: { role: grantsRole! } })
-        : { count: 0 }
+      /*
+       * Dashboard access is the membership just created (SCRUM-1247), so nothing here decides it. The row is still
+       * promoted out of `attendee` until task 11 stops the write (the app refuses a non-attendee): to the invited
+       * organisation's kind (`ORG_KIND_SQL`), so a brand's member never comes out able to create events. One statement;
+       * `role = 'attendee'` holds "only out of attendee" against whatever changed since the session was read.
+       */
+      const [promoted] = await tx.$queryRaw<{ role: string }[]>`
+        UPDATE "User" SET role = (SELECT ${ORG_KIND_SQL} FROM organisations o WHERE o.id = ${invite.org_id}::uuid)::user_role,
+          "updatedAt" = now() AT TIME ZONE 'UTC'
+        WHERE id = ${user.id} AND role = 'attendee'
+        RETURNING role::text AS role`
 
       // In the transaction: a role change this large has a record, or it did not happen.
       await auditInTx(tx, {
@@ -158,7 +154,7 @@ export async function POST(req: NextRequest) {
         action: "org.invite.accepted",
         resource: "organisation",
         resourceId: invite.org_id,
-        details: { inviteId: invite.id, role: invite.role, invitedBy: invite.invited_by, ...(promoted.count > 0 ? { dashboardRole: grantsRole } : {}) },
+        details: { inviteId: invite.id, role: invite.role, invitedBy: invite.invited_by, ...(promoted ? { dashboardRole: promoted.role } : {}) },
         ipAddress: getRequestIp(req),
       })
     })
@@ -167,7 +163,7 @@ export async function POST(req: NextRequest) {
       success: true,
       orgName: invite.org.display_name,
       role: invite.role,
-      // The session's role claim is now stale if they were an attendee; the
+      // The session's role claim is now stale if they had no dashboard before; the
       // client signs out and back in rather than us minting a new token here.
       roleChanged: user.role === "attendee",
     })
@@ -190,23 +186,17 @@ export async function POST(req: NextRequest) {
 
 const INVITE_STALE = "This invite is no longer valid. Ask them to send a new one."
 
-/** May the person who sent this invite still send it? An admin always; otherwise a live member who manages members, and an owner for an owner's invite. */
-async function senderStillStands(
-  tx: Prisma.TransactionClient,
-  senderId: string,
-  orgId: string,
-  invitedAs: org_role,
-  grants: user_role | null
-): Promise<boolean> {
+/**
+ * May the person who sent this invite still send it? An admin always; otherwise a live member who manages members, and an
+ * owner for an owner's invite. Their own `User.role` is not asked (SCRUM-1247): a host's may read `attendee` after task 11.
+ */
+async function senderStillStands(tx: Prisma.TransactionClient, senderId: string, orgId: string, invitedAs: org_role): Promise<boolean> {
   const sender = await tx.user.findUnique({
     where: { id: senderId },
     select: { role: true, suspended_at: true, deletedAt: true },
   })
   if (!sender || sender.suspended_at || sender.deletedAt) return false
   if (sender.role === "app_admin") return true
-  if (!canAccessDashboard(sender.role)) return false
-  // Moved to another dashboard role since: nothing above what they hold now.
-  if (grants && sender.role !== grants) return false
   const member = await tx.organisation_members.findUnique({
     where: { org_id_user_id: { org_id: orgId, user_id: senderId } },
     select: { role: true },

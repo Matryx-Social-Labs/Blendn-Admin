@@ -17,7 +17,6 @@ import {
   normaliseDomain,
   emailDomain,
   isFreeProvider,
-  roleForInvite,
 } from "@/lib/org-invites"
 import {
   checkDomainTxt,
@@ -303,13 +302,9 @@ export async function inviteMember(
     where: { id: orgId },
     select: {
       display_name: true,
-      may_sponsor: true,
-      _count: { select: { venues: { where: { deleted_at: null } } } },
       domains: { where: { verified_at: { not: null } }, select: { domain: true } },
     },
   })
-  const grantsRole = roleForInvite(user.role, { may_sponsor: org.may_sponsor, venueCount: org._count.venues })
-  if (!grantsRole) throw new Refusal("You can’t invite people to this organisation.")
 
   const policy = invitePolicy({
     verifiedDomains: org.domains.map((d) => d.domain),
@@ -376,7 +371,6 @@ export async function inviteMember(
       token_hash: hashInviteToken(token),
       expires_at: new Date(Date.now() + INVITE_TTL_MS),
       invited_by: user.id,
-      grants_role: grantsRole,
       domain_override_reason: policy.requiresReason ? (reason ?? "").trim() : null,
     },
     select: { id: true },
@@ -413,7 +407,6 @@ export async function inviteMember(
       inviteId: invite.id,
       email: target,
       role,
-      grantsRole,
       reason: policy.requiresReason ? (reason ?? "").trim() : null,
       emailSent: sent,
       ...(sent ? {} : { emailFailure }),

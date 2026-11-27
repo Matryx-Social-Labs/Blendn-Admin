@@ -8,6 +8,7 @@ import { ageFrom } from "@/lib/age"
 import { db } from "@/lib/db"
 import { eventNotFoundResponse } from "@/lib/event-access"
 import { inRoomWhere } from "@/lib/event-kind"
+import { roomPersonFacts } from "@/lib/room-person-facts"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { blockCounterparties } from "@/lib/conversations"
@@ -131,7 +132,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      *
      * There used to be a completeness filter here -- `onboarded: true`, a
      * non-null `name`, a non-empty `photos` -- gating the roster on two fields
-     * this endpoint does not serve. It returns a pseudonym, an age, a city and a
+     * this endpoint does not serve. It returns a pseudonym, an age band and a
      * time; whether someone has uploaded a photo changes none of those. So a
      * person who walked through the door, passed the GPS gate and is standing in
      * the room was invisible to everybody in it, and invisible to themselves in
@@ -214,9 +215,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * and the Settings promise ("Friends can see who I am in rooms") was kept
      * on the profile and broken on the list. One function now answers both.
      */
-    const [pseudonyms, visible] = await Promise.all([
+    const [pseudonyms, visible, facts] = await Promise.all([
       pseudonymsForEvent(eventId, checkIns.map((c) => c.user.id)),
       visibleInRoom(authUser.userId, eventId, checkIns.map((c) => c.user.id)),
+      // Before a reveal a row carries the band and the chip, never the age or the city (D-030, `roomPersonFacts`).
+      roomPersonFacts(authUser.userId, eventId, checkIns.map((c) => c.user.id)),
     ])
 
     // One budget for the page: an uncached coordinate is a Nominatim call (1 req/s courtesy).
@@ -234,9 +237,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             // header explains why it is otherwise absent.
             ...(shown && { image: c.user.profile?.photos?.[0] ?? null }),
             // Derived — see `ageFrom` in lib/age.ts. The room shows who is here
-            // now, so the age it shows should be the one they are now.
-            age: ageFrom(c.user.profile),
-            location: await normalizeLocationToCity(c.user.profile?.location, geocoding),
+            // now, so the age it shows should be the one they are now. Only
+            // for somebody the room names to you; the keys stay, null.
+            age: shown ? ageFrom(c.user.profile) : null,
+            location: shown ? await normalizeLocationToCity(c.user.profile?.location, geocoding) : null,
+            ...facts.get(c.user.id)!,
             checkInTime: c.check_in_time,
           }
         })
