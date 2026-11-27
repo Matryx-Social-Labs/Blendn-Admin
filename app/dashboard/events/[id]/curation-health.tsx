@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge"
-import type { RefusalSummary } from "@/lib/check-in-refusals"
+import { REFUSAL_LABEL, type RefusalSummary } from "@/lib/check-in-refusals"
 import type { CurationState } from "@/lib/curation"
 
 /**
@@ -35,7 +35,7 @@ export function CurationHealth({
       </span>
       {refusals.topReason ? (
         <span className="text-[0.8125rem] text-muted-foreground">
-          {REASON[refusals.topReason] ?? refusals.topReason}
+          {REASON[refusals.topReason] ?? REFUSAL_LABEL[refusals.topReason]}
         </span>
       ) : null}
       {refusals.medianShortfallMetres !== null ? (

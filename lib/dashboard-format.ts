@@ -235,6 +235,11 @@ export function lobbyMoment(d: Date, timezone: string): string {
   return `${day}, ${time}`
 }
 
+/** "10:41 PM" on the event's clock, no zone label: a time beside something that happened tonight (the Door's arrivals). */
+export function clockTime(d: Date, timezone: string): string {
+  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: eventClock(timezone).zone }).format(d)
+}
+
 /** "just now", "25 min ago", "3 h ago", "3 d ago": how long since `iso`, as of `now` (passed, so a render stays pure). */
 export function updatedAgo(iso: string, now: string): string {
   const minutes = Math.floor((Date.parse(now) - Date.parse(iso)) / 60_000)
