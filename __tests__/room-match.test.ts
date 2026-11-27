@@ -34,7 +34,6 @@ jest.mock("@/lib/rate-limit", () => ({
 }))
 jest.mock("@/lib/conversations", () => ({
   blockedEitherWay: jest.fn().mockResolvedValue(false),
-  pairIsClosed: jest.fn().mockResolvedValue(false),
 }))
 const mockLike = jest.fn()
 jest.mock("@/lib/matches", () => ({ likeAtEvent: (...a: unknown[]) => mockLike(...a) }))

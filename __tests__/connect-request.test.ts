@@ -66,17 +66,19 @@ describe("the protections that were already there", () => {
     expect(ROUTE()).toContain("blocked_users.findFirst")
   })
 
-  it("answers a closed pair with the same words as a stranger", () => {
+  it("answers a closed pair as a stranger: 404 only to a caller who can see who this is (SCRUM-1476)", () => {
     /*
-     * Before the duplicate-request guard, which would otherwise describe the
-     * old accepted row ("this user has already sent you a request") to
-     * somebody who was unmatched. Same 404 as the likes route, deliberately.
+     * No early refusal: a 404 on one handle named the person from another
+     * room. A closed pair has a conversation row, so it reaches the "something
+     * already exists" branch: the silent 201 for a stranger in the room, and
+     * for an identified caller "not found" rather than the 409, which
+     * described the old accepted request to somebody who was unmatched.
      */
     const route = ROUTE()
-    const closed = route.indexOf("pairIsClosed(authUser.userId, recipientId)")
-    expect(closed).toBeGreaterThan(-1)
-    expect(closed).toBeLessThan(route.indexOf("message_requests.findFirst"))
-    expect(route.slice(closed, closed + 200)).toContain('notFoundResponse("User not found")')
+    expect(route).not.toContain("pairIsClosed")
+    const identified = route.indexOf("(await identityForRef(authUser.userId, ref)).identified")
+    expect(identified).toBeGreaterThan(-1)
+    expect(route.slice(identified, identified + 1200)).toContain('existingConversation?.closed_at ? notFoundResponse("User not found") : conflictResponse(refusal)')
   })
 })
 

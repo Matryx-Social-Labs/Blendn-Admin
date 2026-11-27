@@ -441,6 +441,8 @@ an opaque, url-safe string. Field names and shapes did not change.
   found`, waves `403 RECIPIENT_NOT_HERE`): these two answer from who is in the
   room right now, so a raw id asked "is this account here", and the per-pair
   wave window turned one raw-id wave into a way to find which handle it was.
+  A pair that left each other (an unmatch) is answered as a stranger by both:
+  stored, `200`, never a match (SCRUM-1476; see Waves below).
 - **A handle belongs to one room, of one kind.** An event's room scopes its
   handles by the event, exactly as before. A room of another kind scopes them
   by its own id and kind, so its handles are refused in every other room (an
@@ -1324,8 +1326,8 @@ anonymous conversation.
   `retryAfter`. Reaching the daily limit logs `abuse.cap_hit {userId, gesture,
   cap}` once per user per day.
 - **One answer for every recipient refusal:** not here, hidden from the roster,
-  suspended, banned from the room, blocked either way, a pair that left each
-  other, a friend, or a host — `403 RECIPIENT_NOT_HERE`. Your side: not checked
+  suspended, banned from the room, blocked either way, a friend, or a host —
+  `403 RECIPIENT_NOT_HERE`. Your side: not checked
   in, staff, a host, or the room closed — `403 NOT_CHECKED_IN`. **A sender who
   has left** gets that same `403 NOT_CHECKED_IN` for every refusal, including
   "nobody you can see waved at you": a wave back counts only a wave your own
@@ -1341,6 +1343,16 @@ anonymous conversation.
   pair across rooms: a wave at the same person in another room is a first wave
   there (SCRUM-1385), so a handle is answered the same whoever is behind it.
   `WAVE_TOO_SOON` is no longer sent (installed clients still map it).
+- **A pair that left each other is a stranger here** (an unmatch, either side;
+  SCRUM-1476). The wave is `200 { sent: true, mutual: false }`, stored, and
+  counted by the limits above exactly as a wave at anybody else; a refusal on
+  that one handle named the person from another room. It never makes a match:
+  a wave or like back reopens nothing (`openIfMutual` treats any conversation,
+  closed included, as already linked).
+- **The `room:wave` ping goes only to somebody whose own lists show you** —
+  not somebody you left or who left you, not somebody who reported you. Their
+  lists hide you already, so they are not told a hidden person waved; the
+  sender's answer and the stored row are the same either way.
 
 `GET /events/:eventId/waves?cursor=` — who waved at you here, newest first, 20 a
 page: `{ open, total, waves: [{ userId, displayName, wavedAt, wavedBack }], nextCursor }`.
@@ -2476,10 +2488,14 @@ contact details); a hit is `400` `VALIDATION_FAILED` with `reasonCode:
 is. Nothing is stored or sent.
 
 Guards, in order: rate limit, self-send, recipient exists **and is listed** (`show_online` on; off answers `404 User not found`, by handle or id, as for an id nobody has: SCRUM-904), blocks either way,
-closed pair (an unmatch — same 404 as a block, so the refusal never says "this
-person ended it"), `haveSharedAnEvent` (the same `404 User not found` too, so an
+`haveSharedAnEvent` (the same `404 User not found` too, so an
 id never says whether its owner was at one of your events; it was a `400`,
-SCRUM-1050), existing request, existing conversation. And
+SCRUM-1050), existing request, existing conversation. A pair that left each
+other (an unmatch) has a conversation, so it is that last guard: to anybody
+the room keeps a stranger the synthetic `201` with nothing written (a 404 on
+one handle named the person from another room, SCRUM-1476), and to a caller
+who can see who this is `404 User not found`, never the `409`, so the refusal
+never says "this person ended it". And
 `@@unique([sender_id, recipient_id])` means **one request per pair for all
 time** — decline it and that person can never send another.
 
@@ -3729,8 +3745,10 @@ it (403 for their own like until they do — it is their switch); the crew has
 "Room for one more" (`openToSolo`) and 6 or fewer **active** members (403 for a
 crew member's like until it does); and if the crew is out for dating, the
 person must be too. A crew member's like of a **person** tells them nothing
-about that person: not here, not opted in, not out for dating, or kept apart
-from anybody in the crew — each answers `{ liked: true, blend: null }`, exactly
+about that person: not here, not opted in, not out for dating, kept apart
+from anybody in the crew, or a member of your own crew (by their room handle:
+a 404 said "this handle is in my crew", SCRUM-1476) — each answers
+`{ liked: true, blend: null }`, exactly
 as a like that stood, and nothing is stored. Anything about the other side of a
 like of a **crew** — not here, hidden, a guardrail, anybody on one side kept
 apart (a block or a closed conversation) from anybody on the other, two crews
