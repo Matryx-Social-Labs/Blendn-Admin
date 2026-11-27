@@ -170,20 +170,20 @@ async function runSweep(): Promise<void> {
   }
   /*
    * The Lobby (SCRUM-1026): photos whose first moderation did not land, and
-   * what closed rooms and Lobbies held, 180 days on (lib/lobby-retention.ts;
-   * a dry run unless LOBBY_PURGE=delete). Its own catch, like the crews'.
+   * what closed rooms and Lobbies held, 180 days on (lib/lobby-retention.ts).
+   * Its own catch, like the crews'.
    */
   try {
     const decided = await recheckPendingPhotos()
     if (decided > 0) logger.info("Lobby photos judged on recheck", { decided })
     const purge = await purgeClosedLobbies()
     if (purge.messages + purge.posts + purge.hostPosts + purge.alertPreferences + purge.seenMarkers + purge.pseudonyms + purge.excerpts > 0 || purge.kept > 0) {
-      logger.info(purge.mode === "delete" ? "Lobby purge" : "Lobby purge (dry run: LOBBY_PURGE=delete deletes)", { ...purge })
+      logger.info("Lobby purge", { ...purge })
     }
   } catch (error) {
     logger.error("Lobby sweep failed", { error: error instanceof Error ? error.message : String(error) })
   }
-  /* Tonight's question answers, 30 days after the event (lib/lobby-retention.ts). Not behind LOBBY_PURGE; its own catch. */
+  /* Tonight's question answers, 30 days after the event (lib/lobby-retention.ts). Its own catch. */
   try {
     const answers = await purgeTonightAnswers()
     if (answers.answers > 0) logger.info("Purged Tonight's question answers", { ...answers })
