@@ -1,4 +1,4 @@
-import { eventPermissions, type PermissionActor, type PermissionEvent } from "@/lib/rbac"
+import { eventPermissions, operatesThroughVenue, type PermissionActor, type PermissionEvent } from "@/lib/rbac"
 
 /**
  * The permission matrix. Written before the resolver, for the third time.
@@ -417,3 +417,34 @@ describe("eventPermissions — a claim does not open the venue's past (SCRUM-355
   })
 })
 
+
+describe("operatesThroughVenue — whose relationship the access comes from (SCRUM-1446)", () => {
+  // The Overview tells a non-editing viewer why: the venue sentence only when
+  // the resolver's answer is the venue's row; org staff are told their team.
+  it("is true for a venue member on an event from the claim on", () => {
+    expect(operatesThroughVenue(actor(CARA, "venue_owner", [ORG_VENUE]), event(ORG_HOST, ORG_VENUE))).toBe(true)
+  })
+
+  it("is false for staff of the organizing org: their access is the team's, not the building's", () => {
+    expect(operatesThroughVenue(staff(DEV, "organizer", [ORG_HOST]), event(ORG_HOST, ORG_VENUE))).toBe(false)
+  })
+
+  it("is true for staff who are also in the venue's org, as the resolver's first matching row says", () => {
+    expect(operatesThroughVenue(actor(DEV, "organizer", [ORG_HOST, ORG_VENUE], [ORG_VENUE]), event(ORG_HOST, ORG_VENUE))).toBe(true)
+  })
+
+  it("is false for whoever may edit, even when they are also in the venue's org", () => {
+    expect(operatesThroughVenue(actor(ALICE, "organizer", [ORG_HOST, ORG_VENUE]), event(ORG_HOST, ORG_VENUE))).toBe(false)
+    expect(operatesThroughVenue(actor(ADMIN, "app_admin"), event(ORG_HOST, ORG_VENUE))).toBe(false)
+  })
+
+  it("is true for the venue's member on its venue day", () => {
+    expect(operatesThroughVenue(actor(CARA, "venue_owner", [ORG_VENUE]), event(ORG_VENUE, ORG_VENUE, { kind: "venue_day" }))).toBe(true)
+  })
+
+  it("is false for anyone who may not operate it: an event before the claim, a stranger", () => {
+    const beforeClaim = event(ORG_HOST, ORG_VENUE, { startsAt: new Date(Date.now() - 400 * DAY) })
+    expect(operatesThroughVenue(actor(CARA, "venue_owner", [ORG_VENUE]), beforeClaim)).toBe(false)
+    expect(operatesThroughVenue(actor(STRANGER, "organizer", [ORG_OTHER]), event(ORG_HOST, ORG_VENUE))).toBe(false)
+  })
+})

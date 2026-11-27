@@ -134,12 +134,17 @@ describe("canJoinEvent", () => {
     await expect(canJoinEvent(USER, EVENT_ID)).resolves.toBe(false)
   })
 
-  it("allows the organizer into their own private event", async () => {
+  it("does not let the creator in by authorship: outside the running org they are a stranger (SCRUM-1250)", async () => {
     mockDb.events.findFirst.mockResolvedValue({
       visibility: "private",
       organizer_id: USER,
+      kind: "event",
+      organizer_org_id: "org_nightshift",
+      venue: null,
     })
-    await expect(canJoinEvent(USER, EVENT_ID)).resolves.toBe(true)
+    mockDb.user.findUnique.mockResolvedValue({ role: "organizer" })
+    mockDb.event_rsvps.findFirst.mockResolvedValue(null)
+    await expect(canJoinEvent(USER, EVENT_ID)).resolves.toBe(false)
   })
 
   it("allows a colleague at the organisation running a private event — access is org-shaped", async () => {

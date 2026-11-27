@@ -10,25 +10,15 @@ import { randomUUID } from "crypto"
  * `metadata.sponsored_message_id` to draw a message as a sponsored card, so an
  * attendee could post one that looked like an ad or an announcement.
  *
- * And since R9 (SCRUM-626), photos go in a DM only: a room takes no client
- * metadata and no media at all, and a DM takes a photo once both people are
- * named to each other, or are friends. Found by code reading: both room routes
- * took an attendee's image or video, and a DM took one from a stranger whose
- * pseudonym was all the recipient knew.
- *
- * Every media URL that is taken is the sender's own `chat/<id>/` upload on
- * our bucket.
+ * And since R9 (SCRUM-626) a room takes no client metadata and no media at
+ * all; since SCRUM-1165 a DM takes no photo either. Found by code reading:
+ * both room routes took an attendee's image or video.
  */
 // Signing a private URL is local HMAC: fake credentials are enough (SCRUM-427).
 process.env.TIGRIS_ENDPOINT ??= "https://fly.storage.tigris.dev"
 process.env.TIGRIS_ACCESS_KEY ??= "test-access"
 process.env.TIGRIS_SECRET_KEY ??= "test-secret"
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
-/*
- * And what is stored is the sealed copy, never the URL the client uploaded to,
- * which can still be written for 15 minutes (SCRUM-425). The copy itself is
- * `sealUpload`'s, tested in upload-seal.test.ts; here, that the routes store it.
- */
 jest.mock("@/lib/moderation", () => ({
   ...jest.requireActual("@/lib/moderation"),
   moderateMessage: jest.fn().mockResolvedValue(undefined),
@@ -39,31 +29,15 @@ jest.mock("@/lib/moderation/openai-moderation", () => {
   const actual = jest.requireActual("@/lib/moderation/openai-moderation")
   return { ...actual, checkTextContent: (text: string) => mockCheckText(text) ?? actual.checkTextContent(text) }
 })
-// Each seal mints its own chat/sealed/<uuid>, as sealUpload does since SCRUM-448: no user id in it.
-// `mockSealDelayMs` holds a seal open so two racing sends both get past the retry lookup.
-let mockSealDelayMs = 0
-jest.mock("@/lib/tigris", () => ({
-  ...jest.requireActual("@/lib/tigris"),
-  deleteFile: jest.fn().mockResolvedValue(undefined),
-  sealUpload: jest.fn(async (key: string) => {
-    if (key.endsWith("-missing.jpg")) return { refused: "missing" }
-    if (mockSealDelayMs) await new Promise((resolve) => setTimeout(resolve, mockSealDelayMs))
-    const sealedKey = `chat/sealed/${jest.requireActual("crypto").randomUUID()}`
-    return {
-      key: sealedKey,
-      url: `https://${process.env.TIGRIS_BUCKET || "blendn-media"}-private.fly.storage.tigris.dev/${sealedKey}`,
-      bytes: 120_000,
-      contentType: "image/jpeg",
-    }
-  }),
-}))
+// Nothing a client sends into a room or a DM is copied: no send may reach the seal.
+jest.mock("@/lib/tigris", () => ({ ...jest.requireActual("@/lib/tigris"), sealUpload: jest.fn() }))
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { conversationPair } from "@/lib/conversations"
 import { db, closeDb, makeUser, onboard, testId } from "./helpers"
-import { DM_PHOTOS_NOT_YET, NO_ROOM_MEDIA, NOT_OWN_MEDIA } from "@/lib/validations/chat"
+import { DM_PHOTOS_OFF, NO_ROOM_MEDIA } from "@/lib/validations/chat"
 import { moderateMessage } from "@/lib/moderation"
-import { deleteFile, sealUpload } from "@/lib/tigris"
+import { sealUpload } from "@/lib/tigris"
 
 beforeEach(() => jest.clearAllMocks())
 
@@ -107,11 +81,6 @@ afterAll(async () => {
 const upload = (userId: string) =>
   `https://${process.env.TIGRIS_BUCKET || "blendn-media"}-private.fly.storage.tigris.dev/chat/${userId}/1790641297767-cfg6ta-photo.jpg`
 const OUTSIDE = "https://example.com/pixel.gif"
-/** The URL of the copy the last seal minted. */
-const sealed = () => (sealUpload as jest.Mock).mock.results.at(-1)!.value.then((r: { url: string }) => r.url) as Promise<string>
-/** An upload URL whose object never arrived. */
-const unfinished = (userId: string) => upload(userId).replace("-photo.jpg", "-missing.jpg")
-
 /**
  * The route records an inline "clean" after it answers (`void db…update`), so a
  * read straight after the 201 can land first. Wait for the verdict, bounded.
@@ -269,139 +238,95 @@ describe("a room message is words only, from a client (R9, SCRUM-626)", () => {
   }
 })
 
-describe("a DM's media is the sender's own photo, once both are named to each other (R9, SCRUM-626)", () => {
-  /** A match's conversation: pseudonyms, and by default both revealed. */
-  async function pair(opts: { revealed?: [boolean, boolean]; pseudonymous?: boolean } = {}) {
+describe("a DM takes no photo (SCRUM-1165)", () => {
+  /** Two friends with a conversation: the pair the old rule let send photos. */
+  async function friends() {
     const ids = [await makeUser(testId("mm_a")), await makeUser(testId("mm_b"))]
     users.push(...ids)
     await onboard(...ids)
-    const [user1_revealed, user2_revealed] = opts.revealed ?? [true, true]
     const conversation = await db.private_conversations.create({
-      data: {
-        user1_id: ids[0],
-        user2_id: ids[1],
-        ...(opts.pseudonymous !== false && { user1_pseudonym: "Quiet Otter", user2_pseudonym: "Amber Fox" }),
-        user1_revealed,
-        user2_revealed,
-      },
+      data: { user1_id: ids[0], user2_id: ids[1], user1_revealed: true, user2_revealed: true },
     })
     conversations.push(conversation.id)
+    const [user1_id, user2_id] = conversationPair(ids[0], ids[1])
+    await db.friendships.create({ data: { user1_id, user2_id } })
     const a = await db.user.findUniqueOrThrow({ where: { id: ids[0] }, select: { email: true } })
     return { a: ids[0], b: ids[1], conversationId: conversation.id, token: signAccessToken(ids[0], a.email) }
   }
-  const send = (p: Awaited<ReturnType<typeof pair>>, body: object) =>
+  type Pair = Awaited<ReturnType<typeof friends>>
+  const send = (p: Pair, body: object) =>
     dmRoute.POST(post(`http://localhost/api/mobile/conversations/${p.conversationId}/messages`, p.token, body), {
       params: Promise.resolve({ conversationId: p.conversationId }),
     })
-  const dms = (p: { conversationId: string }) => db.private_messages.count({ where: { conversation_id: p.conversationId } })
+  const dms = (p: Pair) => db.private_messages.count({ where: { conversation_id: p.conversationId } })
 
-  it("refuses an outside URL and the other person's upload, and writes nothing", async () => {
-    const p = await pair()
-    for (const mediaUrl of [OUTSIDE, upload(p.b)]) {
-      const res = await send(p, { mediaUrl, mediaType: "image" })
-      expect(res.status).toBe(400)
-      expect(((await res.json()) as { error?: string }).error).toBe(NOT_OWN_MEDIA)
+  it("refuses any photo with a sentence the app shows as it is, copies nothing and writes nothing", async () => {
+    const p = await friends()
+    for (const body of [
+      // The sender's own upload, as the app sends it.
+      { mediaUrl: upload(p.a), mediaType: "image" },
+      { mediaUrl: upload(p.a) },
+      // With words: the whole send is refused, not the photo dropped.
+      { text: "look", mediaUrl: upload(p.a), mediaType: "image", clientId: randomUUID() },
+      // Anything in mediaUrl at all.
+      { mediaUrl: OUTSIDE },
+      { mediaUrl: upload(p.b), mediaType: "video" },
+      { mediaUrl: "not a url" },
+      { text: "hi", mediaUrl: "" },
+    ]) {
+      const res = await send(p, body)
+      expect(res.status).toBe(403)
+      // The literal: installed apps show it on the photo's bubble as it is.
+      expect(await res.json()).toMatchObject({ success: false, error: "Photos can’t be sent in messages yet.", errorCode: "FORBIDDEN" })
     }
-    expect(await dms(p)).toBe(0)
-  })
-
-  it("accepts the sender's own upload once both have revealed, and stores its sealed copy as a photo", async () => {
-    const p = await pair()
-    // No mediaType: a photo is all a DM takes, so it is stored as one.
-    const res = await send(p, { mediaUrl: upload(p.a) })
-    expect(res.status).toBe(200)
-    const row = await db.private_messages.findFirstOrThrow({ where: { conversation_id: p.conversationId } })
-    expect(row.media_url).toBe(await sealed())
-    expect(row.media_type).toBe("image")
-    // Stored as the bare private reference; handed back signed and short-lived (SCRUM-427).
-    const { data } = (await res.json()) as { data: { mediaUrl: string; mediaType: string } }
-    expect(data.mediaType).toBe("image")
-    const served = new URL(data.mediaUrl)
-    expect(served.searchParams.has("X-Amz-Signature")).toBe(true)
-    expect(served.searchParams.get("X-Amz-Expires")).toBe("900")
-    // Signed path-style against the private bucket: the key is what must match.
-    expect(served.pathname.endsWith(new URL(row.media_url!).pathname)).toBe(true)
-    expect(served.pathname).not.toContain(p.a)
-  })
-
-  it.each([
-    ["neither has revealed", [false, false]],
-    ["only the sender has", [true, false]],
-    ["only the recipient has", [false, true]],
-  ] as const)("refuses a photo when %s, seals nothing, and still takes words", async (_label, revealed) => {
-    const p = await pair({ revealed: [...revealed] })
-    const res = await send(p, { mediaUrl: upload(p.a), mediaType: "image" })
-    expect(res.status).toBe(403)
-    expect(((await res.json()) as { error?: string }).error).toBe(DM_PHOTOS_NOT_YET)
-    expect(sealUpload).not.toHaveBeenCalled()
-    expect(await dms(p)).toBe(0)
-    expect((await send(p, { text: "hi" })).status).toBe(200)
-  })
-
-  it("takes a photo between friends who have not revealed", async () => {
-    const p = await pair({ revealed: [false, false] })
-    const [user1_id, user2_id] = conversationPair(p.a, p.b)
-    await db.friendships.create({ data: { user1_id, user2_id } })
-    expect((await send(p, { mediaUrl: upload(p.a), mediaType: "image" })).status).toBe(200)
-    expect(await dms(p)).toBe(1)
-  })
-
-  it("takes a photo where nobody was ever a pseudonym: an accepted message request", async () => {
-    const p = await pair({ pseudonymous: false, revealed: [false, false] })
-    expect((await send(p, { mediaUrl: upload(p.a), mediaType: "image" })).status).toBe(200)
-  })
-
-  it("refuses a video: a DM takes photos only", async () => {
-    const p = await pair()
-    const res = await send(p, { mediaUrl: upload(p.a), mediaType: "video" })
-    expect(res.status).toBe(400)
     expect(sealUpload).not.toHaveBeenCalled()
     expect(await dms(p)).toBe(0)
   })
 
-  it.each([
-    ["the recipient blocked the sender", (p: { a: string; b: string }) => ({ blocker_id: p.b, blocked_id: p.a })],
-    ["the sender blocked the recipient", (p: { a: string; b: string }) => ({ blocker_id: p.a, blocked_id: p.b })],
-  ])("copies nothing for a send it refuses when %s, and says so before anything about photos", async (_label, block) => {
-    // Unrevealed, so the photo rule would refuse too: the block is asked first, and says nothing about photos.
-    const p = await pair({ revealed: [false, false] })
-    await db.blocked_users.create({ data: block(p) })
-    const res = await send(p, { mediaUrl: upload(p.a), mediaType: "image" })
-    expect(res.status).toBe(403)
-    expect(((await res.json()) as { error?: string }).error).toBe("You cannot send messages to this user")
-    expect(sealUpload).not.toHaveBeenCalled()
-    await db.blocked_users.deleteMany({ where: block(p) })
-  })
-
-  it("answers a retry of a photo that landed with the first write, and seals nothing more", async () => {
-    const p = await pair()
-    const body = { mediaUrl: upload(p.a), mediaType: "image", clientId: randomUUID() }
-    expect((await send(p, body)).status).toBe(200)
-    expect((await send(p, body)).status).toBe(200)
-    expect(await dms(p)).toBe(1)
-    expect(sealUpload).toHaveBeenCalledTimes(1)
-  })
-
-  it("refuses an upload that cannot be sealed, and writes nothing", async () => {
-    const p = await pair()
-    const res = await send(p, { mediaUrl: unfinished(p.a), mediaType: "image" })
-    expect(res.status).toBe(400)
-    expect(await dms(p)).toBe(0)
-  })
-
-  it("removes the copy a racing retry sealed and did not keep (SCRUM-448)", async () => {
-    const p = await pair()
-    const body = { mediaUrl: upload(p.a), mediaType: "image", clientId: randomUUID() }
-    mockSealDelayMs = 300
-    const [x, y] = await Promise.all([send(p, body), send(p, body)]).finally(() => (mockSealDelayMs = 0))
-    expect([x.status, y.status].every((s) => s < 300)).toBe(true)
+  it("still takes words between the same two people", async () => {
+    const p = await friends()
+    // A text send that also says mediaType, as an installed app may, is still words.
+    for (const body of [{ text: "see you at the bar" }, { text: "on my way", mediaType: "image", mediaUrl: null }]) {
+      expect((await send(p, body)).status).toBe(200)
+    }
     const rows = await db.private_messages.findMany({ where: { conversation_id: p.conversationId } })
-    expect(rows).toHaveLength(1)
-    const minted = await Promise.all((sealUpload as jest.Mock).mock.results.map((m) => m.value.then((v: { key?: string }) => v.key)))
-    // Both got past the retry lookup and sealed; the loser's copy is the one removed.
-    expect(minted).toHaveLength(2)
-    const lost = minted.filter((k) => k && !rows[0].media_url!.endsWith(k))
-    expect(lost).toHaveLength(1)
-    expect((deleteFile as jest.Mock).mock.calls.map(([k]) => k)).toEqual(lost)
+    expect(rows.map((r) => [r.message_text, r.media_url, r.media_type]).sort()).toEqual([
+      ["on my way", null, null],
+      ["see you at the bar", null, null],
+    ])
+  })
+
+  it("refuses a retry of a photo send that landed before, and writes nothing more", async () => {
+    const p = await friends()
+    const clientId = randomUUID()
+    const stored = `https://${process.env.TIGRIS_BUCKET || "blendn-media"}-private.fly.storage.tigris.dev/chat/sealed/${randomUUID()}`
+    await db.private_messages.create({
+      data: { conversation_id: p.conversationId, sender_id: p.a, media_url: stored, media_type: "image", client_id: clientId },
+    })
+    const res = await send(p, { mediaUrl: upload(p.a), mediaType: "image", clientId })
+    expect(res.status).toBe(403)
+    expect(((await res.json()) as { error?: string }).error).toBe(DM_PHOTOS_OFF)
+    expect(await dms(p)).toBe(1)
+  })
+
+  it("still serves a photo sent before, signed", async () => {
+    const p = await friends()
+    const stored = `https://${process.env.TIGRIS_BUCKET || "blendn-media"}-private.fly.storage.tigris.dev/chat/sealed/${randomUUID()}`
+    await db.private_messages.create({
+      data: { conversation_id: p.conversationId, sender_id: p.b, media_url: stored, media_type: "image" },
+    })
+    const res = await dmRoute.GET(
+      new NextRequest(`http://localhost/api/mobile/conversations/${p.conversationId}/messages`, {
+        headers: { authorization: `Bearer ${p.token}` },
+      }),
+      { params: Promise.resolve({ conversationId: p.conversationId }) }
+    )
+    expect(res.status).toBe(200)
+    const { data } = (await res.json()) as { data: { messages: Array<{ mediaUrl: string; mediaType: string }> } }
+    expect(data.messages).toHaveLength(1)
+    expect(data.messages[0].mediaType).toBe("image")
+    const served = new URL(data.messages[0].mediaUrl)
+    expect(served.searchParams.has("X-Amz-Signature")).toBe(true)
+    expect(served.pathname.endsWith(new URL(stored).pathname)).toBe(true)
   })
 })

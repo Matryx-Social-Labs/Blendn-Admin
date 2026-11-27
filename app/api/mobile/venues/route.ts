@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client"
 import { NextRequest } from "next/server"
 
-import { ageFrom, isAdult, mayParticipate } from "@/lib/age"
+import { ageFrom, isAdult, mayParticipate, participationSelect } from "@/lib/age"
 import {
   serverErrorResponse,
   successResponse,
@@ -100,7 +100,7 @@ export async function GET(request: NextRequest) {
       rateLimit(request, userLimit("read", "venues", authUser.userId)),
       db.profiles.findUnique({
         where: { id: authUser.userId },
-        select: { age: true, date_of_birth: true, onboarded: true },
+        select: participationSelect,
       }),
     ])
     if (limited) return limited

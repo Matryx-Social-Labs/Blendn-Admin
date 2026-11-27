@@ -49,7 +49,7 @@ export const ErrorResponseSchema = z
       .describe(
         "Why, beside an `errorCode` that keeps the value installed builds match on: `ACCOUNT_SUSPENDED`, " +
           "`ACCOUNT_STAFF`, `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`, " +
-          "`PROFILE_INCOMPLETE`, and on events and friends: `AGE_RESTRICTED` (a known age below the line), " +
+          "`PROFILE_INCOMPLETE`, and on events, friends and DMs: `AGE_RESTRICTED` (a known age below the line, or an account known to be under 18), " +
           "`ORGANISER_SUSPENDED` (an event hidden by its organisation's suspension, on every route that refuses it), `INVITE_UNAVAILABLE`, `PERSON_UNAVAILABLE`, " +
           "`REQUEST_UNAVAILABLE` (one reason for every way something is out of reach), `CANNOT_ADD_SELF`. " +
           "`RATE_LIMITED` (429 on the friend routes, with `retryAfter`). " +
@@ -210,7 +210,10 @@ export const ROOM_BAN_GATE =
 export const PARTICIPATION_GATE =
   "403 \"Finish setting up your profile first. Blend'n is for people 18 and over.\" when the " +
   "profile has neither finished onboarding nor an adult age on file (SCRUM-331) — `errorCode` stays " +
-  "`FORBIDDEN`; the event, check-in and Go Live routes add `reasonCode` `PROFILE_INCOMPLETE`. "
+  "`FORBIDDEN`; the event, check-in, Go Live and friends routes add `reasonCode` `PROFILE_INCOMPLETE`. " +
+  "An account known to be under 18 (a derived age under 18, or `profiles.under_18_since` set; SCRUM-1169), onboarded " +
+  "or not, is 403 `AGE_RESTRICTED` with `reasonCode` `AGE_RESTRICTED` and \"Blend’n is for people 18 and over. If " +
+  "your date of birth is wrong, write to grievance@blendn.app.\" "
 
 const errorBody = (description: string, schema: z.ZodTypeAny = ErrorResponseSchema) => ({
   description,
