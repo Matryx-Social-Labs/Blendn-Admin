@@ -36,6 +36,8 @@ const envSchema = z.object({
   // OpenAI: the moderation model. Required on Railway production (`openaiKeyProblem`);
   // optional elsewhere.
   OPENAI_API_KEY: z.string().optional(),
+  /** The mood classifier's chat model (lib/sentiment/classify.ts). Unset or blank: `DEFAULT_SENTIMENT_MODEL`. */
+  SENTIMENT_MODEL: z.string().optional(),
 
   // Landing-page lead ingest. Optional because an environment that does not
   // serve organizers.blendn.app is a valid environment — but validated when
@@ -547,6 +549,18 @@ export function revenuecatSecretKey(): string | null {
 export function revenuecatWebhookSecret(): string | null {
   const secret = process.env.REVENUECAT_WEBHOOK_SECRET?.trim()
   return secret && secret.length >= 32 ? secret : null
+}
+
+/**
+ * The mood classifier's default model: OpenAI's current small chat model, per
+ * https://developers.openai.com/api/docs/deprecations (read 2026-11-26, SCRUM-1226). It was a hard-coded
+ * gpt-4o-mini, which OpenAI shuts down on 2027-01-14. When OpenAI retires this one, set `SENTIMENT_MODEL`.
+ */
+const DEFAULT_SENTIMENT_MODEL = "gpt-6-luna"
+
+/** The mood classifier's model: `SENTIMENT_MODEL`, or the default when unset or blank. */
+export function sentimentModel(): string {
+  return process.env.SENTIMENT_MODEL?.trim() || DEFAULT_SENTIMENT_MODEL
 }
 
 /** Where replies to Blend'n mail go, or null for no Reply-To. */

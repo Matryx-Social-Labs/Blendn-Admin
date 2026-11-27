@@ -1928,7 +1928,7 @@ vocabulary, meaning exactly what it means there.
 | `venueType` | One of the 35 slugs, or a comma list (`pub_bar,brewery`): a venue of any of them. An unknown slug is a 400. `venueTypes` is the same filter under its plural name; send both and a venue of either matches |
 | `area` | A neighbourhood by `areaSlug` (`koramangala-1st-block`). A venue with no area is in none |
 | `area` / `areaSlug` (on every item) | The neighbourhood a person would name, from Overture's own division polygons (`scripts/places/areas.sql`, set by `scripts/backfill-venue-areas.ts`); both `null` when unknown, never guessed: fall back to the address or city. The list of areas is `GET /venues/summary` |
-| `tonight` (on every item) | `{ opensAt, closesAt }` (`HH:MM`, wall clock in the venue's own timezone) from `venues.hours` for the weekday of the venue's current day, or `null` when no hours are given for it. A close at or before the open runs past midnight. A day with two openings answers with the later one. `venues.hours` has no writer yet, so this is `null` everywhere until one exists |
+| `tonight` (on every item) | `{ opensAt, closesAt }` (`HH:MM`, wall clock in the venue's own timezone) from `venues.hours` for the weekday of the venue's current day, or `null` when no hours are given for it. A close at or before the open runs past midnight. A day with two openings answers with the later one (the dashboard writes one a day, SCRUM-1154). `null` until the venue's owner sets its hours |
 | `sortBy` | `name` (default) or `distance` |
 | `tier` (on every item) | `live`, `open` or `quiet`: the tier `order=live` ranks by, computed by the same rule whatever the order — `live` if `liveNow` is not `quiet`; `open` if open tonight (hours for the venue's current day, or its next public event starts before that day ends); else `quiet`. Under `order=live` it is read from the sets that ordered the page, so it can never disagree with the order; a caller whose `liveNow` is null is never shown `live` |
 | `order` | `live`: three tiers — **live now** (`liveNow` not `quiet`), then **open tonight** (`venues.hours` has a row for the weekday of the venue's current day, or a public event starts before that day ends), then the rest. Each tier is in the chosen sort with the id as tiebreak, so pages never repeat or skip a venue; read until the first quiet venue and nothing open tonight is lost. A caller who may not go live (`liveNow` null) gets the last two tiers. The response echoes `pagination.order: "live"` when applied; without it the server did not honour the order. A venue can change tier (somebody goes live) between two page requests, so **de-duplicate by venue `id` across pages** |
@@ -2064,7 +2064,7 @@ deleted venue; 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) for a profile
 | `live.liveNow` | `quiet` (fewer than 5, none included), `5-9`, `10-19` or `20+`. **Never a number** (D-19, D-x2): a count that moved from 4 to 5 as you watched would tell you somebody just walked in. Guests only (not the venue's staff), never counting you, read at most once a minute per venue, and slow to fall (it drops a bucket only once one more person would not hold it) |
 | `live.youAreLive` … `chatGroupId` | Your own window. Count down from `expiresAt`, never from the tap; open the room by `venueDayId` / `chatGroupId` |
 | `live.stayUntil` | The furthest "stay" can carry your window (four hours from the first stay today); null until you chose stay |
-| `venue.hours` | Opening hours, `[{ day: 0-6 (Sun-Sat), open: "HH:MM", close: "HH:MM" }]` in the venue's own timezone (a close at or before the open runs past midnight); null until given |
+| `venue.hours` | Opening hours, `[{ day: 0-6 (Sun-Sat), open: "HH:MM", close: "HH:MM" }]` in the venue's own timezone (a close at or before the open runs past midnight); null until given. Set by the venue's owning organisation or an admin on the dashboard venue page (`setVenueHours`, SCRUM-1154): one opening a day, opening at or after `dayResetHour` and closing by the next `dayResetHour`, never at the time it opens |
 | `venue.description`, `venue.amenities` | Free text about the place (null) and amenity names from the shared vocabulary (`[]`) until given |
 | `venue.capacity`, `venue.dayResetHour`, `venue.timezone` | The venue's capacity (null if unknown), the local hour its day starts (0-23) and the IANA timezone (`Asia/Kolkata`, `UTC`) that hour is in. Read the two together: the phone derives neither from a time such as `dayEndsAt`, which is wrong across timezones |
 | `venue.upcoming` | Its next public events, at most 5, soonest first: the Places card's filter (published, public, not ended, link not disputed by the venue, within your age) — never its own live rooms |
@@ -3963,7 +3963,7 @@ and only the second is worth blocking.
 | kind | who | media |
 |---|---|---|
 | `announcement` | `canEdit` — the organising org, or an `app_admin`. **Not** the venue owner | no |
-| `sponsored` | one organisation holding `may_sponsor` **and** an approved placement at this event, or an `app_admin` | **yes** |
+| `sponsored` | one organisation holding `may_sponsor` **and** an approved placement at this event, or an `app_admin` | not yet: refused with 400 (nothing stores it) |
 | `system` | `app_admin` only — it speaks as Blend'n | no |
 
 **This route used to compare two user ids.** `event.organizer_id !== caller.id`,
@@ -3984,8 +3984,9 @@ announces as one.
 everyone who can announce can also mark a message sponsored, the label stops
 meaning anything and becomes a styling choice — an organizer could dress an
 advertisement as an announcement or the reverse, and a reader has no way to tell
-which they are looking at. `organisations.may_sponsor` is off for every row and
-granted by an admin, because the word is only worth having if it is scarce.
+which they are looking at. `organisations.may_sponsor` is off by default and
+turned on only by an admin (the Organisations toggle, or approving a sponsor's
+application), because the word is only worth having if it is scarce.
 
 It is an **organisation** flag rather than a role: the permission belongs to the
 company with the commercial agreement, not to whichever of its staff is logged
@@ -4482,7 +4483,7 @@ Messages go through a **pre-emit** pipeline — moderation runs before the messa
 3. **OpenAI Moderation API** (pre-emit, 1s timeout) — Multilingual AI detection for hate, harassment, sexual, violence, self-harm. If caught within 1s, message hidden before broadcast. If timeout, emitted and falls back to async, except in an event room with more than 200 checked in, which waits for the verdict (up to 8s) and refuses the send (`503 MODERATION_UNAVAILABLE`) without one.
 4. **Image moderation** (async, if applicable) — OpenAI omni-moderation for images
 
-Thresholds: `>=0.70` confidence → auto-hide, `>=0.40` → flag for review. Auto-mute after 3 hidden abusive messages in 1 hour (a message hidden only for a contact detail does not count). Auto-unmute after 1 hour with no new violations (checked on next send attempt).
+Thresholds: `>=0.70` confidence → auto-hide, `>=0.40` → flag for review. Auto-mute after 3 hidden abusive messages in 1 hour (a message hidden only for a contact detail or a swear word does not count; a slur, or the model judging the line abusive, does). Auto-unmute after 1 hour with no new violations (checked on next send attempt).
 
 Requires `OPENAI_API_KEY` env var: Railway production refuses to boot without it; elsewhere the server boots with a warning.
 
