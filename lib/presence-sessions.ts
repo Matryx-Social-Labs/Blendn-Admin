@@ -344,8 +344,8 @@ export interface Headcount {
   insideStaff: number
   /**
    * Of those inside, how many have not reported a position within
-   * `CONFIRMED_WINDOW_MINUTES` (SCRUM-1232): the complement of the phone's
-   * `hereConfirmed`.
+   * `CONFIRMED_WINDOW_MINUTES` (SCRUM-1232): the host's counterpart of the
+   * phone's `hereConfirmed`, on sessions rather than check-ins.
    *
    * Not subtracted from the counts above — they are still in the room until
    * something says otherwise. This is what lets a screen admit how much of its

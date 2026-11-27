@@ -28,7 +28,7 @@ export interface LiveFigures {
   checkedOutTotal: number
   /**
    * Of those inside, how many have not reported a position within
-   * `CONFIRMED_WINDOW_MINUTES` (30): the complement of the phone's `hereConfirmed`.
+   * `CONFIRMED_WINDOW_MINUTES` (30): the host's counterpart of the phone's `hereConfirmed`, on presence sessions, staff included.
    *
    * Not subtracted from `inside`: silence is not evidence of leaving, because
    * the client polls in the foreground only and a pocketed phone goes quiet
