@@ -242,6 +242,9 @@ describe("GET /events/:id/people — as the room shows them", () => {
       displayName: await pseudonymOf(anon),
       photo: null,
       age: null,
+      // D-030: no band in a night this small, and a first night out.
+      ageBand: null,
+      tenure: "new",
       insideNow: false,
       youLiked: true,
       overlap: null,

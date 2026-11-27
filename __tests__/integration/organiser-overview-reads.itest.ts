@@ -233,8 +233,8 @@ describe("the live banner and the latest feedback come through the organisation"
     const o = await org()
     const creator = await member(o, "lb_creator")
     colleague = await member(o, "lb_colleague")
-    stranger = await makeUser("lb_stranger", "organizer")
-    users.push(stranger)
+    // Another organisation's organiser: a dashboard is a membership (SCRUM-1247).
+    stranger = await member(await org(), "lb_stranger")
     live = await event(creator, o, { start: new Date(Date.now() - HOUR), hours: 4 })
     rated = await event(creator, o, { start: new Date(Date.now() - 3 * DAY) })
     const raters = await Promise.all([1, 2, 3, 4, 5].map((n) => makeUser(`lb_r${n}`)))

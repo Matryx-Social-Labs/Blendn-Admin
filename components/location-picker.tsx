@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import { themeColour } from "@/lib/theme-colour"
 import type { Map as LeafletMap, Marker, Circle, LeafletMouseEvent } from "leaflet"
 // From the package, not a runtime <link> to unpkg: the CSP's style-src is
-// 'self' (report-only today), and GeofenceEditor loads the same file this way.
+// 'self' (enforced on /dashboard), and GeofenceEditor loads the same file this way.
 import "leaflet/dist/leaflet.css"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"

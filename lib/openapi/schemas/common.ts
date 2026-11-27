@@ -268,3 +268,21 @@ export const StoredLocationSchema = z.string().nullable().openapi({
   description:
     "The city as stored. Null when none is set, or while it is still stored as coordinates: a read never looks the city up and never returns coordinates.",
 })
+/**
+ * What a room row says about somebody before a reveal (D-030, SCRUM-1384; `roomPersonFacts` in lib/room-person-facts.ts).
+ * Spread into every row and room card that carries them, so the two fields read the same everywhere.
+ */
+export const RoomPersonFactsFields = {
+  ageBand: z
+    .enum(["18-24", "25-34", "35-44", "45+"])
+    .nullable()
+    .describe(
+      "A wide age band, shown only when 3+ people who checked in at this event as attendees share it; null below that, when the age is unknown, on a card with no event room (a crew's, Mix's or Lobby post's, or a raw id), and to anybody who runs or hosts the event. The same for every viewer and every route."
+    ),
+  tenure: z
+    .enum(["new", "regular"])
+    .nullable()
+    .describe(
+      "\"regular\" once they came to 2+ distinct events (a multi-day event is one), else \"new\". Null to anybody who runs or hosts the event, and on a raw id's card."
+    ),
+}
