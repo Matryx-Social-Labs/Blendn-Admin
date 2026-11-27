@@ -252,13 +252,14 @@ export async function likePersonAsCrew(
   if (!mine || !mine.present.includes(likerId)) return MY_CREW_NOT_HERE
   if (!mine.open_to_solo || mine.members.length > CREW.MAX_SOLO_MATCH) return NO_ROOM_FOR_ONE
   if (personId === likerId) return NO_PERSON
-  // Your own crewmate, by their room handle: the answer about anybody else, or a 404 says "this handle is in my crew" (SCRUM-1476).
-  if (mine.members.includes(personId)) return nothingTold
 
   const [theirCheckIn, them] = await Promise.all([
     db.event_check_ins.findFirst({ where: { user_id: personId, ...hereNowAt(here.occurrenceId), user: LISTED_IN_ROSTER }, select: { id: true } }),
     intentsAt(eventId, personId),
   ])
+  // Your own crewmate, by their room handle: the answer about anybody not opted in, after the same reads; a 404 said
+  // "this handle is in my crew" (SCRUM-1476).
+  if (mine.members.includes(personId)) return nothingTold
   if (!theirCheckIn || !them.openToCrews || !crewMayMeetSolo(mine, mine.members.length, them.intents)) return nothingTold
   if (blocksExclude(mine.members, [personId], await strangersApartBetween(mine.members, [personId]))) return nothingTold
   // A person a host banned from the room is not here to be liked: the same answer, never which (review H2).
