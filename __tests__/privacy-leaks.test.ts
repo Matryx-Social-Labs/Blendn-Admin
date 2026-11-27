@@ -70,16 +70,18 @@ describe("B3 — the socket roster is for people in the room", () => {
     // And not even the id: each watcher reads a handle unless it is their own
     // check-in (SCRUM-371) — a real id here was the same harvest by account.
     expect(open![0]).toContain("userId: idFor(userId)")
-    // The handle goes only to the arriver and to a viewer whose roster would show them: not a friend, not blocked, the arriver listed (H1).
+    // The handle goes only to the arriver and to a viewer whose roster would show them (H1): the arriver listed, the
+    // viewer not one the roster hides them from (`viewersHiddenFromMany`: friend, block, closed pair, reporter;
+    // SCRUM-1386), and that set actually read (`byUser !== null`: fails closed).
     expect(open![0]).toContain("shown(viewer) ? { userId: idFor(userId) } : {}")
-    expect(src).toContain("viewer === userId || (listed && !friends.has(viewer) && !excludeUserIds.includes(viewer))")
+    expect(src).toContain("viewer === userId || (listed && byUser !== null && !hiddenFrom.has(viewer))")
 
-    // The `.except(...)` keeps the arriver's block counterparties off it (SCRUM-338).
+    // The `.except(...)` keeps everybody whose roster hides the arriver off it (SCRUM-338, SCRUM-1386).
     const roster = /io\.in\(`event:room:\$\{eventId\}`\)\.except\([^\n]*\),\s*eventId,\s*"event:room:checkin",\s*\(idFor, recognises\) => \{[\s\S]*?identity \? userId : undefined\s*\)/.exec(src)
     expect(roster).not.toBeNull()
     expect(roster![0]).toContain("userName")
     expect(roster![0]).toContain("userId: idFor(userId)")
-    expect(roster![0]).toContain(".except([...excludeUserIds, ...friends].map(")
+    expect(roster![0]).toContain(".except([...hiddenFrom].map(")
     // The real name and photo go only to a recipient who may recognise the
     // arriver in this room (`recognisedInRoomBy`, the roster's rule); everybody
     // else gets the pseudonym and no photo.
