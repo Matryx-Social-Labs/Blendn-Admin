@@ -97,6 +97,8 @@ describe("a keyword hide on the async path (D-052a)", () => {
     await send("tu chutiya hai", Promise.resolve({ checked: true, result: threat }))
     expect(mockFlag).toHaveBeenNthCalledWith(2, "m1", "g1", "u1", threat, { messageStatus: false })
     expect(mockJudged).toHaveBeenCalledWith("m1")
+    // The key goes only once the flag that replaces it is written.
+    expect(mockFlag.mock.invocationCallOrder[1]).toBeLessThan(mockJudged.mock.invocationCallOrder[0])
     expect(mockMute).not.toHaveBeenCalled()
   })
 
@@ -138,9 +140,10 @@ describe("a keyword hide on the async path (D-052a)", () => {
     expect(mockMute).not.toHaveBeenCalled()
   })
 
-  it("marks the line judged when the model hid it", async () => {
+  it("marks the line judged when the model hid it, after writing the model's flag", async () => {
     await send("tu chutiya hai", Promise.resolve(HIDE))
     expect(mockJudged).toHaveBeenCalledWith("m1")
+    expect(mockFlag.mock.invocationCallOrder[1]).toBeLessThan(mockJudged.mock.invocationCallOrder[0])
   })
 
   it("counts a slur without asking the model, and does not mark its flag", async () => {

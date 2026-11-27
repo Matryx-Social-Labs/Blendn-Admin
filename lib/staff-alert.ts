@@ -3,7 +3,7 @@
 import { db } from "./db"
 import { dashboardUrl } from "./email"
 import { logger } from "./logger"
-import { SEVERE_CATEGORY_PREFIXES } from "./moderation/config"
+import { SEVERE_CATEGORY_PREFIXES, UNJUDGED_KEY } from "./moderation/config"
 import { MODERATION_TIMEOUT_MS } from "./moderation/openai-moderation"
 import { channelsFrom, sendToChannels } from "./notify-channels"
 import { readMark, writeMark } from "./rate-limit-store"
@@ -94,8 +94,7 @@ async function severeFlags(since: Date, until: Date): Promise<number> {
   // key (`unjudgedHides` below), is not severe by confidence; such flags are
   // also left out of the auto-mute count (abuseHiddenCount in
   // lib/moderation/actions.ts). Any other key beside it keeps the flag severe.
-  // The key is UNJUDGED_KEY (lib/moderation/config.ts), spelled out here and
-  // below. The comparisons never raise: `->` gives NULL on an array or a scalar.
+  // The comparisons never raise: `->` gives NULL on an array or a scalar.
   const [row] = await db.$queryRaw<{ n: number }[]>`
     SELECT count(*)::int AS n
       FROM moderation_flags
@@ -103,7 +102,7 @@ async function severeFlags(since: Date, until: Date): Promise<number> {
        AND created_at > ${since} AND created_at <= ${until}
        AND ((confidence >= ${SEVERE_CONFIDENCE}
              AND categories <> jsonb_build_object('profanity', categories -> 'profanity')
-             AND categories <> jsonb_build_object('profanity', categories -> 'profanity', 'unjudged', categories -> 'unjudged'))
+             AND categories <> jsonb_build_object('profanity', categories -> 'profanity', ${UNJUDGED_KEY}::text, categories -> ${UNJUDGED_KEY}::text))
             OR CASE WHEN jsonb_typeof(categories) = 'object'
                  THEN EXISTS (SELECT 1 FROM jsonb_object_keys(categories) k WHERE k LIKE ANY (${patterns}))
                  ELSE false END)`
@@ -117,7 +116,7 @@ async function unjudgedHides(since: Date, until: Date): Promise<number> {
       FROM moderation_flags
      WHERE status = 'pending'
        AND created_at > ${since} AND created_at <= ${until}
-       AND categories = jsonb_build_object('profanity', categories -> 'profanity', 'unjudged', categories -> 'unjudged')`
+       AND categories = jsonb_build_object('profanity', categories -> 'profanity', ${UNJUDGED_KEY}::text, categories -> ${UNJUDGED_KEY}::text)`
   return row?.n ?? 0
 }
 

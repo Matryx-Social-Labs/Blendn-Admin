@@ -78,14 +78,15 @@ export async function recordHide(
       logger.warn("Hidden line not judged by the model; it does not count toward a mute", { messageId, reason: text.reason })
       return
     }
-    await markJudged(messageId)
+    // The verdict's own flag first: the key goes only once what replaces it is written.
     const verdict = text.result
     if (verdict?.action === "hide") {
       await flagForReview(messageId, chatGroupId, userId, verdict)
-      await checkAndAutoMute(userId, chatGroupId)
     } else if (verdict?.action === "flag" && hasSevereCategory(verdict)) {
       await flagForReview(messageId, chatGroupId, userId, verdict, { messageStatus: false })
     }
+    await markJudged(messageId)
+    if (verdict?.action === "hide") await checkAndAutoMute(userId, chatGroupId)
   } catch (error) {
     logger.error("Failed to record a hidden line", { messageId, error: String(error) })
   }
