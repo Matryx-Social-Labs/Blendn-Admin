@@ -80,11 +80,13 @@ export async function recordHide(
     }
     // The verdict's own flag first: the key goes only once what replaces it is written.
     const verdict = text.result
+    let written = true
     if (verdict?.action === "hide") {
-      await flagForReview(messageId, chatGroupId, userId, verdict)
+      written = await flagForReview(messageId, chatGroupId, userId, verdict)
     } else if (verdict?.action === "flag" && hasSevereCategory(verdict)) {
-      await flagForReview(messageId, chatGroupId, userId, verdict, { messageStatus: false })
+      written = await flagForReview(messageId, chatGroupId, userId, verdict, { messageStatus: false })
     }
+    if (!written) return
     await markJudged(messageId)
     if (verdict?.action === "hide") await checkAndAutoMute(userId, chatGroupId)
   } catch (error) {

@@ -155,7 +155,13 @@ export async function runStaffAlertSweep(now: Date = new Date()): Promise<void> 
       db.message_reports.count({ where: pending }),
       db.event_reports.count({ where: pending }),
       severeFlags(since, until),
-      mayRepeat ? unjudgedHides(unjudgedSaidUntil ?? repeatFrom, settled) : 0,
+      // Its own failure is its own: the reports and severe flags still go out, and the same rows are asked next run.
+      mayRepeat
+        ? unjudgedHides(unjudgedSaidUntil ?? repeatFrom, settled).catch((error) => {
+            logger.error("Staff alert: unjudged count failed", { error: error instanceof Error ? error.message : String(error) })
+            return 0
+          })
+        : 0,
       // `deleted_at: null` so the partial index chat_messages_unchecked_idx serves it.
       db.chat_messages.count({
         where: { moderation_status: "unchecked", deleted_at: null, created_at: { gte: new Date(now.getTime() - HOUR_MS) } },

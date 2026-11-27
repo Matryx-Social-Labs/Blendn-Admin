@@ -41,7 +41,7 @@ export async function hideMessage(
 /**
  * Create a moderation flag record for human review. `messageStatus: false`
  * records the flag only, for a line already hidden whose status must stay
- * `hidden` (`recordHide`).
+ * `hidden` (`recordHide`). Whether the flag was written; never throws.
  */
 export async function flagForReview(
   messageId: string,
@@ -49,7 +49,7 @@ export async function flagForReview(
   userId: string,
   result: ModerationResult,
   { messageStatus = true }: { messageStatus?: boolean } = {}
-): Promise<void> {
+): Promise<boolean> {
   try {
     const flag = db.moderation_flags.create({
       data: {
@@ -82,8 +82,10 @@ export async function flagForReview(
       source: result.source,
       confidence: result.confidence,
     })
+    return true
   } catch (error) {
     logger.error("Failed to flag message", { messageId, error: String(error) })
+    return false
   }
 }
 

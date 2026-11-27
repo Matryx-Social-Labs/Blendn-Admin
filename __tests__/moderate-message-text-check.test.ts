@@ -30,7 +30,10 @@ const HIDE = { checked: true, result: { action: "hide", source: "openai_text", c
 const CLEAN: ModerationCheck = { checked: true, result: null }
 const run = (textCheck?: Promise<ModerationCheck>) => moderateMessage("m1", "see you at nine", "text", "u1", "g1", undefined, textCheck)
 
-beforeEach(() => jest.resetAllMocks())
+beforeEach(() => {
+  jest.resetAllMocks()
+  mockFlag.mockResolvedValue(true)
+})
 
 describe("moderateMessage with the send route's in-flight check", () => {
   it("asks again when the in-flight check failed outright, and hides on the second answer", async () => {
@@ -136,6 +139,14 @@ describe("a keyword hide on the async path (D-052a)", () => {
   ] as const)("leaves the line marked not judged after %s", async (_name, answers) => {
     mockCheck.mockResolvedValue(answers[answers.length - 1])
     await send("tu chutiya hai", Promise.resolve(answers[0]))
+    expect(mockJudged).not.toHaveBeenCalled()
+    expect(mockMute).not.toHaveBeenCalled()
+  })
+
+  it("keeps the line marked not judged when the model's own flag could not be written", async () => {
+    mockFlag.mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+    await send("tu chutiya hai", Promise.resolve(HIDE))
+    expect(mockFlag).toHaveBeenCalledTimes(2)
     expect(mockJudged).not.toHaveBeenCalled()
     expect(mockMute).not.toHaveBeenCalled()
   })
