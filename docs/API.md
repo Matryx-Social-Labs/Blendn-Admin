@@ -267,8 +267,8 @@ And `appleLinked` (boolean, additive): Sign in with Apple is linked, whatever
 A phone signed out everywhere is refused with the same message and no code. A socket
 already open when its account is deleted, suspended or stamped is closed by the
 server: at once when a route in the server made the change, and at the server's next
-read of its blocked-accounts set (within about 30 seconds of traffic) when another
-process did (`scripts/under-18-accounts.ts`).
+read of its blocked-accounts set when another process did
+(`scripts/under-18-accounts.ts`).
 
 **Update required.** The app sends `X-App-Version` (native only). When
 `MOBILE_MIN_APP_VERSION` is set and the header is a plain dotted version
