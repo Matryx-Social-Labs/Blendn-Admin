@@ -101,7 +101,7 @@ describe("feedback through the 180-day purge", () => {
   })
 
   it("leaves every figure the host and the venue see exactly as it was", async () => {
-    await purgeClosedLobbies(new Date(), "delete")
+    await purgeClosedLobbies()
     expect(await db.chat_messages.count({ where: { chat_group_id: room } })).toBe(0)
     expect((await figures("host")).figures).toEqual(before.host.figures)
     expect((await figures("venue")).figures).toEqual(before.venue.figures)
@@ -127,7 +127,7 @@ describe("feedback through the 180-day purge", () => {
   })
 
   it("is the same on the next pass", async () => {
-    await purgeClosedLobbies(new Date(), "delete")
+    await purgeClosedLobbies()
     expect((await figures("host")).figures).toEqual(before.host.figures)
     expect(await db.event_feedback.count({ where: { event_id: eventId } })).toBe(17)
   })
@@ -157,9 +157,8 @@ describe("a dismissed report's excerpt and description", () => {
     const upheld = await report("resolved", 190)
     const pending = await report("pending", null)
 
-    const dryRun = await purgeClosedLobbies(new Date(), "log")
-    expect(dryRun.excerpts).toBeGreaterThanOrEqual(2)
-    await purgeClosedLobbies(new Date(), "delete")
+    const pass = await purgeClosedLobbies()
+    expect(pass.excerpts).toBeGreaterThanOrEqual(2)
     const kept = async (r: { id: string }) =>
       db.message_reports.findUniqueOrThrow({ where: { id: r.id }, select: { excerpt: true, description: true, reason: true, status: true } })
     expect(await kept(aged)).toMatchObject({ excerpt: null, description: null, reason: "spam", status: "reviewed" })

@@ -4,7 +4,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { haversineDistance } from "@/lib/geo"
-import { resolveEventCity, geocodeBudget } from "@/lib/location"
+import { storedCity } from "@/lib/location"
 import {
   successResponse,
   unauthorizedResponse,
@@ -127,8 +127,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      */
     const attended = await distinctAttendeeCounts(favorites.map((f) => f.event.id))
 
-    // One geocode budget for the page. See lib/location.ts.
-    const geocodes = geocodeBudget()
 
     // Transform response
     const events = await Promise.all(favorites.map(async (f) => {
@@ -162,7 +160,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         visibility: event.visibility,
         venueName: event.venue_name,
         address: event.address,
-        city: await resolveEventCity(event.city, event.latitude, event.longitude, geocodes),
+        city: storedCity(event.city),
         state: event.state,
         country: event.country,
         latitude: event.latitude,

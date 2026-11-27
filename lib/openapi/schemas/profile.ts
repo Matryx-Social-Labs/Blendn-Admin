@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { ACCOUNT_MAX_AGE } from "@/lib/age"
 import { registry } from "@/lib/openapi/registry"
-import { FriendOfferSchema, PagedPaginationSchema, RoomLensSchema, UserRefParamSchema } from "./common"
+import { FriendOfferSchema, PagedPaginationSchema, RoomLensSchema, UserRefParamSchema, StoredLocationSchema } from "./common"
 
 /**
  * These mirror `lib/validations/profile.ts`, and a test holds them to it.
@@ -39,7 +39,10 @@ export const UpdateProfileRequestSchema = z
       .optional()
       .openapi({ example: "1998-04-17", description: "YYYY-MM-DD. Write-only." }),
 
-    location: z.string().max(200).optional().nullable(),
+    location: z.string().max(200).optional().nullable().openapi({
+      description:
+        "A city, or `lat,lon`, which is turned into the city on save (one lookup). If that lookup fails the stored location is kept and the rest of the update is saved. `null` or empty clears it.",
+    }),
     homeCitySlug: z.string().min(1).max(64).optional().nullable().openapi({
       description:
         "Where the person goes out normally: a `slug` from GET /events/cities. A preview city is accepted; an unknown or hidden one is 400. `null` clears it. Your own, never shown to anybody else; read it back as `profile.homeCitySlug` on GET and PUT of your own profile.",
@@ -231,7 +234,7 @@ export const ProfileResponseSchema = z
       phone: z.string().nullable(),
       name: z.string().nullable(),
       age: z.number().nullable(),
-      location: z.string().nullable(),
+      location: StoredLocationSchema,
       bio: z.string().nullable(),
       occupation: z.string().nullable(),
       education: z.string().nullable(),
@@ -366,7 +369,7 @@ export const UserPublicProfileSchema = z
     image: z.string().nullable().optional(),
     photos: z.array(z.string()).optional(),
     age: z.number().nullable(),
-    location: z.string().nullable(),
+    location: StoredLocationSchema,
     bio: z.string().nullable().optional(),
     occupation: z.string().nullable().optional(),
     education: z.string().nullable().optional(),

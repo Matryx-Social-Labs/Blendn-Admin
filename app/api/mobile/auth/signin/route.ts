@@ -32,7 +32,7 @@ import {
 import { signinSchema } from "@/lib/validations/auth"
 import { isPhoneKnownDevice, phoneKnownDeviceProof, phoneLimitKey } from "@/lib/known-device"
 import { rateLimit, createAuthRateLimit } from "@/lib/rate-limit"
-import { normalizeLocationToCity } from "@/lib/location"
+import { storedCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
 
 /**
@@ -157,7 +157,7 @@ export async function POST(request: NextRequest) {
     // Store refresh token
     await storeRefreshToken(user.id, refreshToken, deviceInfo)
 
-    const normalizedLocation = await normalizeLocationToCity(user.profile?.location)
+    const normalizedLocation = storedCity(user.profile?.location)
 
     return successResponse({
       user: {

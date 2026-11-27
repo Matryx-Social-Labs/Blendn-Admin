@@ -1,6 +1,7 @@
 // Relative imports: reachable from `server.ts` (via `background.ts`), which
 // `build:server` compiles with plain tsc -- the `@/` alias would be emitted verbatim.
 import { db } from "./db"
+import { beat } from "./heartbeat"
 import { logger } from "./logger"
 import { checkTextContents } from "./moderation/openai-moderation"
 import { breakerIsOpen } from "./moderation/text-breaker"
@@ -140,6 +141,7 @@ async function runRecheck(): Promise<void> {
   try {
     const { looked, settled, abandoned } = await recheckBacklog()
     if (looked > 0 || abandoned > 0) logger.info("Moderation re-check", { looked, settled, abandoned })
+    beat("moderation-recheck", RECHECK_INTERVAL_MS)
   } catch (error) {
     logger.error("Moderation re-check failed", { error: String(error) })
   }
@@ -156,6 +158,7 @@ export function startModerationRecheckSweeper(): void {
     }, RECHECK_INTERVAL_MS)
     timer.unref?.()
   }
+  beat("moderation-recheck", RECHECK_INTERVAL_MS)
   // Boot is when a deploy's backlog gets cleared.
   void runRecheck().finally(schedule)
 }

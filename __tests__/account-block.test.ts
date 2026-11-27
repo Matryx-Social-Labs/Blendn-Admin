@@ -25,10 +25,6 @@ jest.mock("@/lib/rate-limit", () => ({
   createAuthRateLimit: jest.fn().mockReturnValue({ windowMs: 1, maxRequests: 99 }),
 }))
 
-jest.mock("@/lib/location", () => ({
-  normalizeLocationToCity: jest.fn().mockResolvedValue(null),
-}))
-
 import bcrypt from "bcryptjs"
 import { NextRequest } from "next/server"
 import { accountBlockReason } from "@/lib/mobile-auth"
