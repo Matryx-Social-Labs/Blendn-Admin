@@ -3216,6 +3216,12 @@
       "observed": "RED: suite failed to run. S1: 3 of 5 failing. S2: 1 of 5. S3: 1 of 5. S4: 1 of 5. S5: 4 of 5. S6: 1 of 5. Restored each from a copy; 5 of 5. After review, 9 tests: S7 4 of 9 failing. S8 1 of 9. S9 1 of 9. S10 1 of 9. S11 1 of 9. Restored each from a copy; 9 of 9.",
       "date": "2026-11-27"
     },
+    "log-archive.test.ts": {
+      "guards": "SCRUM-1497: the log archive runs as its own cron service; no file under app/, lib/, server.ts or middleware.ts names scripts/log-archive, so a sink that is down cannot touch a request.",
+      "mutation": "(M1) appended a line naming ../scripts/log-archive to lib/logger.ts.",
+      "observed": "M1: 1 of 14 failing. Restored from a copy; 14 of 14.",
+      "date": "2026-11-27"
+    },
     "health-matching-private.test.ts": {
       "guards": "SCRUM-1228 (added case): the token-gated gauges carry loops.stale naming a loop quiet for 3 x its interval; the status stays ok and the response 200, so Railway's healthcheck never restarts the service for a stale loop. (Earlier cases of this file: SCRUM-946, SCRUM-1221.)",
       "mutation": "(M1) loops.stale always []. (M2) a stale loop turns the status degraded.",

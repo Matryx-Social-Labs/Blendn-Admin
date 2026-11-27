@@ -479,6 +479,7 @@ so it is never related to session or login state.
 | `REVIEW_ACCOUNT_IDS` | No (App Review aid) | Comma-separated **user ids** (not emails) of App Review accounts. OFF when unset. See § 7 "App Review aid" |
 | `SHARE_PROXY_SECRET` | For public share pages | 32+ characters, chosen by us (`openssl rand -hex 32`); the SAME value as the landing site's Vercel env var of that name (Preview and Production). The landing sends it as `x-share-proxy` on its server-to-server calls to `GET /api/public/share/*`; holding it makes the forwarded `x-share-client` address believed, so the 120/min limit counts the visitor. Unset (do not create the variable): the endpoint still works, every caller is limited by its own address, and the landing's shared Vercel egress will hit the limit under traffic. **Set but empty or under 32 characters, `validateEnv` fails and production does not boot.** Not set by an agent: the owner sets it on Railway staging and production |
 | `PUBLIC_SITE_ORIGIN` | No (staging: yes) | The public site every server-built link points at: the dashboard's door QR and event link, friend and crew invite links, the mails' "Visit Blend’n" links. A bare https origin, no path or trailing slash. Unset = `https://www.blendn.app`. **Staging: `https://staging.blendn.app`**, so staging hands out staging links. **Production: leave unset** (or exactly `https://www.blendn.app`); anything else fails `validateEnv` there. Not a secret. Fixed on purpose: the privacy policy link, the mail logo images, CORS (the landing reads the API server to server) |
+| `LOGS_SERVICE_ID`, `RAILWAY_LOGS_PROJECT_TOKEN`, `AXIOM_TOKEN`, `AXIOM_DATASET`, `AXIOM_DOMAIN` | Log archive service only | On **Blendn-Log-Archive**, never on the web service (Operating production, Logs). `LOGS_SERVICE_ID` is the web service's id (`${{Blendn-Admin.RAILWAY_SERVICE_ID}}`). `RAILWAY_LOGS_PROJECT_TOKEN` is a Railway project token for that one environment, made by the owner (sent as `Project-Access-Token`); no other kind of Railway token is read, and without it the run refuses with one line and reads nothing. `AXIOM_TOKEN` is an Axiom ingest token, `AXIOM_DATASET` `blendn-logs`; `AXIOM_DOMAIN` defaults to `us-east-1.aws.edge.axiom.co`. Neither `AXIOM_*` set: the archive runs alone and says so; one without the other fails the run. The service also needs the four `TIGRIS_*` credentials and `TIGRIS_PRIVATE_BUCKET` as the web service has them |
 | `SENTRY_AUTH_TOKEN` | No | Source map upload at build time |
 | `NEXT_PUBLIC_SENTRY_DSN` | No | Error reporting. Sentry is disabled if unset |
 | `PORT` | No | Server port (Railway sets this) |
@@ -678,6 +679,84 @@ and the project's Issues for that environment show nothing new since the deploy.
 Railway's own graphs (CPU, memory, HTTP) are on the service's Metrics tab;
 `/api/health` reports the pool, event-loop delay, sockets and stale loops only to a request with
 the `HEALTH_METRICS_TOKEN` header (see Health Check, above).
+
+#### Logs
+
+The web service writes JSON lines to stdout (`lib/logger.ts`; also Next's,
+Prisma's and the few raw `console` lines). Railway keeps them for its plan's
+window and has no log drain, so a separate cron service per environment,
+**Blendn-Log-Archive** (`scripts/log-archive.ts`, schedule `15 * * * *`), reads
+each whole UTC hour back through Railway's API and writes it twice, archive
+first (register D-041):
+
+| Where | What | Kept | Removed by |
+|---|---|---|---|
+| Railway | `railway logs` and the console's Logs tab: live, and the last hour | 7 days (Hobby), 30 (Pro) | Railway |
+| Axiom, dataset `blendn-logs` | every hour, up to 75 minutes late, both environments (field `env`) | 30 days | Axiom's free plan |
+| Tigris private bucket, `logs/<env>/<YYYY-MM-DD>/<HH>.ndjson.gz` (UTC) | the same lines, gzipped NDJSON | 180 days | the lifecycle rule `logs-180-days`, below |
+
+Each line is `_time`, `env`, `level`, `message`, `deploymentId` and
+`attributes`: the logger's fields as one JSON string (Axiom's free plan takes
+256 fields per dataset). Times are UTC; an IST day is 18:30 UTC the day before
+to 18:30 UTC. Logs hold personal data (user ids, sometimes an IP address):
+quote what a line says, never paste lines into a ticket, a chat or a reply.
+
+**What happened last Tuesday** (the last 30 days): Axiom, Query, in APL:
+
+```
+['blendn-logs']
+| where env == "production" and _time between (datetime(2026-12-01T00:00:00Z) .. datetime(2026-12-02T00:00:00Z))
+| where level == "error" or message contains "Reminder sweep failed"
+| extend a = parse_json(attributes) | where tostring(a.eventId) == "<id>"
+```
+
+**The logs for 14 August** (any of the last 180 days): with the AWS CLI and
+the Railway CLI linked to the environment, into a private folder outside the
+repo (it is public), nothing printed but the files:
+
+```bash
+umask 077; d=$(mktemp -d)
+railway run -s Blendn-Admin -- sh -c 'AWS_ACCESS_KEY_ID="$TIGRIS_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$TIGRIS_SECRET_KEY" \
+  aws s3 cp --recursive --endpoint-url "$TIGRIS_ENDPOINT" \
+  "s3://${TIGRIS_PRIVATE_BUCKET:-$TIGRIS_BUCKET-private}/logs/production/2027-08-14/" "$0"' "$d"
+gunzip -c "$d"/*.gz | jq -c 'select(.level == "error")'
+rm -r "$d"
+```
+
+The same download is what CERT-In gets when it asks (direction (iv) of 28
+April 2022; its FAQ Q35 allows logs kept outside India if they are produced in
+reasonable time): the owner decides what is handed over.
+
+**The 180-day rule**, once per environment's private bucket. A put replaces
+every rule on the bucket, so read the bucket's rules first and keep them in the
+list:
+
+```bash
+railway run -s Blendn-Admin -- sh -c 'export AWS_ACCESS_KEY_ID="$TIGRIS_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$TIGRIS_SECRET_KEY" B="${TIGRIS_PRIVATE_BUCKET:-$TIGRIS_BUCKET-private}";
+  aws s3api get-bucket-lifecycle-configuration --endpoint-url "$TIGRIS_ENDPOINT" --bucket "$B"'
+# none yet ("NoSuchLifecycleConfiguration"): put the one rule
+railway run -s Blendn-Admin -- sh -c 'export AWS_ACCESS_KEY_ID="$TIGRIS_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$TIGRIS_SECRET_KEY" B="${TIGRIS_PRIVATE_BUCKET:-$TIGRIS_BUCKET-private}";
+  aws s3api put-bucket-lifecycle-configuration --endpoint-url "$TIGRIS_ENDPOINT" --bucket "$B" \
+  --lifecycle-configuration "{\"Rules\":[{\"ID\":\"logs-180-days\",\"Status\":\"Enabled\",\"Filter\":{\"Prefix\":\"logs/\"},\"Expiration\":{\"Days\":181}}]}"'
+```
+
+181, not 180: Tigris counts from an object's last write and rounds the
+deletion to UTC midnight, so 181 never removes a line younger than 180 days.
+
+**A run failed.** The cron service's logs say `log archive failed: <hour>: <why>`
+and the run exits 1. Every run fills any hour of the last 48 that has no
+archive object, so the archive heals itself; Axiom does not. `archived, not in
+Axiom` means the archive has the hour and Axiom does not, and no later run
+will send it: send it again with
+`railway run -s Blendn-Log-Archive -- npx tsx scripts/log-archive.ts 2026-12-01T09`
+while Railway still keeps that hour's logs (its plan's window). It rewrites
+the hour's object and re-posts it, so Axiom may hold part of the hour twice;
+asked for an hour Railway no longer has, it refuses rather than empty the
+archive. `no deployment … seen live at the start of the hour` means it cannot
+tell which deployment served the hour (a wrong `LOGS_SERVICE_ID`, or five
+deploys inside one hour) and wrote nothing for it. `Axiom not configured …
+archive only` means neither `AXIOM_*` variable is set. A failure older than 48
+hours is the same command per hour, inside Railway's window.
 
 #### A background loop stalled
 
