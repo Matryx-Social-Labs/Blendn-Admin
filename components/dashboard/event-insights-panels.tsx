@@ -102,7 +102,9 @@ export function NightMoodPanel({ mood, live, eventId }: { mood: Pick<FeedbackDig
   return (
     <Panel
       title={live ? "Mood — so far" : "Mood — whole night"}
-      action={<span className="shrink-0 text-[0.75rem] tabular-nums text-faint-foreground">{count(total)} classified msg{total === 1 ? "" : "s"}</span>}
+      // The count as the hint, which drops under the title when both do not fit: as the action it squeezed the title to
+      // "Mood — whole …" beside a band ("57–61 classified msgs", SCRUM-1441).
+      hint={`${count(total)} classified msg${total === 1 ? "" : "s"}`}
       bodyClassName="gap-2.5 pt-3"
     >
       {total === 0 ? (

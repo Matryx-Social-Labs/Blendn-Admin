@@ -223,6 +223,9 @@ test("one held category: the negatives and the total are a band, and nothing giv
     const mood = page.getByText("Mood — whole night").filter({ visible: true }).first().locator("xpath=ancestor::section[1]")
     await expect(mood).toContainText("23–27 negative")
     await expect(mood).toContainText("57–61 classified msgs")
+    // The band's longer count never squeezes the title to "Mood — whole …".
+    const title = mood.getByRole("heading", { name: "Mood — whole night" })
+    expect(await title.evaluate((e) => e.scrollWidth <= e.clientWidth), `mood title truncated at ${width}`).toBe(true)
     for (const n of [20, 27, 61]) expect(await mood.innerText(), `${n} alone on the mood panel at ${width}`).not.toMatch(alone(n))
     expect(await overflow(page), `Overview overflow at ${width}`).toBeLessThanOrEqual(0)
     await page.screenshot({ path: `test-results/screens/held-count-range-overview-${width}.png`, fullPage: true })
