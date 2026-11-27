@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
+import { REPORT_REASONS } from "@/lib/report-reasons"
 
 // Standard success response wrapper
 export const SuccessResponseSchema = z
@@ -271,6 +272,18 @@ export const StoredLocationSchema = z.string().nullable().openapi({
   description:
     "The city as stored. Null when none is set, or while it is still stored as coordinates: a read never looks the city up and never returns coordinates.",
 })
+
+/** A report's `reason`: one of the list in `lib/report-reasons.ts`; any other string is filed as written and read as `other`. */
+export const ReportReasonSchema = z
+  .string()
+  .min(1)
+  .max(200)
+  .describe(
+    `One of: ${Object.entries(REPORT_REASONS)
+      .map(([value, r]) => `\`${value}\` (${r.severity}${r.urgent ? ", urgent" : ""})`)
+      .join(", ")}. Any other string is accepted, stored as written and read as \`other\`.`
+  )
+
 /**
  * What a room row says about somebody before a reveal (D-030, SCRUM-1384; `roomPersonFacts` in lib/room-person-facts.ts).
  * Spread into every row and room card that carries them, so the two fields read the same everywhere.

@@ -4,6 +4,7 @@ import { db } from "./db"
 import { roomScope } from "./room-kind"
 import { roomForMember } from "./room-membership"
 import { roomMemberFromRef } from "./room-handle"
+import { recentLines } from "./report-evidence"
 
 /**
  * Report a person in a crew's or a Blend's room by the handle the room showed
@@ -50,6 +51,7 @@ export async function reportRoomMember(
       reported_id: reportedId,
       reason: input.reason,
       description: [where, input.description].filter(Boolean).join(" "),
+      excerpt: await recentLines(reporterId, reportedId, { chatGroupId }),
     },
   })
   return "reported"

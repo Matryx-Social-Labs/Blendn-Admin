@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { MODERATION_UNAVAILABLE_NOTE, moderationUnavailableError, standardErrors, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
+import { MODERATION_UNAVAILABLE_NOTE, moderationUnavailableError, standardErrors, wrap, bearerAuth, ReportReasonSchema } from "@/lib/openapi/schemas/common"
 import {
   SendMessageRequestSchema,
   ChatMessageSchema,
@@ -232,7 +232,7 @@ registry.registerPath({
     body: {
       content: {
         "application/json": {
-          schema: z.object({ reason: z.string().min(1).max(200), description: z.string().max(2000).optional() }),
+          schema: z.object({ reason: ReportReasonSchema, description: z.string().max(2000).optional() }),
         },
       },
     },
@@ -260,7 +260,7 @@ registry.registerPath({
     body: {
       content: {
         "application/json": {
-          schema: z.object({ reason: z.string().min(1).max(200), description: z.string().max(2000).optional() }),
+          schema: z.object({ reason: ReportReasonSchema, description: z.string().max(2000).optional() }),
         },
       },
     },

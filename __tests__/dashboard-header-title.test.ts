@@ -323,7 +323,10 @@ describe("no h1 anywhere else in the dashboard tree", () => {
     // page's one h1 (step 18). Allowed because `apply-theme.test.ts` keeps
     // every importer of public-frame outside the dashboard — the policy pages'
     // frame included, which that test keeps on the public policy pages.
+    // The full-screen door code (gate 13) is a modal dialog over an inert page,
+    // named by its own h1 as design/02a SPEC §8 requires; the page keeps its one.
     expect(withH1).toEqual([
+      join("app", "dashboard", "events", "[id]", "door", "door-code-screen.tsx"),
       join("components", "dashboard", "page-header.tsx"),
       join("components", "policy-page.tsx"),
       join("components", "public-frame.tsx"),

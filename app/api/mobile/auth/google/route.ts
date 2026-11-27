@@ -9,6 +9,7 @@ import {
   signAccessToken,
   signRefreshToken,
   storeRefreshToken,
+  SuspendedIdentityError,
 } from "@/lib/mobile-auth"
 import { profileForSelfResponse } from "@/lib/self-profile"
 import { db } from "@/lib/db"
@@ -75,6 +76,7 @@ export async function POST(request: NextRequest) {
         createdAt: true,
         deletedAt: true,
         suspended_at: true,
+        suspension_reason: true,
         role: true,
         profile: {
           select: {
@@ -91,7 +93,7 @@ export async function POST(request: NextRequest) {
     })
 
     const blocked = accountBlockReason(user)
-    if (blocked === "suspended" || blocked === "staff") return accountRefusal(blocked)
+    if (blocked === "suspended" || blocked === "staff") return accountRefusal(blocked, user)
     // `!user` is already covered by `blocked === "deleted"`; naming it again is
     // what narrows the type for everything below.
     if (blocked || !user) return errorResponse("Account not found", 401, ErrorCode.ACCOUNT_DELETED, ErrorCode.ACCOUNT_DELETED)
@@ -125,6 +127,7 @@ export async function POST(request: NextRequest) {
       isNewUser ? 201 : 200
     )
   } catch (error) {
+    if (error instanceof SuspendedIdentityError) return accountRefusal("suspended")
     logger.error("Google auth error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to authenticate with Google")
   }

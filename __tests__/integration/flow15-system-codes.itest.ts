@@ -49,11 +49,11 @@ import {
   signRefreshToken,
   storeRefreshToken,
   STAFF_MESSAGE,
-  SUSPENDED_MESSAGE,
   verifyAppleIdToken,
   verifyGoogleIdToken,
 } from "@/lib/mobile-auth"
 import { changePassword, revokeMobileSessions } from "@/lib/account-actions"
+import { suspendedMessageFor } from "@/lib/account-refusal"
 import { issuePasswordResetLink } from "@/lib/password-reset"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
 import { cleanupExpiredTokens, REVOKED_REASON_CODE } from "@/lib/mobile-auth"
@@ -141,6 +141,8 @@ async function account(label: string, state: AccountState | "ok" = "ok") {
       password: await bcrypt.hash(PASSWORD, 4),
       role: state === "staff" ? "organizer" : "attendee",
       suspended_at: state === "suspended" ? new Date() : null,
+      // A category, so a route that loses the column from its select says community guidelines and fails.
+      suspension_reason: state === "suspended" ? "harassment" : null,
       deletedAt: state === "deleted" ? new Date() : null,
       oauth_accounts: {
         create: [
@@ -171,7 +173,8 @@ function blocklistJustRead() {
  * exactly that pair (socialSignInMessage), and the reason is `reasonCode`.
  */
 const THE_REFUSALS = [
-  ["suspended", 403, "ACCOUNT_SUSPENDED", SUSPENDED_MESSAGE],
+  // Each case proves the account (password, provider token, its own refresh or access token), so it is told why (SCRUM-1174).
+  ["suspended", 403, "ACCOUNT_SUSPENDED", suspendedMessageFor("harassment")],
   ["staff", 403, "ACCOUNT_STAFF", STAFF_MESSAGE],
 ] as const
 
@@ -227,7 +230,7 @@ describe("account codes: errorCode and sentence stay, the reason is added beside
     await db.user.update({ where: { id: a.id }, data: { suspended_at: new Date(at.getTime() - 1000) } })
     const res = await refreshRoute.POST(post("/api/mobile/auth/refresh", { refreshToken: token }))
     expect(res.status).toBe(403)
-    expect(await res.json()).toEqual({ success: false, error: SUSPENDED_MESSAGE, errorCode: "FORBIDDEN", reasonCode: "ACCOUNT_SUSPENDED" })
+    expect(await res.json()).toEqual({ success: false, error: suspendedMessageFor(null), errorCode: "FORBIDDEN", reasonCode: "ACCOUNT_SUSPENDED" })
   })
 
   describe("deleted", () => {
@@ -759,7 +762,8 @@ describe("refresh against sign-out-everywhere, interleaved: no session survives"
   })
 
   it.each([
-    ["suspension", { suspended_at: new Date() }, 403, { errorCode: "FORBIDDEN", reasonCode: "ACCOUNT_SUSPENDED" }],
+    // The category is read under the lock too (SCRUM-1174).
+    ["suspension", { suspended_at: new Date(), suspension_reason: "spam" }, 403, { error: suspendedMessageFor("spam"), errorCode: "FORBIDDEN", reasonCode: "ACCOUNT_SUSPENDED" }],
     ["deletion", { deletedAt: new Date() }, 401, { errorCode: "ACCOUNT_DELETED", reasonCode: "ACCOUNT_DELETED" }],
   ] as const)("a %s that holds the user row first: the refresh waits, then refuses, and stores nothing", async (_what, change, status, body) => {
     const a = await onePhone(`race-${_what}`)

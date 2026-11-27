@@ -140,7 +140,8 @@ members, as before. Every reader of the column already falls back to
 app. "Came back" (`lib/loop-closure.ts`) counts check-ins, not member rows, so
 it reads the same.
 
-**A dismissed report's words** (status `reviewed`): the `excerpt` it quoted and
+**A dismissed report's words** (status `reviewed`): the `excerpt` it quoted (the
+message, post or ask, or a reported person's last lines in a room or a DM) and
 the reporter's own `description` both go 180 days after the dismissal, for every
 kind of report. The report itself stays (who, what, reason, status, dates). An
 upheld or a pending report keeps both.
