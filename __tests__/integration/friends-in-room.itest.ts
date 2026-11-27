@@ -336,7 +336,7 @@ describe("arrivals and departures: a friend hears the count, never the arriver (
     await install(
       [arriver, friend, stranger].map((p) => ({ userId: p.id, rooms: [`event:${eventId}`, `event:room:${eventId}`, `user:${p.id}`] }))
     )
-    await emitEventCheckIn(eventId, arriver.id, "Otter", { name: "Arriver", image: null }, [], true)
+    await emitEventCheckIn(eventId, arriver.id, "Otter", { name: "Arriver", image: null }, true)
 
     const to = (p: Person, event: string) => emitted.filter((e) => e.to === p.id && e.event === event)
     expect(to(friend, "event:room:checkin")).toEqual([])
@@ -362,7 +362,7 @@ describe("arrivals and departures: a friend hears the count, never the arriver (
       update: { revealed: true },
     })
     await install([arriver, watcher].map((p) => ({ userId: p.id, rooms: [`event:${eventId}`, `event:room:${eventId}`, `user:${p.id}`] })))
-    await emitEventCheckIn(eventId, arriver.id, "Otter", { name: "Asha Rao Nair", image: null }, [], true)
+    await emitEventCheckIn(eventId, arriver.id, "Otter", { name: "Asha Rao Nair", image: null }, true)
 
     const copy = emitted.filter((e) => e.to === watcher.id && e.event === "event:room:checkin")
     expect(copy).toHaveLength(1)
@@ -407,10 +407,10 @@ describe("arrivals and departures: a friend hears the count, never the arriver (
     await db.blocked_users.create({ data: { blocker_id: blockedBy.id, blocked_id: viewer.id } })
     const rooms = (p: Person) => ({ userId: p.id, rooms: [`event:${eventId}`, `event:room:${eventId}`, `user:${p.id}`] })
 
-    const arrive = async (arriver: Person, listed: boolean, excluded: string[] = []) => {
+    const arrive = async (arriver: Person, listed: boolean) => {
       emitted.length = 0
       await install([viewer, arriver].map(rooms))
-      await emitEventCheckIn(eventId, arriver.id, "Otter", { name: "A", image: null }, excluded, listed)
+      await emitEventCheckIn(eventId, arriver.id, "Otter", { name: "A", image: null }, listed)
       return copyFor(viewer, "event:checkin")
     }
     const friendsCopy = await arrive(hiddenFriend, true)
@@ -419,8 +419,8 @@ describe("arrivals and departures: a friend hears the count, never the arriver (
     expect(friendsCopy).not.toHaveProperty("userId")
     // A listed stranger is the one copy that names the arriver; a block, either way, takes it away.
     expect((await arrive(loud, true)).userId).toBe(roomHandle(eventId, loud.id))
-    expect(await arrive(blockedBy, true, [viewer.id])).toEqual(quietCopy)
-    expect(await arrive(blockedBy, true, [viewer.id])).not.toHaveProperty("userId")
+    expect(await arrive(blockedBy, true)).toEqual(quietCopy)
+    expect(await arrive(blockedBy, true)).not.toHaveProperty("userId")
 
     // The departure agrees, reading the leaver's switch and blocks from the database.
     const leave = async (leaver: Person) => {

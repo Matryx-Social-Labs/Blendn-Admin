@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client"
 
-import { conversationPair } from "./conversations"
+import { blockCounterparties, blockCounterpartiesMany, closedPairKeys, conversationPair } from "./conversations"
 import { blocksBetween } from "./crews/blocks"
 import { db } from "./db"
 
@@ -93,6 +93,57 @@ export async function notStrangersToMany(viewerIds: readonly string[], client: F
     if (ids.has(r.user2_id)) byViewer.get(r.user2_id)!.add(r.user1_id)
   }
   return byViewer
+}
+
+/**
+ * Who `viewerId` never sees in a room, on any list of its people (SCRUM-1386):
+ * anybody in a block with them either way, anybody they closed a conversation
+ * with (an unmatch is permanent), every friend (`notStrangersTo`), and anybody
+ * they reported (SCRUM-229: a block on the reporter's side, without blocking;
+ * any status, so a closed report does not bring the person back and tell the
+ * reporter the outcome; one direction, so the reported person is told nothing).
+ *
+ * ONE list because a list that hides fewer people than the deck lets the viewer
+ * diff the two and single out the handle of the person they unmatched or
+ * reported. The deck, the roster, the participants list, the night's people,
+ * the wave lists and the room preview all ask this
+ * (`people-surfaces-exclude-friends.test.ts`); a pair check is `.has(id)`.
+ */
+export async function hiddenInRooms(viewerId: string): Promise<Set<string>> {
+  const [blocked, closed, friends, reported] = await Promise.all([
+    blockCounterparties(viewerId),
+    closedPairKeys(viewerId),
+    notStrangersTo(viewerId),
+    db.user_reports.findMany({ where: { reporter_id: viewerId }, select: { reported_id: true }, distinct: ["reported_id"] }),
+  ])
+  return new Set([...blocked, ...closed, ...friends, ...reported.map((r) => r.reported_id)])
+}
+
+/**
+ * `hiddenInRooms` turned round, for a push about these people (an arrival, a
+ * departure): for each, the viewers whose lists leave them out. The same four
+ * reasons, so a copy never names somebody the recipient's roster hides; the
+ * report is read from the other end (who reported THEM). Five reads however
+ * many people.
+ */
+export async function viewersHiddenFromMany(userIds: readonly string[]): Promise<Map<string, Set<string>>> {
+  const ids = [...new Set(userIds)]
+  const [friends, blocked, closed, reports] = await Promise.all([
+    notStrangersToMany(ids),
+    blockCounterpartiesMany(ids),
+    db.private_conversations.findMany({
+      where: { closed_at: { not: null }, OR: [{ user1_id: { in: ids } }, { user2_id: { in: ids } }] },
+      select: { user1_id: true, user2_id: true },
+    }),
+    db.user_reports.findMany({ where: { reported_id: { in: ids } }, select: { reporter_id: true, reported_id: true }, distinct: ["reporter_id", "reported_id"] }),
+  ])
+  const byUser = new Map(ids.map((id) => [id, new Set([...(friends.get(id) ?? []), ...(blocked.get(id) ?? [])])]))
+  for (const r of closed) {
+    byUser.get(r.user1_id)?.add(r.user2_id)
+    byUser.get(r.user2_id)?.add(r.user1_id)
+  }
+  for (const r of reports) byUser.get(r.reported_id)?.add(r.reporter_id)
+  return byUser
 }
 
 /** Pair form, for the write routes. Under the pair's lock when it decides a write: pass the transaction. */

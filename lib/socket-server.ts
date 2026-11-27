@@ -6,9 +6,9 @@ import { db } from "./db"
 import { socketOriginAllowed } from "./socket-origin"
 import { startSponsoredScheduler } from "./sponsored-scheduler"
 import { displayNameInConversation, firstName, isPseudonymous } from "./conversation-identity"
-import { notStrangersTo, notStrangersToMany } from "./room-people"
+import { viewersHiddenFromMany } from "./room-people"
 import { idInConversation } from "./conversation-handle"
-import { blockCounterpartiesMany, keptApartIn } from "./conversations"
+import { keptApartIn } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom, mayUseConversation } from "./socket-auth"
 import { liveInVenueDay } from "./chat-window"
 import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from "./socket-ops-auth"
@@ -1494,6 +1494,22 @@ function sendWithHereCount(eventId: string, send: (here: HereNow | undefined) =>
 }
 
 /**
+ * `viewersHiddenFromMany`, or null when it could not be read. The caller then
+ * names the person to nobody but themself: a bare count fails closed, where a
+ * dropped emit would leave every roster a row out and an empty set would name
+ * them to the people who must not see them.
+ */
+function hiddenFromOrNull(userIds: readonly string[], eventId: string): Promise<Map<string, Set<string>> | null> {
+  return viewersHiddenFromMany(userIds).catch((error: unknown) => {
+    logger.warn("Who the room hides could not be read: sending the bare count", {
+      eventId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return null
+  })
+}
+
+/**
  * Emit an event check-in update to all users in the event room
  */
 export function emitEventCheckIn(
@@ -1507,8 +1523,6 @@ export function emitEventCheckIn(
    * pseudonym to everybody.
    */
   identity?: { name: string | null; image: string | null },
-  /** The arriver's block counterparties: kept off the roster, as off the push (SCRUM-338). */
-  excludeUserIds: readonly string[] = [],
   /**
    * False when the REST roster leaves them out ("Show online status" off):
    * then no `event:room:checkin` at all, to anybody — only `event:checkin`,
@@ -1522,23 +1536,26 @@ export function emitEventCheckIn(
   const checkInTime = new Date().toISOString()
 
   /*
-   * Friends of the arriver hear NOTHING of them as a stranger (the owner's rule,
-   * 2026-10-22): no `event:room:checkin` (they are in the exclusion with the
-   * blocks), and on the counter room's `event:checkin` a copy without the handle
-   * — a friend knows which pseudonym is theirs, so the handle beside a chat line
-   * timed to this arrival would name it. The count still moves. An opted-in
-   * friend gets `room:friends` instead (Friends here), by real id.
+   * Whoever's roster leaves the arriver out (`viewersHiddenFromMany`: a block
+   * either way, a closed pair, whoever reported them, a friend — SCRUM-338,
+   * SCRUM-1386) hears NOTHING of them as a stranger: no `event:room:checkin`, and
+   * on the counter room's `event:checkin` a copy without the handle — a friend
+   * (the owner's rule, 2026-10-22) knows which pseudonym is theirs, so the handle
+   * beside a chat line timed to this arrival would name it. The count still
+   * moves. An opted-in friend gets `room:friends` instead (Friends here), by real id.
    *
    * The counter room's copy names the arriver (their handle) ONLY to the arriver
    * themself and to a viewer whose roster would show this arrival: the arriver is
-   * listed (show-online on), and the viewer is neither their friend nor in a block
-   * with them. For everybody else the copy is the bare count, byte for byte: a
+   * listed (show-online on), and the viewer's roster does not hide them. For
+   * everybody else the copy is the bare count, byte for byte: a
    * handle on the copy of an arriver the roster hides would name that hidden person
    * to the whole room, and a friend's copy lacking it while a show-online-off
    * stranger's has it would tell a friend which of the two arrivals was a friend.
    */
-  return notStrangersTo(userId).then((friends) => sendWithHereCount(eventId, (here) => {
-    const shown = (viewer: string) => viewer === userId || (listed && !friends.has(viewer) && !excludeUserIds.includes(viewer))
+  return hiddenFromOrNull([userId], eventId).then((byUser) => sendWithHereCount(eventId, (here) => {
+    // Unread (`null`): fail closed — the count still moves, with no handle and no room copy to anybody else.
+    const hiddenFrom = byUser?.get(userId) ?? new Set<string>()
+    const shown = (viewer: string) => viewer === userId || (listed && byUser !== null && !hiddenFrom.has(viewer))
     /*
      * Two rooms, because two audiences want different things.
      *
@@ -1571,8 +1588,9 @@ export function emitEventCheckIn(
        * their name on the next refresh.
        */
       listed &&
+      byUser !== null &&
       emitAsSeenBy(
-        io.in(`event:room:${eventId}`).except([...excludeUserIds, ...friends].map((id) => `user:${id}`)),
+        io.in(`event:room:${eventId}`).except([...hiddenFrom].map((id) => `user:${id}`)),
         eventId,
         "event:room:checkin",
         (idFor, recognises) => {
@@ -1609,8 +1627,8 @@ const CHECKOUT_EMIT_YIELD_EVERY = 100
  * with the handle only to the leaver and to a viewer whose roster showed them
  * (D23, H1). What is shared is the READING, not the telling -- the client
  * removes one roster row per `event:checkout`, so each leaver still gets their
- * own. Five reads for the whole room (friends, ended friendships, blocks,
- * show-online, the headcount) and one `fetchSockets`, where one at a time
+ * own. Seven reads for the whole room (friends, ended friendships, blocks,
+ * closed pairs, reports, show-online, the headcount) and one `fetchSockets`, where one at a time
  * was thirteen statements and a fetch per person, on the Socket.io thread,
  * when an event ended with thousands inside. `hereCount` is the room's count
  * once all of them are out, the same number for each.
@@ -1621,11 +1639,11 @@ export function emitEventCheckOuts(eventId: string, userIds: readonly string[]):
 
   const checkOutTime = new Date().toISOString()
   void Promise.all([
-    notStrangersToMany(userIds),
-    blockCounterpartiesMany(userIds),
+    // Whose roster leaves each leaver out: the arrival's rule (`viewersHiddenFromMany`).
+    hiddenFromOrNull(userIds, eventId),
     db.profiles.findMany({ where: { id: { in: [...userIds] } }, select: { id: true, show_online: true } }),
   ])
-    .then(([friendsOf, blockedOf, profiles]) => {
+    .then(([hiddenFromOf, profiles]) => {
       const hidden = new Set(profiles.filter((p) => p.show_online === false).map((p) => p.id))
       // One audience for all of them: the sockets do not change between two leavers of one pass.
       const sockets = io.in(`event:${eventId}`).fetchSockets()
@@ -1633,9 +1651,9 @@ export function emitEventCheckOuts(eventId: string, userIds: readonly string[]):
       return sendWithHereCount(eventId, async (here) => {
         let told = 0
         for (const userId of userIds) {
-          const friends = friendsOf.get(userId) ?? new Set<string>()
-          const blocked = blockedOf.get(userId) ?? []
-          const shown = (viewer: string) => viewer === userId || (!hidden.has(userId) && !friends.has(viewer) && !blocked.includes(viewer))
+          // Unread (`null`): fail closed, as the arrival — a bare count, so no roster keeps a ghost row.
+          const hiddenFrom = hiddenFromOf?.get(userId) ?? new Set<string>()
+          const shown = (viewer: string) => viewer === userId || (hiddenFromOf !== null && !hidden.has(userId) && !hiddenFrom.has(viewer))
           // One leaver's failure never stops the rest of the room's copies (a ghost on every roster).
           await emitAsSeenBy(audience, eventId, "event:checkout", (idFor, _recognises, viewer) => ({
             eventId,
