@@ -23,7 +23,7 @@ import { ROLE_ACCOUNTS } from "./fixtures/auth"
 const PASSWORD = process.env.SEED_PASSWORD
 const WRONG_PASSWORD = "not-the-password-0"
 
-// Copy from app/login/page.tsx. Asserted verbatim: these strings are the
+// Copy from app/login/sign-in-form.tsx. Asserted verbatim: these strings are the
 // product's answer to a person who cannot get in.
 const NO_MATCH = "That email and password don't match an operator account."
 const APP_ONLY = "This account is for the Blend'n app."
