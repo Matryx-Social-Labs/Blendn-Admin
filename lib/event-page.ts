@@ -34,6 +34,8 @@ const eventPageSelect = {
   kind: true,
   ticketing_mode: true,
   venue: { select: { name: true, owner_org_id: true, claimed_at: true } },
+  // Named on the Overview's access panel for the org's staff (SCRUM-1446).
+  organizer_org: { select: { display_name: true } },
 } as const
 
 /**
