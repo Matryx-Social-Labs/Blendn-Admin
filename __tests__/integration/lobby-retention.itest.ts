@@ -14,7 +14,8 @@ jest.mock("@/lib/tigris", () => ({
 
 import { randomUUID } from "crypto"
 
-import { purgeClosedLobbies } from "@/lib/lobby-retention"
+import { MESSAGE_BATCH, purgeClosedLobbies } from "@/lib/lobby-retention"
+import { logger } from "@/lib/logger"
 import { loopClosure } from "@/lib/loop-closure"
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, testId } from "./helpers"
 
@@ -254,5 +255,119 @@ describe("the purge", () => {
     expect(await exists.post(id)).toBe(true)
     await purgeClosedLobbies()
     expect(await exists.post(id)).toBe(false)
+  })
+})
+
+/*
+ * Photos stored before SCRUM-448 (SCRUM-1471): the sender's own `chat/<id>/`
+ * key, as a raw upload (before SCRUM-425, on the public bucket's host before
+ * SCRUM-427) or a `-sealed` copy (SCRUM-425 to SCRUM-448). The object goes
+ * with its message. A URL that names anything else in storage is not the
+ * row's to delete: nothing is deleted for it.
+ */
+describe("the purge, photos stored under the older layout", () => {
+  const legacy: Record<string, { id: string; key: string }> = {}
+  const refused: Record<string, string> = {}
+  let room = ""
+  let other = ""
+  let warned: unknown[][] = []
+
+  const withPhoto = async (url: string, user_id = author) =>
+    (await db.chat_messages.create({ data: { chat_group_id: room, user_id, content: "", metadata: { mediaUrl: url } }, select: { id: true } })).id
+
+  beforeAll(async () => {
+    room = (await endedEvent(182, host)).room
+    other = await makeUser(testId("ret-other"))
+    users.push(other)
+    const layouts = {
+      rawPrivate: [`chat/${author}/1758000000000-a1b2c3-photo.jpg`, "blendn-media-private.fly.storage.tigris.dev"],
+      rawPublic: [`chat/${author}/1758000000000-d4e5f6-IMG_0042.jpg`, "blendn-media.fly.storage.tigris.dev"],
+      sealedPerUser: [`chat/${author}/1759100000000-g7h8i9-sealed`, "blendn-media-private.t3.storage.dev"],
+    }
+    for (const [name, [key, hostName]] of Object.entries(layouts)) legacy[name] = { id: await withPhoto(`https://${hostName}/${key}`), key }
+
+    const bucket = "https://blendn-media-private.fly.storage.tigris.dev"
+    const shapes: Record<string, string> = {
+      otherHost: `https://images.example.com/chat/${author}/1758000000000-x-photo.jpg`,
+      otherBucket: `https://someone-else.fly.storage.tigris.dev/chat/${author}/1758000000000-x-photo.jpg`,
+      otherPersonsUpload: `${bucket}/chat/${other}/1758000000000-x-photo.jpg`,
+      avatar: `https://blendn-media.fly.storage.tigris.dev/profile/${author}/1758000000000-x-photo.jpg`,
+      eventMedia: `https://blendn-media.fly.storage.tigris.dev/events/${author}/1758000000000-x-cover.jpg`,
+      traversal: `${bucket}/chat/${author}/%2e%2e/${other}/1758000000000-x-photo.jpg`,
+      emptyKey: `${bucket}/chat/${author}/`,
+      plainHttp: `http://blendn-media-private.fly.storage.tigris.dev/chat/${author}/1758000000000-x-photo.jpg`,
+      notAUrl: `chat/${author}/1758000000000-x-photo.jpg`,
+    }
+    for (const [name, url] of Object.entries(shapes)) refused[name] = await withPhoto(url)
+
+    mockDeleteFile.mockClear()
+    const warn = jest.spyOn(logger, "warn")
+    await purgeClosedLobbies()
+    warned = warn.mock.calls.filter(([message]) => String(message).startsWith("Lobby purge"))
+    warn.mockRestore()
+  })
+
+  it.each(["rawPrivate", "rawPublic", "sealedPerUser"])("deletes a %s photo's object with its message", async (name) => {
+    expect(mockDeleteFile).toHaveBeenCalledWith(legacy[name].key)
+    expect(await exists.message(legacy[name].id)).toBe(false)
+  })
+
+  it("deletes nothing in storage for a URL that names anything but the author's own chat/ object", async () => {
+    const deleted = mockDeleteFile.mock.calls.map((c) => c[0])
+    expect(deleted.sort()).toEqual(Object.values(legacy).map((l) => l.key).sort())
+  })
+
+  it("still deletes the row of every refused URL: its text is due like any other", async () => {
+    for (const id of Object.values(refused)) expect(await exists.message(id)).toBe(false)
+  })
+
+  it("says so in one warning for the pass, by row id and refusal class, never the URL", async () => {
+    expect(warned).toHaveLength(1)
+    const [, detail] = warned[0] as [string, { count: number; rows: { id: string; why: string }[] }]
+    expect(detail.count).toBe(Object.keys(refused).length)
+    expect(detail.rows).toHaveLength(5)
+    for (const row of detail.rows) expect(Object.values(refused)).toContain(row.id)
+    const text = JSON.stringify(warned)
+    for (const fragment of ["http", "example.com", "chat/", "profile/", "events/", "photo.jpg", other]) expect(text).not.toContain(fragment)
+  })
+
+  it("names the refusal class of each shape", async () => {
+    const { chatMediaRefusal } = jest.requireActual<typeof import("@/lib/tigris")>("@/lib/tigris")
+    const bucket = "https://blendn-media-private.fly.storage.tigris.dev"
+    expect(chatMediaRefusal(`https://images.example.com/chat/${author}/1-x-a.jpg`, author)).toBe("other host")
+    expect(chatMediaRefusal(`https://someone-else.fly.storage.tigris.dev/chat/${author}/1-x-a.jpg`, author)).toBe("other host")
+    expect(chatMediaRefusal(`http://blendn-media-private.fly.storage.tigris.dev/chat/${author}/1-x-a.jpg`, author)).toBe("other host")
+    expect(chatMediaRefusal(`chat/${author}/1-x-a.jpg`, author)).toBe("other host")
+    expect(chatMediaRefusal(`${bucket}/chat/${other}/1-x-a.jpg`, author)).toBe("not the author's prefix")
+    expect(chatMediaRefusal(`https://blendn-media.fly.storage.tigris.dev/profile/${author}/1-x-a.jpg`, author)).toBe("another prefix")
+    expect(chatMediaRefusal(`${bucket}/chat/${author}/%2e%2e/${other}/1-x-a.jpg`, author)).toBe("traversal")
+    expect(chatMediaRefusal(`${bucket}/chat/${author}/../${other}/1-x-a.jpg`, author)).toBe("traversal")
+    expect(chatMediaRefusal(`${bucket}/chat/${author}/`, author)).toBe("empty")
+  })
+
+  it("keeps the row of an owned object whose delete failed, and takes both on the next pass", async () => {
+    const key = `chat/${author}/1758000000000-j1k2l3-stuck.jpg`
+    const id = await withPhoto(`https://blendn-media-private.fly.storage.tigris.dev/${key}`)
+    mockDeleteFile.mockRejectedValueOnce(new Error("storage down"))
+    const pass = await purgeClosedLobbies()
+    expect(pass.kept).toBe(1)
+    expect(await exists.message(id)).toBe(true)
+    await purgeClosedLobbies()
+    expect(mockDeleteFile).toHaveBeenLastCalledWith(key)
+    expect(await exists.message(id)).toBe(false)
+  })
+
+  it("drains more than a batch of refused URLs and reaches the photo behind them", async () => {
+    const pile = MESSAGE_BATCH + 100
+    await db.chat_messages.createMany({
+      data: Array.from({ length: pile }, (_, i) => ({ chat_group_id: room, user_id: author, content: "", metadata: { mediaUrl: `https://gifs.example.com/${i}.gif` } })),
+    })
+    // Written after the pile, so a select that keeps re-reading the pile never gets to it.
+    const key = `chat/${author}/1758000000000-m4n5o6-last.jpg`
+    const id = await withPhoto(`https://blendn-media-private.fly.storage.tigris.dev/${key}`)
+    for (let i = 0; i < 4 && (await exists.message(id)); i++) await purgeClosedLobbies()
+    expect(await exists.message(id)).toBe(false)
+    expect(mockDeleteFile).toHaveBeenCalledWith(key)
+    expect(await db.chat_messages.count({ where: { chat_group_id: room } })).toBe(0)
   })
 })
