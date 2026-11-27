@@ -1928,9 +1928,9 @@
       "date": "2026-11-27"
     },
     "reports-queue-severity.itest.ts": {
-      "guards": "SCRUM-1176 on a db:migrate database: the staff reports queue (getReportQueue) shows a message report's kept excerpt once the message row is gone; orders S1 before S2 before S3 across the merged rows whatever their age, reading a padded, capitalised reason as reportReason does; and takes each table's page S1 first in the query, so a full page of older spam does not push a newer threat off it.",
-      "mutation": "(C1) the room/DM excerpt read from the live message only. (C2) the merged rows sorted by age alone. (C3) the page query ordered by created_at alone (severity applied after the cap). (C4) the SQL severity rank without lower(btrim()).",
-      "observed": "Before the change: 3 of 3 failing. C1: 1 of 3 (the kept words). C2: 1 of 3 (threat, harassment, spam). C3: 1 of 3 (the threat behind 100 older spam). C4: 1 of 3 (the same, for ' Threat '). Restored each; 3 of 3 on trust10a.",
+      "guards": "SCRUM-1176 on a db:migrate database: the staff reports queue (getReportQueue) shows a message report's kept excerpt once the message row is gone, and before the live text when the message still exists; orders S1 before S2 before S3 across user, message and event reports whatever their age, reading a reason padded with any whitespace JavaScript trims, in any case, as reportReason does; takes the older of two same-severity reports first inside one hour; lists a report on its own status tab only; and takes each table's page S1 first, then S2, then the oldest S3 in the query, so a full page of older spam keeps newer threats and harassment, and says it is capped.",
+      "mutation": "(C1) the room/DM excerpt read from the live message only. (C2) the merged rows sorted by filing time alone. (C3) the page query ordered by created_at alone. (C9) the merged rows' tie broken by whole hours. (C10) the SQL trim on spaces only. (C11) S2 ranked with S3 in SQL. (C12) newest first inside a severity in SQL. (C13) the page query reading pending whatever the tab. (C14) the live text before the kept words.",
+      "observed": "Before the change: 3 of 3 (first version) failing, then 2 of 6 for the cases added after review (within the hour; a tab-padded threat at the cap). C1: 2 of 6. C2, C3, C9, C10, C11, C12, C13, C14: 1 of 6 each. Restored each; 6 of 6 on trust10a.",
       "date": "2026-11-27"
     },
     "suspension-reason.test.ts": {

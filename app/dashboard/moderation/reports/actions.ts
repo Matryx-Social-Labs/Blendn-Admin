@@ -46,8 +46,12 @@ const PAGE = 100
 const reasonsOf = (severity: "S1" | "S2") =>
   Object.entries(REPORT_REASONS).flatMap(([value, r]) => (r.severity === severity ? [value] : []))
 
+/** What JavaScript's `trim()` strips: its white space and line terminators. */
+const JS_TRIMMED = "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+
 /** A report's severity rank in SQL, reading `reason` as `reportReason` does: S1, S2, then everything else. */
-const SEVERITY_RANK = Prisma.sql`CASE WHEN lower(btrim(reason)) = ANY(${reasonsOf("S1")}) THEN 1 WHEN lower(btrim(reason)) = ANY(${reasonsOf("S2")}) THEN 2 ELSE 3 END`
+const REASON = Prisma.sql`lower(btrim(reason, ${JS_TRIMMED}))`
+const SEVERITY_RANK = Prisma.sql`CASE WHEN ${REASON} = ANY(${reasonsOf("S1")}) THEN 1 WHEN ${REASON} = ANY(${reasonsOf("S2")}) THEN 2 ELSE 3 END`
 
 /**
  * One table's page of the queue: S1 first, oldest first inside each. Ordered in
@@ -340,6 +344,7 @@ export async function getReportQueue(status: report_status = "pending") {
   const sameMessage = new Map(messageSubjects.map((g) => [g.message_id, g._count._all]))
   const sameEvent = new Map(eventSubjects.map((g) => [g.event_id, g._count._all]))
 
+  const filedAt = new Map([...userReports, ...messageReports, ...eventReports].map((r) => [r.id, r.created_at.getTime()]))
   const rows: ReportRow[] = [
     ...userReports.map(
       (r): ReportRow => ({
@@ -518,14 +523,14 @@ export async function getReportQueue(status: report_status = "pending") {
         reviewedBy: r.reviewed_by,
       })
     ),
-  ].sort((a, b) => severityOf(a).localeCompare(severityOf(b)) || b.ageHours - a.ageHours || a.id.localeCompare(b.id))
+  ].sort((a, b) => severityOf(a).localeCompare(severityOf(b)) || filedAt.get(a.id)! - filedAt.get(b.id)! || a.id.localeCompare(b.id))
 
   const counts: Record<string, number> = {}
   for (const c of [...userCounts, ...messageCounts, ...eventCounts]) {
     counts[c.status] = (counts[c.status] ?? 0) + c._count._all
   }
 
-  return { rows, counts, truncated: userReports.length === PAGE || messageReports.length === PAGE }
+  return { rows, counts, truncated: [userPage, messagePage, eventPage].some((page) => page.length === PAGE) }
 }
 
 /**
