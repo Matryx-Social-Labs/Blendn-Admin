@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
      * recipient, so it says nothing about who they are.
      */
     // Shaped as the screen above answers (`TEXT_NOT_ALLOWED`), so the app shows the sentence rather than a generic failure.
-    if (preSaveCheck(message)) {
+    if (preSaveCheck(message).hide) {
       return textNotAllowedResponse("message", "That message can’t be sent. Take out contact details and offensive language, and try again.")
     }
     // A Lobby room's handle names somebody only while that room seats you both (`lobbyMeeting`); refused, it is nobody.

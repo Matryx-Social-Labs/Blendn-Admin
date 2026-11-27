@@ -101,16 +101,24 @@ export function pickBuilding(elements: unknown, pin: LatLng): Ring | null {
     const ring = usable(toRing(geometry.map((g: { lat?: unknown; lon?: unknown }) => [g?.lon, g?.lat])))
     return ring ? [{ ring, stadium: tags?.leisure === "stadium" }] : []
   })
+  return pickShape(shapes, pin)?.ring ?? null
+}
 
+/**
+ * `pickBuilding`'s rule over shapes from any source — the Overture backfill
+ * (`scripts/backfill-venue-fences.ts`) too, so the two cannot disagree. Returns
+ * the shape itself, so a caller keeps whatever it carried alongside the ring.
+ */
+export function pickShape<S extends { ring: Ring; stadium: boolean }>(shapes: S[], pin: LatLng): S | null {
   const containing = shapes
     .filter(({ ring }) => pointInPolygon(pin, ring))
     .sort((a, b) => Number(b.stadium) - Number(a.stadium) || size(a.ring) - size(b.ring))
-  if (containing.length) return containing[0].ring
+  if (containing.length) return containing[0]
 
   const near = shapes
     .filter(({ stadium }) => !stadium)
-    .map(({ ring }) => ({ ring, metres: distanceToGeofence(pin, { type: "polygon", ring, buffer: 0 }) }))
+    .map((shape) => ({ shape, metres: distanceToGeofence(pin, { type: "polygon", ring: shape.ring, buffer: 0 }) }))
     .filter(({ metres }) => metres <= OUTLINE_BUILDING_WITHIN_M)
     .sort((a, b) => a.metres - b.metres)
-  return near[0]?.ring ?? null
+  return near[0]?.shape ?? null
 }

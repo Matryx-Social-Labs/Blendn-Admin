@@ -69,7 +69,7 @@ async function attend(e: { id: string; occ: string; start: Date }, who: string[]
   }
 }
 
-const openAccess = async (orgId: string) => ({ ...(await analyticsAccess(orgId, NOW)), org: true })
+const openAccess = async (orgId: string) => ({ ...(await analyticsAccess({ orgId, mayBuyHere: true }, NOW)), org: true })
 
 beforeAll(async () => {
   host = await makeUser(testId("af-host"), "organizer")
@@ -170,7 +170,7 @@ describe("G3 scoping", () => {
     const crowd = await people(9, "s")
     const canary = await event(orgB, new Date(NOW.getTime() - 5 * DAY), 4, "Canary of B 4417")
     await attend(canary, crowd, { stay: crowd.map(() => 211) })
-    const view = await analyticsPage(orgA, { range: "all", eventId: canary.id }, NOW)
+    const view = await analyticsPage({ orgId: orgA, mayBuyHere: true }, { range: "all", eventId: canary.id }, NOW)
     const json = JSON.stringify(view)
     expect(json).not.toContain(canary.id)
     expect(json).not.toContain("Canary of B 4417")
@@ -193,7 +193,7 @@ describe("G6 the first event that clears the floor", () => {
     const running = await event(orgF, new Date(NOW.getTime() - 60 * MIN), 4)
     await attend(running, crowd)
 
-    const access = await analyticsAccess(orgF, NOW)
+    const access = await analyticsAccess({ orgId: orgF, mayBuyHere: true }, NOW)
     expect(access.firstFreeEventId).toBe(qualifying.id)
     expect(access.freeUntil?.getTime()).toBe(qualifying.end.getTime() + NINETY_DAYS_MS)
     const row = await db.organisations.findUniqueOrThrow({ where: { id: orgF }, select: { analytics_free_until: true, first_free_event_id: true } })
@@ -203,7 +203,7 @@ describe("G6 the first event that clears the floor", () => {
     await db.events.update({ where: { id: qualifying.id }, data: { deleted_at: NOW } })
     const later = await event(orgF, new Date("2026-09-01T10:00:00Z"))
     await attend(later, crowd)
-    const again = await analyticsAccess(orgF, NOW)
+    const again = await analyticsAccess({ orgId: orgF, mayBuyHere: true }, NOW)
     expect(again.firstFreeEventId).toBe(qualifying.id)
     expect(again.freeUntil?.getTime()).toBe(qualifying.end.getTime() + NINETY_DAYS_MS)
   })
@@ -214,8 +214,8 @@ describe("G6 the first event that clears the floor", () => {
     const e = await event(orgB, new Date("2026-08-01T10:00:00Z"), 2)
     await attend(e, crowd)
     const end = e.end.getTime() + NINETY_DAYS_MS
-    expect((await analyticsAccess(orgB, new Date(end - 1))).org).toBe(true)
-    expect((await analyticsAccess(orgB, new Date(end))).org).toBe(false)
+    expect((await analyticsAccess({ orgId: orgB, mayBuyHere: true }, new Date(end - 1))).org).toBe(true)
+    expect((await analyticsAccess({ orgId: orgB, mayBuyHere: true }, new Date(end))).org).toBe(false)
   })
 })
 

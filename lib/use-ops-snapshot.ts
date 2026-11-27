@@ -42,17 +42,28 @@ export function useOpsSnapshot(eventId: string, enabled: boolean) {
     // serves the dashboard, so there is no separate host to configure.
     socket = io({ withCredentials: true, transports: ["websocket", "polling"] })
 
-    // Dropped and opened again, by the close listener below: so "reconnecting"
-    // is true, and does not wait the 85 s for Socket.io's ping to notice.
+    // Four ticks with no snapshot: the screen says its figures stopped, and it
+    // asks again every four ticks until one comes. An open socket asks for the
+    // join (unanswered, or one the server could not check, SCRUM-1402); a
+    // socket Socket.io gave up on (a refused handshake destroys it) is opened
+    // again. One Socket.io is still retrying is left alone: a `disconnect()`
+    // then stops the retries for good and fires no `disconnect` event
+    // (SCRUM-1444), and a transport that never closed is closed by its ping
+    // and retried like any other drop.
     const armQuiet = () => {
       clearTimeout(quiet)
       quiet = setTimeout(() => {
-        if (!cancelled) socket?.disconnect()
+        if (cancelled) return
+        setStatus("error")
+        if (!socket?.active) socket?.connect()
+        else if (socket.connected) socket.emit("join:eventOps", eventId)
+        armQuiet()
       }, QUIET_MS)
     }
 
     socket.on("connect", () => {
       socket?.emit("join:eventOps", eventId)
+      armQuiet()
     })
 
     // Which copy arrives is the server's decision, by who is watching (SCRUM-516).
@@ -82,15 +93,20 @@ export function useOpsSnapshot(eventId: string, enabled: boolean) {
     // A dropped transport is retried by Socket.io about a second later, and a
     // drop that comes back on that retry shows nothing. The first retry that
     // fails is this `connect_error`: from then the screen says its figures
-    // stopped (SCRUM-1348). The next `ops:snapshot` clears it.
+    // stopped (SCRUM-1348). The next `ops:snapshot` clears it. Each one
+    // restarts the quiet timer, so it fires only once Socket.io has stopped
+    // trying: a refused handshake (an ended session, or a read that threw).
     socket.on("connect_error", () => {
-      if (!cancelled) setStatus("error")
+      if (cancelled) return
+      setStatus("error")
+      armQuiet()
     })
 
     // A close Socket.io will not retry (the server sent DISCONNECT, as
-    // `evictUserSockets` does, or the quiet timer above dropped it) is stale at
-    // once, and is retried here, so the screen's "reconnecting" stays true. An
-    // ended session fails the handshake; a lost right is refused at the join.
+    // `evictUserSockets` does) is stale at once, and is opened again here, so
+    // the screen's "reconnecting" stays true; if the network is down by then,
+    // the failed open falls back to Socket.io's own retries. An ended session
+    // fails the handshake; a lost right is refused at the join.
     socket.on("disconnect", () => {
       if (cancelled || socket?.active) return
       setStatus("error")

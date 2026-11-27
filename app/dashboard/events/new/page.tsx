@@ -5,6 +5,7 @@ import { getAuth } from "@/lib/auth"
 import { clipCheckOn } from "@/lib/media-clip"
 import { canCreateEvents } from "@/lib/rbac"
 import { mayCreateEvents } from "@/lib/event-ownership"
+import { duplicateFor } from "@/lib/event-duplicate"
 
 import { routeMetadata } from "@/lib/dashboard-route-content"
 
@@ -13,7 +14,7 @@ export const metadata = routeMetadata("/dashboard/events/new")
 
 export const dynamic = "force-dynamic"
 
-export default async function NewEventPage() {
+export default async function NewEventPage({ searchParams }: { searchParams: Promise<{ from?: string | string[] }> }) {
   const session = await getAuth()
   /*
    * An allowlist, via `lib/rbac.ts`, not a denylist on `attendee`.
@@ -67,12 +68,20 @@ export default async function NewEventPage() {
     orderBy: { sort_order: "asc" },
   })
 
+  // "Duplicate" (SCRUM-1153): next week's copy of an event this person may edit; anything else is the plain form.
+  const { from } = await searchParams
+  const copy = await duplicateFor(session.user, from)
+
   return (
     <EventEditor
+      // A new key per source: the form takes its values once, on mount, so ?from=A → ?from=B (or → /new) must remount it.
+      key={copy ? String(from) : "new"}
       categories={categories}
       amenities={amenities}
       canFeature={session.user.role === "app_admin"}
       clipCheck={clipCheckOn()}
+      initialEvent={copy?.initialEvent}
+      copyNote={copy?.note}
     />
   )
 }

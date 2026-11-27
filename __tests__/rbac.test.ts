@@ -2,6 +2,9 @@ import {
   canAccessDashboard,
   canSendSystemMessages,
   canSendPushNotifications,
+  mayManageBilling,
+  mayManageVenueBilling,
+  maySendVenueOffers,
 } from "@/lib/rbac"
 
 /**
@@ -37,5 +40,25 @@ describe("admin-only capabilities", () => {
     }
     expect(canSendSystemMessages("app_admin")).toBe(true)
     expect(canSendPushNotifications("app_admin")).toBe(true)
+  })
+})
+
+/*
+ * Billing and offers read the organisation's facts, never the
+ * person's User.role (SCRUM-1246): the caller already holds the membership in
+ * the org that pays or owns the venue, and passes its role.
+ */
+describe("billing and offers: the member's org role decides", () => {
+  it("lets an owner or admin buy the org's plan and the venue's Venue Pro, and send its offers", () => {
+    for (const may of [mayManageBilling, mayManageVenueBilling, maySendVenueOffers]) {
+      expect(may("owner")).toBe(true)
+      expect(may("admin")).toBe(true)
+    }
+  })
+
+  it("refuses staff all three", () => {
+    for (const may of [mayManageBilling, mayManageVenueBilling, maySendVenueOffers]) {
+      expect(may("staff")).toBe(false)
+    }
   })
 })

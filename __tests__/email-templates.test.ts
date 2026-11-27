@@ -19,7 +19,7 @@ import {
 const templates = () => [
   onboardingVerifyEmail("Asha", "https://api.blendn.app/apply/verify?token=t"),
   inviteEmail("Byg Brewski", "Asha", "https://api.blendn.app/invite?token=t"),
-  approvedEmail("Asha", "Byg Brewski", "asha@bygbrewski.com", "https://x/reset-password?token=t"),
+  approvedEmail("Asha", "Byg Brewski", "asha@bygbrewski.com", "https://x/reset-password?token=t", "organizer"),
   declinedEmail("Asha", "We couldn’t confirm your venue licence."),
   domainVerifyEmail("bygbrewski.com", "https://api.blendn.app/verify?token=t"),
   passwordResetEmail("Asha", "https://api.blendn.app/reset-password?token=t"),
@@ -32,7 +32,7 @@ const designed = () => [
 ]
 const shelled = () => [
   inviteEmail("Byg Brewski", "Asha", "https://api.blendn.app/invite?token=t"),
-  approvedEmail("Asha", "Byg Brewski", "asha@bygbrewski.com", "https://x/reset-password?token=t"),
+  approvedEmail("Asha", "Byg Brewski", "asha@bygbrewski.com", "https://x/reset-password?token=t", "organizer"),
   declinedEmail("Asha", "We couldn’t confirm your venue licence."),
   domainVerifyEmail("bygbrewski.com", "https://api.blendn.app/verify?token=t"),
 ]
@@ -85,7 +85,7 @@ describe("every template carries its link and says how long it lasts", () => {
 describe("the approval email", () => {
   it("carries the address and a set-password link, and never a password (SCRUM-134)", () => {
     const link = "https://api.blendn.app/reset-password?token=abc"
-    const t = approvedEmail("Asha", "Byg Brewski", "asha@bygbrewski.com", link)
+    const t = approvedEmail("Asha", "Byg Brewski", "asha@bygbrewski.com", link, "organizer")
     expect(t.text).toContain("asha@bygbrewski.com")
     expect(t.text).toContain(link)
     expect(t.text).toMatch(/expires in 24 hours/i)
@@ -93,9 +93,49 @@ describe("the approval email", () => {
   })
 
   it("tells a promoted account to use the password it already has", () => {
-    const t = approvedEmail("Asha", "Byg Brewski", "asha@bygbrewski.com", null)
+    const t = approvedEmail("Asha", "Byg Brewski", "asha@bygbrewski.com", null, "organizer")
     expect(t.text).toMatch(/existing password/i)
     expect(t.text).not.toContain("reset-password")
+  })
+
+  // SCRUM-1342: one next step per mail, after the password step, in both parts. The Members line it replaces is gone.
+  describe("its one next step, by what the account was approved for", () => {
+    const link = "https://x/reset-password?token=t"
+    beforeEach(() => {
+      process.env.DASHBOARD_HOST = "dashboard.blendn.app"
+    })
+    afterEach(() => {
+      delete process.env.DASHBOARD_HOST
+    })
+
+    it("an organizer: create your first event, on the dashboard's new-event page", () => {
+      const t = approvedEmail("Asha", "Byg Brewski", "asha@byg.in", link, "organizer")
+      expect(t.text).toContain("Next, create your first event:\nhttps://dashboard.blendn.app/dashboard/events/new")
+      expect(t.text.indexOf("events/new")).toBeGreaterThan(t.text.indexOf(link))
+      expect(t.html).toMatch(/Next: <a [^>]*href="https:\/\/dashboard\.blendn\.app\/dashboard\/events\/new"[^>]*>Create your first event<\/a>/)
+      expect(t.html.indexOf("events/new")).toBeGreaterThan(t.html.indexOf("Set your password"))
+      for (const part of [t.text, t.html]) expect(part).not.toMatch(/Members|colleagues|venue/i)
+    })
+
+    it("a venue owner: their first step is their venue, never an event", () => {
+      const t = approvedEmail("Asha", "Byg Brewski", "asha@byg.in", link, "venue_owner")
+      expect(t.text).toContain("Next, add your venue, or claim it if it’s already listed:\nhttps://dashboard.blendn.app/dashboard/venues")
+      expect(t.html).toMatch(/Next: <a [^>]*href="https:\/\/dashboard\.blendn\.app\/dashboard\/venues"[^>]*>Add or claim your venue<\/a>/)
+      for (const part of [t.text, t.html]) expect(part).not.toMatch(/events\/new|first event|Members|colleagues/i)
+    })
+
+    it("a sponsor keeps the Members line: they create no events and hold no venue", () => {
+      const t = approvedEmail("Asha", "Byg Brewski", "asha@byg.in", link, "sponsor")
+      expect(t.text).toContain("You can invite colleagues from Organisation → Members.")
+      expect(t.html).toContain("invite your colleagues from Your organisation &rarr; Members.")
+      for (const part of [t.text, t.html]) expect(part).not.toMatch(/events\/new|first event|dashboard\/venues/)
+    })
+
+    it("a promoted account with no password step still gets its next step after the sign-in", () => {
+      const t = approvedEmail("Asha", "Byg Brewski", "asha@byg.in", null, "organizer")
+      expect(t.text).toContain("Next, create your first event:\nhttps://dashboard.blendn.app/dashboard/events/new")
+      expect(t.html.indexOf("events/new")).toBeGreaterThan(t.html.indexOf("Sign in to the dashboard"))
+    })
   })
 })
 
@@ -216,7 +256,7 @@ describe("HTML escaping", () => {
   it("escapes an organisation name containing markup", () => {
     // Org display names are user-supplied at /apply.
     const html = (
-      approvedEmail("A", '<script>alert(1)</script>', "a@b.com", null) as unknown as { html: string }
+      approvedEmail("A", '<script>alert(1)</script>', "a@b.com", null, "organizer") as unknown as { html: string }
     ).html
     expect(html).not.toContain("<script>")
     expect(html).toContain("&lt;script&gt;")
@@ -258,11 +298,13 @@ describe("no invented compliance footer", () => {
 describe("the approval email’s account block", () => {
   it("carries the address and the set-password button, and no password", () => {
     const link = "https://api.blendn.app/reset-password?token=abc"
-    const html = (approvedEmail("Asha", "Byg Brewski", "asha@byg.in", link) as unknown as { html: string }).html
+    const html = (approvedEmail("Asha", "Byg Brewski", "asha@byg.in", link, "organizer") as unknown as { html: string }).html
     expect(html).toContain("asha@byg.in")
     expect(html).toContain(`href="${link}"`)
     expect(html).toMatch(/Set your password/)
     expect(html).not.toMatch(/>Password</)
+    // A long address wraps inside the box rather than pushing a 390 px screen sideways (SCRUM-1342 render).
+    expect(html).toMatch(/word-break:break-all;" class="dm-text"><span[^>]*>Email<\/span><br>asha@byg\.in/)
   })
 })
 
@@ -306,7 +348,7 @@ describe("host-facing links can move; session-bound links cannot", () => {
     // 404 at the exact moment they first try to use the product.
     process.env.NEXTAUTH_URL = "https://api.blendn.app"
     process.env.PUBLIC_APPLY_URL = "https://organizers.blendn.app"
-    const t = approvedEmail("Asha", "Byg Brewski", "a@byg.in", null)
+    const t = approvedEmail("Asha", "Byg Brewski", "a@byg.in", null, "organizer")
     expect(t.text).toContain("https://api.blendn.app/login")
     expect(t.text).not.toContain("organizers.blendn.app")
   })

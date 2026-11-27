@@ -5,7 +5,7 @@ import { sendFreeWindowEndingMail } from "./free-window-mail"
 import { logger } from "./logger"
 import { cleanupExpiredTokens } from "./mobile-auth"
 import { checkPushReceipts, pruneIdlePushTokens, releaseHeldNotifications } from "./push-notifications"
-import { sendNextNightNudges } from "./next-night-nudge"
+import { sendFirstNightNudges, sendNextNightNudges } from "./next-night-nudge"
 import { sendResultsMails } from "./results-mail"
 import { sendEventReminders, sendRatingRequests } from "./services/event-notifications.service"
 
@@ -44,6 +44,9 @@ async function pass(): Promise<void> {
   // below that throws ends the pass, and this mail has a one-day window. Never throws, like the results mail.
   const nudged = await sendNextNightNudges()
   if (nudged > 0) logger.info("Next-night nudges sent", { nudged })
+  // Three days after approval with nothing listed, "list your first night" (SCRUM-1342). Here for the same reason.
+  const firstNudged = await sendFirstNightNudges()
+  if (firstNudged > 0) logger.info("First-night nudges sent", { nudged: firstNudged })
 
   // 60 minutes, matching the cron route's argument. The client schedules no local reminder: this is the only one.
   const notified = await sendEventReminders(60)

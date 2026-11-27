@@ -294,14 +294,24 @@ describe("getLinkedEventsForOwner", () => {
     expect(mockDb.venues.findMany).not.toHaveBeenCalled()
   })
 
-  it("returns nothing for an organiser rather than throwing", async () => {
+  it("returns nothing, and runs no event query, for a member whose orgs own no claimed venue", async () => {
     // This feeds a screen an organiser can reach; an empty list is the right
     // answer, not an error page.
     signIn("organizer")
+    mockDb.venues.findMany.mockResolvedValue([])
     expect(await getLinkedEventsForOwner()).toEqual({ rows: [], total: 0 })
     expect(mockDb.events.findMany).not.toHaveBeenCalled()
-    // And no count either: an organiser is refused before either query runs.
     expect(mockDb.events.count).not.toHaveBeenCalled()
+  })
+
+  it("gives an organizer-role member of the venue-owning org its linked events, as a venue_owner gets (SCRUM-1246)", async () => {
+    signIn("organizer")
+    mockDb.venues.findMany.mockResolvedValue([{ id: "venue_1", claimed_at: CLAIMED }])
+    mockDb.events.count.mockResolvedValue(0)
+    await getLinkedEventsForOwner()
+    expect(mockDb.events.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ OR: [{ venue_id: "venue_1", start_time: { gte: CLAIMED } }] }) })
+    )
   })
 
   it("refuses a signed-out caller", async () => {

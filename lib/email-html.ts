@@ -316,12 +316,14 @@ export function approvedHtml(
   name: string,
   orgName: string,
   email: string,
-  setPasswordLink: string | null
+  setPasswordLink: string | null,
+  /** The account's first step (SCRUM-1342); null keeps the Members line, for an account with none to point at. */
+  next: { href: string; label: string } | null
 ): string {
   const signIn = `${appUrl()}/login`
   // The sign-in address is monospaced: it is the one thing in this email the
   // reader has to type exactly. No password travels here (SCRUM-134).
-  const account = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="dm-codebox dm-border" style="margin:22px 0 6px;background-color:#F7F4F3;border:1px solid #E2DAD7;border-radius:10px;"><tr><td style="padding:16px 18px;font-family:'SF Mono',Consolas,Menlo,monospace;font-size:13px;line-height:22px;color:${INK};" class="dm-text"><span style="color:${MUTED};">Email</span><br>${esc(email)}</td></tr></table>`
+  const account = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="dm-codebox dm-border" style="margin:22px 0 6px;background-color:#F7F4F3;border:1px solid #E2DAD7;border-radius:10px;"><tr><td style="padding:16px 18px;font-family:'SF Mono',Consolas,Menlo,monospace;font-size:13px;line-height:22px;color:${INK};word-break:break-all;" class="dm-text"><span style="color:${MUTED};">Email</span><br>${esc(email)}</td></tr></table>`
 
   return shell({
     title: "Your Blend’n host account is ready",
@@ -345,9 +347,9 @@ export function approvedHtml(
             ),
           ]
         : [button(signIn, "Sign in to the dashboard"), fallbackLink(signIn)]),
-      note(
-        "Once you&rsquo;re in, invite your colleagues from Your organisation &rarr; Members."
-      ),
+      next
+        ? `<p style="margin:18px 0 0;font-family:${FONT};font-size:14px;line-height:22px;color:${INK};" class="dm-text">Next: <a class="dm-text" href="${esc(next.href)}" target="_blank" style="color:${INK};font-weight:bold;text-decoration:underline;">${esc(next.label)}</a></p>`
+        : note("Once you&rsquo;re in, invite your colleagues from Your organisation &rarr; Members."),
     ].join("\n"),
   })
 }

@@ -20,7 +20,7 @@ import { audienceBand, nextOfferAt, OFFERS_PER_WEEK, sentThisWeek, type Audience
 import { activeMembership } from "@/lib/org-membership"
 import { violatedConstraint } from "@/lib/prisma-errors"
 import { hit, peek, StoreUnavailable } from "@/lib/rate-limit-store"
-import { mayRedeemAtVenue, maySendVenueOffers } from "@/lib/rbac"
+import { maySendVenueOffers } from "@/lib/rbac"
 import { Refusal } from "@/lib/refusal"
 import { audienceSql, REGULAR_NIGHTS, REGULAR_WINDOW_DAYS } from "@/lib/regulars"
 import { venueDayBounds } from "@/lib/venue-day"
@@ -198,7 +198,7 @@ export async function sendOffer(input: { venueId: string; text: string; days: nu
 
   const gate = await senderAt(db, venueId, user.id)
   if (!gate) throw new Refusal(NOT_YOUR_VENUE)
-  if (!maySendVenueOffers(user.role, gate.member.role)) throw new Refusal("Only an owner or admin of the venue’s organisation can send offers.")
+  if (!maySendVenueOffers(gate.member.role)) throw new Refusal("Only an owner or admin of the venue’s organisation can send offers.")
   // Per organisation and venue: colleagues share it, and another venue of theirs has its own.
   // After the role check: staff who may not send must not be able to spend the owner's minute.
   if (await overLimit(`offer-send:${gate.place.owner_org_id}:${venueId}`, SENDS_PER_MINUTE, MINUTE_MS)) {
@@ -229,7 +229,7 @@ export async function sendOffer(input: { venueId: string; text: string; days: nu
     // Again under the lock (L4): the owner, the sender's role and the plan as they are now.
     const held = await senderAt(tx, venueId, user.id)
     if (!held || held.place.owner_org_id !== gate.place.owner_org_id) throw new Refusal(NOT_YOUR_VENUE)
-    if (!maySendVenueOffers(user.role, held.member.role)) throw new Refusal("Only an owner or admin of the venue’s organisation can send offers.")
+    if (!maySendVenueOffers(held.member.role)) throw new Refusal("Only an owner or admin of the venue’s organisation can send offers.")
     if (!(await hasEntitlement({ kind: "venue", id: venueId }, "venue_pro", {}, now, tx))) {
       throw new Refusal("Offers to regulars are part of Venue Pro. See your plan to add it.")
     }
@@ -289,13 +289,12 @@ export async function redeemPass(input: { venueId: string; code: string }): Prom
     where: { id: venueId, deleted_at: null },
     select: { id: true, owner_org_id: true, timezone: true, day_reset_hour: true },
   })
-  const member =
-    venue?.owner_org_id && mayRedeemAtVenue(user.role)
-      ? await db.organisation_members.findFirst({
-          where: { user_id: user.id, org_id: venue.owner_org_id, ...activeMembership },
-          select: { id: true },
-        })
-      : null
+  const member = venue?.owner_org_id
+    ? await db.organisation_members.findFirst({
+        where: { user_id: user.id, org_id: venue.owner_org_id, ...activeMembership },
+        select: { id: true },
+      })
+    : null
   // Authorised before anything is counted: nobody outside the venue's organisation touches its counters.
   if (!venue?.owner_org_id || !member) throw new Refusal(NOT_A_PASS_HERE)
   if (await overLimit(`offer-redeem:${venueId}:${user.id}`, DOOR_TRIES_PER_MINUTE, MINUTE_MS)) {

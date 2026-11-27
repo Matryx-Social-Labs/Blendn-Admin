@@ -36,6 +36,12 @@ export function canSendPushNotifications(role: user_role): boolean {
 
 export interface PermissionActor {
   id: string
+  /**
+   * Read for one thing only: `app_admin`, the platform's own staff. Every other
+   * right comes from `orgIds` / `editOrgIds` and the venue's claim, never from
+   * this (SCRUM-1246): a host keeps the attendee app, so their `User.role` says
+   * nothing about what they run.
+   */
   role: user_role
   /**
    * Organisations this actor is a member of. Empty denies everything.
@@ -110,6 +116,8 @@ export interface EventPermissions {
 const DENIED: EventPermissions = { canEdit: false, canOperate: false, canViewAttendees: false }
 const ALL: EventPermissions = { canEdit: true, canOperate: true, canViewAttendees: true }
 const STAFF: EventPermissions = { canEdit: false, canOperate: true, canViewAttendees: false }
+/** The venue's org on an event held there: the room and the held-back count, never edit or labels. */
+const VENUE: EventPermissions = { canEdit: false, canOperate: true, canViewAttendees: true }
 
 /**
  * Resolve what an actor may do with one event.
@@ -122,14 +130,22 @@ const STAFF: EventPermissions = { canEdit: false, canOperate: true, canViewAtten
  *     | actor       | condition                          | edit | operate | attendees |
  *     | app_admin   | always                             | yes  | yes     | yes       |
  *     | host        | owner/admin of the organising org  | yes  | yes     | yes       |
+ *     | venue       | member of the venue's owning org,  | no   | yes     | count     |
+ *     |             | event from the claim on            |      |         |           |
  *     | host staff  | staff of the organising org        | no   | yes     | no        |
- *     | venue owner | member of the venue's owning org   | no   | yes     | yes       |
+ *
+ *   first matching row wins, so host staff who are also in the venue's org get
+ *   the venue's row: rights are the union of memberships. "count" is the
+ *   held-back count, never labels, because `canEdit` is false.
  *
  *   and on a venue day (`kind = 'venue_day'`), whatever `organizer_org_id` says:
  *
  *     | app_admin   | always                             | yes  | yes     | yes       |
- *     | venue owner | member of the venue's owning org   | no   | yes     | no        |
+ *     | venue       | member of the venue's owning org   | no   | yes     | no        |
  *     | anyone else |                                    | no   | no      | no        |
+ *
+ * `User.role` is read for `app_admin` only (SCRUM-1246). Everything else is the
+ * organisation's facts: which org, owner/admin or staff, and the venue's claim.
  *
  * Membership rather than identity is the point: a colleague who did not create
  * the event gets the same access, and the venue survives one person leaving.
@@ -146,7 +162,6 @@ export function eventPermissions(
   if (!actor?.id) return DENIED
 
   if (actor.role === "app_admin") return ALL
-  if (actor.role !== "organizer" && actor.role !== "venue_owner") return DENIED
 
   // Empty ids are filtered so a blank membership cannot match a null owner —
   // the null-equals-null hole, in its organisation form.
@@ -166,15 +181,15 @@ export function eventPermissions(
   // `!== "event"`, not `=== "venue_day"`: a row that reached here without its
   // kind takes the narrow branch, never the organiser's.
   if (event.kind !== "event") {
-    return ownsVenueAt(actor, orgs, event) ? { canEdit: false, canOperate: true, canViewAttendees: false } : DENIED
+    return ownsVenueAt(orgs, event) ? { canEdit: false, canOperate: true, canViewAttendees: false } : DENIED
   }
 
   // Whichever org runs it: its owners and admins get everything, its staff run
   // the night and change none of it (SCRUM-1244). An edit right outside `orgs`
   // is a hand-built actor, and grants nothing.
-  if (event.organizer_org_id && orgs.has(event.organizer_org_id)) {
-    return (actor.editOrgIds ?? []).includes(event.organizer_org_id) ? ALL : STAFF
-  }
+  const hostOrg = event.organizer_org_id
+  const hosts = hostOrg != null && orgs.has(hostOrg)
+  if (hosts && (actor.editOrgIds ?? []).includes(hostOrg)) return ALL
 
   /*
    * A claim opens what happens at the venue from then on — never its past
@@ -183,12 +198,13 @@ export function eventPermissions(
    * new owner seeing them. That history is for aggregate insights (SCRUM-356).
    * No claim date on an owned venue is bad data: closed, not open.
    */
-  return ownsVenueAt(actor, orgs, event) ? { canEdit: false, canOperate: true, canViewAttendees: true } : DENIED
+  if (ownsVenueAt(orgs, event)) return VENUE
+  return hosts ? STAFF : DENIED
 }
 
-function ownsVenueAt(actor: PermissionActor, orgs: Set<string>, event: PermissionEvent): boolean {
+/** A member of the venue's owning org, on an event from the claim on. Membership decides, not User.role (SCRUM-1246). */
+function ownsVenueAt(orgs: Set<string>, event: PermissionEvent): boolean {
   return (
-    actor.role === "venue_owner" &&
     event.venue?.owner_org_id != null &&
     orgs.has(event.venue.owner_org_id) &&
     event.venue.claimed_at != null &&
@@ -256,7 +272,7 @@ export type BroadcastKind = "announcement" | "sponsored" | "system"
  * ## Why this is a tuple and not two booleans
  *
  * It was two booleans, and that was a confused deputy.
- * `lib/org-membership.ts:maySponsorFor` answers "does **any** org you belong to
+ * The deleted `maySponsorFor` answered "does **any** org you belong to
  * hold the flag", and a `placesAtEvent` written the same way answers "does
  * **any** org you belong to have a placement". A person who is staff at Org A
  * (holds `may_sponsor`, no placement) and Org B (has a placement, no flag)
@@ -360,38 +376,28 @@ export function broadcastMayCarryMedia(kind: BroadcastKind): boolean {
 }
 
 /**
- * May this member of an organisation buy, change or cancel its plan (step 16)?
- *
- * Organisers only (a venue's plan is `mayManageVenueBilling`), and the organisation's owners
- * and admins: the people who manage its members (`orgPermissions`). Staff see
- * the plan and are told who can change it. A platform admin buys nothing for
- * an organisation; they grant (`lib/billing-actions.ts`).
+ * May this member buy, change or cancel the organisation's plan (step 16)?
+ * Its owners and admins, the people who manage its members (`orgPermissions`);
+ * staff see the plan and are told who can change it. Like the two below, it
+ * reads the role of the membership the caller holds in the paying org, never
+ * `User.role` (SCRUM-1246). A platform admin buys nothing; they grant
+ * (`lib/billing-actions.ts`).
  */
-export function mayManageBilling(userRole: user_role, memberRole: org_role): boolean {
-  return userRole === "organizer" && (memberRole === "owner" || memberRole === "admin")
+export function mayManageBilling(memberRole: org_role): boolean {
+  return memberRole === "owner" || memberRole === "admin"
+}
+
+/** May this member of a venue's owning organisation buy, change or cancel its Venue Pro (step 17)? */
+export function mayManageVenueBilling(memberRole: org_role): boolean {
+  return memberRole === "owner" || memberRole === "admin"
 }
 
 /**
- * May this member of a venue's owning organisation buy, change or cancel the
- * venue's Venue Pro (step 17)? Venue owners only, and the organisation's
- * owners and admins, as for an organiser's plan. A platform admin grants.
+ * May this member of a venue's owning organisation send its regulars an offer
+ * (step 12)? It goes out in the venue's name to people's phones. Staff redeem
+ * passes at the door: any member of the owning org, whose membership lookup
+ * in `redeemPass` is the whole rule.
  */
-export function mayManageVenueBilling(userRole: user_role, memberRole: org_role): boolean {
-  return userRole === "venue_owner" && (memberRole === "owner" || memberRole === "admin")
-}
-
-/**
- * May this member of a venue's owning organisation send its regulars an
- * offer (step 12)? Venue owners only, and the organisation's owners and
- * admins: an offer goes out in the venue's name to people's phones. Staff
- * redeem passes at the door (`mayRedeemAtVenue`). A platform admin sends
- * nothing for a venue.
- */
-export function maySendVenueOffers(userRole: user_role, memberRole: org_role): boolean {
-  return userRole === "venue_owner" && (memberRole === "owner" || memberRole === "admin")
-}
-
-/** May this member redeem a door pass at the venue (step 12)? Anyone on its staff. */
-export function mayRedeemAtVenue(userRole: user_role): boolean {
-  return userRole === "venue_owner"
+export function maySendVenueOffers(memberRole: org_role): boolean {
+  return memberRole === "owner" || memberRole === "admin"
 }
