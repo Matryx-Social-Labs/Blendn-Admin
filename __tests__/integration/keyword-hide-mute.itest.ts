@@ -176,6 +176,9 @@ describe.each(ROUTES)("the %s", (_name, send) => {
     })
     expect(counted).toHaveLength(3)
     expect(counted.every((f) => f.auto_action === "hidden" && "harassment" in (f.categories as object))).toBe(true)
+    // The model answered every line: no flag still says it was not judged.
+    const flags = await db.moderation_flags.findMany({ where: { chat_group_id: r.groupId, user_id: r.memberId }, select: { categories: true } })
+    expect(flags.some((f) => "unjudged" in (f.categories as object))).toBe(false)
   })
 
   it("counts a line hidden for a contact detail when the model judged it abusive", async () => {

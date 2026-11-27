@@ -290,4 +290,17 @@ describe("hides the model could not judge", () => {
     w = windowAfter(15 * 60)
     expect(await w.sweep()).toContain("1 hidden line the model could not judge.")
   })
+
+  it("after a restart, counts only the last 15 minutes' unjudged hides", async () => {
+    const w = windowAfter(60 * 60)
+    await w.flag(UNJUDGED, 0.9, "auto_keyword", sec(sweepAt - 20 * 60))
+    let fresh!: typeof import("@/lib/staff-alert")
+    jest.isolateModules(() => {
+      fresh = require("@/lib/staff-alert") // eslint-disable-line @typescript-eslint/no-require-imports
+    })
+    fetchMock.mockClear()
+    await fresh.runStaffAlertSweep(sec(sweepAt))
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
 })
+

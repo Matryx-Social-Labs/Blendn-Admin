@@ -154,7 +154,10 @@ it("alerts a swear-word hide the model flags as a threat as a severe flag, and d
 it("tells staff about swear-word hides the model could not judge, in one message, and mutes nobody", async () => {
   const r = await liveRoom()
   for (let i = 1; i <= AUTO_MUTE_HIDDEN_COUNT; i++) await sendHidden(r, `${i} [down] chutiya`)
-  const flags = await flagsWhen(r, (f) => f.length === AUTO_MUTE_HIDDEN_COUNT)
+  await flagsWhen(r, (f) => f.length === AUTO_MUTE_HIDDEN_COUNT)
+  // Long enough for a wrongly removed key to be gone: both model calls have answered.
+  await new Promise((res) => setTimeout(res, 300))
+  const flags = await flagsWhen(r, () => true)
   expect(flags.map(keys)).toEqual(Array(AUTO_MUTE_HIDDEN_COUNT).fill("profanity,unjudged"))
   // A sweeper just booted: what this database held before is no concern of this test.
   let fresh!: typeof import("@/lib/staff-alert")

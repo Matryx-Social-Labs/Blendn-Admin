@@ -128,6 +128,21 @@ describe("a keyword hide on the async path (D-052a)", () => {
     expect(mockMute).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ["no key", [{ checked: false, reason: "no_key" }]],
+    ["an error, then an error again", [{ checked: false, reason: "error" }, { checked: false, reason: "error" }]],
+  ] as const)("leaves the line marked not judged after %s", async (_name, answers) => {
+    mockCheck.mockResolvedValue(answers[answers.length - 1])
+    await send("tu chutiya hai", Promise.resolve(answers[0]))
+    expect(mockJudged).not.toHaveBeenCalled()
+    expect(mockMute).not.toHaveBeenCalled()
+  })
+
+  it("marks the line judged when the model hid it", async () => {
+    await send("tu chutiya hai", Promise.resolve(HIDE))
+    expect(mockJudged).toHaveBeenCalledWith("m1")
+  })
+
   it("counts a slur without asking the model, and does not mark its flag", async () => {
     await send("you are a retard")
     expect(mockCheck).not.toHaveBeenCalled()
