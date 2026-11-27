@@ -1,5 +1,5 @@
 import { hiddenInRooms } from "@/lib/room-people"
-import { hereCountFor } from "@/lib/attendee-counts"
+import { hereNowFor, type HereNow } from "@/lib/attendee-counts"
 import { db } from "@/lib/db"
 import { expandInterests, interestParents } from "@/lib/matches"
 
@@ -49,8 +49,7 @@ export function tasteMatchBucket(count: number): TasteMatchBucket | null {
   return TASTE_MATCH_BUCKET_FLOORS.reduce<TasteMatchBucket | null>((bucket, floor) => (count >= floor ? floor : bucket), null)
 }
 
-export interface RoomPreview {
-  hereCount: number
+export interface RoomPreview extends HereNow {
   /** A bucket's floor or `null`, never the count — see `TASTE_MATCH_BUCKET_FLOORS`. */
   tasteMatchCount: TasteMatchBucket | null
 }
@@ -59,8 +58,8 @@ export interface RoomPreview {
  * What the Room looks like from the door: how many are here, and how many of
  * them share at least one interest with you.
  *
- * `hereCount` is `hereCountFor` — the same number as the socket's
- * `hereCount`, so the preview never disagrees with the Room it opens.
+ * `hereCount` and `hereConfirmed` are `hereNowFor` — the same numbers as the
+ * socket's, so the preview never disagrees with the Room it opens.
  *
  * `tasteMatchCount` is a bucket of the people **inside now** and visible to you, with
  * the roster's exclusions (`GET /events/:id/checkins`), because it is a
@@ -79,8 +78,8 @@ export interface RoomPreview {
  * be fewer.
  */
 export async function roomPreview(eventId: string, viewerId: string): Promise<RoomPreview> {
-  const hereCount = await hereCountFor(eventId)
-  if (hereCount < MIN_ROOM_FOR_TASTE_COUNT) return { hereCount, tasteMatchCount: null }
+  const here = await hereNowFor(eventId)
+  if (here.hereCount < MIN_ROOM_FOR_TASTE_COUNT) return { ...here, tasteMatchCount: null }
 
   const [hiddenSet, viewerInterests, inside] = await Promise.all([
     // The roster's list (`hiddenInRooms`): blocks, closed pairs, the reported, friends.
@@ -110,7 +109,7 @@ export async function roomPreview(eventId: string, viewerId: string): Promise<Ro
     people.set(row.user_id, row.user.user_interests.map((i) => i.category_id))
   }
   // No interests of your own means nothing can be shared: no sharers, so no figure.
-  if (viewerInterests.length === 0) return { hereCount, tasteMatchCount: null }
+  if (viewerInterests.length === 0) return { ...here, tasteMatchCount: null }
 
   const parentOf = await interestParents()
   const mine = new Set(expandInterests(viewerInterests.map((i) => i.category_id), parentOf))
@@ -118,5 +117,5 @@ export async function roomPreview(eventId: string, viewerId: string): Promise<Ro
   for (const ids of people.values()) {
     if (expandInterests(ids, parentOf).some((id) => mine.has(id))) tasteMatchCount += 1
   }
-  return { hereCount, tasteMatchCount: tasteMatchBucket(tasteMatchCount) }
+  return { ...here, tasteMatchCount: tasteMatchBucket(tasteMatchCount) }
 }

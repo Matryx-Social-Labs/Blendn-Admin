@@ -224,7 +224,7 @@ describe("with \"Show online status\" off (SCRUM-620)", () => {
     expect(a.arrivals).toEqual([])
     expect(a.counts).toEqual([expect.objectContaining({ hereCount: inside.size })])
     // SCRUM-905: bare count — no handle, real id or pseudonym on the copy of the arrival the roster hides.
-    expect(Object.keys(a.counts[0]).sort()).toEqual(["checkInTime", "eventId", "hereCount"])
+    expect(Object.keys(a.counts[0]).sort()).toEqual(["checkInTime", "eventId", "hereConfirmed", "hereCount"])
     expect(JSON.stringify(a.counts)).not.toContain(E.id)
     expect(JSON.stringify(a.counts)).not.toContain(roomHandle(eventId, E.id))
 
@@ -249,7 +249,7 @@ describe("with \"Show online status\" off (SCRUM-620)", () => {
     expect(out.status).toBe(200)
     await until(() => a.outs.length > 0)
     expect(a.outs).toHaveLength(1)
-    expect(Object.keys(a.outs[0]).sort()).toEqual(["checkOutTime", "eventId", "hereCount"])
+    expect(Object.keys(a.outs[0]).sort()).toEqual(["checkOutTime", "eventId", "hereConfirmed", "hereCount"])
     expect(JSON.stringify(a.outs)).not.toContain(roomHandle(eventId, E.id))
   })
 })

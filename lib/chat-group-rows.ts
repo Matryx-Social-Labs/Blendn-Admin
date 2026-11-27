@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client"
-import { hereCounts } from "@/lib/attendee-counts"
+import { hereNow } from "@/lib/attendee-counts"
 import { lastMessagesOf, lobbyOthersOf, unreadAfterMarkers, unreadTotalsOf, type OtherMemberRow } from "@/lib/chat-list"
 import { chatClosesAt } from "@/lib/chat-window"
 import { db } from "@/lib/db"
@@ -149,12 +149,12 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
         })
       : [],
     /*
-     * How many are in each room: inside now (`hereCounts`), the Room's own
+     * How many are in each room: inside now (`hereNow`), the Room's own
      * number, one GROUP BY for the page. Never the room's members — a member row
      * outlives the check-in, so that counted everybody who had ever been in.
      * A venue day's room says no count at all (below).
      */
-    hereCounts(memberships.filter((m) => m.chat_group.event.kind !== "venue_day").map((m) => m.chat_group.event.id)),
+    hereNow(memberships.filter((m) => m.chat_group.event.kind !== "venue_day").map((m) => m.chat_group.event.id)),
     // Who else is in each Lobby room, by room pseudonym (Flow 5 C5): one statement for all of them.
     lobbyOthersOf(lobbyIds, userId, blockedIds),
   ])
@@ -212,9 +212,11 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
        * and expire is the differencing the venue's bucket exists to stop
        * (D-19, F14).
        */
-      hereCount: venueDay ? null : here.get(membership.chat_group.event.id) ?? 0,
+      hereCount: venueDay ? null : here.get(membership.chat_group.event.id)?.hereCount ?? 0,
+      /** Of `hereCount`, seen or checked in within 30 minutes (SCRUM-1232); null with it. */
+      hereConfirmed: venueDay ? null : here.get(membership.chat_group.event.id)?.hereConfirmed ?? 0,
       /** `hereCount` under its old name, for the apps installed before it: every one of them prints it as "N in the room". */
-      memberCount: venueDay ? null : here.get(membership.chat_group.event.id) ?? 0,
+      memberCount: venueDay ? null : here.get(membership.chat_group.event.id)?.hereCount ?? 0,
       unreadCount: unreadOf(membership),
       /** Whether you silenced this room's pushes, and until when (`lib/room-mute.ts`). */
       mute: roomMuteState(membership.notification_preferences),

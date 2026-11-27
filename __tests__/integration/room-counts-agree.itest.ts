@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 process.env.MOBILE_JWT_SECRET = process.env.MOBILE_JWT_SECRET ?? "itest-mobile-secret-0123456789abcdefghij"
 process.env.NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? "itest-nextauth-secret-0123456789abcdefghij"
 
-import { hereCountFor, hereCounts } from "@/lib/attendee-counts"
+import { hereNow, hereNowFor } from "@/lib/attendee-counts"
 import { performCheckout } from "@/lib/checkout"
 import { signAccessToken } from "@/lib/mobile-auth"
 
@@ -16,7 +16,7 @@ import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, putIn
  * check-in — checkout and expiry leave it `active` — so it counted everybody
  * who had ever been in. And the Room info list listed them.
  *
- * Every surface now says the Room's number, inside now (`hereCountFor`), and
+ * Every surface now says the Room's number, inside now (`hereNowFor`), and
  * the "In the room" list lists only the people it counts. A checkout takes one
  * off all of them at once, and so does an expiry.
  */
@@ -101,8 +101,8 @@ async function everyCount() {
   const d = await get(detail.GET, `events/${w.eventId}`, w.token, { eventId: w.eventId })
   const people = await get(participants.GET, `chat/groups/${w.roomId}/participants?limit=100`, w.token, { chatGroupId: w.roomId })
   return {
-    helper: await hereCountFor(w.eventId),
-    batched: (await hereCounts([w.eventId])).get(w.eventId),
+    helper: (await hereNowFor(w.eventId)).hereCount,
+    batched: (await hereNow([w.eventId])).get(w.eventId)?.hereCount,
     rowHere: row?.hereCount,
     rowMembers: row?.memberCount,
     preview: p.json.data.hereCount,

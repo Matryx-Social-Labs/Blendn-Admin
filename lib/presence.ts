@@ -31,6 +31,16 @@ import { evaluateCheckIn, MAX_GPS_ACCURACY_METERS, type Geofence, type LatLng } 
 /** How often the client is asked to report. Battery over precision. */
 export const PING_INTERVAL_MINUTES = 5
 
+/**
+ * Inside AND seen, or checked in, this recently: "confirmed here" (SCRUM-1232).
+ * Pings are foreground only, so silence is a pocketed phone as often as a
+ * departure: nobody leaves the count for it. This only says how much of the
+ * count was observed: `hereConfirmed` on the phone, and its host-side
+ * counterpart `unconfirmed` on the live tab (presence sessions, staff
+ * included). Db-free, so the live tab can print it.
+ */
+export const CONFIRMED_WINDOW_MINUTES = 30
+
 /** A cigarette, a phone call, an ATM. Not a departure. */
 export const DEPARTURE_GRACE_MINUTES = 10
 

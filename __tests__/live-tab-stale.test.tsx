@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server"
 
 import type { LiveSnapshot, VenueLiveSnapshot } from "@/lib/live-metrics"
+import { CONFIRMED_WINDOW_MINUTES } from "@/lib/presence"
 
 /*
  * The Live tab says when its figures stopped (SCRUM-1348).
@@ -32,7 +33,7 @@ const host = (alerts: LiveSnapshot["alerts"] = []): LiveSnapshot => ({
   staffInside: 4,
   checkedInTotal: 151,
   checkedOutTotal: 9,
-  staleInside: 0,
+  unconfirmed: 0,
   capacity: 195,
   fillPct: 71,
   overCapacity: false,
@@ -57,7 +58,7 @@ const venue = (): VenueLiveSnapshot => ({
   staffInside: "quiet",
   checkedInTotal: "100+",
   checkedOutTotal: "5-9",
-  staleInside: "quiet",
+  unconfirmed: "quiet",
   mostlyInferred: false,
   capacity: 195,
   overCapacity: false,
@@ -124,5 +125,24 @@ describe("the Live tab after its connection drops", () => {
     const html = render(null, "error")
     expect(html).toContain("Live connection lost")
     expect(html).not.toContain(LINE)
+  })
+})
+
+/*
+ * The unconfirmed line names the window it counts on (SCRUM-1232). It said "the
+ * last few minutes" over a 10-minute cutoff; the cutoff is now 30, and the copy
+ * reads the constant so the two cannot disagree again. design/09 rewords it.
+ */
+describe("the unconfirmed line", () => {
+  const sentence = (n: string) => `${n} not seen in the last ${CONFIRMED_WINDOW_MINUTES} minutes — phones sleep, so they are still counted`
+
+  it("names the confirmed window, from the one constant, for a host and a venue", () => {
+    expect(CONFIRMED_WINDOW_MINUTES).toBe(30)
+    expect(render({ ...host(), unconfirmed: 12 }, "live")).toContain(sentence("12"))
+    expect(render({ ...venue(), unconfirmed: "10-19" } as VenueLiveSnapshot, "live")).toContain(sentence("10–19"))
+  })
+
+  it("is not said when everybody inside was seen", () => {
+    expect(render(host(), "live")).not.toContain("not seen in the last")
   })
 })

@@ -363,7 +363,7 @@ export async function readLiveSnapshot(
      * "seen an hour ago" is one an organiser has no way to calibrate, and R31
      * is explicit that a soft number should say it is soft where it is shown.
      */
-    staleInside: live.stale,
+    unconfirmed: live.unconfirmed,
     capacity: occupancy.capacity,
     fillPct: occupancy.fillPct,
     overCapacity: occupancy.overCapacity,

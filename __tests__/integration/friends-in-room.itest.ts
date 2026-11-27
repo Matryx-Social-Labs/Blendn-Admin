@@ -213,7 +213,7 @@ describe("a friend leaves every stranger surface, whatever their switch (B1)", (
     await db.user_interests.createMany({ data: [viewer, quiet, loud].map((p) => ({ user_id: p.id, category_id: category.id })) })
     const preview = await roomPreview(eventId, viewer.id)
     // Three inside, but the number would be the one visible person's overlap with the viewer.
-    expect(preview).toEqual({ hereCount: 3, tasteMatchCount: null })
+    expect(preview).toEqual({ hereCount: 3, hereConfirmed: 3, tasteMatchCount: null })
     await db.user_interests.deleteMany({ where: { category_id: category.id } })
     await db.categories.delete({ where: { id: category.id } })
   })

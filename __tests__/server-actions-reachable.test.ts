@@ -122,7 +122,7 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
   // The staleness half of this ratchet is what makes the entry temporary: wire
   // them and it will tell you to delete these lines.
   ["attended", "scripts/seed-qa-scale-rows.ts has a local helper of the same name; the presence-sessions fold has only itest callers"],
-  ["insideNow", "the presence-sessions fold of who is inside now; the Room still counts event_check_ins (hereCountFor), called only by itests"],
+  ["insideNow", "the presence-sessions fold of who is inside now; the Room still counts event_check_ins (hereNowFor), called only by itests"],
   ["dwellSeconds", "the fold occupancy/dwell readers move to; they still read event_check_ins"],
   ["departureQuality", "the degraded-occupancy signal R31 wants on the organiser's screen; no screen reads it yet"],
 

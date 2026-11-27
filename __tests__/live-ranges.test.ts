@@ -47,7 +47,7 @@ function hostSnapshot(over: Partial<LiveSnapshot> = {}): LiveSnapshot {
     staffInside: 1,
     checkedInTotal: 14,
     checkedOutTotal: 2,
-    staleInside: 3,
+    unconfirmed: 3,
     capacity: 10,
     fillPct: 110,
     overCapacity: true,
@@ -91,7 +91,7 @@ describe("forVenue", () => {
       staffInside: "quiet",
       checkedInTotal: "10-19",
       checkedOutTotal: "quiet",
-      staleInside: "quiet",
+      unconfirmed: "quiet",
       checkInRate10m: "5-9",
       activeChatters30m: "5-9",
       sentiment: { positive: "5-9", neutral: "quiet", negative: "quiet" },
@@ -115,7 +115,7 @@ describe("forVenue", () => {
     expect(forVenue(hostSnapshot({ overCapacity: false })).overCapacity).toBe(false)
     // 3 of 12 unseen is under half; 7 of 12 is over it.
     expect(venue.mostlyInferred).toBe(false)
-    expect(forVenue(hostSnapshot({ staleInside: 7 })).mostlyInferred).toBe(true)
+    expect(forVenue(hostSnapshot({ unconfirmed: 7 })).mostlyInferred).toBe(true)
   })
 
   it("sends the alert without the counts in its body", () => {

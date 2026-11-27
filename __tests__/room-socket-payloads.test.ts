@@ -3,7 +3,7 @@
  *
  * The mobile Room keeps its headline number live from `hereCount` on the
  * check-in and checkout events — so the number must be on all three payloads,
- * and must be "inside now" (`hereCountFor`), so a checkout brings it down. `room:match` and
+ * and must be "inside now" (`hereNowFor`), so a checkout brings it down. `room:match` and
  * `room:wave` go to a person's own `user:{id}` room and nowhere else.
  *
  * And every id on them is per recipient (SCRUM-371): your own is your real id,
@@ -19,7 +19,8 @@ const mockChatGroup = jest.fn()
 const mockReports = jest.fn(async (..._a: unknown[]): Promise<unknown[]> => [])
 jest.mock("@/lib/db", () => ({
   db: {
-    event_check_ins: { count: (...a: unknown[]) => mockCount(...a) },
+    // `hereNow`: one raw read, both numbers (SCRUM-1232).
+    $queryRaw: (...a: unknown[]) => mockCount(...a),
     chat_groups: { findUnique: (...a: unknown[]) => mockChatGroup(...a) },
     // The emitter asks a room's kind: a venue day's goes only to the people live in it.
     events: { findUnique: async () => ({ kind: "event" }) },
@@ -97,7 +98,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   mockCount.mockReset()
-  mockCount.mockResolvedValue(7)
+  mockCount.mockImplementation(async () => [{ event_id: EVENT, here: 7, confirmed: 5 }])
   mockChatGroup.mockReset()
   mockChatGroup.mockResolvedValue({ id: CHAT, kind: "event", event_id: EVENT })
 })
@@ -112,35 +113,36 @@ describe("hereCount", () => {
     await settle()
 
     expect(watcher["event:checkin"]).toEqual([
-      expect.objectContaining({ eventId: EVENT, userId: handle("arriver"), hereCount: 7 }),
+      expect.objectContaining({ eventId: EVENT, userId: handle("arriver"), hereCount: 7, hereConfirmed: 5 }),
     ])
     expect(inRoom["event:room:checkin"]).toEqual([
-      expect.objectContaining({ userId: handle("arriver"), userName: "Cosmic Panda", hereCount: 7 }),
+      expect.objectContaining({ userId: handle("arriver"), userName: "Cosmic Panda", hereCount: 7, hereConfirmed: 5 }),
     ])
-    expect(watcher["event:checkout"]).toEqual([expect.objectContaining({ userId: handle("leaver"), hereCount: 7 })])
+    expect(watcher["event:checkout"]).toEqual([expect.objectContaining({ userId: handle("leaver"), hereCount: 7, hereConfirmed: 5 })])
     // Still no name in the room anyone can join.
     expect(watcher["event:checkin"]![0]).not.toHaveProperty("userName")
   })
 
   it("counts distinct people inside NOW, so a checkout brings it down", async () => {
     const watcher = await listen("probe", [`event:${EVENT}`])
-    mockCount.mockResolvedValue(6)
+    mockCount.mockImplementation(async () => [{ event_id: EVENT, here: 6, confirmed: 4 }])
     emitEventCheckOut(EVENT, "leaver")
     await settle()
 
-    expect(watcher["event:checkout"]).toEqual([expect.objectContaining({ hereCount: 6 })])
+    expect(watcher["event:checkout"]).toEqual([expect.objectContaining({ hereCount: 6, hereConfirmed: 4 })])
     // Not `distinctAttendeeCounts` (which keeps checked_out): live rows only.
     // A count in the database (one open check-in per person, SCRUM-705), never the rows.
     // At a venue day, a window still open too (`inRoomWhere`, SCRUM-922): its real-event arm leaves an event unchanged.
-    expect(mockCount).toHaveBeenCalledWith({
-      where: {
-        event_id: EVENT,
-        status: "checked_in",
-        kind: "attendee",
-        user: { suspended_at: null },
-        AND: [{ OR: [{ event: { kind: "event" } }, { status: "checked_in", expires_at: { gt: expect.any(Date) } }] }],
-      },
-    })
+    // here-confirmed.itest.ts holds this SQL to the Prisma predicate (`HERE_NOW`, `inRoomWhere`) on a real database.
+    const sql = (mockCount.mock.calls[0]![0] as readonly string[]).join("?")
+    for (const predicate of [
+      "c.status = 'checked_in'",
+      "c.kind = 'attendee'",
+      "u.suspended_at IS NULL",
+      "(e.kind = 'event' OR c.expires_at > ?)",
+      "COUNT(*) FILTER (WHERE c.last_seen_at > ? OR c.check_in_time > ?)",
+    ])
+      expect(sql).toContain(predicate)
   })
 
   it("a failed count still delivers the check-in, without a number, and throws nothing", async () => {
@@ -152,6 +154,14 @@ describe("hereCount", () => {
 
     expect(watcher["event:checkin"]).toEqual([expect.objectContaining({ userId: handle("arriver-2") })])
     expect(watcher["event:checkin"]![0]).not.toHaveProperty("hereCount")
+    expect(watcher["event:checkin"]![0]).not.toHaveProperty("hereConfirmed")
+
+    // A departure too: both numbers absent together, never one without the other.
+    emitEventCheckOut(EVENT, "leaver-2")
+    await settle()
+    expect(watcher["event:checkout"]).toEqual([expect.objectContaining({ userId: handle("leaver-2") })])
+    expect(watcher["event:checkout"]![0]).not.toHaveProperty("hereCount")
+    expect(watcher["event:checkout"]![0]).not.toHaveProperty("hereConfirmed")
   })
 
   it("an unread hidden set fails closed: the count still moves, the handle and the room copy reach nobody (SCRUM-1386)", async () => {

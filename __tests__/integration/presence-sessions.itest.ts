@@ -206,7 +206,7 @@ describe("a session per visit, not a status per person", () => {
      * cutoff does not drain a stale room; it drains a full one.
      *
      * Both failure modes are real and they are not symmetric. A stalled
-     * sweeper leaves the figure VISIBLY uncertain: `stale` says how much of it
+     * sweeper leaves the figure VISIBLY uncertain: `unconfirmed` says how much of it
      * is inference, and the sweeper has a cron fallback. A silence cutoff makes
      * it SILENTLY wrong, in the direction of telling a fire officer that a room
      * with three hundred people in it is empty.
@@ -229,7 +229,7 @@ describe("a session per visit, not a status per person", () => {
     // But the figure knows it is inferring, and can say so where it is shown.
     const h = await headcount({ occurrenceId: r.occurrenceId })
     expect(h.insideGuests).toBe(1)
-    expect(h.stale).toBe(1)
+    expect(h.unconfirmed).toBe(1)
 
     // A definite signal still removes them. Departure is decided, never assumed.
     await closeSession(r.occurrenceId, r.person, "sweeper")

@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { phoneCheckInRadius } from "@/lib/geofence"
-import { distinctAttendeeCounts, hereCounts } from "@/lib/attendee-counts"
+import { distinctAttendeeCounts, hereNow, type HereNow } from "@/lib/attendee-counts"
 import { storedCity } from "@/lib/location"
 import { haversineDistance } from "@/lib/geo"
 import { eventHostSelect, hostPayload } from "@/lib/event-host"
@@ -138,7 +138,7 @@ async function transformEvent(
   event: EventListItem,
   ctx: TransformContext,
   attended: Map<string, number>,
-  here: Map<string, number>,
+  here: Map<string, HereNow>,
   tallies: EventTallies,
   featured: Featured | null,
   price: ListPrice
@@ -244,11 +244,13 @@ async function transformEvent(
     // Came: everybody who checked in, left or not. Never "here now".
     checkInCount: attended.get(event.id) ?? 0,
     /*
-     * Here now: the Room's number (`hereCountFor`) — checked in, not checked
+     * Here now: the Room's number (`hereNow`) — checked in, not checked
      * out, guests only. A live card's "14 here now" read `currentCapacity`,
      * which is the attended count above, so it kept two people who had left.
+     * `hereConfirmed`: of those, seen or checked in within 30 minutes.
      */
-    hereCount: here.get(event.id) ?? 0,
+    hereCount: here.get(event.id)?.hereCount ?? 0,
+    hereConfirmed: here.get(event.id)?.hereConfirmed ?? 0,
     favoriteCount: tallies.favorites.get(event.id) ?? 0,
     ratingCount: tallies.ratings.get(event.id) ?? 0,
     // The detail's `stats.rsvpCount`, the same number: RSVPs `going` only, never
@@ -295,7 +297,7 @@ export async function rsvpStatusesFor(userId: string, eventIds: readonly string[
 
 export interface ListCounts {
   attended: Map<string, number>
-  here: Map<string, number>
+  here: Map<string, HereNow>
   tallies: EventTallies
 }
 
@@ -316,7 +318,7 @@ export async function listCounts(events: readonly { id: string }[]): Promise<Lis
   const ids = events.map((e) => e.id)
   const [attended, here, tallies] = await Promise.all([
     distinctAttendeeCounts(ids),
-    hereCounts(ids),
+    hereNow(ids),
     eventTallies(ids),
   ])
   return { attended, here, tallies }

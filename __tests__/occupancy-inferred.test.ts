@@ -26,13 +26,13 @@ describe("occupancy says when it is mostly inferred", () => {
   })
 
   it("is confident when most of the room has been seen", () => {
-    expect(occupancyMostlyInferred({ inside: 100, staleInside: 10 })).toBe(false)
-    expect(occupancyMostlyInferred({ inside: 100, staleInside: 50 })).toBe(false)
+    expect(occupancyMostlyInferred({ inside: 100, unconfirmed: 10 })).toBe(false)
+    expect(occupancyMostlyInferred({ inside: 100, unconfirmed: 50 })).toBe(false)
   })
 
   it("admits inference when most of the room has not", () => {
-    expect(occupancyMostlyInferred({ inside: 100, staleInside: 51 })).toBe(true)
-    expect(occupancyMostlyInferred({ inside: 3, staleInside: 3 })).toBe(true)
+    expect(occupancyMostlyInferred({ inside: 100, unconfirmed: 51 })).toBe(true)
+    expect(occupancyMostlyInferred({ inside: 3, unconfirmed: 3 })).toBe(true)
   })
 
   it("does not call an empty room unreliable", () => {
@@ -41,7 +41,7 @@ describe("occupancy says when it is mostly inferred", () => {
      * warning on the most certain number the screen ever shows — and it is the
      * state every event is in before doors.
      */
-    expect(occupancyMostlyInferred({ inside: 0, staleInside: 0 })).toBe(false)
+    expect(occupancyMostlyInferred({ inside: 0, unconfirmed: 0 })).toBe(false)
   })
 
   it("is actually wired to the screen", () => {
