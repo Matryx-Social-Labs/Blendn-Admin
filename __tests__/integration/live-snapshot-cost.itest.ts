@@ -1,4 +1,4 @@
-import { buildLiveSnapshot, HELD_EVENT_MS, readLiveSnapshot, type HeldEvent } from "@/lib/live-snapshot"
+import { HELD_EVENT_MS, readLiveSnapshot, type HeldEvent } from "@/lib/live-snapshot"
 import { recordIssuesFor } from "@/lib/event-issues"
 
 import { sqlCounter, waveCounter } from "./sql-count"
@@ -59,7 +59,7 @@ async function liveRoom() {
 describe("the chat figures", () => {
   it("count messages in the last ten minutes and distinct senders in the last thirty", async () => {
     const eventId = await liveRoom()
-    const snapshot = await buildLiveSnapshot(eventId)
+    const snapshot = await readLiveSnapshot(eventId, undefined, { social: true }).then((r) => r?.snapshot ?? null)
     expect(snapshot!.messagesPerMinute).toBe(0.3)
     expect(snapshot!.activeChatters30m).toBe(3)
   })
@@ -68,8 +68,8 @@ describe("the chat figures", () => {
     const eventId = await liveRoom()
     const counter = sqlCounter()
     try {
-      const { sql } = await counter.during(() => buildLiveSnapshot(eventId))
-      console.info(`buildLiveSnapshot: ${sql.length} statements`)
+      const { sql } = await counter.during(() => readLiveSnapshot(eventId, undefined, { social: true }).then((r) => r?.snapshot ?? null))
+      console.info(`readLiveSnapshot: ${sql.length} statements`)
       // Not the look-up by id behind the complaint floor (SCRUM-890): feedback rows' authors, bounded by the window's feedback.
       expect(sql.filter((s) => /chat_messages/.test(s) && !/"chat_messages"\."id" IN/.test(s))).toHaveLength(1)
     } finally {
@@ -106,9 +106,9 @@ describe("a loop's held tick, in waves", () => {
     const held: { current?: HeldEvent } = {}
     const waves = waveCounter()
     try {
-      const fresh = await waves.during(() => buildLiveSnapshot(eventId))
-      const first = await waves.during(() => buildLiveSnapshot(eventId, held))
-      const next = await waves.during(() => buildLiveSnapshot(eventId, held))
+      const fresh = await waves.during(() => readLiveSnapshot(eventId, undefined, { social: true }).then((r) => r?.snapshot ?? null))
+      const first = await waves.during(() => readLiveSnapshot(eventId, held, { social: true }).then((r) => r?.snapshot ?? null))
+      const next = await waves.during(() => readLiveSnapshot(eventId, held, { social: true }).then((r) => r?.snapshot ?? null))
       console.info(`waves: fresh ${fresh.waves}, held loop's first ${first.waves}, then ${next.waves}`)
       expect(fresh.waves).toBe(3)
       expect(first.waves).toBe(3)
@@ -124,7 +124,7 @@ describe("the issue sweep", () => {
     const eventId = await liveRoom()
     const counter = sqlCounter()
     try {
-      const snapshotCost = (await counter.during(() => buildLiveSnapshot(eventId))).sql.length
+      const snapshotCost = (await counter.during(() => readLiveSnapshot(eventId, undefined, { social: true }).then((r) => r?.snapshot ?? null))).sql.length
       const { sql } = await counter.during(() => recordIssuesFor(eventId))
       console.info(`recordIssuesFor: ${sql.length} statements (a snapshot alone: ${snapshotCost})`)
       expect(sql.filter((s) => /FROM "public"."event_occurrences"/.test(s))).toHaveLength(1)

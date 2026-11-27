@@ -4,7 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg"
 import { encode } from "next-auth/jwt"
 import { randomUUID } from "node:crypto"
 
-import { buildLiveSnapshot, readLiveSnapshot } from "../lib/live-snapshot"
+import { readLiveSnapshot } from "../lib/live-snapshot"
 import { forVenue } from "../lib/live-metrics"
 
 /**
@@ -198,7 +198,7 @@ test("the Feedback tab holds back the category one person dominates, as it does 
   }
 
   // The live snapshot a host's socket is sent for the same event.
-  const snapshot = (await buildLiveSnapshot(eventId))!
+  const snapshot = (await readLiveSnapshot(eventId, undefined, { social: true }).then((r) => r?.snapshot ?? null))!
   expect(snapshot.categories.find((c) => c.category === "entry_queue")).toEqual({ category: "entry_queue", count: null, suppressed: true })
   expect(snapshot.categories.find((c) => c.category === "crowding")).toEqual({ category: "crowding", count: 10, suppressed: false })
   expect(JSON.stringify(snapshot)).not.toMatch(/suppressionReason|dominance/)
@@ -254,7 +254,7 @@ test("one held category: the negatives and the total are a band, and nothing giv
   }
 
   // The live snapshot a host's socket is sent: the band, never the exact count, and the alert says the bands.
-  const snapshot = (await buildLiveSnapshot(rangeEventId))!
+  const snapshot = (await readLiveSnapshot(rangeEventId, undefined, { social: true }).then((r) => r?.snapshot ?? null))!
   expect(snapshot.sentiment).toEqual({ positive: 25, neutral: 9, negative: { min: 23, max: 27 } })
   expect(JSON.stringify(snapshot)).not.toMatch(/"negative":27\b/)
   expect(snapshot.alerts.find((a) => a.kind === "mood_sliding")?.body).toBe("23–27 of 57–61 classified messages in the last 30 minutes are negative.")

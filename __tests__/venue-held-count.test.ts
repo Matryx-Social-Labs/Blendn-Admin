@@ -47,7 +47,7 @@ async function venueDigest(feedback: TallyRow[]) {
   return { view, counts, total, categories, raised, topics, ratings, averageRating, ratingCount, ratingsTowardNextUpdate, messages, messagesTotal }
 }
 
-/** The host's live snapshot of the same rows, as `buildLiveSnapshot` makes it, for `forVenue` to round. */
+/** The host's live snapshot of the same rows, as `readLiveSnapshot` makes it, for `forVenue` to round. */
 function hostSnapshot(feedback: TallyRow[]): LiveSnapshot {
   const t = tallyFeedback(feedback)
   const categories = discloseCategories(t.categoryCounts, t.contributors, ROOM, t.topMessages)

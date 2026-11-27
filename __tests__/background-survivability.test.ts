@@ -77,7 +77,7 @@ describe("I9 — the ops loop cannot stack on itself", () => {
     /*
      * This was the one loop using `setInterval` with an async body. The two
      * sweepers both self-schedule and both carry a comment saying a slow pass
-     * must not overlap the next — and it matters more here: `buildLiveSnapshot`
+     * must not overlap the next — and it matters more here: `readLiveSnapshot`
      * issues around ten round trips every five seconds per watched event, on
      * the Socket.io event loop, so overlapping passes make the database slower,
      * which makes the next pass longer.

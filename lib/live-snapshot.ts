@@ -124,22 +124,16 @@ async function eventAndSlots(eventId: string, now: Date, held?: { current?: Held
 
 
 /**
- * Compute one snapshot.
+ * Compute one snapshot, with the event and day it read (the issue sweep needs both and must not read them twice) and
+ * the window's exact negatives (the venue's copy, `forVenue`; never sent to a host).
  *
  * Read directly rather than kept in memory: a counter held in the process is
  * wrong after any restart, and wrong in a way nobody notices until an alert
  * fails to fire. The queries are all indexed and scoped to one event.
  *
  * `held` is the event and its days a loop keeps between ticks (`HeldEvent`);
- * leave it out for a snapshot that must read them fresh.
- */
-export async function buildLiveSnapshot(eventId: string, held?: Held, { social = true }: { social?: boolean } = {}): Promise<LiveSnapshot | null> {
-  return (await readLiveSnapshot(eventId, held, { social }))?.snapshot ?? null
-}
-
-/**
- * `buildLiveSnapshot`, and the event and day it read: the issue sweep needs both and must not read them twice.
- * `social` only for a screen: the sweep shows nobody "Meeting tonight", so it does not read it.
+ * leave it out for a snapshot that must read them fresh. `social` only for a
+ * screen: the sweep shows nobody "Meeting tonight", so it does not read it.
  */
 export async function readLiveSnapshot(
   eventId: string,

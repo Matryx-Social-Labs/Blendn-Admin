@@ -30,7 +30,7 @@ export interface VenueTonight {
 
 /*
  * One snapshot read per room per minute, however many owners' tabs refresh it:
- * `buildLiveSnapshot` holds the event and the heavy social read in `Held`
+ * `readLiveSnapshot` holds the event and the heavy social read in `Held`
  * (HELD_SOCIAL_MS), and shares a read in flight.
  * ponytail: per process and per bundle layer; cleared whole past ROOMS_HELD.
  */

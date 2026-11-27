@@ -379,7 +379,7 @@ export function startOpsBroadcast(eventId: string): void {
    * schedule the next pass from the end of the current one, and both carry a
    * comment saying a slow pass must not overlap the next.
    *
-   * It matters more here than there. `buildLiveSnapshot` issues **eight** round
+   * It matters more here than there. `readLiveSnapshot` issues **eight** round
    * trips per pass -- two sequential (the event, then its occurrence) and six
    * held concurrently -- every five seconds per watched event.
    *
