@@ -116,6 +116,14 @@ describe("Your access to this event: one row per state", () => {
     expect(panel).toContain('href="/dashboard/events/e1/messaging"')
   })
 
+  it("names no org it could not load: staff of an org with no row read 'the organizer's team'", async () => {
+    mockActor = { orgIds: [HOST], editOrgIds: [] }
+    mockEvent = eventRow({ organizer_org: null })
+    const { panel } = await render()
+    expect(panel).toContain("You are on the organizer&#x27;s team, so you get the live view and the room chat.")
+    expect(panel).not.toContain("the team at")
+  })
+
   it("staff of the organizing org who are also in the venue's org get the venue's row, as the resolver says", async () => {
     mockActor = { orgIds: [HOST, VENUE], editOrgIds: [VENUE] }
     const { panel } = await render()

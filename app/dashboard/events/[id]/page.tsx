@@ -305,7 +305,7 @@ export default async function EventDetailPage({
         canEdit={permissions.canEdit}
         canViewAttendees={permissions.canViewAttendees}
         throughVenue={operatesThroughVenue(actor, event)}
-        venueDay={event.kind === "venue_day"}
+        venueDay={event.kind !== "event"}
         venueName={venueName}
         orgName={event.organizer_org?.display_name ?? null}
         attendance={attendance}
