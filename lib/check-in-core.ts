@@ -1,4 +1,4 @@
-import type { event_kind, Prisma } from "@prisma/client"
+import type { check_in_method, event_kind, Prisma } from "@prisma/client"
 
 import { outOfRangeMessage } from "@/lib/checkin-messages"
 import { logger } from "@/lib/logger"
@@ -14,6 +14,7 @@ import { ErrorCode, errorResponse } from "@/lib/api-response"
 import { type CheckinInput } from "@/lib/validations/event"
 import { claimAnonymousName } from "@/lib/anonymous-names"
 import { recordRefusal } from "@/lib/check-in-refusals"
+import { ENTRY_CODE_NEAR_M } from "@/lib/entry-code"
 import { checkInKindFor } from "@/lib/checkin-kind"
 import { checkOutOfOtherEvents, type SwitchResult } from "@/lib/checkout"
 import { trackArrival } from "@/lib/arrivals-in-flight"
@@ -41,14 +42,24 @@ import { violatedConstraint } from "@/lib/prisma-errors"
  * anywhere. Below the ceiling, accuracy is no longer a pass/fail gate: it is
  * folded into the distance test (`fenceRefusal`), which is where it belongs.
  */
-export function vagueFixRefusal(gpsAccuracy: number | undefined, code: string = ErrorCode.OUT_OF_RANGE) {
+export function vagueFixRefusal(
+  gpsAccuracy: number | undefined,
+  code: string = ErrorCode.OUT_OF_RANGE,
+  /** The event door: record the weak fix (`weak_fix`, with its accuracy), and offer the door code when it is live. */
+  door?: { eventId: string; userId: string; occurrenceId: string; offerEntryCode: boolean }
+) {
   if (gpsAccuracy === undefined || gpsAccuracy <= MAX_GPS_ACCURACY_METERS) return null
+  if (door) recordRefusal({ eventId: door.eventId, userId: door.userId, reason: "weak_fix", occurrenceId: door.occurrenceId, accuracyMetres: gpsAccuracy })
   return errorResponse(
     `GPS signal is too weak (accuracy: ${Math.round(gpsAccuracy)}m). Move to an area with better signal and try again.`,
     400,
-    code
+    code,
+    door?.offerEntryCode ? ENTRY_CODE_OFFERED : undefined
   )
 }
+
+/** On a refusal the door code can fix: the server decides, so the app does no distance maths (gate 13). */
+export const ENTRY_CODE_OFFERED = "DOOR_CODE_OFFERED"
 
 const doorProfileSelect = {
   ...participationSelect,
@@ -154,6 +165,8 @@ export function fenceRefusal(input: {
    * the fence is the organiser's door, and the number is how a guest finds it.
    */
   outsideMessage?: string
+  /** The event door with its code live: offer it when the shortfall is within `ENTRY_CODE_NEAR_M`. */
+  offerEntryCode?: boolean
 }) {
   const record = input.record
   if (!input.fence) {
@@ -182,7 +195,8 @@ export function fenceRefusal(input: {
       accuracyMetres: input.gpsAccuracy,
     })
   }
-  return errorResponse(input.outsideMessage ?? outOfRangeMessage(verdict.shortfall), 400, ErrorCode.OUT_OF_RANGE)
+  const offer = input.offerEntryCode && verdict.shortfall <= ENTRY_CODE_NEAR_M ? ENTRY_CODE_OFFERED : undefined
+  return errorResponse(input.outsideMessage ?? outOfRangeMessage(verdict.shortfall), 400, ErrorCode.OUT_OF_RANGE, offer)
 }
 
 export interface SeatInput {
@@ -207,6 +221,8 @@ export interface SeatInput {
    * is not told of an arrival that did not happen (step 4 review).
    */
   extending?: boolean
+  /** How they got in (gate 13). `gps` unless the door code or the App Review bypass let them in. */
+  method?: check_in_method
 }
 
 /**
@@ -297,6 +313,7 @@ export async function seatAtTheDoor(input: SeatInput) {
         occurrence_id: occurrenceId,
         user_id: userId,
         kind,
+        method: input.method ?? "gps",
         status: "checked_in",
         check_in_time: now,
         latitude,
@@ -313,6 +330,7 @@ export async function seatAtTheDoor(input: SeatInput) {
         ...(deviceInfo !== undefined && { device_info: deviceInfo }),
       },
       update: {
+        method: input.method ?? "gps",
         status: "checked_in",
         check_in_time: now,
         /*

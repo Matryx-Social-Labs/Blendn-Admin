@@ -35,6 +35,20 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "entry-code.test.ts": {
+      "guards": "Gate 13 (SCRUM-1316, design/02a SPEC §1-§2): the event's door code is HKDF 'blendn door-code v1' over event:occurrence:step; steps 0/-1/-2 match, -3 answers 'changed', -4 and +1 are wrong; another event's or occurrence's code fails; 8/B 5/S 2/Z fold both ways; the code exists from doors to the end on a published, non-venue-day, uncancelled, unpaused occurrence; a pause holds 10 minutes and never from before this occurrence's doors; the auto-pause trips only at wrong >= 30 and wrong > correct.",
+      "mutation": "RED on dev 5da8952a: module lib/entry-code missing. M2271 GRACE_STEPS 2 -> 1; M2272 the doors floor dropped from entryPauseInForce; M2273 the trip without `wrong > correct`; M2274 foldConfusables returns its input.",
+      "observed": "RED: suite fails to compile. M2271: 2 of 11 failing; M2272: 1 of 11; M2273: 1 of 11; M2274: 1 of 11. Each reverted, 11 of 11 green.",
+      "date": "2026-11-26",
+      "source": "run-on-branch"
+    },
+    "entry-code.itest.ts": {
+      "guards": "Gate 13 (SCRUM-1316) through the real check-in route on a db:migrate database: method door_code from 400 m; wrong, changed, far (>1 km, no accuracy, >1000 m accuracy, mocked), locked (5 in 10 min with the time; 10 a night; removed from the room), paused (not before doors, lifts after 10 min), auto-pause audited as the system, Redis-out 503 with GPS unaffected; the review bypass first; weak_fix recorded and DOOR_CODE_OFFERED; the GPS success response unchanged; doorCode.available never the code; readDoor/pause/resume on canOperate with pseudonyms and handles only.",
+      "mutation": "RED on dev 5da8952a: module lib/entry-code missing. M2275 StoreUnavailable no longer caught in entryCodeGate; M2276 a host's removal no longer locks code entry; M2277 readDoor without the canOperate check; M2278 the arrival row carries userId; M2279 the review bypass no longer runs before the code.",
+      "observed": "RED: suite fails to compile. M2275-M2279: each 1 of 26 failing, the test named for it. Each reverted, 26 of 26 green.",
+      "date": "2026-11-26",
+      "source": "run-on-branch"
+    },
     "wave-retention.itest.ts": {
       "guards": "SCRUM-1382: the shared fixture endedEvent (__tests__/integration/helpers.ts) moves its occurrence's occurs_on with its times, and addPastNight dates a run's later night on the UTC day it started, so a run's first night (long ago) and its latest (yesterday) never share a UTC date under event_occurrences_event_id_occurs_on_key, whatever the hour. The suite's liveSeries run, two occurrences of one event, is created in beforeAll at any hour.",
       "mutation": "(RED) the suite on origin/dev 028f391d with the clock pinned at 2026-11-27T00:30Z (makeEvent dates occurs_on from now - 1 h, a second occurrence was dated now - 24 h). (M1) the fix's two halves undone: occurs_on dropped from endedEvent's updateMany and pastNight dated from end_time. (M2) only the first half undone. (M3) only the second. Both suites run with Date alone pinned by a scratch setupFilesAfterEnv (jest.useFakeTimers({ now: PIN_CLOCK, doNotFake: every timer, nextTick, setImmediate, hrtime, performance, queueMicrotask })), on a db:migrate database.",
@@ -784,8 +798,8 @@
     },
     "check-in-refusals.test.ts": {
       "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
-      "mutation": "Replace app/api/mobile/events/[eventId]/checkin/route.ts with an empty stub (`export {}`), run this suite, revert. Re-run as M545 after step 4 moved half the refusals into lib/check-in-core.ts (the suite reads both).",
-      "observed": "3 failing; M545 (2026-10-02): 2 of 9 failing ('records all six ways', 'never records coordinates').",
+      "mutation": "Replace app/api/mobile/events/[eventId]/checkin/route.ts with an empty stub (`export {}`), run this suite, revert. Re-run as M545 after step 4 moved half the refusals into lib/check-in-core.ts (the suite reads both). M2270 (gate 13, SCRUM-1316): the door_code_far record(...) call in lib/entry-code-gate.ts replaced with `void shortfall`.",
+      "observed": "3 failing; M545 (2026-10-02): 2 of 9 failing ('records all six ways', 'never records coordinates'). M2270 (2026-11-26): 1 of 9 failing ('records every way to be turned away').",
       "date": "2026-08-25",
       "source": "run-at-integration-merge"
     },
@@ -1639,8 +1653,20 @@
     "../e2e/where-map-stacking.spec.ts": {
       "guards": "SCRUM-420: nothing on the map paints over the venue suggestions or the sticky header, and the open suggestions scroll under the header. Leaflet's panes (400-700) and controls (up to 1000) stay inside components/geofence-editor.tsx's wrapper, which is `isolate`; the list (where-search.tsx) is z-10, over the map and under the z-20 chrome. Checked by hit-testing a grid over each surface, inset past its border-radius, with the zoom buttons asserted inside the sampled band on both axes and more than 100 points actually sampled.",
       "mutation": "M1: `isolate` removed from the geofence editor's wrapper. M2: the list back at z-[900] (with `isolate` kept). M0 (a vacuous first draft): the list was hit-tested where it opened, below the fold of a 720px viewport.",
-      "observed": "M1: 2 of 2 failing. List: leaflet-control-zoom, leaflet-control-zoom-in. Header: the zoom controls and the Map/Satellite toggle. M2: 1 of 2 failing (the header test: the list's rows over the header). M0: the list test passed on the unfixed code because elementFromPoint returned null for every point, which is why the list is now scrolled into view and sampled > 100 is asserted.",
+      "observed": "M1: 2 of 2 failing. List: leaflet-control-zoom, leaflet-control-zoom-in. Header: the zoom controls and the Map/Satellite toggle (the toggle was removed in SCRUM-1147, so today the header guard covers the zoom controls). M2: 1 of 2 failing (the header test: the list's rows over the header). M0: the list test passed on the unfixed code because elementFromPoint returned null for every point, which is why the list is now scrolled into view and sampled > 100 is asserted.",
       "date": "2026-09-29"
+    },
+    "../e2e/where-street-map-trace.spec.ts": {
+      "guards": "SCRUM-1147: the check-in area editor draws one base map. Tracing an outline by hand happens on the OpenStreetMap street map and makes no request to arcgisonline.com (the Esri World Imagery layer, unlicensed without a key, is gone with its Map/Satellite toggle); the OSM credit links to https://www.openstreetmap.org/copyright. Driven as organizer@: a place picked, four corners clicked, the outline closed, the draft saved, and `SELECT geofence FROM events WHERE id = ...` read back as a polygon whose ring is the clicked corners (one scale per axis within 1.5 px, a street zoom, centred within 0.003 degrees of the pin). OSM tile requests are counted so an empty Esri list means a listener that saw tiles. Since the GREEN run, the legend and the credit do not intersect at 1280 or 768.",
+      "mutation": "M1 (RED, the spec alone on dev 8db72806, PR #1060 run 45739817835): today's editor, with the sat layer, the toggle and draw()'s setLayer(\"sat\").",
+      "observed": "M1: failing on both attempts, every promise at once (the toggle and credit checks are soft): the Satellite button count 1, the credit ' Leaflet | © OpenStreetMap' (no 'contributors', no copyright link, at 1280 and at 768), and 10 arcgisonline.com tile requests after 'Draw it yourself'. The trace itself held on the old code: the row read back as a 4-corner polygon. GREEN on the fix (run 45741564638, head 6bb522f9). Its 768 screenshot showed the credit box over the legend's bottom-right corner (map 412 px wide with the sidebar), so the legend moved to bottom-7 and the no-intersection check was added; its control is that screenshot's geometry (credit top above the legend's bottom, x ranges overlapping), not a re-run mutation.",
+      "date": "2026-11-26"
+    },
+    "map-tile-credits.test.ts": {
+      "guards": "SCRUM-1147: no file under app/, components/ or lib/ names arcgisonline or World_Imagery, and every file that draws tile.openstreetmap.org tiles (today exactly components/geofence-editor.tsx and components/location-picker.tsx, listed so a new map is noticed) carries a credit linking to https://www.openstreetmap.org/copyright. The dashboard-wide half of e2e/where-street-map-trace.spec.ts: the venue pages and the curate form render the same two components.",
+      "mutation": "M1: components/geofence-editor.tsx replaced with its dev version (git show origin/dev:...). M2: only the editor's attribution back to \"© OpenStreetMap\". M3: an Esri World_Imagery tileLayer line appended to components/location-picker.tsx.",
+      "observed": "M1: 2 of 2 failing (the Esri scan listed the editor; the credit check). M2: 1 of 2 failing (the credit check). M3: 1 of 2 failing (the scan listed location-picker.tsx). Each reverted; 2 of 2 green (2026-11-26).",
+      "date": "2026-11-26"
     },
     "event-page-timezone.test.ts": {
       "guards": "SCRUM-421: every time on the event's pages is told on the event's clock. The page selects events.timezone and formats through eventClock, including days to the doors by the event's calendar. Nothing under app/dashboard/events/[id] (the page, feedback, feed, messaging), live-tab, issue-log or issue-timestamp formats with Intl.DateTimeFormat or toLocale*String, which would use the server's zone (UTC on Railway) or the viewer's. With event-phase.test.ts (eventClock under jest's TZ=UTC: IST output, calendar days across DST in New York and London, the UTC fallback asserted on .zone) and issue-timestamp.test.ts (an IST cross-midnight case that UTC gets wrong). Since 2026-10-01 (SCRUM-496) the sponsor's Placements and the Chatrooms list too: getSponsorOverview selects the event timezone, and both pages and the sponsor landing page (overview-sponsor) format through eventClock, with no bare formatter. Since step 15 the Events list builds its rows through lib/event-row.ts (eventRowFields), shared with the overview's Coming up: the label is whenLabel with the event's timezone and the date tile comes from eventClock(event.timezone). Since step 15 (part 2) the event header (when, lifecycle, days to the doors) is components/dashboard/event-header.tsx, shared by the overview, Room chat and Feedback, and the select is lib/event-page.ts; both are held, and the QR & link tab's when uses the same clock.",
@@ -1833,6 +1859,24 @@
       "mutation": "M307: `ages.years < 18` -> `<= 18`. M308: the stored-age fallback replaced with NULL. M309: the plausibility check (not future, <= 149 years) replaced with `date_of_birth IS NOT NULL`. M310: the looking_for match without word boundaries (`!~ 'dating'`, and separately without the closing `\\M`). M311: intent_default left as it was. M312: an unknown age counted as 0. M313: the stored age consulted before the birth date. M314: `OR p.show_orientation` dropped from the has-something-to-clear guard. M315: the guard made always true. M316: the upper bound 149 -> 100000. M317: today's date one day early. M318: looking_for re-ordered by value. M319: a NULL looking_for turned into '{}'. M320: the not-in-the-future guard on the birth date dropped (age() reads a date up to a year ahead as 0). M321: Postgres \\m/\\M word boundaries in place of the ASCII ones.",
       "observed": "Each: minor-dating-fields-cleared.itest.ts 1 of 1 failing. Restored; 1 of 1.",
       "date": "2026-09-29"
+    },
+    "report-reasons.test.ts": {
+      "guards": "SCRUM-1176: the one list of report reasons. Every value the installed app sends reads as itself; urgent is exactly child_safety, impersonation, intimate_image, under_18; a stored free string reads as other; case and padding read as the value they spell; an inherited property name is never a reason.",
+      "mutation": "(M9) Object.hasOwn replaced by `key in REPORT_REASONS`. (M10) the trim and lower-case removed.",
+      "observed": "M9: 1 of 7 failing (inherited names). M10: 1 of 7 (case and padding). Restored each; 7 of 7.",
+      "date": "2026-11-27"
+    },
+    "report-evidence.itest.ts": {
+      "guards": "SCRUM-1176 on a db:migrate database: a message report (room, DM, Block and report) copies the message into excerpt and the copy survives the message's deletion; a person report named by a room's or DM's handle, from Unmatch and report, or from a crew room (redesign-crews-blends.itest.ts) copies their last 20 lines there, oldest first, each bounded, only from a place the reporter is in; the reporter's data export carries no excerpt; the dismissed-report sweep clears user_reports' excerpt and description at 180 days and keeps a pending one's.",
+      "mutation": "(M1) the message route's excerpt removed. (M2) the person route's excerpt removed. (M3) the leave route's excerpt always null. (M4) the DM lines without the reporter's participation. (M5) the room lines without the reporter's membership. (M6) the per-line clip removed. (M7) the oldest-first reverse removed. (M8) the sweep's user_reports line removed. (M11) the export selects user_reports.excerpt. (M12) the crew-room report's excerpt removed. (M13) empty lines kept. (M14) a DM with text and a photo read as its text alone.",
+      "observed": "M1: 3 of 12 failing. M2: 3 of 12. M3: 2 of 12. M4: 1 of 12. M5: 1 of 12. M6: 1 of 12. M7: 2 of 12. M8: 1 of 12. M11: 1 of 12. M12: 1 of 3 room-member report tests in redesign-crews-blends.itest.ts. M13: 1 of 13. M14: 1 of 13. Restored each; 13 of 13 and 3 of 3 on trust10.",
+      "date": "2026-11-27"
+    },
+    "report-evidence-place.test.ts": {
+      "guards": "SCRUM-1176: placeOfRef reads the place a handle was minted in (an event's room, a crew's, a Blend's or a board post's room, a DM) and none from a raw id or a forged handle.",
+      "mutation": "(M15) a crew, Blend or board-post handle read as an event id.",
+      "observed": "M15: 1 of 2 failing. Restored; 2 of 2.",
+      "date": "2026-11-27"
     },
     "deletion-erases-participation.itest.ts": {
       "guards": "SCRUM-481: DELETE /account ends every open check-in through performCheckout, so an erased person is not 'here now' in a live room (getOccupancy drops them) while the check-in row stays, closed, as the organiser's attendance, and their presence session is departed. Another attendee in the same room is untouched. Review pass: every open check-in goes (a second event's too), each session is closed as departed_source 'user', and a failure to read them never costs the storage erasure (account-deletion.test.ts: still 200, both folders deleted).",

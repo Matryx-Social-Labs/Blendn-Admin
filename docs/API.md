@@ -88,6 +88,15 @@ the response is the lowercase form. A second signup in another case gets the
 same **409** as any taken address. `signin`, Google, Apple, the dashboard and
 password reset all lowercase what they are given too (SCRUM-328).
 
+**One inbox, one account, and a suspended person cannot sign up again**
+(SCRUM-1172). An address is compared as one inbox: lower case, without a
+`+tag`, and for Gmail without dots (`googlemail.com` is `gmail.com`), by the
+SQL function `identity_email`. One that any account already holds gets the
+same **409** `CONFLICT` "Email already registered" as the exact address, and no
+account is written, whoever holds it. Google and Apple, which prove the inbox,
+answer a new account for an inbox a suspended account holds with the suspended
+**403** below.
+
 **Password rules.** At least **12 characters**, and rejected if it is an obvious
 choice (`password1234` is twelve characters and fails) or built from the local
 part of the address. This is `checkPassword` in `lib/password.ts`, the same
@@ -148,7 +157,9 @@ failure: a silent refusal to sign in is indistinguishable from a bug.
 ```
 
 On `signin` it is checked **after** the password, so the response cannot be used
-to discover which addresses are suspended.
+to discover which addresses are suspended. `google` and `apple` also answer it
+when they would create an account for the same inbox as a suspended one (see
+`POST /auth/signup`).
 
 On `refresh` it is answered even for the token the suspension **revoked** — which
 is every live token, since suspending revokes them all. A token we signed, not
@@ -997,7 +1008,7 @@ and `/event/<id>` and their link-preview cards. No auth, no CORS; `lib/share-pub
 |--------|----------|-------------|
 | GET | `/events` | List events (paginated, filterable) |
 | GET | `/events/:eventId` | Get event details. Also carries `area` (the confirmed venue's area, else the city; null when neither is known), `doorPolicy`, `details` (or null) and `amenities`, none of which the list has. `chatGroup` is `{ id, name, status, member_count }` — snake_case — or null; `member_count` is `stats.hereCount`, in the room now (the column of that name only ever went up, and is not read). `categories[]` are the leaves as stored, `{ id, name, slug, description, icon }`, with no `parent`. `distance` is kilometres from `lat`/`lon`, and `null` (never absent) without them. `organizer` is `{ id, name, image, kind }` and never the user who created the row (SCRUM-1146): `organizer.id` is the organisation's id for `org` and null otherwise, `image` is always null. `organizer.kind` (SCRUM-1095) says what the name is: `org` (an organisation), `venue` (a venue day, its venue), `platform` (Blendn standing in), or `person` (an event with no organisation; `name` is null, the creating user's name is not sent). Draw a "Host" only for `org`; `GET /events` rows and `GET /users/:userId/favorites` rows carry the same. Also `changedAt`, `changedFields`, `changedFrom`, `days`, `dayCount` and `dayNumber` ([Flow 3](#the-event-what-changed-the-days-and-why-a-link-is-refused-flow-3)) |
-| POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`). On a native ticketed event (`TICKETING` on), 403 `tickets_required` unless the caller holds a ticket whose order is paid or is the event's staff (SCRUM-1014). `left` names the rooms it took you out of (see "One room at a time, and the switch"). Optional `withCrewId` tells that crew you're in ("With {crew}", answered by `crewTold`) |
+| POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`). On a native ticketed event (`TICKETING` on), 403 `tickets_required` unless the caller holds a ticket whose order is paid or is the event's staff (SCRUM-1014). `left` names the rooms it took you out of (see "One room at a time, and the switch"). Optional `withCrewId` tells that crew you're in ("With {crew}", answered by `crewTold`). Optional `doorCode` is the host's door code for a guest GPS could not place: see "The door code" |
 | GET | `/events/:eventId/people` | People from a night you attended, for the Recap — see below |
 | POST | `/events/:eventId/checkout` | Check out of event |
 | POST | `/events/:eventId/presence` | "Am I still counted as here?", every few minutes while checked in. `status` is `inside`, `outside`, `unknown` (a fix worse than the door's 150 m that reads outside: it neither starts nor advances the departure clock, SCRUM-1326), `checked_out` or `not_checked_in`. Checked out after 20 minutes outside, and on silence only after two outside readings at least 10 minutes apart; see `docs/CHECKIN.md` |
@@ -1794,6 +1805,41 @@ feature is worth. Rows cascade on account deletion.
 ```json
 { "pagination": { "page": 1, "limit": 20, "totalCount": 100, "totalPages": 5, "hasMore": true } }
 ```
+
+### The door code (gate 13)
+
+A guest whose GPS cannot place them types the code on the host’s screen. The
+code changes every 30 seconds, is per event occurrence, and is never returned
+by any mobile endpoint: only the host's dashboard Door shows it.
+
+- **When it exists:** `GET /events/:eventId` carries `doorCode: { available }`,
+  true while the door is open (doors, start − 90 min, to the end), the event is
+  published and the code is not paused. Never the code.
+- **When to offer it:** a refusal of `POST /events/:eventId/checkin` with
+  `reasonCode: DOOR_CODE_OFFERED`: an `OUT_OF_RANGE` within 1 km of the fence,
+  or a fix over 150 m accuracy (now recorded as `weak_fix`), while the code is
+  live. The server decides; the app does no distance maths.
+- **The request:** the usual body plus `doorCode` (string, at most 12; lower
+  case, spaces and dashes accepted; 8/B, 5/S, 2/Z read as one) and
+  `deviceInfo.gpsAccuracy` (required with a code), optionally
+  `deviceInfo.mocked`. Every other gate runs first, unchanged.
+- **The answers, in order** (`errorCode`, status, sentence):
+
+| `errorCode` | Status | Sentence |
+|---|---|---|
+| `DOOR_CODE_PAUSED` | 400 | The door code is paused. Ask the host. |
+| `DOOR_CODE_LOCKED` | 429 | Too many tries. Try again at 10:52 PM, or step outside and use GPS. (5 wrong in 10 minutes; the time is on the event's clock) |
+| `DOOR_CODE_LOCKED` | 429 | Too many tries tonight. Step outside and use GPS. (10 wrong in the night, or removed from the room by the host) |
+| `DOOR_CODE_FAR` | 400 | You need to be at the venue to use the door code. (no accuracy, over 1000 m, a mocked fix, or more than 1 km short) |
+| `DOOR_CODE_CHANGED` | 400 | That code just changed. Read the new one on the host’s screen. (not counted as a guess) |
+| `DOOR_CODE_WRONG` | 400 | That code didn’t match. Check the host’s screen; it may have just changed. |
+| `DOOR_CODE_UNAVAILABLE` | 503 | The door code isn’t available right now. Try GPS. (the counters cannot be read; GPS is unaffected) |
+
+A valid code checks in exactly as GPS does, same response; the row records
+`method: door_code`. An App Review account at a `review_demo` event ignores the
+code (`method: review`). Wrong codes count per person and per event; 30 wrong
+in 10 minutes with more wrong than right pauses the code for 10 minutes and
+tells the host's Door.
 
 ### A venue day's id is not an event's
 
@@ -4552,6 +4598,31 @@ Requires `OPENAI_API_KEY` env var: Railway production refuses to boot without it
 | POST | `/chat/groups/:chatGroupId/report` | `event_reports` with `chat_group_id` — shown as "Room" |
 | POST | `/events/:eventId/board/:postId/report` | `message_reports` with `message_type: "board_post"` — shown as "Lobby · offer\|seeking\|chat" |
 | POST | `/board/requests/:requestId/report` | `message_reports` with `message_type: "board_request"` — shown as "Lobby ask" |
+
+**Reasons** (`reason`, at most 200 characters) are one list, `lib/report-reasons.ts`,
+each with a severity (S1 first) and an urgent flag. The OpenAPI spec prints it.
+Any other string is still accepted: it is stored as written and read as `other`,
+so an older app's free text keeps working and keeps its words.
+
+| Severity | Reasons |
+|---|---|
+| S1, urgent | `child_safety`, `intimate_image`, `under_18`, `impersonation` |
+| S1 | `threat`, `unsafe` |
+| S2 | `harassment`, `hate_speech`, `pile_on`, `inappropriate_content`, `inappropriate_messages`, `inappropriate_photos`, `offensive`, `fake_profile`, `host_conduct`, `organiser_conduct`, `unsafe_venue` |
+| S3 | `spam`, `contact_details`, `misleading`, `misleading_listing`, `not_real`, `other` |
+
+The crew, offer and Lobby report routes keep their own shorter enums, all from
+this list.
+
+**What a report keeps of the words**, copied when it is filed, in `excerpt`: a
+message report (room or DM, and Unmatch/Block and report with a `messageId`) the
+message itself; a person report the person's last 20 lines (500 characters
+each) in the room or conversation it came from: named by a room's or a
+conversation's handle, from a crew's or Blend's room, or from Unmatch/Block and
+report without a message. Copied only from a room or conversation the reporter
+is in. The copy is for staff review: no mobile response and
+no data export carries it. A dismissed report loses it at 180 days
+(`docs/RETENTION.md`).
 
 ### The Lobby
 

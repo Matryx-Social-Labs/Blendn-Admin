@@ -141,6 +141,10 @@ export function Overview({
                 </div>
               ))}
             </dl>
+            {/* Before shows no Door tab (gate 13): say when it comes. */}
+            {state === "upcoming" ? (
+              <p className="text-[0.75rem] text-faint-foreground">The door code appears 90 minutes before the start.</p>
+            ) : null}
           </Panel>
         )}
       </div>

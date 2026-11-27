@@ -10,6 +10,7 @@ import { PRODUCT_EVENTS, record } from "./product-events"
 import { endPhoneSessions, phoneSessionsEnded } from "./session-end"
 import { Prisma } from "@prisma/client"
 import { oauthDisplayName } from "./moderation/oauth-name"
+import { isSuspendedIdentity } from "./suspended-identity"
 
 function getJwtSecret(): string {
   const secret = process.env.MOBILE_JWT_SECRET
@@ -809,6 +810,9 @@ async function linkVerifiedOAuthIdentity(
   }
 }
 
+/** A new Google or Apple account would be a suspended person's: the route answers `accountRefusal("suspended")`. */
+export class SuspendedIdentityError extends Error {}
+
 export async function findOrCreateGoogleUser(
   googlePayload: GoogleTokenPayload
 ): Promise<{ userId: string; email: string; isNewUser: boolean }> {
@@ -846,6 +850,8 @@ export async function findOrCreateGoogleUser(
       isNewUser: false,
     }
   }
+
+  if (await isSuspendedIdentity(email)) throw new SuspendedIdentityError()
 
   // Create a new user with the Google account. The name is capped and screened (oauthDisplayName).
   const googleName = oauthDisplayName(googlePayload.name || googlePayload.given_name)
@@ -985,6 +991,7 @@ export async function findOrCreateAppleUser(
   if (!email) {
     throw new Error("Apple sign in did not provide an email for a new user")
   }
+  if (await isSuspendedIdentity(email)) throw new SuspendedIdentityError()
 
   const newUser = await db.user.create({
     data: {

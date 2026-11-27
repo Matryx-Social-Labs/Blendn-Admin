@@ -27,6 +27,7 @@ import { resolveEventCity } from "@/lib/location"
 import { eventArea } from "@/lib/venue-visibility"
 import { getInsideCount } from "@/lib/occupancy"
 import { dayOccurrencesSelect, eventDays, eventSession } from "@/lib/occurrences"
+import { entryCodeAvailable } from "@/lib/entry-code"
 import { changeForResponse, EventStatusMovedError, updateEventTracked } from "@/lib/event-change"
 import {
   successResponse,
@@ -292,6 +293,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       // Covers the whole area, outline or circle, from the pin (SCRUM-350) —
       // the app judges "near enough" and "has left" by this circle alone.
       checkInRadius: phoneCheckInRadius(event),
+      // Whether the host's door code is live now (gate 13): the app offers "Enter door code" on its own weak-fix tray. Never the code.
+      doorCode: { available: entryCodeAvailable(event, new Date()) },
       isFeatured: event.is_featured,
       isRecurring: event.is_recurring,
       externalLink: event.external_link,

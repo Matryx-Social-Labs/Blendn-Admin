@@ -138,6 +138,11 @@ export const REFUSAL_LABEL: Record<refusal_reason, string> = {
   too_late: "After the window closed",
   day_cancelled: "Day was cancelled",
   under_age: "Under 18",
+  weak_fix: "GPS too weak to judge",
+  door_code_wrong: "Wrong door code",
+  door_code_far: "Door code, too far away",
+  door_code_locked: "Door code, too many tries",
+  door_code_paused: "Door code paused",
 }
 
 /** The lower median of an ascending list; null when it is empty. */
