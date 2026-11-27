@@ -49,6 +49,20 @@ async function host(label: string, kind: "organizer" | "venue_owner" = "organize
   return id
 }
 
+/**
+ * The organizer's home organisation, made once if they have none: an event is
+ * its organisation's, and the overview reads organisations, never who created
+ * the row (SCRUM-1250).
+ */
+async function homeOrg(userId: string) {
+  const home = await db.organisation_members.findFirst({ where: { user_id: userId }, orderBy: { created_at: "asc" }, select: { org_id: true } })
+  if (home) return home.org_id
+  const org = await db.organisations.create({ data: { display_name: `Dash ${testId("org")}`, kind: "company" } })
+  orgs.push(org.id)
+  await db.organisation_members.create({ data: { org_id: org.id, user_id: userId, role: "owner" } })
+  return org.id
+}
+
 const DAY = 24 * 60 * 60 * 1000
 
 async function makeScheduledEvent(
@@ -72,6 +86,7 @@ async function makeScheduledEvent(
       timezone: "UTC",
       status: opts.status ?? "published",
       organizer_id: organizerId,
+      organizer_org_id: await homeOrg(organizerId),
       max_capacity: opts.capacity ?? null,
       venue_name: opts.venue ?? null,
     },

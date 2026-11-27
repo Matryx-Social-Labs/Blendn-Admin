@@ -162,6 +162,6 @@ describe("the delete route binds the key the way the fetch path does", () => {
     const src = readFileSync(join(__dirname, "..", "app/api/mobile/uploads/delete/route.ts"), "utf8")
     expect(src).toMatch(/ownedObjectKey\(url, authUser\.userId, f\)/)
     expect(src).not.toMatch(/extractKeyFromUrl/)
-    expect(src).toMatch(/DELETABLE_FOLDERS: UploadFolder\[\] = \["profile", "chat", "events"\]/)
+    expect(src).toMatch(/DELETABLE_FOLDERS: UploadFolder\[\] = \["profile", "chat"\]/)
   })
 })

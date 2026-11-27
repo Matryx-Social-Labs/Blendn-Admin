@@ -1385,8 +1385,8 @@
       "date": "2026-09-17"
     },
     "integration/org-suspension.itest.ts": {
-      "guards": "suspending an organisation flips its published events to draft (remembered), hides them from the list, the SQL search, GET, RSVP, the roster and the room, empties the member's actor and list (creator fallback gated), tells the people going once, and reinstating restores only what the suspension hid; ⌘K search keeps its scope under the search terms (SCRUM-8)",
-      "mutation": "Six, one at a time: drop `...activeMembership` from actorFor; drop `status: \"draft\"` from the suspend updateMany; drop `...hostNotSuspended` from the creator fallback; make canJoinChat return true; drop `status: \"draft\"` from the reinstate where; restore `{ ...eventScope, OR: [...] }` in app/api/search/route.ts.",
+      "guards": "suspending an organisation flips its published events to draft (remembered), hides them from the list, the SQL search, GET, RSVP, the roster and the room, empties the member's actor and list (no creator arm since SCRUM-1250: the org-less event they created is not listed either), tells the people going once, and reinstating restores only what the suspension hid; ⌘K search keeps its scope under the search terms (SCRUM-8)",
+      "mutation": "Six, one at a time: drop `...activeMembership` from actorFor; drop `status: \"draft\"` from the suspend updateMany; drop `...hostNotSuspended` from the creator fallback (retired with the fallback, SCRUM-1250; re-adding any creator arm now fails the same assertion); make canJoinChat return true; drop `status: \"draft\"` from the reinstate where; restore `{ ...eventScope, OR: [...] }` in app/api/search/route.ts.",
       "observed": "1 failing each: the host keeps the org; the events stay listed; the host still lists the event they created; the room stays open; the admin-cancelled event comes back published; another organiser's ⌘K lists the hidden event.",
       "date": "2026-09-17"
     },

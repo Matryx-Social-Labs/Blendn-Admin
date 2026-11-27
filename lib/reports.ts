@@ -6,7 +6,6 @@ import { attendeeLabel } from "./pseudonym"
 import { arrivalsByHour, checkedInBy, distinctAttendeeCounts, distinctAttendeeCountsByDay, hostSettledAt } from "./attendee-counts"
 import { discloseGuests, discloseVenueCounts, MIN_CELL } from "./disclosure"
 import { stillArriving } from "./occurrences"
-import { hostNotSuspended } from "./event-access"
 import { realEventsWhere } from "./event-kind"
 import { displayCategories } from "./moderation/config"
 import { claimedVenueEventsWhere, reachedThroughBuilding } from "./event-visibility"
@@ -171,8 +170,7 @@ const NOTHING: Prisma.eventsWhereInput = { id: { in: [] } }
  * Which events an actor reports on, split by how they reach each one.
  *
  * - `hosted`: the events the organisations they own or administer run (not
- *   their staff: SCRUM-1244), plus the creator floor
- *   (gated like `visibleEventsWhere`'s, SCRUM-8). Exact counts, per-guest rows.
+ *   their staff: SCRUM-1244). Exact counts, per-guest rows.
  * - `venueOnly`: a venue owner's reach through the building — other hosts'
  *   events at their venues, from the claim on (SCRUM-355, SCRUM-500). Counts
  *   only, held back under the floor (SCRUM-501).
@@ -214,11 +212,8 @@ export async function reportScope(role: user_role, userId: string): Promise<Repo
     return { all: NOTHING, hosted: NOTHING, venueOnly: NOTHING, actor: { id: userId, orgIds } }
   }
 
-  const hostedArms: Prisma.eventsWhereInput[] = [
-    { organizer_org_id: { in: editOrgIds } },
-    // The creator arm, for events with no organisation only: one that has an org is its members' (SCRUM-942).
-    { organizer_id: userId, organizer_org_id: null, ...hostNotSuspended },
-  ]
+  // Organisations, never who created the row (SCRUM-942, SCRUM-1250), as `visibleEventsWhere`.
+  const hostedArms: Prisma.eventsWhereInput[] = [{ organizer_org_id: { in: editOrgIds } }]
   // Any member of a venue's org, whatever their User.role (SCRUM-1246), as `eventPermissions` grants.
   const venueArms = await claimedVenueEventsWhere(orgIds)
 
@@ -234,7 +229,6 @@ export async function reportScope(role: user_role, userId: string): Promise<Repo
             // Not theirs to run. Explicit about NULL: a bare `notIn` on a
             // nullable column drops every event with no organising org.
             { OR: [{ organizer_org_id: null }, { organizer_org_id: { notIn: orgIds } }] },
-            { organizer_id: { not: userId } },
           ],
         }
       : NOTHING,
@@ -355,7 +349,6 @@ export async function buildReport(
           city: true,
           venue_name: true,
           max_capacity: true,
-          organizer_id: true,
           organizer_org_id: true,
           _count: {
             select: {
