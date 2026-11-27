@@ -6,7 +6,7 @@ process.env.MOBILE_JWT_SECRET ??= "itest-mobile-secret-0123456789abcdefghij"
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { conversationPair } from "@/lib/conversations"
-import { emitEventCheckIn, emitEventCheckOut } from "@/lib/socket-server"
+import { emitEventCheckIn, emitEventCheckOut, emitEventCheckOuts } from "@/lib/socket-server"
 import { roomHandle } from "@/lib/room-handle"
 
 import { cleanup, closeDb, db, makeUser, onboard, testId } from "./helpers"
@@ -26,6 +26,7 @@ const checkinRoute = require("@/app/api/mobile/events/[eventId]/checkin/route") 
 const rosterRoute = require("@/app/api/mobile/events/[eventId]/checkins/route") as typeof import("@/app/api/mobile/events/[eventId]/checkins/route")
 const matchesRoute = require("@/app/api/mobile/events/[eventId]/matches/route") as typeof import("@/app/api/mobile/events/[eventId]/matches/route")
 const peopleRoute = require("@/app/api/mobile/events/[eventId]/people/route") as typeof import("@/app/api/mobile/events/[eventId]/people/route")
+const wavesRoute = require("@/app/api/mobile/events/[eventId]/waves/route") as typeof import("@/app/api/mobile/events/[eventId]/waves/route")
 const participantsRoute = require("@/app/api/mobile/chat/groups/[chatGroupId]/participants/route") as typeof import("@/app/api/mobile/chat/groups/[chatGroupId]/participants/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -129,6 +130,7 @@ const lists = async (eventId: string, as: Person) => {
 
 afterAll(async () => {
   await db.user_reports.deleteMany({ where: { reporter_id: { in: users } } })
+  await db.event_waves.deleteMany({ where: { event_id: { in: events } } })
   await db.private_conversations.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
   await db.presence_sessions.deleteMany({ where: { event_id: { in: events } } })
   await cleanup(users, events)
@@ -186,6 +188,14 @@ describe("a viewer with a closed pair and a report: every room list names the sa
     expect(reported.roster).toContain(h(v))
     expect(reported.participants).toContain(h(v))
     expect(reported.deck).toContain(h(v))
+  })
+
+  it("the wave list hides their waves as the deck hides them; a stranger's wave is listed", async () => {
+    await db.event_waves.createMany({ data: [b, c, s].map((p) => ({ event_id: eventId, from_id: p.id, to_id: v.id })) })
+    const res = await call(wavesRoute.GET, `/api/mobile/events/${eventId}/waves`, v, { eventId })
+    expect(res.status).toBe(200)
+    expect(res.body.data.waves.map((w: { userId: string }) => w.userId)).toEqual([h(s)])
+    expect(res.body.data.total).toBe(1)
   })
 
   it("reads the rows back: the pair's conversation is closed, and the report is V's", async () => {
@@ -261,6 +271,15 @@ describe("arrivals and departures follow the same list: the hidden person's copy
     await emitEventCheckIn(eventId, v.id, "Otter", { name: "V", image: null }, true)
     expect(copies(c, "event:room:checkin")).toHaveLength(1)
     expect(copies(c, "event:checkin")[0].payload.userId).toBe(roomHandle(eventId, v.id))
+  })
+
+  it("a room's departures in one pass: each leaver's copy follows that leaver's own list", async () => {
+    await install([v, s], eventId)
+    emitEventCheckOuts(eventId, [b.id, c.id, s.id])
+    for (let i = 0; i < 40 && copies(s, "event:checkout").length < 3; i++) await new Promise((r) => setTimeout(r, 50))
+    const ids = (to: Person) => copies(to, "event:checkout").map((e) => e.payload.userId ?? null)
+    expect(ids(v).sort()).toEqual([null, null, roomHandle(eventId, s.id)].sort())
+    expect(ids(s).sort()).toEqual([roomHandle(eventId, b.id), roomHandle(eventId, c.id), s.id].sort())
   })
 
   it.each([

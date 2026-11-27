@@ -1487,6 +1487,22 @@ function sendWithHereCount(eventId: string, send: (hereCount: number | undefined
 }
 
 /**
+ * `viewersHiddenFromMany`, or null when it could not be read. The caller then
+ * names the person to nobody but themself: a bare count fails closed, where a
+ * dropped emit would leave every roster a row out and an empty set would name
+ * them to the people who must not see them.
+ */
+function hiddenFromOrNull(userIds: readonly string[], eventId: string): Promise<Map<string, Set<string>> | null> {
+  return viewersHiddenFromMany(userIds).catch((error: unknown) => {
+    logger.warn("Who the room hides could not be read: sending the bare count", {
+      eventId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return null
+  })
+}
+
+/**
  * Emit an event check-in update to all users in the event room
  */
 export function emitEventCheckIn(
@@ -1529,9 +1545,10 @@ export function emitEventCheckIn(
    * to the whole room, and a friend's copy lacking it while a show-online-off
    * stranger's has it would tell a friend which of the two arrivals was a friend.
    */
-  return viewersHiddenFromMany([userId]).then((byUser) => sendWithHereCount(eventId, (hereCount) => {
-    const hiddenFrom = byUser.get(userId) ?? new Set<string>()
-    const shown = (viewer: string) => viewer === userId || (listed && !hiddenFrom.has(viewer))
+  return hiddenFromOrNull([userId], eventId).then((byUser) => sendWithHereCount(eventId, (hereCount) => {
+    // Unread (`null`): fail closed — the count still moves, with no handle and no room copy to anybody else.
+    const hiddenFrom = byUser?.get(userId) ?? new Set<string>()
+    const shown = (viewer: string) => viewer === userId || (listed && byUser !== null && !hiddenFrom.has(viewer))
     /*
      * Two rooms, because two audiences want different things.
      *
@@ -1564,6 +1581,7 @@ export function emitEventCheckIn(
        * their name on the next refresh.
        */
       listed &&
+      byUser !== null &&
       emitAsSeenBy(
         io.in(`event:room:${eventId}`).except([...hiddenFrom].map((id) => `user:${id}`)),
         eventId,
@@ -1615,7 +1633,7 @@ export function emitEventCheckOuts(eventId: string, userIds: readonly string[]):
   const checkOutTime = new Date().toISOString()
   void Promise.all([
     // Whose roster leaves each leaver out: the arrival's rule (`viewersHiddenFromMany`).
-    viewersHiddenFromMany(userIds),
+    hiddenFromOrNull(userIds, eventId),
     db.profiles.findMany({ where: { id: { in: [...userIds] } }, select: { id: true, show_online: true } }),
   ])
     .then(([hiddenFromOf, profiles]) => {
@@ -1626,8 +1644,9 @@ export function emitEventCheckOuts(eventId: string, userIds: readonly string[]):
       return sendWithHereCount(eventId, async (hereCount) => {
         let told = 0
         for (const userId of userIds) {
-          const hiddenFrom = hiddenFromOf.get(userId) ?? new Set<string>()
-          const shown = (viewer: string) => viewer === userId || (!hidden.has(userId) && !hiddenFrom.has(viewer))
+          // Unread (`null`): fail closed, as the arrival — a bare count, so no roster keeps a ghost row.
+          const hiddenFrom = hiddenFromOf?.get(userId) ?? new Set<string>()
+          const shown = (viewer: string) => viewer === userId || (hiddenFromOf !== null && !hidden.has(userId) && !hiddenFrom.has(viewer))
           // One leaver's failure never stops the rest of the room's copies (a ghost on every roster).
           await emitAsSeenBy(audience, eventId, "event:checkout", (idFor, _recognises, viewer) => ({
             eventId,

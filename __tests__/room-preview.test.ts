@@ -19,7 +19,7 @@ const mockDb = {
   // Friends leave the count (lib/room-people.ts); none here.
   friendships: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
   ended_friendships: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
-  user_reports: { findMany: jest.fn(async () => []) },
+  user_reports: { findMany: jest.fn(async (..._a: unknown[]): Promise<{ reported_id: string }[]> => []) },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 
@@ -33,10 +33,11 @@ jest.mock("@/lib/event-access", () => ({
 }))
 
 const mockBlocks = jest.fn()
+const mockClosed = jest.fn(async (..._a: unknown[]) => new Set<string>())
 // Blocks reach the count through `hiddenInRooms`; closed pairs and reports are empty here.
 jest.mock("@/lib/conversations", () => ({
   blockCounterparties: (...a: unknown[]) => mockBlocks(...a),
-  closedPairKeys: async () => new Set<string>(),
+  closedPairKeys: (...a: unknown[]) => mockClosed(...a),
 }))
 jest.mock("@/lib/rate-limit", () => ({ rateLimit: async () => null, userLimit: () => ({}) }))
 
@@ -118,6 +119,16 @@ it("leaves out anyone in a block relationship either way", async () => {
   const body = await (await call()).json()
   expect(body.data.tasteMatchCount).toBeNull()
   expect(mockBlocks).toHaveBeenCalledWith(ME)
+})
+
+it("leaves out a closed pair and anybody the viewer reported, as the roster does (SCRUM-1386)", async () => {
+  pool = [person("p1", ["techno"]), person("p2", ["techno"]), person("p3", ["techno"]), person("p4", ["techno"])]
+  mockClosed.mockResolvedValueOnce(new Set(["p1"]))
+  mockDb.user_reports.findMany.mockResolvedValueOnce([{ reported_id: "p2" }])
+  const body = await (await call()).json()
+  // Four share; without p1 and p2 two are left: under the bucket.
+  expect(body.data.tasteMatchCount).toBeNull()
+  expect(mockDb.user_reports.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { reporter_id: ME } }))
 })
 
 it("is null when fewer than three are inside now, and does not even look", async () => {

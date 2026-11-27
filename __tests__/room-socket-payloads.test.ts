@@ -16,6 +16,7 @@
 process.env.NEXTAUTH_SECRET = "room-socket-payloads-secret-32-characters"
 const mockCount = jest.fn()
 const mockChatGroup = jest.fn()
+const mockReports = jest.fn(async (..._a: unknown[]): Promise<unknown[]> => [])
 jest.mock("@/lib/db", () => ({
   db: {
     event_check_ins: { count: (...a: unknown[]) => mockCount(...a) },
@@ -30,7 +31,7 @@ jest.mock("@/lib/db", () => ({
     blocked_users: { findMany: async () => [] },
     // …and closed pairs and reports, the rest of who the roster hides (`viewersHiddenFromMany`).
     private_conversations: { findMany: async () => [] },
-    user_reports: { findMany: async () => [] },
+    user_reports: { findMany: (...a: unknown[]) => mockReports(...a) },
   },
 }))
 jest.mock("@/lib/mobile-auth", () => ({ verifyAccessToken: jest.fn(), accountBlockReason: jest.fn() }))
@@ -151,6 +152,21 @@ describe("hereCount", () => {
 
     expect(watcher["event:checkin"]).toEqual([expect.objectContaining({ userId: handle("arriver-2") })])
     expect(watcher["event:checkin"]![0]).not.toHaveProperty("hereCount")
+  })
+
+  it("an unread hidden set fails closed: the count still moves, the handle and the room copy reach nobody (SCRUM-1386)", async () => {
+    mockReports.mockRejectedValueOnce(new Error("db down")).mockRejectedValueOnce(new Error("db down"))
+    const watcher = await listen("watcher-3", [`event:${EVENT}`, `event:room:${EVENT}`])
+
+    emitEventCheckIn(EVENT, "arriver-3", "Quiet Otter")
+    emitEventCheckOut(EVENT, "leaver-3")
+    await settle()
+
+    expect(watcher["event:checkin"]).toEqual([expect.objectContaining({ hereCount: 7 })])
+    expect(watcher["event:checkin"]![0]).not.toHaveProperty("userId")
+    expect(watcher["event:room:checkin"] ?? []).toEqual([])
+    expect(watcher["event:checkout"]).toEqual([expect.objectContaining({ hereCount: 7 })])
+    expect(watcher["event:checkout"]![0]).not.toHaveProperty("userId")
   })
 })
 

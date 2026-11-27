@@ -1411,9 +1411,9 @@ nothing. When nothing maps, `lens` is `null` and the app draws the plain card.
 
 **How long:** 30 days after the event's last night ends the answer and the `workIntent` are cleared; `GET .../preferences` then says `null` for both (`docs/RETENTION.md`).
 
-### A member a host banned from the room
+### Who a room's lists leave out
 
-**Who a room's lists leave out is one list** (SCRUM-1386, `hiddenInRooms` in
+**One list** (SCRUM-1386, `hiddenInRooms` in
 `lib/room-people.ts`): anybody in a block with you either way, anybody you closed
 a conversation with (an unmatch: both of you), your friends, and anybody you
 reported (any status; the person you reported is told nothing and still sees
@@ -1425,6 +1425,8 @@ list minus another names anybody. Each list's total (`pagination.totalCount`,
 which stays the one public headcount. The live `event:checkin` /
 `event:room:checkin` / `event:checkout` copies follow the same rule
 (docs/SOCKET_EVENTS.md).
+
+### A member a host banned from the room
 
 A ban closes the room's people, not only its chat. To a member a host banned
 from an event's room, every one of these answers as the chat does — 403
