@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { ConversationClosedError, blockedEitherWay, openConversation } from "@/lib/conversations"
 import { db } from "@/lib/db"
+import { eventAccessResponse, participationRefusal } from "@/lib/event-access"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { sendPushNotification } from "@/lib/push-notifications"
@@ -54,6 +55,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     const { action } = parsed.data
+
+    // Accepting opens a conversation: an account known to be under 18 may not (SCRUM-1169). Decline and block stay open to everyone.
+    if (action === "accept") {
+      const denial = await participationRefusal(authUser.userId)
+      if (denial?.kind === "age") return eventAccessResponse(denial)
+    }
 
     // Get the message request
     const messageRequest = await db.message_requests.findUnique({

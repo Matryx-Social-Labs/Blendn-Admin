@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { acceptFriendRequest, dismissFriendRequest, withdrawFriendRequest } from "@/lib/friends"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
+import { eventAccessResponse, participationRefusal } from "@/lib/event-access"
 import { rateLimit, userLimit, withReasonCode } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -46,7 +46,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (parsed.data.action === "accept") {
       // Becoming friends is taking part, as asking is (SCRUM-331).
       const unfinished = await participationRefusal(authUser.userId)
-      if (unfinished) return unfinishedResponse(unfinished)
+      if (unfinished) return eventAccessResponse(unfinished)
       if (!(await acceptFriendRequest(requestId, authUser.userId))) return gone()
       return successResponse({ state: "friends" })
     }

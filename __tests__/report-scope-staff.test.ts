@@ -62,3 +62,18 @@ it("reads the Attendees export from the hosted arm, never `all` (SCRUM-1246)", (
   expect(block).toContain("scopes.hosted")
   expect(block).not.toMatch(/\bscope\b/)
 })
+
+/*
+ * Creating a row is not running it (SCRUM-942). The creator arm — `organizer_id
+ * = me AND organizer_org_id IS NULL` — is gone from `hosted`, and `venueOnly`
+ * no longer drops a row by who created it, so `hosted` and `venueOnly` still
+ * partition `all`: an event at our venue that we created but our org does not
+ * run is the venue's, with its figures held back.
+ */
+it("scopes the reports on organisations, never on who created the row (SCRUM-942)", async () => {
+  const { claimedVenueEventsWhere } = jest.requireMock("@/lib/event-visibility") as { claimedVenueEventsWhere: jest.Mock }
+  claimedVenueEventsWhere.mockResolvedValueOnce([{ venue_id: "venue-1", start_time: { gte: new Date(0) } }])
+  mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: "org-venue", role: "owner" }])
+  const { all, hosted, venueOnly } = await reportScope("organizer", "u1")
+  for (const scope of [all, hosted, venueOnly]) expect(JSON.stringify(scope)).not.toContain("organizer_id")
+})

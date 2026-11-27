@@ -8,7 +8,7 @@ export const SendMessageRequestSchema = z
     content: z.string().min(1).max(4000),
     type: z.literal("text").default("text").openapi({
       description:
-        "Words only. A room takes no media: any other type, or any `metadata`, is 400 \"Photos can only be sent in a direct message\" (R9, SCRUM-626).",
+        "Words only. A room takes no media: any other type, or any `metadata`, is 400 \"Photos can’t be sent in a room\" (R9, SCRUM-626).",
     }),
     parentId: z.string().uuid().optional(),
   })
@@ -16,15 +16,14 @@ export const SendMessageRequestSchema = z
 
 export const SendDMRequestSchema = z
   .object({
-    text: z.string().max(5000).optional(),
-    mediaUrl: z.string().url().optional().openapi({
-      description:
-        "A photo: the sender's own chat upload (POST /uploads/presigned-url, folder chat). Any other URL is 400 (SCRUM-426). " +
-        "403 until both people are named to each other or are friends; stored as a copy with its metadata (EXIF, GPS, XMP) removed (R9, SCRUM-626).",
-    }),
-    mediaType: z.literal("image").optional().openapi({ description: "Photos only: `video` is 400 (R9, SCRUM-626)." }),
+    text: z.string().min(1).max(5000),
+    replyToId: z.string().uuid().optional().openapi({ description: "A message in the same conversation, or 400." }),
+    clientId: z.string().uuid().optional().openapi({ description: "This send's own id: a retry with it returns the first write." }),
   })
-  .openapi("SendDMRequest")
+  .openapi("SendDMRequest", {
+    description:
+      "Words only (SCRUM-1165). A send carrying `mediaUrl`, with or without `text`, is 403 FORBIDDEN \"Photos can’t be sent in messages yet.\" and nothing is stored.",
+  })
 
 export const CreateConversationRequestSchema = z
   .object({

@@ -400,12 +400,29 @@ describe("resolveReport", () => {
     expect(mockDb.$transaction).not.toHaveBeenCalled()
   })
 
+  // What the suspended person is told is the report's reason as a fixed category (SCRUM-1174).
+  it.each([
+    ["user", "harassment", "harassment"],
+    ["message", "spam", "spam"],
+    ["user", "he was rude to me at the bar", "guidelines"],
+  ] as const)("a %s report for %j suspends with the category %j", async (kind, reason, category) => {
+    if (kind === "user") mockDb.user_reports.findUnique.mockResolvedValue({ ...pendingUserReport, reason })
+    else {
+      mockDb.message_reports.findUnique.mockResolvedValue({ ...pendingGroupReport, reason })
+      mockDb.chat_messages.findUnique.mockResolvedValue({ user_id: "u9", chat_group_id: "g1" })
+    }
+    await resolveReport(kind, kind === "user" ? "ur1" : "mr1", "suspend")
+    expect(tx.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "u9" }, data: expect.objectContaining({ suspension_reason: category }) })
+    )
+  })
+
   it("reinstating clears the suspension", async () => {
     mockDb.user_reports.findUnique.mockResolvedValue(pendingUserReport)
     await resolveReport("user", "ur1", "reinstate")
     expect(tx.user.update).toHaveBeenCalledWith({
       where: { id: "u9" },
-      data: { suspended_at: null, suspended_by: null },
+      data: { suspended_at: null, suspended_by: null, suspension_reason: null },
     })
   })
 
@@ -421,7 +438,7 @@ describe("resolveReport", () => {
     await resolveReport("user", "ur1", "reinstate")
     expect(tx.user.update).toHaveBeenCalledWith({
       where: { id: "u9" },
-      data: { suspended_at: null, suspended_by: null },
+      data: { suspended_at: null, suspended_by: null, suspension_reason: null },
     })
     // The report's own verdict stands; only the suspension is lifted.
     expect(tx.user_reports.updateMany).not.toHaveBeenCalled()

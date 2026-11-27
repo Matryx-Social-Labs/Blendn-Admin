@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
-import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
+import { eventAccessResponse, participationRefusal } from "@/lib/event-access"
 import { INVITE_TOKEN, matchStanding, mayConnect, personCard, personSelect, releaseHeldRequests, requestFriend } from "@/lib/friends"
 import { userIdFromDmRef } from "@/lib/conversation-ref"
 import { identityForRef } from "@/lib/identity"
@@ -138,9 +138,9 @@ export async function POST(request: NextRequest) {
     const limited = await rateLimit(request, userLimit("write", "friend-request", me))
     if (limited) return withReasonCode(limited, ErrorCode.RATE_LIMITED)
 
-    // Not onboarded and no adult age on file: may not take part yet (SCRUM-331).
+    // Known to be under 18, or not onboarded with no adult age on file: may not take part (SCRUM-331, SCRUM-1169).
     const unfinished = await participationRefusal(me)
-    if (unfinished) return unfinishedResponse(unfinished)
+    if (unfinished) return eventAccessResponse(unfinished)
 
     const parsed = createSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)

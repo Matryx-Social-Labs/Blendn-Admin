@@ -19,7 +19,7 @@ import { closePostRooms, closeRoomSockets } from "@/lib/room-close"
 import { closeCrewBlendsLocked, dissolveCrewLocked } from "@/lib/crews/sweep"
 import { blockAccountNow } from "@/lib/account-blocklist"
 import { notifyReportActioned } from "@/lib/push-notifications"
-import { applySuspension, liftSuspension } from "@/lib/suspension"
+import { applySuspension, liftSuspension, suspensionCategory } from "@/lib/suspension"
 import { clipCharacters } from "@/lib/utils"
 
 /**
@@ -542,7 +542,7 @@ export async function resolveReport(
     kind === "user"
       ? await db.user_reports.findUnique({
           where: { id: reportId },
-          select: { id: true, status: true, reported_id: true, reporter_id: true },
+          select: { id: true, status: true, reason: true, reported_id: true, reporter_id: true },
         })
       : kind === "event"
         ? await db.event_reports.findUnique({
@@ -551,7 +551,7 @@ export async function resolveReport(
           })
         : await db.message_reports.findUnique({
             where: { id: reportId },
-            select: { id: true, status: true, message_id: true, message_type: true, reporter_id: true },
+            select: { id: true, status: true, reason: true, message_id: true, message_type: true, reporter_id: true },
           })
 
   if (!report) throw new Refusal("Report not found")
@@ -739,7 +739,8 @@ export async function resolveReport(
     }
 
     if (decision === "suspend" && subjectId) {
-      await applySuspension(tx, subjectId, admin.id)
+      // The report's reason as a fixed category: what the person is told (SCRUM-1174).
+      await applySuspension(tx, subjectId, admin.id, suspensionCategory((report as { reason: string }).reason))
     }
 
     if (decision === "reinstate" && subjectId) {

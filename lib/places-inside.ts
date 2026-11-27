@@ -1,5 +1,5 @@
 import { cityRuleWhere, viewerCityRule } from "@/lib/browse-scope"
-import { ageFrom, isAdult, mayParticipate, minAgeRefusal } from "@/lib/age"
+import { ageFrom, isAdult, mayParticipate, minAgeRefusal, participationSelect } from "@/lib/age"
 import { db } from "@/lib/db"
 import { eventDisplayTitle, inRoomWhere, realEventsWhere, venueDaysWhere } from "@/lib/event-kind"
 import {
@@ -113,7 +113,7 @@ export async function placesInside(
   now: Date = new Date()
 ): Promise<PlacesInside> {
   const [profile, currentRow] = await Promise.all([
-    db.profiles.findUnique({ where: { id: userId }, select: { onboarded: true, age: true, date_of_birth: true } }),
+    db.profiles.findUnique({ where: { id: userId }, select: participationSelect }),
     db.event_check_ins.findFirst({
       where: { user_id: userId, status: "checked_in", ...inRoomWhere(userId, now) },
       orderBy: { check_in_time: "desc" },

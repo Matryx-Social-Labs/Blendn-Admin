@@ -20,24 +20,6 @@ const CSP_ENFORCED_SOURCES = ["/dashboard/:path*", "/pay/:path*", "/login", "/in
 const CSP_REPORT_ONLY_SOURCE = "/:path((?!dashboard(?:/|$)|pay(?:/|$)|login$|invite$).*)";
 
 const nextConfig: NextConfig = {
-  // Image optimization
-  images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "**.amazonaws.com",
-      },
-      {
-        protocol: "https",
-        hostname: "**.googleusercontent.com",
-      },
-      {
-        protocol: "https",
-        hostname: "**.cloudinary.com",
-      },
-    ],
-  },
-
   // Disable x-powered-by header
   poweredByHeader: false,
 

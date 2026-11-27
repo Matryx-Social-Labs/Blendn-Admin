@@ -450,3 +450,20 @@
   padding: 0;
   margin: 0.25rem 0 0;
 }
+
+/*
+ * Map credits (Leaflet's attribution control, SCRUM-1147). Underlined, because
+ * Leaflet marks a link by colour alone and its blue sits close to the credit's
+ * grey text; a shade darker than Leaflet's #0078a8 so the link keeps AA contrast
+ * over the translucent box on light tiles. The focus ring is drawn inside: the control sits flush in
+ * the map's clipped corner. Literals, not tokens: the box is Leaflet's white
+ * whatever the theme.
+ */
+.leaflet-container .leaflet-control-attribution a {
+  color: #00608a;
+  text-decoration: underline;
+}
+.leaflet-container .leaflet-control-attribution a:focus-visible {
+  outline: 2px solid #00608a;
+  outline-offset: -1px;
+}

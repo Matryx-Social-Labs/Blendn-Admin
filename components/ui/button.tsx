@@ -65,9 +65,9 @@ function Button({
    *
    * HTML defaults a `<button>` inside a `<form>` to `type="submit"`, so any
    * `<Button onClick={…}>` in a form submitted it. That is not a theoretical
-   * footgun: the geofence editor's Map/Satellite toggle did exactly this, and
-   * clicking it threw the organiser to the top of the event form with five
-   * fields flagged red — a bug reported from a real session and reproduced on
+   * footgun: the geofence editor's Map/Satellite toggle (removed in SCRUM-1147)
+   * did exactly this, and clicking it threw the organiser to the top of the
+   * event form with five fields flagged red — a bug reported from a real session and reproduced on
    * staging (scroll position 3018 → 0, `title`, `description`,
    * `full_description`, `start_time`, `end_time` all `aria-invalid`).
    *

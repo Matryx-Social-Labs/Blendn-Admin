@@ -119,8 +119,12 @@ export const checkinSchema = z.object({
       device: z.string().optional(),
       appVersion: z.string().optional(),
       gpsAccuracy: z.number().min(0).optional(), // accuracy radius in metres; a negative one (iOS "no fix") would pass the vague-fix gate as a perfect fix
+      /** The OS says the fix is simulated (iOS `isMocked`, Android `isFromMockProvider`). Refuses the door code (gate 13). */
+      mocked: z.boolean().optional(),
     })
     .optional(),
+  /** The host's door code, typed by a guest GPS could not place (gate 13). Normalised by the server. */
+  doorCode: z.string().min(1).max(12).optional(),
   /** "With {crew}": one of your crews to tell at this check-in (S1). Silently ignored if it is not yours. */
   withCrewId: z.string().uuid().optional(),
 })

@@ -536,7 +536,8 @@ describe("the whole key set of GET /events/:id", () => {
   const NEW_KEYS = ["changedAt", "changedFields", "changedFrom", "dayCount", "dayNumber", "days", "daysFrom"]
   // Added after this scene, by Flow 16 (the share pages): the confirmed venue's area, else the city.
   // And by ticketing (SCRUM-1011, contract §1): `ticketing`, null while TICKETING is off.
-  const LATER_KEYS = ["area", "ticketing"]
+  // And by the door code (gate 13, SCRUM-1316): `doorCode: { available }`, never the code.
+  const LATER_KEYS = ["area", "doorCode", "ticketing"]
 
   it("is the old set and exactly the new ones (the six of Flow 3, and `daysFrom`), nothing renamed or dropped", async () => {
     const viewer = await person("scn-keys")
