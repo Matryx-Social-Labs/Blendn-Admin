@@ -131,6 +131,15 @@ describe("forVenue", () => {
     expect(JSON.stringify(venue.alerts)).not.toMatch(/\d/)
   })
 
+  it("never carries the host's seen figure, the low end of the range (SCRUM-1328)", () => {
+    // 52 in, 14 unconfirmed: the host reads "38–52". The venue may learn neither 38 nor 14.
+    const big = forVenue(hostSnapshot({ inside: 52, guestsInside: 52, staffInside: 0, unconfirmed: 14 }), 1)
+    expect(big.inside).toBe("20+")
+    expect(big.unconfirmed).toBe("10-19")
+    expect(numericKeys(big).sort()).toEqual(["capacity", "messagesPerMinute", "openFlags"])
+    expect(JSON.stringify(big)).not.toMatch(/\b(38|14)\b/)
+  })
+
   it("lets through only the fields it names, so a figure added later does not reach a venue", () => {
     const widened = { ...hostSnapshot(), uniqueAttendance: 14 } as LiveSnapshot
     expect(forVenue(widened, 1)).not.toHaveProperty("uniqueAttendance")

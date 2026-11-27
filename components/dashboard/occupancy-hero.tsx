@@ -1,7 +1,7 @@
-import { IconWifiOff } from "@tabler/icons-react"
-
+import { formatNumber, hereRange } from "@/lib/dashboard-format"
 import { liveCountLabel, type LiveCountBucket } from "@/lib/disclosure"
 import type { Occupancy } from "@/lib/occupancy"
+import { CONFIRMED_WINDOW_MINUTES } from "@/lib/presence"
 import { cn } from "@/lib/utils"
 
 /**
@@ -39,11 +39,17 @@ export interface HeldBackOccupancy {
  * it must not read as a malfunction, and it must be impossible to miss.
  *
  * Fill is measured against **guests**, so four crew do not fill a room of four.
+ *
+ * The host's figure is a range (SCRUM-1328): who was seen within the confirmed
+ * window to everyone checked in, because pings are foreground only and a
+ * pocketed phone goes quiet. The bar draws both ends, solid then hatched.
+ * Capacity, the pill and the fill read the high end, always: they are the
+ * safety signal, and a full room is exactly the one whose phones are pocketed.
+ * The venue's copy keeps its rounded high end and gets no low end.
  */
 export function OccupancyHero({
   occupancy,
   time,
-  unreliable,
   stale,
   description,
 }: {
@@ -52,27 +58,9 @@ export function OccupancyHero({
    * question and demanding it here would force the live snapshot to carry a
    * number nothing on this screen renders.
    */
-  occupancy: Omit<Occupancy, "uniqueAttendance"> | HeldBackOccupancy
+  occupancy: (Omit<Occupancy, "uniqueAttendance"> & { unconfirmed: number }) | HeldBackOccupancy
   /** Rendered as given — the caller owns the event's timezone, not this. */
   time: string
-  /**
-   * The headcount is mostly inference rather than observation.
-   *
-   * Written for the mass-checkout guard — the sweeper refusing to act because
-   * one pass would have removed a quarter of the room — which #278 deleted,
-   * leaving this prop with no caller and no cause for weeks.
-   *
-   * The cause it was actually needed for is the other side of the same coin.
-   * Nobody is checked out for going quiet, because the client polls in the
-   * foreground only and a pocketed phone stops reporting within minutes; the
-   * price of not emptying a full room is admitting when most of the figure is
-   * carried by sessions nobody has confirmed. `occupancyMostlyInferred` in
-   * lib/live-metrics decides, at the same half share `departureQuality` uses.
-   *
-   * The organiser is far better served by "this count is roughly right" than
-   * by a confidently wrong number.
-   */
-  unreliable?: boolean
   /** The connection dropped and these are the last figures: no "· live" (SCRUM-1348). */
   stale?: boolean
   description?: string
@@ -82,16 +70,19 @@ export function OccupancyHero({
   const exact = "fillPct" in occupancy ? occupancy : null
   // "Under 5 staff" could be none, and usually is: shown from 5 up.
   const anyStaff = exact ? exact.staffInside > 0 : occupancy.staffInside !== "quiet"
-  // Suppressed while unreliable: flagging a breach off numbers we have just
-  // said we do not trust is how a false evacuation starts.
-  const over = occupancy.overCapacity && !unreliable
+  const over = occupancy.overCapacity
   const overBy = over && exact && capacity !== null ? exact.guestsInside - capacity : 0
+  const range = exact ? hereRange(exact.inside, exact.unconfirmed) : null
+  const count = (n: number | LiveCountBucket) => (typeof n === "number" ? formatNumber(n) : liveCountLabel(n))
 
   // The bar's domain stretches past capacity when the room is over it, so the
   // dashed capacity marker lands inside the track rather than at its very end.
   const guests = exact?.guestsInside ?? 0
+  // An upper bound on seen guests: `unconfirmed` has no guest/staff split, so seen staff count here too; capped at the guests.
+  const seen = exact ? Math.min(guests, Math.max(0, exact.inside - exact.unconfirmed)) : 0
   const domain = capacity === null ? Math.max(guests, 1) : Math.max(capacity, guests)
   const guestPct = Math.min((guests / domain) * 100, 100)
+  const seenPct = (seen / domain) * 100
   const capacityPct = capacity === null ? null : (capacity / domain) * 100
 
   return (
@@ -107,50 +98,44 @@ export function OccupancyHero({
         style={{ background: "var(--gradient-brand)" }}
       />
 
-      <div className="flex flex-wrap items-center gap-2.5">
-        <p className="text-[0.75rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">
-          In the room · {time}
-          {stale ? null : " · live"}
-        </p>
-        {unreliable ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-warning bg-[color-mix(in_oklch,var(--warning)_8%,transparent)] px-2.5 py-0.5 text-[0.7188rem] font-bold text-warning">
-            <IconWifiOff className="size-3" />
-            count unreliable
-          </span>
-        ) : null}
-      </div>
+      <p className="text-[0.75rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+        In the room · {time}
+        {stale ? null : " · live"}
+      </p>
 
       <div className="mt-2 flex flex-wrap items-baseline gap-3">
-        <span
-          className={cn(
-            "text-[length:var(--text-metric-hero)] font-bold leading-[1.05] tabular-nums",
-            unreliable && "text-muted-foreground"
-          )}
-        >
-          {unreliable ? "~" : ""}
-          {liveCountLabel(inside)}
-        </span>
-        <span className="text-base text-muted-foreground">
-          {unreliable ? "in the room, roughly" : "in the room"}
-        </span>
+        {range ? (
+          <>
+            {/* Said once, in words and full numbers; the glyphs ("9.9k–12k") are for the eye. Not a live region: a range read out every five seconds would drown the tab. */}
+            <span className="sr-only">{range.spoken}</span>
+            <span aria-hidden="true" className="text-[length:var(--text-metric-hero)] font-bold leading-[1.05] tabular-nums">
+              {range.label}
+            </span>
+            <span aria-hidden="true" className="text-base text-muted-foreground">here</span>
+          </>
+        ) : (
+          <>
+            <span className="text-[length:var(--text-metric-hero)] font-bold leading-[1.05] tabular-nums">
+              {liveCountLabel(inside)}
+            </span>
+            <span className="text-base text-muted-foreground">in the room</span>
+          </>
+        )}
+        {/* Announced once, on crossing: always on the page, and its words do not move with the count (the pill's do, every tick). */}
+        <span role="status" className="sr-only">{over ? "Over stated capacity" : ""}</span>
         {over ? (
           /* Ink on orange, never white — white on #F05423 is 3.4:1 and fails AA. */
-          <span className="rounded-full bg-primary px-2.5 py-0.5 text-[0.8125rem] font-bold tabular-nums text-primary-foreground">
-            {exact ? `${overBy} over stated capacity` : "over stated capacity"}
+          <span aria-hidden="true" className="rounded-full bg-primary px-2.5 py-0.5 text-[0.8125rem] font-bold tabular-nums text-primary-foreground">
+            {exact ? `${formatNumber(overBy)} over stated capacity` : "over stated capacity"}
           </span>
         ) : null}
       </div>
 
       {/* The split. Two numbers with their own labels — never one figure. */}
-      <div
-        className={cn(
-          "mt-2 flex flex-wrap gap-4 text-[0.8438rem] text-muted-foreground",
-          unreliable && "opacity-75"
-        )}
-      >
+      <div className="mt-2 flex flex-wrap gap-4 text-[0.8438rem] text-muted-foreground">
         <span className="inline-flex items-center gap-1.5">
           <i aria-hidden className="size-2 rounded-[2px] bg-chart-1" />
-          <b className="font-bold tabular-nums text-foreground">{liveCountLabel(guestsInside)}</b> guests
+          <b className="font-bold tabular-nums text-foreground">{count(guestsInside)}</b> guests
         </span>
         {/* Only when there are any.
             Staff are told from guests by organisation membership at check-in,
@@ -161,7 +146,7 @@ export function OccupancyHero({
         {anyStaff ? (
           <span className="inline-flex items-center gap-1.5">
             <i aria-hidden className="size-2 rounded-[2px] bg-chart-3" />
-            <b className="font-bold tabular-nums text-foreground">{liveCountLabel(occupancy.staffInside)}</b> staff
+            <b className="font-bold tabular-nums text-foreground">{count(occupancy.staffInside)}</b> staff
           </span>
         ) : null}
       </div>
@@ -179,18 +164,22 @@ export function OccupancyHero({
             aria-valuenow={exact.fillPct ?? 0}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-label={`Fill: ${guestsInside} guests of capacity ${capacity}`}
+            aria-valuetext={`${exact.fillPct ?? 0}%: ${formatNumber(guests)} guests, up to ${formatNumber(seen)} of them seen in the last ${CONFIRMED_WINDOW_MINUTES} minutes`}
+            aria-label={`Fill: ${formatNumber(guests)} guests of capacity ${formatNumber(capacity)}`}
             className="relative h-2 rounded-full bg-surface-raised"
           >
+            {/* Solid to the guests seen, hatched (the kit's) on to everyone checked in. */}
             <div
-              className="absolute inset-y-0 left-0 rounded-full"
+              className="absolute inset-y-0 rounded-full"
+              style={{ left: 0, width: `${seenPct}%`, background: over ? "var(--primary)" : "var(--gradient-brand)" }}
+            />
+            <div
+              className="absolute inset-y-0 rounded-full"
               style={{
-                width: `${guestPct}%`,
-                background: unreliable
-                  ? "repeating-linear-gradient(45deg, color-mix(in oklch, var(--primary) 40%, transparent) 0 5px, transparent 5px 10px)"
-                  : over
-                    ? "var(--primary)"
-                    : "var(--gradient-brand)",
+                left: `${seenPct}%`,
+                width: `${guestPct - seenPct}%`,
+                background:
+                  "repeating-linear-gradient(45deg, color-mix(in oklch, var(--primary) 40%, transparent) 0 5px, transparent 5px 10px)",
               }}
             />
             {over && capacityPct !== null ? (
@@ -210,15 +199,13 @@ export function OccupancyHero({
             {over ? (
               <>
                 <b className="font-bold">
-                  {guestsInside} guests against capacity {capacity}
+                  {formatNumber(guests)} guests against capacity {formatNumber(capacity)}
                 </b>{" "}
                 — fill {exact.fillPct}%. Staff aren&rsquo;t counted toward fill.
               </>
             ) : (
               <>
-                fill {unreliable ? "~" : ""}
-                {exact.fillPct}% — {guestsInside} guests of capacity {capacity}; staff count toward the
-                room, not the fill
+                fill {exact.fillPct}% — {formatNumber(guests)} guests of capacity {formatNumber(capacity)}; staff count toward the room, not the fill
               </>
             )}
           </p>

@@ -72,6 +72,8 @@ export interface LiveEvent {
   flags: number
   /** Inside right now, staff included (fire safety counts bodies). */
   inside: number
+  /** Of `inside`, not seen within the confirmed window: printed as a range with it (`hereRange`). */
+  unconfirmed: number
   /** Distinct guests who have checked in tonight. */
   checkedIn: number
   messages: number

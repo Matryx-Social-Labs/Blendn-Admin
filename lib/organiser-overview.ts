@@ -60,6 +60,7 @@ export async function liveEventFor(scope: Prisma.eventsWhereInput, now: Date): P
     doors: eventClock(event.timezone).time(event.start_time),
     flags,
     inside: occupancy.inside,
+    unconfirmed: occupancy.unconfirmed,
     checkedIn: occupancy.uniqueAttendance,
     messages,
   }
