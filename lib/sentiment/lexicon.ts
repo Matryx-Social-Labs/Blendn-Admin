@@ -98,6 +98,9 @@ const AMBIGUITY_MARKERS = [
   /\bonly\b.*\b(hour|hours|min|mins|minutes)\b/i,
   /\bsure\b|\byeah right\b|\bapparently\b|\bsupposedly\b/i,
   /\bbut\b/i,
+  // A grab, fight or punch without a safety cue's shape ("he keeps grabbing", "they are fighting outside") is not a
+  // cue, so it neither goes first nor sticks, but the word list does not clear it either: the model reads it.
+  /\b(grab|fight|punch)\w*/i,
 ]
 
 /**

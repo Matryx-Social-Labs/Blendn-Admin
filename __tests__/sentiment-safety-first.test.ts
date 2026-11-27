@@ -74,6 +74,31 @@ describe("a safety report goes first, and batches run side by side", () => {
     expect(out.map((r) => r.id).sort()).toEqual(["chat", ...Array.from({ length: 10 }, (_, i) => `r${i}`)].sort())
   })
 
+  it("puts a cued room's batch first across rooms, so a report in the 300th room is in the first call", async () => {
+    // Mutation control: without the cue-first sort, room 299's batch is past the 10-call cap and waits a pass.
+    fetchMock.mockImplementation(async (_url, init) =>
+      reply(neutralFor(JSON.parse(JSON.parse(String(init.body)).messages[1].content).map((m: { id: string }) => m.id)))
+    )
+    const rooms: MessageToClassify[] = Array.from({ length: 299 }, (_, i) => ({ id: `r${i}`, text: FILLER, room: `room-${i}` }))
+
+    const out = await classifyMessages([...rooms, { id: "safety", text: SAFETY, room: "room-299" }])
+
+    expect(sentIds(0)).toEqual(["safety"])
+    expect(out.find((r) => r.id === "safety")?.category).toBe("safety_conduct")
+  })
+
+  it("takes rooms in turns: a busy room's second batch waits for a quiet room's first", async () => {
+    // Mutation control: without the turn order, the busy room's 11 batches filled the 10 calls and the quiet room waited.
+    fetchMock.mockImplementation(async (_url, init) =>
+      reply(neutralFor(JSON.parse(JSON.parse(String(init.body)).messages[1].content).map((m: { id: string }) => m.id)))
+    )
+    const busy: MessageToClassify[] = Array.from({ length: 220 }, (_, i) => ({ id: `b${i}`, text: FILLER, room: "busy" }))
+
+    const out = await classifyMessages([...busy, { id: "quiet", text: FILLER, room: "quiet" }])
+
+    expect(out.map((r) => r.id)).toContain("quiet")
+  })
+
   it("sends a room's messages only with that room's, never mixed with another room's", async () => {
     // Negative control: two rooms' messages, interleaved as the sweeper takes them, shared one call.
     fetchMock.mockImplementation(async (_url, init) =>
@@ -107,6 +132,15 @@ describe("a safety cue sticks: the model may add safety_conduct, never remove it
     expect(sentIds(0).sort()).toEqual(["inj", "safety"])
   })
 
+  it("keeps the model's own label when it agrees a cued line is a safety report", async () => {
+    // Mutation control: with the sticky clause reduced to `!cued.has(message)`, the model's read was thrown away.
+    fetchMock.mockResolvedValueOnce(
+      reply([{ id: "safety", sentiment: "negative", category: "safety_conduct", topic: null, confidence: 0.97 }])
+    )
+    const [out] = await classifyMessages([{ id: "safety", text: SAFETY }])
+    expect(out).toMatchObject({ category: "safety_conduct", source: "llm", confidence: 0.97 })
+  })
+
   it("tells the model each text is untrusted and labelled from its own text only", async () => {
     // Negative control: the prompt never said the text was data.
     fetchMock.mockResolvedValueOnce(reply(neutralFor(["m1"])))
@@ -137,6 +171,10 @@ describe("the lexicon settles neutral only for English it can read (SCRUM-1069)"
     "il me suit depuis tantôt",
     // Hinglish "the" is "were": an English function word in a Hindi sentence.
     "do ladke mujhe ghoor rahe the",
+    // ASCII French with no Indic word: only the English function-word check sends it on.
+    "aidez-moi svp, il me suit",
+    // Mixed scripts with English function words: only the ASCII check sends it on.
+    "वो आदमी पीछा कर रहा है, where are you",
   ]
 
   it.each(NOT_ENGLISH)("sends %s to the model", async (text) => {
@@ -195,5 +233,25 @@ describe("the cues that stick are narrow: a word match queues a person's report,
     modelSays("positive", "other")
     const [out] = await classifyMessages([{ id: "x", text }])
     expect(out.category).not.toBe("safety_conduct")
+  })
+})
+
+describe("review findings", () => {
+  it.each(["the guy in the red shirt keeps grabbing", "they are fighting outside", "someone just punched"])(
+    "sends %s to the model: not a sticky cue, never settled as chatter either",
+    (text) => {
+      // Negative control: after the cue was narrowed, "keeps grabbing" was settled neutral 0.8 and never read.
+      expect(hasSafetyCue(text)).toBe(false)
+      expect(classifyWithLexicon(text)).toBeNull()
+    }
+  )
+
+  it("writes 0.5, never NaN, when the model's confidence is not a number", async () => {
+    // Negative control: Math.min(1, "high") is NaN, written to event_feedback and to the moderation flag.
+    fetchMock.mockResolvedValueOnce(
+      reply([{ id: "m1", sentiment: "neutral", category: "other", topic: null, confidence: "high" as unknown as number }])
+    )
+    const [out] = await classifyMessages([{ id: "m1", text: FILLER }])
+    expect(out.confidence).toBe(0.5)
   })
 })

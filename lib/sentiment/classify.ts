@@ -157,9 +157,11 @@ async function classifyBatchWithLlm(
       // database and break every group-by that reads it.
       if (!row.id || !row.sentiment || !row.category) continue
       if (!isSentiment(row.sentiment) || !isIssueCategory(row.category)) {
+        // A label-shaped value or a marker, never free text: an injected message can make the model echo chat here.
+        const shown = (v: unknown) => (typeof v === "string" && /^[a-z_]{1,32}$/.test(v) ? v : "(not a label)")
         logger.warn("Sentiment classifier returned an out-of-taxonomy label", {
-          sentiment: row.sentiment,
-          category: row.category,
+          sentiment: shown(row.sentiment),
+          category: shown(row.category),
         })
         continue
       }
@@ -168,7 +170,8 @@ async function classifyBatchWithLlm(
         category: row.category,
         // A topic is what a positive message liked; anything else the model says is no topic, never a dropped message.
         topic: row.sentiment === "positive" && isFeedbackTopic(row.topic) ? row.topic : null,
-        confidence: Math.max(0, Math.min(1, row.confidence ?? 0.5)),
+        // A number or 0.5: `"high"` would write NaN to event_feedback and to the moderation flag.
+        confidence: Number.isFinite(row.confidence) ? Math.max(0, Math.min(1, row.confidence as number)) : 0.5,
         source: "llm",
       })
     }
@@ -242,6 +245,7 @@ export async function classifyMessages(
           settled.push({ id: message.id, ...result })
           continue
         }
+        if (result) logger.warn("Sentiment model dropped a lexicon safety cue", { messageId: message.id, category: result.category })
         /*
          * Degraded path, and where a model answer that drops a safety cue lands.
          * The lexicon's best guess, which is what the docstring above has always
