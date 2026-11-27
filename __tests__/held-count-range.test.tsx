@@ -123,6 +123,15 @@ describe("the night in the ticket (negative 27, crowding 7 shown, entry_queue he
   })
 })
 
+describe("the mood alert on a band", () => {
+  it("decides on the midpoint, not the band's top: 20 positive, 9 neutral, 17–21 negative (19 of 48 is 39.6%; 21 of 50 would be 42%)", () => {
+    expect(moodAlert({ positive: 20, neutral: 9, negative: { min: 17, max: 21 } })).toBeNull()
+  })
+  it("fires once the midpoint reaches 40%: 18 positive, 9 neutral, 16–20 negative (18 of 45)", () => {
+    expect(moodAlert({ positive: 18, neutral: 9, negative: { min: 16, max: 20 } })?.body).toBe("16–20 of 43–47 classified messages in the last 30 minutes are negative.")
+  })
+})
+
 describe("the rule, on its own", () => {
   const held = (category: string): DisclosedCategory => ({ category, count: null, suppressed: true })
   const shown = (category: string, count: number): DisclosedCategory => ({ category, count, suppressed: false })
@@ -164,6 +173,8 @@ describe("over every night (positive, neutral 0–6; shown negatives 0–12; hel
       { category: "entry_queue", count: null, suppressed: true },
     ]
     const negative = discloseNegatives(n.shownNeg + n.heldNeg, categories, new Map([["crowding", n.shownNeg], ["entry_queue", n.heldNeg]]))
+    // The band always holds the true count: it hides the figure, it never misstates it.
+    if (typeof negative !== "number") expect([negative.min <= n.shownNeg + n.heldNeg, n.shownNeg + n.heldNeg <= negative.max]).toEqual([true, true])
     const split = moodSplit({ positive: n.positive, neutral: n.neutral, negative: n.shownNeg + n.heldNeg }, "host", negative)
     return {
       split,
