@@ -85,6 +85,8 @@ describe("the night in the ticket (negative 27, crowding 7 shown, entry_queue he
     expect(view.total).toEqual({ min: 57, max: 61 })
     expect(countLabel(view.counts.negative)).toBe("23–27")
     expect(countLabel(view.total)).toBe("57–61")
+    // Long-text proof: a band of a big night keeps its separators.
+    expect(countLabel({ min: 12476, max: 12480 })).toBe("12,476–12,480")
   })
 
   it("gives the held count back nowhere: not in the digest's split, the bar, the panel or the alert", () => {

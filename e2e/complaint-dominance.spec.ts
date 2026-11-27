@@ -30,6 +30,9 @@ let owner = ""
 let orgId = ""
 let eventId = ""
 let roomId = ""
+// SCRUM-1441: a second night with exactly one category held beside a shown one.
+let rangeEventId = ""
+let rangeRoomId = ""
 let browser: Browser
 
 async function person(label: string, role: "attendee" | "organizer" = "attendee") {
@@ -38,14 +41,40 @@ async function person(label: string, role: "attendee" | "organizer" = "attendee"
   return u.id
 }
 
-/** `messages[i]` negative messages in `category` from `people[i]`. */
-async function wrote(people: string[], category: "entry_queue" | "crowding" | "facilities", messages: number[]) {
+/** `messages[i]` messages of `sentiment` in `category` from `people[i]`, in the first night unless `night` says otherwise. */
+async function wrote(
+  people: string[],
+  category: "entry_queue" | "crowding" | "facilities" | "other",
+  messages: number[],
+  sentiment: "negative" | "positive" | "neutral" = "negative",
+  night = { event: eventId, room: roomId }
+) {
   for (const [i, n] of messages.entries()) {
     for (let k = 0; k < n; k++) {
-      const m = await db.chat_messages.create({ data: { chat_group_id: roomId, user_id: people[i], content: `${tag} ${category} ${k}` } })
-      await db.event_feedback.create({ data: { event_id: eventId, message_id: m.id, sentiment: "negative", category, confidence: 0.9, source: "lexicon" } })
+      const m = await db.chat_messages.create({ data: { chat_group_id: night.room, user_id: people[i], content: `${tag} ${category} ${k}` } })
+      await db.event_feedback.create({ data: { event_id: night.event, message_id: m.id, sentiment, category, confidence: 0.9, source: "lexicon" } })
     }
   }
+}
+
+/** An ended night of the org's with a room of 14; returns its event, its room and the members. */
+async function night(title: string) {
+  const end = new Date(Date.now() - HOUR)
+  const start = new Date(end.getTime() - 4 * HOUR)
+  const event = (
+    await db.events.create({
+      data: { slug: `${tag}-${randomUUID().slice(0, 4)}`, title, description: "e2e fixture", start_time: start, end_time: end, timezone: "UTC", status: "published", organizer_id: owner, organizer_org_id: orgId },
+    })
+  ).id
+  await db.event_occurrences.create({ data: { event_id: event, occurs_on: new Date(start.toISOString().slice(0, 10)), start_time: start, end_time: end } })
+  const room = (await db.chat_groups.create({ data: { event_id: event, name: "room" }, select: { id: true } })).id
+  const members: string[] = []
+  for (let i = 0; i < 14; i++) {
+    const id = await person(`${title.length}-m${i}`)
+    members.push(id)
+    await db.chat_group_members.create({ data: { chat_group_id: room, user_id: id, anonymous_name: `${tag} Pseudo ${i}` } })
+  }
+  return { event, room, members }
 }
 
 async function sessionFor(baseURL: string) {
@@ -91,16 +120,29 @@ test.beforeAll(async () => {
   await wrote(members.slice(0, 5), "entry_queue", [20, 2, 1, 1, 1])
   await wrote(members.slice(5, 10), "crowding", [2, 2, 2, 2, 2])
   await wrote(members.slice(10, 12), "facilities", [1, 1])
+
+  // 25 positive, 9 neutral, 27 negative: entry_queue 20 from 5 people, one with 16 (held); crowding 7 from 5 (shown).
+  // A three-line title for the long-text proof.
+  const r = await night(`${tag} Thiruvananthapuram Indie Makers' Late-Night Flea, Food and Vinyl Swap: Winter Edition at the Old Harbour Warehouse`)
+  rangeEventId = r.event
+  rangeRoomId = r.room
+  const at = { event: r.event, room: r.room }
+  await wrote(r.members.slice(0, 5), "other", [5, 5, 5, 5, 5], "positive", at)
+  await wrote(r.members.slice(10, 13), "other", [3, 3, 3], "neutral", at)
+  await wrote(r.members.slice(0, 5), "entry_queue", [16, 1, 1, 1, 1], "negative", at)
+  await wrote(r.members.slice(5, 10), "crowding", [2, 2, 1, 1, 1], "negative", at)
 })
 
 test.afterAll(async () => {
   await browser.close()
-  await db.event_feedback.deleteMany({ where: { event_id: eventId } })
-  await db.chat_messages.deleteMany({ where: { chat_group_id: roomId } })
-  await db.chat_group_members.deleteMany({ where: { chat_group_id: roomId } })
-  await db.chat_groups.deleteMany({ where: { id: roomId } })
-  await db.event_occurrences.deleteMany({ where: { event_id: eventId } })
-  await db.events.deleteMany({ where: { id: eventId } })
+  const events = [eventId, rangeEventId].filter(Boolean)
+  const rooms = [roomId, rangeRoomId].filter(Boolean)
+  await db.event_feedback.deleteMany({ where: { event_id: { in: events } } })
+  await db.chat_messages.deleteMany({ where: { chat_group_id: { in: rooms } } })
+  await db.chat_group_members.deleteMany({ where: { chat_group_id: { in: rooms } } })
+  await db.chat_groups.deleteMany({ where: { id: { in: rooms } } })
+  await db.event_occurrences.deleteMany({ where: { event_id: { in: events } } })
+  await db.events.deleteMany({ where: { id: { in: events } } })
   await db.organisation_members.deleteMany({ where: { org_id: orgId } })
   await db.organisations.deleteMany({ where: { id: orgId } })
   await db.user.deleteMany({ where: { id: { in: users } } })
@@ -149,4 +191,55 @@ test("the Feedback tab holds back the category one person dominates, as it does 
     console.log(`READBACK ${category} ${JSON.stringify({ event: eventId, rows: counts })}`)
     expect(counts).toEqual(category === "entry_queue" ? [20, 2, 1, 1, 1] : [2, 2, 2, 2, 2])
   }
+})
+
+/**
+ * SCRUM-1441 driven (register D-012): with exactly one category held, negative 27 minus the shown crowding 7 would be
+ * the held entry_queue's 20. As the organizer at 1280 and 768, the Feedback tab and the Overview's mood panel show the
+ * negatives as 23–27 and the total as 57–61, and no figure on either panel is 20, 27 or 61 on its own; the live
+ * snapshot a host's socket is sent carries the same band, and its mood alert says the bands. The read-back is printed.
+ */
+test("one held category: the negatives and the total are a band, and nothing gives the held count back", async ({ baseURL }) => {
+  // A figure standing alone, not the end of a band ("23–27" is a band; "27" alone is the exact count).
+  const alone = (n: number) => new RegExp(`(?<![\\d–,])${n}(?![\\d–,])`)
+  for (const width of WIDTHS) {
+    const ctx = await browser.newContext({ baseURL, viewport: { width, height: 900 }, storageState: await sessionFor(baseURL!) })
+    const page = await ctx.newPage()
+
+    await page.goto(`/dashboard/events/${rangeEventId}/feedback`)
+    const split = page.locator("p", { hasText: "negatives are the takeaway" }).filter({ visible: true }).first().locator("..")
+    await expect(split).toContainText("23–27 negative")
+    await expect(split).toContainText("25 positive")
+    await expect(split).toContainText("9 neutral")
+    await expect(split).toContainText("7 of 23–27")
+    await expect(page.getByText(/· 57–61 messages/).filter({ visible: true }).first()).toBeVisible()
+    await expect(row(page, "crowding")).toContainText("7")
+    await expect(row(page, "entry queue")).toContainText("<5")
+    for (const n of [20, 27, 61]) expect(await split.innerText(), `${n} alone on the Feedback split at ${width}`).not.toMatch(alone(n))
+    expect(await overflow(page), `Feedback overflow at ${width}`).toBeLessThanOrEqual(0)
+    await page.screenshot({ path: `test-results/screens/held-count-range-feedback-${width}.png`, fullPage: true })
+
+    await page.goto(`/dashboard/events/${rangeEventId}`)
+    const mood = page.getByText("Mood — whole night").filter({ visible: true }).first().locator("xpath=ancestor::section[1]")
+    await expect(mood).toContainText("23–27 negative")
+    await expect(mood).toContainText("57–61 classified msgs")
+    for (const n of [20, 27, 61]) expect(await mood.innerText(), `${n} alone on the mood panel at ${width}`).not.toMatch(alone(n))
+    expect(await overflow(page), `Overview overflow at ${width}`).toBeLessThanOrEqual(0)
+    await page.screenshot({ path: `test-results/screens/held-count-range-overview-${width}.png`, fullPage: true })
+    await ctx.close()
+  }
+
+  // The live snapshot a host's socket is sent: the band, never the exact count, and the alert says the bands.
+  const snapshot = (await buildLiveSnapshot(rangeEventId))!
+  expect(snapshot.sentiment).toEqual({ positive: 25, neutral: 9, negative: { min: 23, max: 27 } })
+  expect(JSON.stringify(snapshot)).not.toMatch(/"negative":27\b/)
+  expect(snapshot.alerts.find((a) => a.kind === "mood_sliding")?.body).toBe("23–27 of 57–61 classified messages in the last 30 minutes are negative.")
+
+  // The read-back: the negatives per category the band hides one of.
+  const rows = await db.$queryRaw<{ category: string; count: bigint }[]>`
+    SELECT f.category::text AS category, count(*) FROM event_feedback f
+    WHERE f.event_id = ${rangeEventId}::uuid AND f.sentiment = 'negative' GROUP BY 1 ORDER BY 1`
+  const counts = Object.fromEntries(rows.map((r) => [r.category, Number(r.count)]))
+  console.log(`READBACK negatives ${JSON.stringify({ event: rangeEventId, counts, shown: { negative: "23–27", total: "57–61" } })}`)
+  expect(counts).toEqual({ crowding: 7, entry_queue: 20 })
 })
