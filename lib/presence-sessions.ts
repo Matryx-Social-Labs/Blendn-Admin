@@ -42,9 +42,6 @@ export interface ArrivalInput {
   userId: string
   kind?: "attendee" | "staff"
   at?: Date
-  lat?: number | null
-  lng?: number | null
-  accuracy?: number | null
   source?: "os_geofence" | "polling"
 }
 
@@ -73,9 +70,6 @@ export async function openSession(input: ArrivalInput) {
       where: { id: existing.id },
       data: {
         last_seen_at: at,
-        ...(input.lat != null && { last_lat: input.lat }),
-        ...(input.lng != null && { last_lng: input.lng }),
-        ...(input.accuracy != null && { last_accuracy: input.accuracy }),
         updated_at: at,
       },
     })
@@ -89,9 +83,6 @@ export async function openSession(input: ArrivalInput) {
       kind: input.kind ?? "attendee",
       arrived_at: at,
       last_seen_at: at,
-      ...(input.lat != null && { last_lat: input.lat }),
-      ...(input.lng != null && { last_lng: input.lng }),
-      ...(input.accuracy != null && { last_accuracy: input.accuracy }),
       source: input.source ?? "polling",
     },
   })
@@ -234,18 +225,13 @@ export async function insideNow(
 export async function touchSession(
   occurrenceId: string,
   userId: string,
-  at: Date,
-  fix?: { lat: number; lng: number; accuracy: number | null }
+  at: Date
 ): Promise<void> {
   await db.presence_sessions.updateMany({
     where: { occurrence_id: occurrenceId, user_id: userId, departed_at: null },
-    data: {
-      last_seen_at: at,
-      updated_at: at,
-      ...(fix
-        ? { last_lat: fix.lat, last_lng: fix.lng, last_accuracy: fix.accuracy }
-        : {}),
-    },
+    // No point: nothing reads one (`last_lat`, `last_lng`, `last_accuracy` are
+    // left NULL and dropped later; SCRUM-1230).
+    data: { last_seen_at: at, updated_at: at },
   })
 }
 

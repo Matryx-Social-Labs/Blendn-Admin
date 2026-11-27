@@ -234,7 +234,6 @@ export async function seatAtTheDoor(input: SeatInput) {
   const eventId = event.id
   const { lat: latitude, lng: longitude } = input.point
   const deviceInfo = input.deviceInfo
-  const gpsAccuracy = deviceInfo?.gpsAccuracy
 
   // You cannot be in two rooms. Goes through the shared checkout path so the
   // socket event and the chat cutoff cannot be forgotten here and remembered
@@ -374,9 +373,6 @@ export async function seatAtTheDoor(input: SeatInput) {
     userId,
     kind,
     at: now,
-    lat: latitude,
-    lng: longitude,
-    accuracy: gpsAccuracy,
   }).catch((err) =>
     logger.error("Opening presence session failed", {
       error: err instanceof Error ? err.message : String(err),

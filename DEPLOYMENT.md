@@ -182,20 +182,20 @@ live from day one). Columns: `name, address, lat, lng, maps_url, type, city` —
 `name` and `city` required; `lat`+`lng` or a Google Maps link. Each row meets the
 dashboard's own rules (`lib/venue-rules.ts`): refused within 100 m of a listed
 venue or an earlier row, an area sized for its type, unclaimed. The owner claims
-it later at `/claim/venue/<id>`.
+it later at `/claim/venue/<id>`. Building outlines come from Overture in one
+offline pass, `scripts/backfill-venue-fences.ts`.
 
 ```bash
-DATABASE_URL=<url> npx tsx scripts/import-venues.ts venues.csv                # dry run: rows + duplicates, writes nothing
-DATABASE_URL=<url> npx tsx scripts/import-venues.ts venues.csv --apply        # write
-DATABASE_URL=<url> npx tsx scripts/import-venues.ts venues.csv --apply --osm  # + the building's OSM outline where named
+DATABASE_URL=<url> npx tsx scripts/import-venues.ts venues.csv          # dry run: rows + duplicates, writes nothing
+DATABASE_URL=<url> npx tsx scripts/import-venues.ts venues.csv --apply  # write
 ```
 
 **`npx tsx`, not `npm run`.** npm 11 takes `--apply` given to `npm run` as its
 own option and drops it, which turns a write into a dry run; wrapped in an npm
 script it needs `--` before the file. The first line of output says `APPLY` or
 `DRY RUN`. `--apply` is all-or-nothing: a file with any refused row writes
-nothing, and the rows are written in one transaction after every footprint is
-worked out. Rows are reported by their line in the file, with where each row's
+nothing, and the rows are written in one transaction after every row is
+checked. Rows are reported by their line in the file, with where each row's
 coordinates came from (lat/lng, the place pin, a typed pair, or only the map's
 centre). Re-running is safe: rows already imported come back as duplicates.
 
