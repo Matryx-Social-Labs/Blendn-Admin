@@ -152,11 +152,13 @@ describe("every refusal answers AccessDenied and writes nothing", () => {
     expect(await refused(claims(other, { hd: "example.org" }), [other])).toEqual({ users: 0, links: [], sessions: 0 })
   })
 
-  it("the staff domain claimed in hd while the address is elsewhere", async () => {
-    const admin = await person("offdomain-row")
-    const elsewhere = `itest-sso-elsewhere-${run}@gmail.com`
-    expect(await refused(claims(elsewhere), [elsewhere])).toEqual({ users: 0, links: [], sessions: 0 })
-    expect(await db.account.count({ where: { userId: admin.id } })).toBe(0)
+  it("a live admin whose address is off the staff domain, though their Workspace is ours (a secondary domain)", async () => {
+    // hd is the Workspace's primary domain, so a user on a domain it also holds carries ours. The address decides.
+    const email = `itest-sso-secondary-${run}@blendn.app`
+    emails.push(email)
+    const row = await db.user.create({ data: { email, name: "secondary", role: "app_admin", emailVerified: new Date() } })
+    ids.push(row.id)
+    expect(await refused(claims(email), [email])).toMatchObject({ users: 1, links: [], sessions: 0 })
   })
 
   it("an admin's own address with the hd claim missing", async () => {
