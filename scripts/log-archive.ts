@@ -5,7 +5,7 @@ import { bucketFor, getS3Client } from "../lib/tigris"
 
 /**
  * The log archive (SCRUM-1497, register D-041). Run hourly as its own Railway
- * cron service per environment (`5 * * * *`), never inside the web service:
+ * cron service per environment (`15 * * * *`), never inside the web service:
  *
  *   npx tsx scripts/log-archive.ts                     every missing hour of the last 48
  *   npx tsx scripts/log-archive.ts 2026-11-27T09       that hour again (archive and Axiom)
@@ -28,23 +28,20 @@ const HOUR_MS = 3_600_000
 /** Hours looked back on every run: a skipped or failed run is filled by the next. Railway keeps 7 days on Hobby. */
 const HEAL_HOURS = 48
 /** An hour is read once Railway has had this long to take its last lines. */
-const SETTLE_MS = 5 * 60_000
-/** Lines per `deploymentLogs` call. A full page halves the window, down to a second. */
+const SETTLE_MS = 10 * 60_000
+/** Lines per `deploymentLogs` call, Railway's maximum (it refuses more). A full page halves the window, down to a second. */
 const PAGE = 5000
 const MIN_WINDOW_MS = 1000
 /** Per call, so a hung Railway, Tigris or Axiom ends the run instead of stalling it until the next one is skipped. */
 const CALL_TIMEOUT_MS = 30_000
 /** Axiom takes at most 10,000 events per request. */
 const AXIOM_BATCH = 10_000
-/**
- * Deployments asked for an hour: the newest that could have served it.
- * ponytail: five deploys inside one hour, the newest of which never went live,
- * would leave an older live one out; read each deployment's end if that happens.
- */
+/** Deployments asked for an hour: the newest created before its end, which must reach back to one live at its start. */
 const CANDIDATES = 5
+/** Deployments listed per run; the newest come first. */
+const LISTED = 50
 /** `claims` is a private folder, so this is TIGRIS_PRIVATE_BUCKET: never the public one. */
 const PRIVATE_BUCKET = bucketFor("claims")
-const NEVER_SERVED = new Set(["FAILED", "SKIPPED", "BUILDING", "DEPLOYING", "INITIALIZING", "QUEUED", "WAITING"])
 
 type Deployment = { id: string; status: string; createdAt: string }
 type Row = { timestamp: string; message: string; severity: string; attributes: { key: string; value: string }[] }
@@ -79,8 +76,8 @@ async function railway<T>(query: string, variables: Record<string, unknown>): Pr
 
 async function deploymentsOf(): Promise<Deployment[]> {
   const data = await railway<{ deployments: { edges: { node: Deployment }[] } }>(
-    `query($input: DeploymentListInput!) { deployments(input: $input, first: 50) { edges { node { id status createdAt } } } }`,
-    { input: { projectId: required("RAILWAY_PROJECT_ID"), environmentId: required("RAILWAY_ENVIRONMENT_ID"), serviceId: required("LOGS_SERVICE_ID") } }
+    `query($input: DeploymentListInput!, $first: Int) { deployments(input: $input, first: $first) { edges { node { id status createdAt } } } }`,
+    { input: { projectId: required("RAILWAY_PROJECT_ID"), environmentId: required("RAILWAY_ENVIRONMENT_ID"), serviceId: required("LOGS_SERVICE_ID") }, first: LISTED }
   )
   return data.deployments.edges.map((e) => e.node).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
 }
@@ -96,6 +93,7 @@ async function linesOf(deploymentId: string, from: number, to: number): Promise<
     const mid = from + Math.floor((to - from) / 2)
     return [...(await linesOf(deploymentId, from, mid)), ...(await linesOf(deploymentId, mid, to))]
   }
+  if (deploymentLogs.some((r) => Number.isNaN(Date.parse(r.timestamp)))) throw new Error(`unreadable timestamp in ${deploymentId}`)
   return deploymentLogs.filter((r) => Date.parse(r.timestamp) >= from && Date.parse(r.timestamp) < to)
 }
 
@@ -136,13 +134,21 @@ async function archivedKeys(env: string, hours: number[]): Promise<Set<string>> 
   return keys
 }
 
-async function toAxiom(lines: ArchivedLine[]): Promise<void> {
+type AxiomTarget = { url: string; token: string }
+
+/** Neither variable: null, the archive runs alone. One without the other, or a host that is not Axiom's: refused before anything runs. */
+function axiomTarget(): AxiomTarget | null {
+  if (!process.env.AXIOM_TOKEN && !process.env.AXIOM_DATASET) return null
   const domain = process.env.AXIOM_DOMAIN || "us-east-1.aws.edge.axiom.co"
-  const url = `https://${domain}/v1/ingest/${encodeURIComponent(required("AXIOM_DATASET"))}`
+  if (!/^[a-z0-9.-]+\.axiom\.co$/.test(domain)) throw new Error(`AXIOM_DOMAIN must be an axiom.co host: ${domain}`)
+  return { url: `https://${domain}/v1/ingest/${encodeURIComponent(required("AXIOM_DATASET"))}`, token: required("AXIOM_TOKEN") }
+}
+
+async function toAxiom(lines: ArchivedLine[], { url, token }: AxiomTarget): Promise<void> {
   for (let i = 0; i < lines.length; i += AXIOM_BATCH) {
     const res = await fetch(url, {
       method: "POST",
-      headers: { authorization: `Bearer ${required("AXIOM_TOKEN")}`, "content-type": "application/x-ndjson" },
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/x-ndjson" },
       body: lines.slice(i, i + AXIOM_BATCH).map((l) => JSON.stringify(l)).join("\n"),
       signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
     })
@@ -152,12 +158,25 @@ async function toAxiom(lines: ArchivedLine[]): Promise<void> {
 }
 
 /** One hour: archived, then sent to Axiom. Throws with the hour named. */
-async function archiveHour(env: string, hour: number, deployments: Deployment[], axiom: boolean): Promise<{ key: string; lines: number }> {
+async function archiveHour(
+  env: string,
+  hour: number,
+  deployments: Deployment[],
+  axiom: AxiomTarget | null,
+  again: boolean
+): Promise<{ key: string; lines: number }> {
   const end = hour + HOUR_MS
-  const serving = deployments.filter((d) => Date.parse(d.createdAt) < end && !NEVER_SERVED.has(d.status)).slice(0, CANDIDATES)
+  // Failed ones too: a deploy that never went healthy logged why.
+  const serving = deployments.filter((d) => Date.parse(d.createdAt) < end).slice(0, CANDIDATES)
+  const reachesStart = serving.some((d) => Date.parse(d.createdAt) <= hour)
+  // Without one live at the start, part of the hour would be archived as if it were all of it.
+  if (!reachesStart && (serving.length === 0 || serving.length === CANDIDATES || deployments.length === LISTED)) {
+    throw new Error(`no deployment of LOGS_SERVICE_ID seen live at the start of the hour (${serving.length} asked of ${deployments.length} listed)`)
+  }
   const lines: ArchivedLine[] = []
   for (const d of serving) for (const row of await linesOf(d.id, hour, end)) lines.push(toLine(row, env, d.id))
   lines.sort((a, b) => Date.parse(a._time) - Date.parse(b._time))
+  if (again && lines.length === 0) throw new Error("Railway has no lines for this hour (past its log window?); the archive is left as it is")
 
   const key = keyOf(env, hour)
   const body = gzipSync(lines.map((l) => JSON.stringify(l) + "\n").join(""))
@@ -167,7 +186,7 @@ async function archiveHour(env: string, hour: number, deployments: Deployment[],
   )
   if (axiom && lines.length > 0) {
     try {
-      await toAxiom(lines)
+      await toAxiom(lines, axiom)
     } catch (err) {
       throw new Error(`archived, not in Axiom: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -181,6 +200,9 @@ export async function archiveLogs(now: Date, onlyHour?: string): Promise<Archive
   try {
     const env = required("RAILWAY_ENVIRONMENT_NAME")
     if (!/^[a-z0-9-]+$/.test(env)) throw new Error(`unexpected environment name ${env}`)
+    if (PRIVATE_BUCKET === bucketFor("profile")) throw new Error("the private bucket is the public one: set TIGRIS_PRIVATE_BUCKET")
+    const axiom = axiomTarget()
+    if (!axiom) result.axiom = "not configured"
     let hours: number[]
     if (onlyHour) {
       const hour = Date.parse(`${onlyHour.slice(0, 13)}:00:00Z`)
@@ -192,14 +214,11 @@ export async function archiveLogs(now: Date, onlyHour?: string): Promise<Archive
       const done = await archivedKeys(env, all)
       hours = all.filter((h) => !done.has(keyOf(env, h)))
     }
-    // Neither set: the archive runs alone (it is the CERT-In record) and says so on every run.
-    const axiom = Boolean(process.env.AXIOM_TOKEN || process.env.AXIOM_DATASET)
-    if (!axiom) result.axiom = "not configured"
     if (hours.length === 0) return result
     const deployments = await deploymentsOf()
     for (const hour of hours) {
       try {
-        result.written.push(await archiveHour(env, hour, deployments, axiom))
+        result.written.push(await archiveHour(env, hour, deployments, axiom, Boolean(onlyHour)))
       } catch (err) {
         result.failures.push(`${new Date(hour).toISOString()}: ${err instanceof Error ? err.message : String(err)}`)
       }
@@ -216,5 +235,8 @@ if (require.main === module) {
     for (const w of written) console.log(`archived ${w.key} (${w.lines} lines)`)
     for (const f of failures) console.error(`log archive failed: ${f}`)
     process.exit(failures.length > 0 ? 1 : 0)
+  }).catch((err) => {
+    console.error("log archive failed:", err)
+    process.exit(1)
   })
 }

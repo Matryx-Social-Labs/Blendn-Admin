@@ -16,7 +16,7 @@ process.env.TIGRIS_SECRET_KEY = "test"
 process.env.TIGRIS_BUCKET = "blendn-media-test"
 const PRIVATE = "blendn-media-test-private"
 
-type Sent = { name: string; input: Record<string, unknown> }
+type Sent = { name: string; input: Record<string, unknown>; options?: { abortSignal?: unknown } }
 const sent: Sent[] = []
 let existing: string[] = []
 
@@ -29,8 +29,8 @@ jest.mock("@aws-sdk/client-s3", () => {
     }
   return {
     S3Client: class {
-      async send(command: Sent) {
-        sent.push(command)
+      async send(command: Sent, options?: Sent["options"]) {
+        sent.push({ name: command.name, input: command.input, options })
         if (command.name === "ListObjectsV2") {
           const prefix = command.input.Prefix as string
           return { Contents: existing.filter((k) => k.startsWith(prefix)).map((Key) => ({ Key })), IsTruncated: false }
@@ -48,7 +48,7 @@ jest.mock("@aws-sdk/client-s3", () => {
 
 import { archiveLogs } from "../scripts/log-archive"
 
-const NOW = new Date("2026-11-27T10:07:00Z")
+const NOW = new Date("2026-11-27T10:17:00Z")
 const HOUR = "2026-11-27T09:00:00.000Z"
 
 type Row = { timestamp: string; message: string; severity: string; attributes: { key: string; value: string }[] }
@@ -78,11 +78,12 @@ beforeEach(() => {
     { id: "dep-new", status: "SUCCESS", createdAt: "2026-11-27T09:30:00Z" },
     { id: "dep-old", status: "REMOVED", createdAt: "2026-11-20T00:00:00Z" },
     { id: "dep-failed", status: "FAILED", createdAt: "2026-11-27T09:20:00Z" },
+    { id: "dep-later", status: "SUCCESS", createdAt: "2026-11-27T10:05:00Z" },
   ]
   logs = {
     "dep-old": [row("2026-11-27T08:59:59.999Z", "before the hour"), row("2026-11-27T09:10:00.5Z", "old one", { userId: "u1" }), row("2026-11-27T09:31:00Z", "old draining")],
     "dep-new": [row("2026-11-27T09:30:30.123456789Z", "new one", { eventsCount: 3 }), row("2026-11-27T10:00:00Z", "next hour")],
-    "dep-failed": [row("2026-11-27T09:21:00Z", "never served")],
+    "dep-failed": [row("2026-11-27T09:21:00Z", "boot failed")],
   }
   process.env.RAILWAY_ENVIRONMENT_NAME = "staging"
   process.env.RAILWAY_PROJECT_ID = "proj"
@@ -103,7 +104,11 @@ beforeEach(() => {
     const from = Date.parse(variables.startDate)
     const to = Date.parse(variables.endDate)
     // Railway's endDate is inclusive, and a full page is the newest `limit` lines of the window (measured on staging).
-    const inWindow = (logs[variables.deploymentId] ?? []).filter((r) => Date.parse(r.timestamp) >= from && Date.parse(r.timestamp) <= to)
+    // A time Railway reads and JS cannot (the garbled-line test) comes back whatever the window.
+    const inWindow = (logs[variables.deploymentId] ?? []).filter((r) => {
+      const t = Date.parse(r.timestamp)
+      return Number.isNaN(t) || (t >= from && t <= to)
+    })
     return Response.json({ data: { deploymentLogs: inWindow.slice(-variables.limit) } })
   }) as unknown as typeof fetch
 })
@@ -125,12 +130,13 @@ describe("archiveLogs", () => {
 
     const result = await archiveLogs(NOW)
 
-    expect(result).toEqual({ written: [{ key: "logs/staging/2026-11-27/09.ndjson.gz", lines: 3 }], failures: [] })
+    expect(result).toEqual({ written: [{ key: "logs/staging/2026-11-27/09.ndjson.gz", lines: 4 }], failures: [] })
     expect(puts()).toHaveLength(1)
     expect(puts()[0].input).toMatchObject({ Bucket: PRIVATE, Key: "logs/staging/2026-11-27/09.ndjson.gz" })
     const lines = archived("logs/staging/2026-11-27/09.ndjson.gz")
     // In time order across deployments; the hour is half-open, so 08:59:59.999 and 10:00:00 are not in it.
-    expect(lines.map((l) => l.message)).toEqual(["old one", "new one", "old draining"])
+    // A FAILED deployment's boot output is kept: it is what a bad deploy is read from.
+    expect(lines.map((l) => l.message)).toEqual(["old one", "boot failed", "new one", "old draining"])
     expect(lines[0]).toEqual({
       _time: "2026-11-27T09:10:00.5Z",
       env: "staging",
@@ -139,11 +145,12 @@ describe("archiveLogs", () => {
       deploymentId: "dep-old",
       attributes: JSON.stringify({ userId: "u1" }),
     })
-    // The FAILED deployment never served, so its lines are not asked for.
-    expect(calls.some((c) => c.body.includes("dep-failed"))).toBe(false)
+    // A deployment created after the hour is not asked.
+    expect(calls.some((c) => c.body.includes("dep-later"))).toBe(false)
     // Railway is asked with the project token, and every call carries a deadline.
     expect(calls[0].headers["Project-Access-Token"]).toBe("rw-test")
     expect(calls.every((c) => c.signal instanceof AbortSignal)).toBe(true)
+    expect(sent.every((c) => c.options?.abortSignal instanceof AbortSignal)).toBe(true)
     // Axiom gets the same lines, after the archive.
     const [ax] = axiomBodies()
     expect(ax.url).toBe("https://us-east-1.aws.edge.axiom.co/v1/ingest/blendn-logs")
@@ -192,12 +199,15 @@ describe("archiveLogs", () => {
 
     const result = await archiveLogs(NOW, HOUR)
 
-    expect(result).toEqual({ written: [{ key: "logs/staging/2026-11-27/09.ndjson.gz", lines: 3 }], failures: [], axiom: "not configured" })
+    expect(result).toEqual({ written: [{ key: "logs/staging/2026-11-27/09.ndjson.gz", lines: 4 }], failures: [], axiom: "not configured" })
     expect(axiomBodies()).toHaveLength(0)
 
     process.env.AXIOM_DATASET = "blendn-logs"
+    sent.length = 0
     const half = await archiveLogs(NOW, HOUR)
+    // Refused before anything is read or written.
     expect(half.failures).toEqual([expect.stringMatching(/AXIOM_TOKEN is not set/)])
+    expect(sent).toHaveLength(0)
   })
 
   it("fails the hour, and writes nothing for it, when Railway refuses", async () => {
@@ -207,6 +217,51 @@ describe("archiveLogs", () => {
 
     expect(puts()).toHaveLength(0)
     expect(result.failures).toEqual([expect.stringMatching(/Not Authorized/)])
+  })
+
+  it("reads an hour only once it is ten minutes past", async () => {
+    existing = Array.from({ length: 48 }, (_, i) => new Date(Date.parse(HOUR) - (i + 1) * 3_600_000).toISOString()).map(
+      (h) => `logs/staging/${h.slice(0, 10)}/${h.slice(11, 13)}.ndjson.gz`
+    )
+    expect((await archiveLogs(new Date("2026-11-27T10:09:00Z"))).written).toEqual([])
+    expect((await archiveLogs(new Date("2026-11-27T10:10:00Z"))).written).toEqual([{ key: "logs/staging/2026-11-27/09.ndjson.gz", lines: 4 }])
+  })
+
+  it("fails an hour, and writes nothing for it, when it cannot see which deployment served its start", async () => {
+    // A wrong LOGS_SERVICE_ID: Railway answers an empty list, not an error.
+    deployments = []
+    const none = await archiveLogs(NOW, HOUR)
+    expect(none.failures).toEqual([expect.stringMatching(/^2026-11-27T09:00:00.000Z: no deployment of LOGS_SERVICE_ID/)])
+
+    // Five deploys inside the hour: the one live at its start is past the five asked.
+    deployments = Array.from({ length: 5 }, (_, i) => ({ id: `d${i}`, status: "SUCCESS", createdAt: `2026-11-27T09:1${i}:00Z` })).concat([
+      { id: "dep-old", status: "REMOVED", createdAt: "2026-11-20T00:00:00Z" },
+    ])
+    const busy = await archiveLogs(NOW, HOUR)
+    expect(busy.failures).toEqual([expect.stringMatching(/^2026-11-27T09:00:00.000Z: no deployment of LOGS_SERVICE_ID/)])
+    expect(puts()).toHaveLength(0)
+  })
+
+  it("never overwrites an hour with nothing when it is asked again after Railway has dropped it", async () => {
+    logs = {}
+    const result = await archiveLogs(NOW, HOUR)
+    expect(result.failures).toEqual([expect.stringMatching(/Railway has no lines for this hour/)])
+    expect(puts()).toHaveLength(0)
+  })
+
+  it("fails a line whose time it cannot read, instead of dropping it", async () => {
+    logs["dep-new"].push(row("not a time", "garbled"))
+    const result = await archiveLogs(NOW, HOUR)
+    expect(result.failures).toEqual([expect.stringMatching(/unreadable timestamp/)])
+    expect(puts()).toHaveLength(0)
+  })
+
+  it("never sends the Axiom token to a host that is not Axiom", async () => {
+    process.env.AXIOM_DOMAIN = "axiom.co.example.com"
+    const result = await archiveLogs(NOW, HOUR)
+    delete process.env.AXIOM_DOMAIN
+    expect(result.failures).toEqual([expect.stringMatching(/AXIOM_DOMAIN/)])
+    expect(calls).toHaveLength(0)
   })
 
   it("never writes to the public bucket", async () => {

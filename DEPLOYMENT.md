@@ -685,14 +685,14 @@ the `HEALTH_METRICS_TOKEN` header (see Health Check, above).
 The web service writes JSON lines to stdout (`lib/logger.ts`; also Next's,
 Prisma's and the few raw `console` lines). Railway keeps them for its plan's
 window and has no log drain, so a separate cron service per environment,
-**Blendn-Log-Archive** (`scripts/log-archive.ts`, schedule `5 * * * *`), reads
+**Blendn-Log-Archive** (`scripts/log-archive.ts`, schedule `15 * * * *`), reads
 each whole UTC hour back through Railway's API and writes it twice, archive
 first (register D-041):
 
 | Where | What | Kept | Removed by |
 |---|---|---|---|
 | Railway | `railway logs` and the console's Logs tab: live, and the last hour | 7 days (Hobby), 30 (Pro) | Railway |
-| Axiom, dataset `blendn-logs` | every hour, about an hour late, both environments (field `env`) | 30 days | Axiom's free plan |
+| Axiom, dataset `blendn-logs` | every hour, up to 75 minutes late, both environments (field `env`) | 30 days | Axiom's free plan |
 | Tigris private bucket, `logs/<env>/<YYYY-MM-DD>/<HH>.ndjson.gz` (UTC) | the same lines, gzipped NDJSON | 180 days | the lifecycle rule `logs-180-days`, below |
 
 Each line is `_time`, `env`, `level`, `message`, `deploymentId` and
@@ -711,19 +711,21 @@ quote what a line says, never paste lines into a ticket, a chat or a reply.
 ```
 
 **The logs for 14 August** (any of the last 180 days): with the AWS CLI and
-the Railway CLI linked to the environment, nothing printed but the files:
+the Railway CLI linked to the environment, into a private folder outside the
+repo (it is public), nothing printed but the files:
 
 ```bash
+umask 077; d=$(mktemp -d)
 railway run -s Blendn-Admin -- sh -c 'AWS_ACCESS_KEY_ID="$TIGRIS_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$TIGRIS_SECRET_KEY" \
   aws s3 cp --recursive --endpoint-url "$TIGRIS_ENDPOINT" \
-  "s3://${TIGRIS_PRIVATE_BUCKET:-$TIGRIS_BUCKET-private}/logs/production/2027-08-14/" ./logs-2027-08-14/'
-gunzip -c ./logs-2027-08-14/*.gz | jq -c 'select(.level == "error")'
+  "s3://${TIGRIS_PRIVATE_BUCKET:-$TIGRIS_BUCKET-private}/logs/production/2027-08-14/" "$0"' "$d"
+gunzip -c "$d"/*.gz | jq -c 'select(.level == "error")'
+rm -r "$d"
 ```
 
 The same download is what CERT-In gets when it asks (direction (iv) of 28
 April 2022; its FAQ Q35 allows logs kept outside India if they are produced in
-reasonable time): the owner decides what is handed over. Delete the local copy
-when done.
+reasonable time): the owner decides what is handed over.
 
 **The 180-day rule**, once per environment's private bucket. A put replaces
 every rule on the bucket, so read the bucket's rules first and keep them in the
@@ -743,13 +745,18 @@ deletion to UTC midnight, so 181 never removes a line younger than 180 days.
 
 **A run failed.** The cron service's logs say `log archive failed: <hour>: <why>`
 and the run exits 1. Every run fills any hour of the last 48 that has no
-archive object, so one failed run heals itself. `archived, not in Axiom` means
-the archive has the hour and Axiom does not: send it again with
+archive object, so the archive heals itself; Axiom does not. `archived, not in
+Axiom` means the archive has the hour and Axiom does not, and no later run
+will send it: send it again with
 `railway run -s Blendn-Log-Archive -- npx tsx scripts/log-archive.ts 2026-12-01T09`
-(it rewrites that hour's object and re-posts it, so Axiom may hold part of the
-hour twice). `Axiom not configured … archive only` means neither `AXIOM_*`
-variable is set. A failure older than 48 hours is the same command per hour,
-for as long as Railway still keeps the logs (its plan's window).
+while Railway still keeps that hour's logs (its plan's window). It rewrites
+the hour's object and re-posts it, so Axiom may hold part of the hour twice;
+asked for an hour Railway no longer has, it refuses rather than empty the
+archive. `no deployment … seen live at the start of the hour` means it cannot
+tell which deployment served the hour (a wrong `LOGS_SERVICE_ID`, or five
+deploys inside one hour) and wrote nothing for it. `Axiom not configured …
+archive only` means neither `AXIOM_*` variable is set. A failure older than 48
+hours is the same command per hour, inside Railway's window.
 
 #### A background loop stalled
 
