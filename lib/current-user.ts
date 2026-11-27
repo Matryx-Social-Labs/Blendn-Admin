@@ -1,7 +1,7 @@
 import type { user_role } from "@prisma/client"
 
 import { getAuth, getInviteAuth } from "@/lib/auth"
-import { db } from "@/lib/db"
+import { sessionAccount } from "@/lib/org-membership"
 import { Refusal } from "@/lib/refusal"
 import { isRevoked } from "@/lib/session-revocation"
 
@@ -14,19 +14,18 @@ import { isRevoked } from "@/lib/session-revocation"
  * rule (`isRevoked`, lib/session-revocation.ts) again on its own read, so a
  * session object built anywhere else, or a change to that callback, cannot
  * hand out a person the database has ended: deleted, suspended, or signed in
- * before the password changed. The role is the row's; the session lends only
- * its id and when it signed in. A read that fails throws — never a user made
+ * before the password changed. The role is the one the session's claim carries,
+ * derived from the same read (`dashboardRoleFor`: `app_admin` from the row,
+ * anyone else from their memberships, SCRUM-1247), so a page and its action
+ * cannot disagree; the session lends only its id and when it signed in. A read that fails throws — never a user made
  * from the session's claims.
  */
 async function accountOf(session: Awaited<ReturnType<typeof getInviteAuth>>): Promise<{ id: string; role: user_role } | null> {
   const id = session?.user?.id
   if (!id) return null
-  const account = await db.user.findUnique({
-    where: { id },
-    select: { role: true, suspended_at: true, deletedAt: true, password_changed_at: true, sessions_revoked_at: true },
-  })
+  const account = await sessionAccount(id)
   if (!account || isRevoked({ sub: id, signedInAt: session?.user?.signedInAt }, account)) return null
-  return { id, role: account.role }
+  return { id, role: account.dashboardRole }
 }
 
 export async function currentUser(): Promise<{ id: string; role: user_role } | null> {

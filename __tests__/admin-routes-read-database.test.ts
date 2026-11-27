@@ -5,13 +5,14 @@
  */
 let mockRow: { role: string; suspended_at: Date | null; deletedAt: Date | null; password_changed_at: Date | null; sessions_revoked_at: Date | null } | null = null
 jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "u1", role: "app_admin", signedInAt: Date.now() } }) }))
-jest.mock("@/lib/db", () => ({ db: { user: { findUnique: jest.fn(async () => mockRow) } } }))
+jest.mock("@/lib/db", () => ({ db: { $queryRaw: async () => mockSessionRows(mockRow), user: { findUnique: jest.fn(async () => mockRow) } } }))
 jest.mock("@/lib/lead-queries", () => ({ getLeads: jest.fn().mockResolvedValue([]) }))
 
 import { NextRequest } from "next/server"
 
 import { GET as docs } from "@/app/api/docs/route"
 import { GET as exportLeads } from "@/app/api/leads/export/route"
+import { mockSessionRows } from "./support/session-account"
 
 const row = (role: string, suspended = false) => {
   mockRow = { role, suspended_at: suspended ? new Date() : null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null }

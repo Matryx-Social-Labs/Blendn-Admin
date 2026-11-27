@@ -148,6 +148,11 @@ test.beforeAll(async () => {
   ids.ownerB = await person("owner-b", "organizer")
   ids.orgA = await org("org A", ids.owner, ids.staff)
   ids.orgB = await org("org B", ids.ownerB)
+  // A venue owner's dashboard is their organisation's (SCRUM-1247): one approved as a venue owner, with no venue yet.
+  const venueOrg = await org("venue org", ids.venueOwner)
+  await db.organiser_onboarding_requests.create({
+    data: { org_id: venueOrg, display_name: `${tag} venue org`, contact_name: "Venue", contact_email: `${tag}-venue-app@e2e.invalid`, requested_role: "venue_owner", status: "approved" },
+  })
 
   const firstPeople = await people("first", 8)
   ids.first = await event(ids.orgA, ids.owner, "first", daysAgoAt(now, 120), firstPeople.map((user_id) => ({ user_id, minutes: 95 })))
@@ -197,6 +202,7 @@ test.afterAll(async () => {
   await db.event_occurrences.deleteMany({ where: { event_id: { in: events } } })
   await db.events.deleteMany({ where: { id: { in: events } } })
   await db.organisation_members.deleteMany({ where: { org_id: { in: orgs } } })
+  await db.organiser_onboarding_requests.deleteMany({ where: { org_id: { in: orgs } } })
   await db.organisations.deleteMany({ where: { id: { in: orgs } } })
   await db.user.deleteMany({ where: { id: { in: users } } })
   await db.$disconnect()

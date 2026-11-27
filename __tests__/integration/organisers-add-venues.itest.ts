@@ -27,6 +27,7 @@ afterAll(async () => {
   await cleanup([], events)
   await db.venues.deleteMany({ where: { id: { in: venues } } })
   await db.organisation_members.deleteMany({ where: { org_id: { in: orgs } } })
+  await db.organiser_onboarding_requests.deleteMany({ where: { org_id: { in: orgs } } })
   await db.organisations.deleteMany({ where: { id: { in: orgs } } })
   await cleanup(users, [])
   await closeDb()
@@ -43,6 +44,12 @@ async function member(label: string, role: "organizer" | "venue_owner" | "app_ad
     })
     orgs.push(org.id)
     await db.organisation_members.create({ data: { org_id: org.id, user_id: id, role: "owner" } })
+    // A venue owner's organisation is one approved as such, before it owns a venue (SCRUM-1247).
+    if (role === "venue_owner") {
+      await db.organiser_onboarding_requests.create({
+        data: { org_id: org.id, display_name: testId(`${label}-app`), contact_name: "V", contact_email: `${testId(label)}@itest.invalid`, requested_role: "venue_owner", status: "approved" },
+      })
+    }
     orgId = org.id
   }
   return { id, orgId, as: () => mockGetAuth.mockResolvedValue({ user: { id, role } }) }
@@ -93,10 +100,12 @@ describe("an organiser adds a venue", () => {
     expect(r.geofence).toMatchObject({ type: "polygon", buffer: 20 })
   })
 
+  // Since SCRUM-1247 an organizer row with no organisation is no host at all: refused before the organisation is asked.
   it("is refused without an organisation — there is nobody to give the edit to", async () => {
     const loner = await member("oav-loner", "organizer", false)
     loner.as()
-    await expect(added({ lat: base.lat + 0.01, lng: base.lng })).rejects.toThrow(/organisation/i)
+    await expect(added({ lat: base.lat + 0.01, lng: base.lng })).rejects.toThrow(/organisation|forbidden/i)
+    expect(await db.venues.count({ where: { created_by: loner.id } })).toBe(0)
   })
 
   it("an admin still adds unclaimed venues with no creating organisation", async () => {

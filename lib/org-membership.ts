@@ -1,4 +1,4 @@
-import type { org_role, user_role } from "@prisma/client"
+import { $Enums, Prisma, type org_role, type user_role } from "@prisma/client"
 
 // Relative: reachable from server.ts via socket-ops-auth. See v0.12.1.
 import { db } from "./db"
@@ -30,6 +30,87 @@ export const activeMembership = { org: { status: { not: "suspended" as const } }
  * `homeOrgIdFor` and `activeOrgsFor` both order by this.
  */
 export const HOME_ORG_ORDER = [{ created_at: "asc" as const }, { org_id: "asc" as const }]
+
+/**
+ * An organisation's dashboard kind, over the alias `o`. A brand's (granted `may_sponsor`, or owning a live, unmerged
+ * brand: a revoked grant still leaves a brand to look after) before a venue's (owns a live venue), a venue's before an
+ * events org's. An org that has neither yet is what its approved application asked to be: a venue owner approved this
+ * morning has no venue until their first claim, and must be able to file it. SQL, not TypeScript, so the session read is
+ * one statement; this is the rule's only text.
+ */
+export const ORG_KIND_SQL = Prisma.sql`CASE
+  WHEN o.may_sponsor OR EXISTS (SELECT 1 FROM sponsors s WHERE s.org_id = o.id AND s.deleted_at IS NULL AND s.merged_into IS NULL) THEN 'sponsor'
+  WHEN EXISTS (SELECT 1 FROM venues v WHERE v.owner_org_id = o.id AND v.deleted_at IS NULL) THEN 'venue_owner'
+  WHEN EXISTS (SELECT 1 FROM organiser_onboarding_requests r WHERE r.org_id = o.id AND r.status = 'approved' AND r.requested_role = 'sponsor') THEN 'sponsor'
+  WHEN EXISTS (SELECT 1 FROM organiser_onboarding_requests r WHERE r.org_id = o.id AND r.status = 'approved' AND r.requested_role = 'venue_owner') THEN 'venue_owner'
+  ELSE 'organizer'
+END`
+
+/** The kind of the home organisation of the user aliased `u`: `activeMembership` and `HOME_ORG_ORDER`, in SQL. NULL with none. */
+const HOME_KIND_SQL = Prisma.sql`(
+  SELECT ${ORG_KIND_SQL}
+  FROM organisation_members m JOIN organisations o ON o.id = m.org_id
+  WHERE m.user_id = u.id AND o.status <> 'suspended'
+  ORDER BY m.created_at ASC, m.org_id ASC
+  LIMIT 1
+)`
+
+const HOST_KINDS: readonly user_role[] = ["sponsor", "venue_owner", "organizer"]
+
+/**
+ * Who someone is to the dashboard (SCRUM-1247): `app_admin` if the row is, whatever their memberships; otherwise the kind
+ * of their home organisation (the oldest live membership; a suspended org grants nothing); with none, `attendee`.
+ * `User.role` is read only for the admin check, so task 11 can stop writing it for hosts. Someone in orgs of two kinds
+ * sees their home org's dashboard (a mixed nav is design's, BACKLOG). Anything else from the query is a refusal.
+ */
+export function dashboardRoleFor(row: { role: user_role; home_kind: string | null }): user_role {
+  if (row.role === "app_admin") return "app_admin"
+  if (row.home_kind === null) return "attendee"
+  const kind = HOST_KINDS.find((k) => k === row.home_kind)
+  if (!kind) throw new Error("Unknown organisation kind")
+  return kind
+}
+
+const USER_ROLES = new Set<string>(Object.values($Enums.user_role))
+
+/** What the session readers need of a person: the row's `role` (for `isRevoked`'s admin rule) and `dashboardRole`. */
+export interface SessionAccount {
+  id: string
+  email: string
+  name: string | null
+  role: user_role
+  suspended_at: Date | null
+  deletedAt: Date | null
+  password_changed_at: Date | null
+  sessions_revoked_at: Date | null
+  dashboardRole: user_role
+}
+
+type Row = Omit<SessionAccount, "dashboardRole" | "role"> & { role: string; home_kind: string | null }
+
+function toAccount({ home_kind, ...row }: Row): SessionAccount {
+  if (!USER_ROLES.has(row.role)) throw new Error("Unknown user role")
+  const role = row.role as user_role
+  return { ...row, role, dashboardRole: dashboardRoleFor({ role, home_kind }) }
+}
+
+const ACCOUNT_COLUMNS = Prisma.sql`u.id, u.email, u.name, u.role::text AS role, u.suspended_at, u."deletedAt",
+  u.password_changed_at, u.sessions_revoked_at, ${HOME_KIND_SQL} AS home_kind`
+
+/**
+ * The one read every dashboard session makes (the jwt callback, `currentUser`, the socket handshake): the account and
+ * its dashboard role in ONE statement. A Prisma nested select is one call but three round trips, on every request.
+ */
+export async function sessionAccount(id: string): Promise<SessionAccount | null> {
+  const [row] = await db.$queryRaw<Row[]>`SELECT ${ACCOUNT_COLUMNS} FROM "User" u WHERE u.id = ${id}`
+  return row ? toAccount(row) : null
+}
+
+/** `sessionAccount` for sign-in alone: by address, with the password hash. */
+export async function signinAccount(email: string): Promise<(SessionAccount & { password: string | null }) | null> {
+  const [row] = await db.$queryRaw<(Row & { password: string | null })[]>`SELECT ${ACCOUNT_COLUMNS}, u.password FROM "User" u WHERE u.email = ${email}`
+  return row ? { ...toAccount(row), password: row.password } : null
+}
 
 /** Which of this person's organisations are suspended, for the banner. */
 export async function suspendedOrgsFor(
