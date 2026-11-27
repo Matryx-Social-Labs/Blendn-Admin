@@ -345,6 +345,21 @@ describe("a pass is a few statements, however many messages it classifies", () =
     const kept = await db.event_feedback.findUniqueOrThrow({ where: { message_id: corrected.id } })
     expect(kept).toMatchObject({ source: "human", sentiment: "positive", category: "other" })
   })
+
+  it("hands the classifier each message's room, and comes straight back for what it did not reach (SCRUM-1231)", async () => {
+    // Negative control: no room was passed, so rooms shared a model call; and a pass the classifier's call cap cut
+    // short reported hasMore false, so the rest waited a minute.
+    const { groupId } = await roomWith(["GOOD one", "GOOD two"])
+    let seen: Array<{ id: string; room?: string }> = []
+    jest.mocked(classifyMessages).mockImplementationOnce(async (messages) => {
+      seen = messages
+      return []
+    })
+    const result = await sweepSentiment()
+    const mine = await db.chat_messages.findMany({ where: { chat_group_id: groupId }, select: { id: true } })
+    expect(seen.filter((m) => mine.some((x) => x.id === m.id)).map((m) => m.room)).toEqual([groupId, groupId])
+    expect(result).toEqual({ classified: 0, hasMore: true })
+  })
 })
 describe("one busy room does not starve the rest (G7)", () => {
   it("gives a quiet room its turn in the same pass as a backlog older than it", async () => {

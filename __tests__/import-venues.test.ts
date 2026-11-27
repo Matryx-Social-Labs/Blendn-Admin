@@ -15,7 +15,6 @@ import {
   venueTypeFrom,
   type VenueRow,
 } from "../scripts/import-venues"
-import { fenceFromOsm, type OsmHit } from "../scripts/enrich-venues-from-osm"
 
 /**
  * Founder seeding (step 1): the parts of `scripts/import-venues.ts` that decide
@@ -165,23 +164,6 @@ describe("columnsOf", () => {
     expect(() => columnsOf(["city", "lat"])).toThrow(/no "name" column/)
     // A spreadsheet saved with ";" between columns reads as one column.
     expect(() => columnsOf(["name;city;lat;lng"])).toThrow(/separated by ";"/)
-  })
-})
-
-describe("fenceFromOsm — whose footprint a seeded venue gets", () => {
-  const square: [number, number][] = [
-    [12.9790, 77.6405], [12.9790, 77.6409], [12.9794, 77.6409], [12.9794, 77.6405], [12.9790, 77.6405],
-  ]
-  const hit = (nameMatched: boolean): OsmHit => ({ tags: { name: "Toit" }, ring: square, distance: 5, nameMatched })
-
-  it("takes a named building's outline, closed ring trimmed", () => {
-    expect(fenceFromOsm(hit(true))).toEqual({ type: "polygon", ring: square.slice(0, -1), buffer: 25 })
-  })
-
-  it("never takes an unnamed neighbour's, or nothing", () => {
-    // An unnamed building near a pin is a different business sharing a postcode.
-    expect(fenceFromOsm(hit(false))).toBeNull()
-    expect(fenceFromOsm(null)).toBeNull()
   })
 })
 

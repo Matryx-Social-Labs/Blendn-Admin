@@ -6,10 +6,9 @@ import { cityCatalogue, cityFor, type Catalogue } from "../lib/cities"
 import { parseCsvRows } from "../lib/csv"
 import { closeDb, db } from "../lib/db"
 import { haversineDistanceMeters } from "../lib/geo"
-import { isValidLatLng, type Geofence } from "../lib/geofence"
+import { isValidLatLng } from "../lib/geofence"
 import { DUPLICATE_RADIUS_M, defaultVenueFence, nearbyVenues } from "../lib/venue-rules"
 import { VENUE_TYPE_GROUPS } from "../lib/venue-types"
-import { fenceFromOsm, lookup } from "./enrich-venues-from-osm"
 
 /**
  * Founder seeding: venues from a CSV (product-completion plan v2, §3).
@@ -24,9 +23,8 @@ import { fenceFromOsm, lookup } from "./enrich-venues-from-osm"
  *   - **unclaimed**, as an admin's venue is: no owner, no creating organisation.
  *     The owner claims it later at `/claim/venue/<id>`, and a person reviews it.
  *
- * With `--osm`, a venue whose own building OSM knows by name gets that
- * footprint instead of the circle — `scripts/enrich-venues-from-osm.ts`'s
- * lookup, five seconds apart, because Overpass throttles anonymous callers.
+ * A seeded venue's building outline comes later, from Overture buildings in
+ * one offline pass (`scripts/backfill-venue-fences.ts`), not from here.
  *
  * ## The file
  *
@@ -53,12 +51,11 @@ import { fenceFromOsm, lookup } from "./enrich-venues-from-osm"
  * and writes nothing.
  *
  * `--apply` is all-or-nothing. A file with any refused row writes nothing; so
- * does a failure part-way, because every footprint is worked out first and the
- * rows are written in one transaction. Re-running is safe: rows already
- * imported come back as duplicates.
+ * does a failure part-way, because the rows are written in one transaction.
+ * Re-running is safe: rows already imported come back as duplicates.
  *
  *   DATABASE_URL=… npx tsx scripts/import-venues.ts venues.csv
- *   DATABASE_URL=… npx tsx scripts/import-venues.ts venues.csv --apply [--osm]
+ *   DATABASE_URL=… npx tsx scripts/import-venues.ts venues.csv --apply
  *
  * Through `npx tsx`, not an npm script, on purpose: npm 11 takes `--apply`
  * given to `npm run` as its own option and drops it, which quietly turns a
@@ -67,9 +64,7 @@ import { fenceFromOsm, lookup } from "./enrich-venues-from-osm"
  */
 
 const COLUMNS = ["name", "address", "lat", "lng", "maps_url", "type", "city", "source", "source_id"] as const
-const FLAGS = new Set(["--apply", "--osm"])
-/** Overpass's anonymous rate, the same pause the enrichment script keeps. */
-const OSM_PAUSE_MS = 5000
+const FLAGS = new Set(["--apply"])
 const SHORT_LINK_HOSTS = new Set(["maps.app.goo.gl", "goo.gl"])
 /** google.com, google.co.in, maps.google.com and the like — not google.evil.com. */
 const GOOGLE_MAPS_HOST = /^(www\.|maps\.)?google\.(com|co\.[a-z]{2}|com\.[a-z]{2}|[a-z]{2})$/
@@ -295,21 +290,6 @@ export function duplicateInFile(row: VenueRow, earlier: VenueRow[]): { of: Venue
   return null
 }
 
-async function footprint(row: VenueRow, osm: boolean): Promise<{ fence: Geofence; source: string }> {
-  if (osm) {
-    try {
-      const fence = fenceFromOsm(await lookup(row.lat, row.lng, row.name))
-      if (fence) return { fence, source: "osm outline" }
-    } catch (error) {
-      console.log(`  WARN  line ${row.line} ${row.name}: Overpass failed (${error instanceof Error ? error.message : error}); circle`)
-    } finally {
-      // Paced whatever the answer: a failure is still a request Overpass counted.
-      await new Promise((r) => setTimeout(r, OSM_PAUSE_MS))
-    }
-  }
-  return { fence: defaultVenueFence(row.lat, row.lng, row.venueType), source: "circle by type" }
-}
-
 /** Every row checked against the file and the database, printed, and the ones to write returned. */
 async function plan(text: string): Promise<{ accepted: VenueRow[]; refused: number; duplicates: number; total: number }> {
   const [header, ...body] = parseCsvRows(text)
@@ -380,12 +360,11 @@ async function main() {
   const file = args.find((a) => !a.startsWith("--"))
   const unknown = args.filter((a) => a.startsWith("--") && !FLAGS.has(a))
   if (!file || unknown.length > 0 || args.filter((a) => !a.startsWith("--")).length !== 1) {
-    console.error("Usage: npx tsx scripts/import-venues.ts <venues.csv> [--apply] [--osm]")
+    console.error("Usage: npx tsx scripts/import-venues.ts <venues.csv> [--apply]")
     process.exitCode = 1
     return
   }
   const apply = args.includes("--apply")
-  const osm = args.includes("--osm")
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set")
 
   console.log(`${apply ? "APPLY" : "DRY RUN"} · ${file} · database ${new URL(process.env.DATABASE_URL).host}\n`)
@@ -406,9 +385,7 @@ async function main() {
   const unplaced = accepted.find((row) => !row.timezone)
   if (unplaced) throw new Error(`line ${unplaced.line} ${unplaced.name} has no time zone: nothing was written`)
 
-  // Footprints first (the slow, fallible part), so the write is one transaction.
-  const writes: { row: VenueRow; fence: Geofence; source: string }[] = []
-  for (const row of accepted) writes.push({ row, ...(await footprint(row, osm)) })
+  const writes = accepted.map((row) => ({ row, fence: defaultVenueFence(row.lat, row.lng, row.venueType) }))
 
   // Two statements for the whole file, not two round trips per row: a city's
   // dataset rows run to thousands. Still one transaction, so still all or nothing.
