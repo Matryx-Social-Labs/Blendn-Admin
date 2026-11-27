@@ -9,7 +9,8 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 import { accountRefusal, suspendedMessageFor } from "@/lib/account-refusal"
 import { COMPANY } from "@/lib/company"
 import { SUSPENDED_MESSAGE } from "@/lib/mobile-auth"
-import { suspensionCategory } from "@/lib/suspension"
+import { REPORT_REASONS } from "@/lib/report-reasons"
+import { SUSPENSION_CATEGORIES, suspensionCategory } from "@/lib/suspension"
 
 const GRIEVANCE = COMPANY.grievance.email
 
@@ -82,5 +83,19 @@ describe("accountRefusal: the reason only reaches a proven owner", () => {
     const a = await accountRefusal("staff").json()
     const b = await accountRefusal("staff", { suspension_reason: "harassment" }).json()
     expect(b).toEqual(a)
+  })
+})
+
+describe("the categories are the report reasons, read from one list", () => {
+  it("every category but guidelines is a report reason", () => {
+    const extra = Object.keys(SUSPENSION_CATEGORIES).filter((k) => k !== "guidelines" && !Object.hasOwn(REPORT_REASONS, k))
+    expect(extra).toEqual([])
+  })
+
+  it("a reason's suspension phrase is what its owner reads; a reason without one reads as guidelines", () => {
+    for (const [value, r] of Object.entries(REPORT_REASONS)) {
+      const reads = r.suspension ? `This account has been suspended. Reason: ${r.suspension}. To appeal, write to ${GRIEVANCE}.` : suspendedMessageFor(null)
+      expect(suspendedMessageFor(value)).toBe(reads)
+    }
   })
 })
