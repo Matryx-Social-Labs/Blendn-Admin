@@ -51,9 +51,8 @@ import { VENUE_TYPE_GROUPS } from "../lib/venue-types"
  * and writes nothing.
  *
  * `--apply` is all-or-nothing. A file with any refused row writes nothing; so
- * does a failure part-way, because every footprint is worked out first and the
- * rows are written in one transaction. Re-running is safe: rows already
- * imported come back as duplicates.
+ * does a failure part-way, because the rows are written in one transaction.
+ * Re-running is safe: rows already imported come back as duplicates.
  *
  *   DATABASE_URL=… npx tsx scripts/import-venues.ts venues.csv
  *   DATABASE_URL=… npx tsx scripts/import-venues.ts venues.csv --apply

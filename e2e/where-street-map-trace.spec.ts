@@ -44,6 +44,8 @@ const CORNERS = [
 async function expectLegendClearOfCredit(page: Page) {
   const legend = await page.getByText(/^GPS allowance/).locator("xpath=ancestor::div[1]").boundingBox()
   const credit = await page.locator(".leaflet-control-attribution").boundingBox()
+  const map = await page.locator(".leaflet-container").boundingBox()
+  console.log(`[credit] map ${Math.round(map!.width)} px wide, credit ${Math.round(credit!.width)}x${Math.round(credit!.height)}`)
   expect(legend!.y + legend!.height <= credit!.y || legend!.x + legend!.width <= credit!.x).toBe(true)
   // One line (12 px at 1.4): a wrapped credit grows upward into the legend's row.
   expect(credit!.height).toBeLessThan(12 * 1.4 * 2)
