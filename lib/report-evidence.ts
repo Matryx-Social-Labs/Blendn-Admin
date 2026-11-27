@@ -9,10 +9,10 @@ import { clipCharacters } from "./utils"
  */
 
 /** A message report keeps the whole message: the longest a room takes. */
-export const MESSAGE_EXCERPT_MAX = 4000
+const MESSAGE_EXCERPT_MAX = 4000
 /** A person report keeps their last lines where it was filed from, each bounded. */
-export const EVIDENCE_LINES = 20
-export const EVIDENCE_LINE_MAX = 500
+const EVIDENCE_LINES = 20
+const EVIDENCE_LINE_MAX = 500
 
 export type EvidencePlace = { chatGroupId: string } | { eventId: string } | { conversationId: string }
 
