@@ -1,3 +1,5 @@
+import { Prisma } from "@prisma/client"
+
 /**
  * Every report reason, in one list (D-027, D-032).
  *
@@ -53,3 +55,17 @@ export function reportReason(stored: string | null | undefined): ReportReason {
   const key = stored?.trim().toLowerCase() ?? ""
   return Object.hasOwn(REPORT_REASONS, key) ? (key as ReportReason) : "other"
 }
+
+const reasonsOf = (severity: "S1" | "S2") =>
+  Object.entries(REPORT_REASONS).flatMap(([value, r]) => (r.severity === severity ? [value] : []))
+
+/** What JavaScript's `trim()` strips: its white space and line terminators. */
+const JS_TRIMMED = "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+
+/**
+ * A `reason` column's severity in SQL, read as `reportReason` reads it: 1 for
+ * S1, 2 for S2, 3 for the rest. The lists are bound parameters from the list
+ * above, so a reason added there is ranked with no SQL edit.
+ */
+const REASON = Prisma.sql`lower(btrim(reason, ${JS_TRIMMED}))`
+export const SEVERITY_RANK = Prisma.sql`CASE WHEN ${REASON} = ANY(${reasonsOf("S1")}) THEN 1 WHEN ${REASON} = ANY(${reasonsOf("S2")}) THEN 2 ELSE 3 END`

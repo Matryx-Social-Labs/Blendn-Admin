@@ -10,7 +10,9 @@ jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
 import { randomUUID } from "crypto"
+import { Prisma } from "@prisma/client"
 import { getReportQueue } from "@/app/dashboard/moderation/reports/actions"
+import { REPORT_REASONS, reportReason, SEVERITY_RANK } from "@/lib/report-reasons"
 import { cleanup, closeDb, db, makeEvent, makeUser } from "./helpers"
 
 const HOUR = 60 * 60 * 1000
@@ -43,6 +45,19 @@ const report = (reason: string, hoursAgo: number, more: { excerpt?: string; mess
   db.message_reports.create({
     data: { reporter_id: reporter, message_id: randomUUID(), message_type: "group", reason, created_at: new Date(Date.now() - hoursAgo * HOUR), ...more },
   })
+
+it("ranks a stored reason in SQL as reportReason reads it", async () => {
+  const stored = [" Threat ", "\u00a0threat\n", "HARASSMENT", "hate_speech\t", "\u3000Under_18\u2028", "spam", "other", "", "He kept following me after I said stop", "constructor"]
+  const values = Prisma.join(stored.map((v) => Prisma.sql`(${v})`))
+
+  const ranked = await db.$queryRaw<{ reason: string; rank: number }[]>`
+    SELECT reason, ${SEVERITY_RANK} AS rank FROM (VALUES ${values}) AS t(reason)`
+
+  const rankOf = { S1: 1, S2: 2, S3: 3 } as const
+  expect(new Map(ranked.map((r) => [r.reason, Number(r.rank)]))).toEqual(
+    new Map(stored.map((v) => [v, rankOf[REPORT_REASONS[reportReason(v)].severity]]))
+  )
+})
 
 it("shows the words kept at report time once the reported message is gone", async () => {
   const r = await report("harassment", 1, { excerpt: "come outside, alone" })
