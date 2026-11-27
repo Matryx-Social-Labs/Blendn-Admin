@@ -1,6 +1,6 @@
 // Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
-exports[`the room roster is what the snapshot says, names a page, and budgets its geocoding 1`] = `
+exports[`the room roster is what the snapshot says, names a page, and geocodes nothing 1`] = `
 [
   {
     "age": 27,
@@ -16,17 +16,17 @@ exports[`the room roster is what the snapshot says, names a page, and budgets it
   },
   {
     "age": 27,
-    "location": "Testville",
+    "location": null,
     "name": "Pseudo plain-1",
   },
   {
     "age": 27,
-    "location": "Testville",
+    "location": null,
     "name": "Pseudo plain-2",
   },
   {
     "age": 27,
-    "location": "Testville",
+    "location": null,
     "name": "Pseudo plain-3",
   },
   {

@@ -4,6 +4,7 @@ import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { db, poolStats } from "@/lib/db"
 import { healthMetricsToken } from "@/lib/env"
+import { staleLoops } from "@/lib/heartbeat"
 
 export const dynamic = "force-dynamic"
 
@@ -72,7 +73,7 @@ function mayReadGauges(request?: Request): boolean {
  *
  * ## Process gauges, for the monitor only
  *
- * `pool`, `eventLoopDelayMs` and `sockets` are counts about this process,
+ * `pool`, `eventLoopDelayMs`, `sockets` and `loops.stale` are about this process,
  * nothing about a person, behind a token (`mayReadGauges`); they are what
  * ops/07 alerts on.
  */
@@ -100,6 +101,8 @@ export async function GET(request?: Request) {
     health.pool = poolStats()
     health.eventLoopDelayMs = lastLoopWindow
     health.sockets = globalThis.__blendnSocketIo?.engine.clientsCount ?? null
+    // Loops quiet for three of their intervals (lib/heartbeat.ts). Never in the status: a redeploy is the fix, not a restart loop.
+    health.loops = { stale: staleLoops() }
   }
 
   const statusCode = health.status === "ok" ? 200 : 503

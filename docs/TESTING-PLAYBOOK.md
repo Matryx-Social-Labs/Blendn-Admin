@@ -778,8 +778,8 @@ whatever diff happened to find it:
 - **No GIN index** for the mobile feed's four-column `ILIKE` search; `pg_trgm` is
   available and not enabled.
 - The city rollup is an unbounded `findMany` folded in Node.
-- `coordinateCache` in `lib/location.ts` has no TTL and no size cap, beside a
-  bounded cache in the same file.
+- `coordinateCache` in `lib/location.ts` had no TTL and no size cap. Deleted
+  with SCRUM-1229: no read geocodes any more, and a write asks Nominatim afresh.
 - **15 of 28 dashboard API routes return raw strings** where the mobile side is
   100% consistent on the envelope.
 - `/dashboard/events/new` reports a **hydration mismatch** from its two Leaflet

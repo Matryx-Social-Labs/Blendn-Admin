@@ -161,11 +161,7 @@ export async function POST(
   if (shouldPersistPing(decision, state, now)) {
     // The session's heartbeat rides the same branch as the check-in's, so the
     // two stores cannot drift apart between pings.
-    await touchSession(checkIn.occurrence.id, authUser.userId, now, {
-      lat: latitude,
-      lng: longitude,
-      accuracy: body.accuracy ?? null,
-    })
+    await touchSession(checkIn.occurrence.id, authUser.userId, now)
     /*
      * A weak fix (`no_signal`, SCRUM-1326) is no reading: its check-in
      * `last_seen_at` would pass for the second outside reading that lets the

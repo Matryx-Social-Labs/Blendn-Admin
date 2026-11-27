@@ -10,6 +10,8 @@ import { closeDb, statementTimeoutMs } from "./lib/db"
 // The four sweepers are started and stopped as one unit now (#276). Importing
 // them individually here is what coupled them to Socket.io in the first place.
 import { startBackgroundWork, stopBackgroundWork } from "./lib/background"
+import { reminderPassInFlight } from "./lib/reminder-sweeper"
+import { drainAndExit } from "./lib/shutdown"
 import { ensureBucketExists } from "./lib/tigris"
 import { validateEnv, googleSignInConfigWarning } from "./lib/env"
 
@@ -108,7 +110,11 @@ app.prepare().then(() => {
   console.log(`[${new Date().toISOString()}] > Background work started`)
 
   // Graceful shutdown
+  let shuttingDown = false
   const shutdown = () => {
+    // A second signal (Ctrl-C twice, SIGTERM then SIGINT) must not start a second drain and a second forced exit.
+    if (shuttingDown) return
+    shuttingDown = true
     console.log(`\n[${new Date().toISOString()}] > Shutting down gracefully...`)
     // Without this the scheduler's pending timeout keeps the event loop alive
     // and the process waits out the forced-exit timeout. #264 moved this out of
@@ -122,42 +128,29 @@ app.prepare().then(() => {
     stopAllOpsBroadcasts()
 
     /*
-     * Write out the buffered signals BEFORE the pool closes.
+     * Then the drains, and exit only once they have settled (lib/shutdown.ts, SCRUM-1228, SCRUM-1404). This exited in
+     * `httpServer.close`'s callback while the flush and `closeDb` ran fire-and-forget, and it never waited for the
+     * reminder pass that had already claimed its rows.
      *
-     * `product_events` batches for ten seconds, so a deploy discards up to one
-     * window of first-opens — which is exactly the moment a deploy happens, and
-     * exactly the population (people using the app right now) whose loss would
-     * bias the number most. Draining costs one statement.
-     *
-     * Ordered before `$disconnect`, and the disconnect chained after it, or the
-     * pool closes underneath the flush and the drain silently does nothing.
+     * - `flushProductEvents`: `product_events` batches for ten seconds, so a deploy discarded up to one window of
+     *   first-opens, the people using the app right now.
+     * - `reminderPassInFlight`: reminders are claimed before they are sent; capped at 8 s.
+     * - `io.close()` also closes the HTTP server (socket.io 4.8.4 `dist/index.js` `close`), which waits for the
+     *   requests still running; there is no second `httpServer.close`.
+     * - `closeDb` after all three, not `$disconnect`: that does not close a pool the driver adapter created, so the
+     *   old container kept its connections while the new one opened its own.
      */
-    void flushProductEvents()
-      .catch(() => {})
-      /*
-       * Drain the connection pool -- `closeDb`, not `$disconnect`.
-       *
-       * This called `db.$disconnect()` under this comment, and that does not
-       * close a pool the driver adapter created. So the sockets were dropped
-       * when the process exited rather than closed, which on a rolling deploy
-       * is the old container still holding connections while the new one opens
-       * its own. `closeDb` does both, in order.
-       */
-      .then(() => closeDb().catch(() => {}))
-
-    io?.close(() => {
-      console.log(`[${new Date().toISOString()}] > Socket.io closed`)
+    const at = () => `[${new Date().toISOString()}] >`
+    void drainAndExit({
+      flush: () => flushProductEvents().then((n) => console.log(`${at()} Product events flushed (${n})`)),
+      inFlight: () => reminderPassInFlight().then(() => console.log(`${at()} Reminder pass settled`)),
+      closeDb: () => closeDb().then(() => console.log(`${at()} Database pool closed`)),
+      closeIo: () => io.close().then(() => console.log(`${at()} Socket.io and HTTP server closed`)),
+      exit: (code) => {
+        console.log(`${at()} Exiting (${code})`)
+        process.exit(code)
+      },
     })
-    httpServer.close(() => {
-      console.log(`[${new Date().toISOString()}] > HTTP server closed`)
-      process.exit(0)
-    })
-
-    // Force exit after 10 seconds
-    setTimeout(() => {
-      console.error(`[${new Date().toISOString()}] > Forced shutdown after timeout`)
-      process.exit(1)
-    }, 10000)
   }
 
   process.on("SIGTERM", shutdown)

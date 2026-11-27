@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { phoneCheckInRadius } from "@/lib/geofence"
 import { distinctAttendeeCounts, hereNow, type HereNow } from "@/lib/attendee-counts"
-import { resolveEventCity, geocodeBudget, type GeocodeBudget } from "@/lib/location"
+import { storedCity } from "@/lib/location"
 import { haversineDistance } from "@/lib/geo"
 import { eventHostSelect, hostPayload } from "@/lib/event-host"
 import { appUrl } from "@/lib/email"
@@ -122,16 +122,6 @@ interface TransformContext {
   /** The day's rotation seed (`featuredSeed`); the rank of a featured event is its place in that order. */
   featuredSeed?: string
   /**
-   * How many reverse-geocodes this request may still make.
-   *
-   * Owned by `transformEvents`, not by the caller: a page of null-city rows used
-   * to fan out one Nominatim request per event, concurrently, on a user-facing
-   * read. City is resolved at write time now, so this only ever covers rows
-   * created before that -- and past the budget a card renders without a city
-   * rather than the page waiting on a public API.
-   */
-  geocodes?: GeocodeBudget
-  /**
    * `listCounts(events)`, already awaited by a caller that started it beside its
    * own reads (the list route's favourites and check-ins), so the counts do not
    * wait for them or they for the counts. Omitted: `transformEvents` asks.
@@ -178,7 +168,7 @@ async function transformEvent(
      */
     venue: eventVenue(event),
     address: event.address,
-    city: await resolveEventCity(event.city, event.latitude, event.longitude, ctx.geocodes),
+    city: storedCity(event.city),
     state: event.state,
     country: event.country,
     latitude: event.latitude,
@@ -342,13 +332,11 @@ export async function transformEvents(
   ctx: TransformContext
 ) {
   const { attended, here, tallies } = ctx.counts ?? (await listCounts(events))
-  // One budget for the page, made here so it cannot be shared between requests.
-  const withBudget = { ...ctx, geocodes: ctx.geocodes ?? geocodeBudget() }
   const featured = featuredOf(events, ctx.featuredSeed ?? featuredSeed(undefined, new Date()))
   const prices = await listPrices(events)
   return Promise.all(
     events.map((event) =>
-      transformEvent(event, withBudget, attended, here, tallies, featured.get(event.id) ?? null, prices.get(event.id) ?? NO_PRICE)
+      transformEvent(event, ctx, attended, here, tallies, featured.get(event.id) ?? null, prices.get(event.id) ?? NO_PRICE)
     )
   )
 }

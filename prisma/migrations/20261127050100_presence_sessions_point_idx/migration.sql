@@ -1,0 +1,15 @@
+-- Presence sessions stop storing a point (SCRUM-1230: nothing reads "last_lat", "last_lng" or "last_accuracy"), and the
+-- ones written before are nulled by `forgetCheckInPoints` (lib/presence-sweeper.ts) a batch at a time. This index holds
+-- exactly the sessions still carrying one, so the batch is read from it rather than by a scan of every session, and
+-- once the backlog is gone every five-minute pass reads an empty index. The columns, and this index with them, are
+-- dropped by a later contract migration. Partial, so it lives here and not in schema.prisma (CLAUDE.md, db push).
+--
+-- CONCURRENTLY, alone in its file and not wrapped: it cannot run inside a transaction, and a plain CREATE INDEX would
+-- hold every presence write for the length of a scan of the whole table (__tests__/migration-tx.test.ts).
+-- If it fails, Prisma records the migration as failed and every later deploy stops (P3009) until it is resolved, and
+-- the failed build can leave an INVALID "presence_sessions_point_idx" that IF NOT EXISTS would skip on a retry.
+-- Recovery is an ops step, not a new migration: `DROP INDEX CONCURRENTLY IF EXISTS "presence_sessions_point_idx";`,
+-- then `prisma migrate resolve --rolled-back` for this folder, then redeploy. Afterwards
+-- `SELECT indisvalid FROM pg_index WHERE indexrelid = '"presence_sessions_point_idx"'::regclass` reads true. A build that hangs is waiting on an older snapshot: look for `idle in transaction` in
+-- pg_stat_activity first.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "presence_sessions_point_idx" ON "presence_sessions" ("id") WHERE "last_lat" IS NOT NULL OR "last_lng" IS NOT NULL OR "last_accuracy" IS NOT NULL;

@@ -1,6 +1,7 @@
 // Relative, not "@/lib/*" — reachable from server.ts, and `build:server`
 // compiles with plain tsc. Enforced by __tests__/server-import-boundary.test.ts.
 import { db } from "./db"
+import { beat } from "./heartbeat"
 import { logger } from "./logger"
 import { BATCH_SIZE, classifyMessages } from "./sentiment/classify"
 
@@ -44,6 +45,13 @@ import { BATCH_SIZE, classifyMessages } from "./sentiment/classify"
  */
 
 export const SWEEP_INTERVAL_MS = 60 * 1000
+/**
+ * The heartbeat's interval (lib/heartbeat.ts reports a loop after 3 of them), not the sweep's. With the model timing
+ * out, one pass is up to 20 calls, 4 at a time (lib/sentiment/classify.ts), × (20 s + 2 s + 20 s) ≈ 3.5 min and still
+ * finishes on the word list: 3 × 3 min clears that plus the minute between passes, so a slow OpenAI is not reported as
+ * a stalled loop.
+ */
+const BEAT_INTERVAL_MS = 3 * 60 * 1000
 
 /**
  * Ten batches of 20. The ceiling exists so the first pass after a quiet deploy
@@ -129,7 +137,7 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
   if (batch.length === 0) return { classified: 0, hasMore: false }
 
   const rowOf = new Map(batch.map((m) => [m.id, m]))
-  const results = await classifyMessages(batch.map((m) => ({ id: m.id, text: m.content })))
+  const results = await classifyMessages(batch.map((m) => ({ id: m.id, text: m.content, room: m.chat_group_id })))
 
   let written: { message_id: string }[]
   try {
@@ -164,7 +172,8 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
     }
   }
 
-  return { classified: written.length, hasMore }
+  // A message the classifier did not reach this pass (its call cap) has no row yet: the next pass comes at once.
+  return { classified: written.length, hasMore: hasMore || results.length < batch.length }
 }
 
 /** How far back the pass looks for messages to classify. */
@@ -255,6 +264,7 @@ export function startSentimentSweeper(): void {
   const run = async () => {
     try {
       const result = await sweepSentiment()
+      beat("sentiment", BEAT_INTERVAL_MS)
       if (result.classified > 0) {
         logger.info("Sentiment sweep", { ...result })
       }
@@ -269,6 +279,7 @@ export function startSentimentSweeper(): void {
   }
 
   timer = setTimeout(() => void run(), SWEEP_INTERVAL_MS)
+  beat("sentiment", BEAT_INTERVAL_MS)
 }
 
 export function stopSentimentSweeper(): void {

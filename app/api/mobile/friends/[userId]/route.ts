@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { ageFrom } from "@/lib/age"
 import { blockedEitherWay, conversationPair } from "@/lib/conversations"
-import { normalizeLocationToCity } from "@/lib/location"
+import { storedCity } from "@/lib/location"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { UNNAMED } from "@/lib/conversation-identity"
@@ -103,7 +103,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       education: p?.education ?? null,
       // Derived — `ageFrom` reads the date; the date itself is never returned.
       age: ageFrom(p),
-      location: await normalizeLocationToCity(p?.location),
+      location: storedCity(p?.location),
       interests: user.user_interests.map((ui) => ui.category),
       // The ones you hold too, as `GET /users/:id` sends them: one person, one page from both doors (SCRUM-896).
       sharedInterests: await sharedInterestNames(me, user.user_interests),
