@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import { themeColour } from "@/lib/theme-colour"
 import type { Map as LeafletMap, Marker, Circle, LeafletMouseEvent } from "leaflet"
 // From the package, not a runtime <link> to unpkg: the CSP's style-src is
-// 'self' (report-only today), and GeofenceEditor loads the same file this way.
+// 'self' (enforced on /dashboard), and GeofenceEditor loads the same file this way.
 import "leaflet/dist/leaflet.css"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -141,8 +141,9 @@ export function LocationPicker({
       mapInstanceRef.current = map
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        // A new tab: the picker sits inside an unsaved form (SCRUM-1147).
         attribution:
-          '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+          '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" aria-label="OpenStreetMap copyright (opens in a new tab)">OpenStreetMap</a> contributors',
         maxZoom: 19,
       }).addTo(map)
 

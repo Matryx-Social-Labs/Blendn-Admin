@@ -5,8 +5,8 @@ import { deleteFile, ownedObjectKey, sealedChatKey, sealUpload, type SealRefusal
 /** Said when a message's media is not the sender's own upload. */
 export const NOT_OWN_MEDIA = "Send photos through the app rather than linking to them"
 
-/** Said when a room message carries media: photos go in a DM (R9, SCRUM-626). */
-export const NO_ROOM_MEDIA = "Photos can only be sent in a direct message"
+/** Said when a room message carries media: a room is words only (R9, SCRUM-626). */
+export const NO_ROOM_MEDIA = "Photos can’t be sent in a room"
 
 /**
  * What a client may send into a room, by either door (`POST /events/:id/chat`,
@@ -16,7 +16,7 @@ export const NO_ROOM_MEDIA = "Photos can only be sent in a direct message"
  * draws any message whose metadata has `sponsored_message_id` as a sponsored
  * card, so an attendee could post one (SCRUM-426); then it was `{ mediaUrl }`,
  * and a room took an attendee's photo or video. A room is strangers under
- * pseudonyms, so photos go in a DM only (R9, SCRUM-626). The server's own
+ * pseudonyms, so it takes no photos (R9, SCRUM-626). The server's own
  * writers (the sponsored scheduler, broadcasts) set a room message's metadata
  * and type on the row themselves and never come through this.
  */
@@ -25,8 +25,8 @@ export const roomMessageWords = {
   metadata: z.never({ error: NO_ROOM_MEDIA }).optional(),
 }
 
-/** Said when a DM photo comes before both people are named to each other (R9, SCRUM-626). */
-export const DM_PHOTOS_NOT_YET = "You can send photos once you have both revealed who you are"
+/** Said when a DM carries a photo: a DM is words only (SCRUM-1165). Shown by the app as it is, on the photo's bubble. */
+export const DM_PHOTOS_OFF = "Photos can’t be sent in messages yet."
 
 /**
  * A message's media is the sender's own `chat/<id>/` upload on our bucket

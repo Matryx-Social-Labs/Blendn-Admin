@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, ListPaginationSchema, ListQuerySchema, PageOrCursorQuerySchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, ListPaginationSchema, ListQuerySchema, PageOrCursorQuerySchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth, ROOM_BAN_GATE, ReportReasonSchema } from "@/lib/openapi/schemas/common"
 import {
   UserPublicProfileSchema,
   UserFavoritesResponseSchema,
@@ -575,7 +575,7 @@ registry.registerPath({
   tags: ["Mobile Users"],
   summary: "Get user public profile",
   description: ROOM_BAN_GATE +
-    "What a room card opens. `userId` may be a room handle, and `id` echoes it as sent (SCRUM-371). A handle is answered in that room's terms — revealed there, or a friend with `friends_see_me_in_rooms` on — never from a reveal, like or conversation elsewhere. For somebody the room keeps anonymous only `id`, `name` (their pseudonym there), `age`, `location`, `isOwnProfile` and `identityVisible` come back. `connection` is present only when `identityVisible` is true. A friend's raw id (a friendship, no block either way, no open pseudonymous conversation) is named like `GET /friends/{userId}` does (SCRUM-863). A crew's, Mix's or Lobby post's handle is that room's card for somebody it admits now — a crew's first name, a Mix's or post's pseudonym, the same five fields — and 404 for anyone else (SCRUM-864).",
+    "What a room card opens. `userId` may be a room handle, and `id` echoes it as sent (SCRUM-371). A handle is answered in that room's terms — revealed there, or a friend with `friends_see_me_in_rooms` on — never from a reveal, like or conversation elsewhere. For somebody the room keeps anonymous only `id`, `name` (their pseudonym there), `age` and `location` (both null), `ageBand`, `tenure`, `isOwnProfile` and `identityVisible` come back (D-030, SCRUM-1384): no exact age, city, join date or counts. A raw id that does not name them also sends `age`/`location` null, `ageBand`/`tenure` null and no `memberSince` or `stats`. `connection` is present only when `identityVisible` is true. A friend's raw id (a friendship, no block either way, no open pseudonymous conversation) is named like `GET /friends/{userId}` does (SCRUM-863). A crew's, Mix's or Lobby post's handle is that room's card for somebody it admits now — a crew's first name, a Mix's or post's pseudonym, the same fields with `ageBand` null (no event to count a band over) — and 404 for anyone else (SCRUM-864).",
   security: bearerAuth,
   request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {
@@ -723,7 +723,8 @@ registry.registerPath({
   tags: ["Mobile Message Requests"],
   summary: "Respond to message request",
   description:
-    "Recipient only. A request that is not yours to answer is 404, the same as one that does not exist, so a sender cannot check which request ids are real (SCRUM-371). **Only `accept` notifies the sender** (a push and a bell row, naming the accepter). `decline` and `block` send nothing: the product has no declined state, and a no is silent (SCRUM-621).",
+    "Recipient only. A request that is not yours to answer is 404, the same as one that does not exist, so a sender cannot check which request ids are real (SCRUM-371). **Only `accept` notifies the sender** (a push and a bell row, naming the accepter). `decline` and `block` send nothing: the product has no declined state, and a no is silent (SCRUM-621). " +
+    "`accept` from an account known to be under 18 is 403 `AGE_RESTRICTED` with `reasonCode` `AGE_RESTRICTED` and the participation sentence (SCRUM-1169); `decline` and `block` are open to everyone.",
   security: bearerAuth,
   request: {
     params: z.object({ requestId: z.string().uuid() }),
@@ -758,6 +759,7 @@ registry.registerPath({
   path: "/api/mobile/uploads/delete",
   tags: ["Mobile Uploads"],
   summary: "Delete uploaded file",
+  description: "Only your own `profile` or `chat` upload (`<folder>/<yourId>/…` on our bucket); any other URL is 403.",
   security: bearerAuth,
   request: {
     body: { content: { "application/json": { schema: DeleteUploadRequestSchema } } },
@@ -1237,7 +1239,7 @@ registry.registerPath({
         "application/json": {
           schema: z.object({
             messageType: z.enum(["group", "private"]),
-            reason: z.string().min(1).max(200),
+            reason: ReportReasonSchema,
             description: z.string().max(2000).optional(),
           }),
         },
@@ -1263,7 +1265,7 @@ registry.registerPath({
       content: {
         "application/json": {
           schema: z.object({
-            reason: z.string().min(1).max(200),
+            reason: ReportReasonSchema,
             description: z.string().max(2000).optional(),
           }),
         },
@@ -1292,7 +1294,7 @@ registry.registerPath({
       content: {
         "application/json": {
           schema: z.object({
-            reason: z.string().min(1).max(200),
+            reason: ReportReasonSchema,
             description: z.string().max(2000).optional(),
           }),
         },

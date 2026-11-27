@@ -13,6 +13,7 @@ jest.mock("next/headers", () => ({ cookies: async () => ({ set: jest.fn() }) }))
 const mockFindUnique = jest.fn()
 jest.mock("@/lib/db", () => ({
   db: {
+    $queryRaw: () => mockSessionRows(mockFindUnique()),
     user: { findUnique: (...a: unknown[]) => mockFindUnique(...a) },
     mobile_refresh_tokens: { create: jest.fn() },
   },
@@ -26,6 +27,7 @@ import type { NextAuthOptions } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { SIGNIN_ACCOUNT_LOCKED } from "@/lib/rbac"
 import { POST } from "@/app/api/mobile/auth/signin/route"
+import { mockSessionRows } from "./support/session-account"
 
 type Authorize = (c: Record<string, string>, req?: { headers: Record<string, string> }) => Promise<unknown>
 const authorize = (authOptions as NextAuthOptions & { providers: { options: { authorize: Authorize } }[] }).providers[0].options.authorize

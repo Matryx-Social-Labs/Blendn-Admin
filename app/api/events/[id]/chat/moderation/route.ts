@@ -6,6 +6,7 @@ import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { isUuid } from "@/lib/api-input"
 import { errorResponse } from "@/lib/api-response"
+import { displayCategories } from "@/lib/moderation/config"
 import { boundedInt } from "@/lib/pagination"
 import { idForViewer } from "@/lib/room-handle"
 
@@ -143,7 +144,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           ...(isPlatformAdmin ? { userName: f.user.name, userEmail: f.user.email } : {}),
           source: f.source,
           status: f.status,
-          categories: f.categories,
+          categories: displayCategories(f.categories),
           confidence: f.confidence,
           autoAction: f.auto_action,
           // A staff account id, and nothing on the host's screen reads it.

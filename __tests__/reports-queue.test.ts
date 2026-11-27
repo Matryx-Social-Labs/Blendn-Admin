@@ -19,6 +19,7 @@ const tx = {
 }
 
 const mockDb = {
+  $queryRaw: jest.fn((): Promise<Record<string, unknown>[]> => mockSessionRows(mockDb.user.findUnique())),
   // requireAdmin reads the role from the database (lib/current-user.ts): here, the session's own.
   user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null })) },
   user_reports: { findMany: jest.fn(), findUnique: jest.fn(), groupBy: jest.fn() },
@@ -48,6 +49,7 @@ const evictUserSockets = jest.fn()
 jest.mock("@/lib/socket-server", () => ({ emitChatMessageHidden, evictUserSockets }))
 
 import { getReportQueue, resolveReport } from "@/app/dashboard/moderation/reports/actions"
+import { mockSessionRows } from "./support/session-account"
 
 const T0 = new Date("2026-08-10T12:00:00.000Z")
 

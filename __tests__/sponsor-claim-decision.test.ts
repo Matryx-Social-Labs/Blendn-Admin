@@ -16,7 +16,7 @@ jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/audit-log", () => ({ auditLog, auditInTx: (_tx: unknown, entry: unknown) => auditLog(entry) }))
 jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "admin", role: "app_admin", signedInAt: Date.now() } }) }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
-jest.mock("@/lib/org-membership", () => ({ actorFor: jest.fn() }))
+jest.mock("@/lib/org-membership", () => ({ actorFor: jest.fn(), sessionAccount: () => mockSessionAccount(mockDb.user.findUnique()) }))
 const sent: { to: string; subject: string; text: string }[] = []
 jest.mock("@/lib/email", () => {
   const actual = jest.requireActual("@/lib/email")
@@ -31,6 +31,7 @@ jest.mock("@/lib/email", () => {
 })
 
 import { decideSponsorClaim } from "@/lib/sponsor-claim-actions"
+import { mockSessionAccount } from "./support/session-account"
 
 beforeEach(() => {
   jest.clearAllMocks()

@@ -4,7 +4,7 @@
 // The routes' answers for an event someone may not see or take part in. The rules themselves
 // are lib/event-door.ts (database only, so the custom server can reach them); re-exported here
 // so every route keeps importing one module.
-import { ErrorCode, errorResponse, notFoundResponse } from "./api-response"
+import { ErrorCode, errorResponse, forbiddenResponse, notFoundResponse } from "./api-response"
 import { suspensionReasonFor, type EventAccessDenial } from "./event-door"
 
 export * from "./event-door"
@@ -16,13 +16,11 @@ export async function eventNotFoundResponse(userId: string, eventId: string, mes
 }
 
 /**
- * The 403 for `participationRefusal`'s sentence: `FORBIDDEN` and the words as
- * they always were, and `reasonCode: PROFILE_INCOMPLETE` beside them (Flow 15).
+ * The denial as the response every guarded route returns for it. A known
+ * too-young age (an event's minimum, or an account known to be under 18) is
+ * `AGE_RESTRICTED` in both fields; an unfinished profile is `FORBIDDEN` with
+ * `reasonCode: PROFILE_INCOMPLETE` (Flow 15).
  */
-export const unfinishedResponse = (sentence: string) =>
-  errorResponse(sentence, 403, ErrorCode.FORBIDDEN, ErrorCode.PROFILE_INCOMPLETE)
-
-/** The denial as the response every guarded route returns for it. */
 export function eventAccessResponse(denial: EventAccessDenial) {
   if (denial.kind === "age") {
     return errorResponse(
@@ -33,6 +31,17 @@ export function eventAccessResponse(denial: EventAccessDenial) {
       denial.unknownAge ? ErrorCode.AGE_UNKNOWN : ErrorCode.AGE_RESTRICTED
     )
   }
-  if (denial.kind === "unfinished") return unfinishedResponse(denial.message)
+  if (denial.kind === "unfinished") return errorResponse(denial.message, 403, ErrorCode.FORBIDDEN, ErrorCode.PROFILE_INCOMPLETE)
   return denial.reason ? errorResponse("Event not found", 404, ErrorCode.NOT_FOUND, denial.reason) : notFoundResponse("Event not found")
+}
+
+/**
+ * `participationRefusal`'s answer on the three messaging routes (`POST
+ * /conversations`, `POST /message-requests`, `POST /conversations/:id/messages`):
+ * an unfinished profile is a plain `FORBIDDEN` with no `reasonCode`, as these
+ * routes have always answered; an account known to be under 18 is
+ * `eventAccessResponse`'s `AGE_RESTRICTED`, as everywhere.
+ */
+export function messagingRefusalResponse(denial: EventAccessDenial) {
+  return denial.kind === "unfinished" ? forbiddenResponse(denial.message) : eventAccessResponse(denial)
 }

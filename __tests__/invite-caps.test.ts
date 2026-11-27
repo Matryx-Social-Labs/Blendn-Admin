@@ -72,8 +72,6 @@ beforeEach(() => {
     where.user_id ? { role: "owner" } : null
   )
   mockDb.organisations.findUniqueOrThrow.mockResolvedValue({
-    may_sponsor: false,
-    _count: { venues: 0 },
     display_name: "Nightshift",
     domains: [{ domain: "blendn.app" }],
   })
@@ -224,3 +222,16 @@ describe("invites per organisation per day", () => {
     expect(mockDb.organisation_invites.create).toHaveBeenCalledTimes(100)
   })
 })
+
+// Since SCRUM-1247 the dashboard is the membership: who may invite is the org's answer (`canManageMembers`), never the
+// sender's `User.role`, and an invite no longer carries a dashboard role for the invitee.
+describe("who may invite", () => {
+  it("an attendee-role owner of the org may, and the invite carries no grants_role", async () => {
+    mockAuth.mockResolvedValue({ user: { id: "u9", name: "Nila", role: "attendee" } })
+    await expect(invite()).resolves.toMatchObject({ ok: true })
+    const data = mockDb.organisation_invites.create.mock.calls.at(-1)?.[0].data
+    expect(data).toMatchObject({ org_id: ORG, invited_by: "u9", role: "staff" })
+    expect(data).not.toHaveProperty("grants_role")
+  })
+})
+

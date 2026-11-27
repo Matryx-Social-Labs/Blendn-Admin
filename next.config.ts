@@ -2,31 +2,24 @@ import { withSentryConfig } from "@sentry/nextjs/config";
 import type { NextConfig } from "next";
 import { contentSecurityPolicy, sentryCspReportUri } from "./lib/csp-report";
 
-// Where the report-only CSP reports to. See lib/csp-report.ts and the policy below.
+// Where the CSP reports to. See lib/csp-report.ts and the policies below.
 const cspReportUri = sentryCspReportUri(
   process.env.NEXT_PUBLIC_SENTRY_DSN,
   process.env.RAILWAY_ENVIRONMENT_NAME
 );
 
-const nextConfig: NextConfig = {
-  // Image optimization
-  images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "**.amazonaws.com",
-      },
-      {
-        protocol: "https",
-        hostname: "**.googleusercontent.com",
-      },
-      {
-        protocol: "https",
-        hostname: "**.cloudinary.com",
-      },
-    ],
-  },
+/*
+ * The CSP is enforced on the pages that hold the session cookie or load
+ * Razorpay (SCRUM-1243; /invite reads the session to accept), and only
+ * reported everywhere else -- Swagger UI at /api-docs needs 'unsafe-eval'.
+ * Each path gets exactly one of the two headers: the report-only rule's
+ * source excludes these by lookahead, so a path added to one list without
+ * the other fails csp-report.test.ts.
+ */
+const CSP_ENFORCED_SOURCES = ["/dashboard/:path*", "/pay/:path*", "/login", "/invite"];
+const CSP_REPORT_ONLY_SOURCE = "/:path((?!dashboard(?:/|$)|pay(?:/|$)|login$|invite$).*)";
 
+const nextConfig: NextConfig = {
   // Disable x-powered-by header
   poweredByHeader: false,
 
@@ -59,40 +52,36 @@ const nextConfig: NextConfig = {
             key: "Strict-Transport-Security",
             value: "max-age=63072000; includeSubDomains; preload",
           },
-          {
-            /*
-             * CSP, in report-only to begin with.
-             *
-             * No XSS sink is known -- React escapes by default, the one
-             * `dangerouslySetInnerHTML` builds CSS from a static config, and the
-             * email templates escape every interpolation. CSP is what makes the
-             * *next* one non-catastrophic, which is why it is worth having and
-             * why it is not urgent.
-             *
-             * Report-only because enforcing it blind would break Swagger UI and
-             * the chart library on a Friday. `'unsafe-inline'` and
-             * `'unsafe-eval'` are here because Next's dev overlay and the
-             * Swagger bundle both need them; tightening those is the work that
-             * turns this into an enforcing policy, and it needs a report
-             * endpoint and a week of data first.
-             *
-             * The endpoint is Sentry's (SCRUM-321): without a reporting
-             * directive the policy blocked nothing and collected nothing, so
-             * the week of data could never start. No DSN, no directive — as
-             * before.
-             */
-            key: "Content-Security-Policy-Report-Only",
-            // Razorpay Checkout's script and frames are allowed (step 16);
-            // the directives live in lib/csp-report.ts so a test reads them.
-            value: contentSecurityPolicy(cspReportUri),
-          },
         ],
       },
       /*
+       * CSP. No XSS sink is known -- React escapes by default, the one
+       * `dangerouslySetInnerHTML` builds CSS from a static config, and the
+       * email templates escape every interpolation. CSP is what makes the
+       * *next* one less catastrophic.
+       *
+       * Reports go to Sentry (SCRUM-321); no DSN, no reporting directive.
+       * The directives live in lib/csp-report.ts so a test reads them.
+       */
+      {
+        source: CSP_REPORT_ONLY_SOURCE,
+        headers: [{ key: "Content-Security-Policy-Report-Only", value: contentSecurityPolicy(cspReportUri) }],
+      },
+      // 'unsafe-eval' only in development, for Next's overlay.
+      ...CSP_ENFORCED_SOURCES.map((source) => ({
+        source,
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: contentSecurityPolicy(cspReportUri, process.env.NODE_ENV !== "production"),
+          },
+        ],
+      })),
+      /*
        * The pay page and its status door (SCRUM-1011). Its URL carries the
        * pay token, so no referrer leaves it (Razorpay's script is loaded from
-       * here); it is never indexed and never cached. Listed after the block
-       * above, so its Referrer-Policy is the one sent.
+       * here); it is never indexed and never cached. Listed after the
+       * "/:path*" block, so its Referrer-Policy is the one sent.
        */
       {
         source: "/pay/:path*",

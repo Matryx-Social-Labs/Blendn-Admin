@@ -97,7 +97,7 @@ export async function getBuildingOccupancy(
             start_time: { lte: now, ...(window ? { gte: window.gte } : {}) },
             end_time: { gte: now },
           },
-          select: { id: true, title: true, kind: true, organizer_id: true, organizer_org_id: true },
+          select: { id: true, title: true, kind: true, organizer_org_id: true },
         })
 
   const capacity = venue?.capacity ?? null

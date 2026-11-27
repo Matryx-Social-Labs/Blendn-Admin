@@ -111,7 +111,7 @@ The API:
 | `eventPermissionSelect` | The `select` fragment `eventPermissions` needs. Spread it rather than hand-picking columns; a select missing `venue` reads as "no venue" and silently denies a venue owner. |
 | `canBroadcast(actor, event, kind, grant?)` | Who may put a non-user message in a room. `grant` is a `SponsorGrant` from `resolveSponsorGrant(actor, eventId)` (`lib/org-membership.ts`): `sponsored` needs ONE organisation of the actor's holding both `may_sponsor` and an `approved` placement at this event (an `app_admin` needs none). No grant refuses. Pass the third argument, `sponsorId`, whenever the thing being changed belongs to one brand (a campaign): without it any brand placed at the event satisfies the grant (SCRUM-319). `canBroadcast` trusts the grant it is given, so never build one by hand. |
 | `broadcastMayCarryMedia(kind)` | Whether a broadcast kind may carry an image. |
-| `canAccessDashboard(role)` | Dashboard entry. Read by `middleware.ts`. |
+| `canAccessDashboard(role)` | Dashboard entry. Read by `middleware.ts`. The `role` it is handed is the session's claim, which is derived, not `User.role`: `dashboardRoleFor` (`lib/org-membership.ts`) gives `app_admin` from the row and anyone else their home organisation's kind (`ORG_KIND_SQL`: `may_sponsor` or a live brand, a live venue, else what its approved application asked for, else organizer), or `attendee` with no live membership. Every session read (`sessionAccount`: the jwt callback, `currentUser`, the dashboard socket) derives it in one SQL statement. |
 | `mayManageBilling(memberRole)`, `mayManageVenueBilling(memberRole)`, `maySendVenueOffers(memberRole)` | The org's `owner`/`admin`, from the membership the caller already holds in the paying or venue-owning org; never `User.role`. Door redemption at a venue is any active member of its owning org (the lookup in `redeemPass`). |
 
 Build the actor with `actorFor(user)` from `lib/org-membership.ts` — it loads memberships, and `PermissionActor.orgIds` and `editOrgIds` (the owner/admin subset) are required precisely so a bare session user cannot typecheck into the resolver and silently deny everyone.
@@ -132,7 +132,7 @@ Historical note, because this paragraph used to say otherwise: `canManageEvent` 
 
 `lib/socket-server.ts` initializes Socket.io on the shared HTTP server. Rooms are scoped per event/conversation. Handles group chat (`chat_groups`/`chat_messages`), private DMs (`private_conversations`/`private_messages`), typing indicators, check-in/check-out, and presence. See `docs/SOCKET_EVENTS.md` for the event catalog and `docs/chat-moderation.md` / `docs/client-chat-moderation-guide.md` for how moderation integrates with the socket flow from the client's perspective.
 
-**The Lobby, the room and the posts' rooms share one lifecycle** (SCRUM-1026): the Lobby (`/events/:id/board`) is open until doors (`doorsAt`: start − 90 min, when check-in opens), read-only from doors, and closed with the room a day after the end (`chatClosesAt`; `lobbyState` in `lib/board.ts`). The room opens at doors — there is no pre-event room. After the close nobody reads any of it in the app (`roomReadDenial`, `roomReadDenialFor`); it is kept server-side and purged 180 days on, removed or reported content 180 days from its removal (`lib/lobby-retention.ts`, a dry run unless `LOBBY_PURGE=delete`).
+**The Lobby, the room and the posts' rooms share one lifecycle** (SCRUM-1026): the Lobby (`/events/:id/board`) is open until doors (`doorsAt`: start − 90 min, when check-in opens), read-only from doors, and closed with the room a day after the end (`chatClosesAt`; `lobbyState` in `lib/board.ts`). The room opens at doors — there is no pre-event room. After the close nobody reads any of it in the app (`roomReadDenial`, `roomReadDenialFor`); it is kept server-side and purged 180 days on, removed or reported content 180 days from its removal (`lib/lobby-retention.ts`; it deletes on every pass, no switch: register D-029).
 
 **A chat room has a kind** (`chat_groups.kind`: `event`, `board_post`, and `crew` / `blend` from step 8) and one owner of that kind. Who may enter — socket join, every `/chat/groups/:id` read and write, typing — is `lib/room-kind.ts` (`roomOwnerDenial`, `roomReadDenialFor`, `mayWriteToRoomFor`): an event's room is today's rule unchanged; any other asks its owner, and a member row alone is never enough. A room's handles are minted in `roomScope(room)` — its event for an event's room (unchanged for installed clients), its own id and kind otherwise — so a handle never resolves in another room. A room that is not an event's is re-asked on every delivery, and a writer that closes its owner empties it (`lib/room-close.ts`). `board_post_id` is ON DELETE RESTRICT: a post with a room is never deleted, only taken off the board. A new reader of `chat_group.event` must decide what it does for a room with none: `__tests__/chat-group-event-readers.test.ts` counts them.
 
@@ -265,7 +265,11 @@ version is a new row, never an edit), the `tickets_order_must_be_paid` trigger
 (a ticket exists only for a paid order), the
 `events_city_clean` and `venues_city_clean` triggers (`clean_city_text`, the database's half of `cityKey`, so a padded or "Toronto, ON" city cannot pass the city rule), the
 system user `blendn-system` that owns
-every venue day, and the `system_user_is_permanent` trigger that refuses its
+every venue day, the `identity_email` function and its expression index
+`User_identity_email_idx` (one key per inbox: sign-up's "already registered" and
+the Google/Apple suspended refusal read it, `lib/suspended-identity.ts`; on a
+`db push` database every sign-up fails for want of the function), and the
+`system_user_is_permanent` trigger that refuses its
 deletion. On a `db push` database `venueDayFor` fails for want of that user,
 and says so. See `docs/VENUES.md` § Venue days.
 
@@ -291,7 +295,7 @@ pre-deploy step (`scripts/test-accounts.ts`) re-asserts on every deploy.
 `seed:qa --apply` refuses to run without it, and refuses any database that is
 not Railway `staging` or `localhost`.
 
-Optional: Tigris object storage (`TIGRIS_ENDPOINT`, `TIGRIS_ACCESS_KEY`, `TIGRIS_SECRET_KEY`, `TIGRIS_BUCKET`, `TIGRIS_PRIVATE_BUCKET`, `TIGRIS_REGION`), Google OAuth client IDs (`GOOGLE_WEB_CLIENT_ID`, `GOOGLE_IOS_CLIENT_ID`, `GOOGLE_ANDROID_CLIENT_ID`), `OPENAI_API_KEY` (outside production), `REDIS_URL`, `NEXT_PUBLIC_SENTRY_DSN`.
+Optional: Tigris object storage (`TIGRIS_ENDPOINT`, `TIGRIS_ACCESS_KEY`, `TIGRIS_SECRET_KEY`, `TIGRIS_BUCKET`, `TIGRIS_PRIVATE_BUCKET`, `TIGRIS_REGION`), Google OAuth client IDs (`GOOGLE_WEB_CLIENT_ID`, `GOOGLE_IOS_CLIENT_ID`, `GOOGLE_ANDROID_CLIENT_ID`), `OPENAI_API_KEY` (outside production), `REDIS_URL`, `NEXT_PUBLIC_SENTRY_DSN`, `MIGRATE_DATABASE_URL` (the owner role, for `prisma migrate deploy` only, once `DATABASE_URL` is the app role `blendn_app`, which is refused DDL: `prisma.config.ts`, SCRUM-1358).
 
 **The storage vars are `TIGRIS_*`, not `AWS_*`.** This file said `AWS_ACCESS_KEY_ID` / `AWS_S3_BUCKET`, and `lib/tigris.ts` has only ever read `TIGRIS_*` — so a deployment configured from these instructions got uploads silently switched off, with no error anywhere. `DEPLOYMENT.md` and `lib/env.ts` were corrected; this file was not, and it is the one an agent reads first.
 

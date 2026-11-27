@@ -1,3 +1,5 @@
+import { COMPANY } from "./company"
+
 /**
  * Age rules, and where the age itself comes from.
  *
@@ -10,8 +12,9 @@
  *
  *  0. **An account is an adult.** `ACCOUNT_MIN_AGE`, below. Blend'n is 18+ —
  *     the store listings say so, and the owner ruled it on 2026-09-27
- *     (SCRUM-330). The floor used to be 13. Accounts made before the ruling
- *     are left alone, which is why rule 1 still exists.
+ *     (SCRUM-330). The floor used to be 13. An account with a known age under
+ *     18 takes part nowhere (`participationDenial`, SCRUM-1169); rule 1 still
+ *     guards the dating fields of every account whose age is unknown.
  *
  *  1. **Dating intent requires 18.** It gated the dating tag, not the account,
  *     while the floor was 13 — a 14-year-old could tick "open to dating" and be
@@ -58,20 +61,60 @@ export function isAdult(age: number | null | undefined): boolean {
 export const FINISH_ONBOARDING = `Finish setting up your profile first. ${ADULTS_ONLY}`
 
 /**
- * May this profile take part — RSVP, check in, use the board, DM? (SCRUM-331)
- *
- * Finished onboarding, or an adult age on file. Google and Apple accounts
- * arrive with no age and the app holds them at "The basics"; without this the
- * hold was a client convention and the raw API let them straight in. Gated on
- * onboarding OR age, not age alone: onboarded accounts from before age was
- * asked have none and keep working, and an onboarded under-18 from before the
- * 18+ ruling is left alone. No profile at all cannot happen (sign-up and OAuth
- * both create one), so it is a no.
+ * What an account known to be under 18 is told wherever it tries to take part
+ * (SCRUM-1169, D-026): adults only, and where to write when the birth date on
+ * file is wrong. Staff correct it there (`scripts/under-18-accounts.ts --correct`).
  */
-export function mayParticipate(
-  profile: (AgeSource & { onboarded: boolean }) | null | undefined
-): boolean {
-  return !!profile && (profile.onboarded || isAdult(ageFrom(profile)))
+export const UNDER_18_ACCOUNT = `${ADULTS_ONLY} If your date of birth is wrong, write to ${COMPANY.grievance.email}.`
+
+/**
+ * What `participationDenial` reads. `under_18_since` is required, not optional,
+ * so a caller whose select leaves it out does not typecheck: a missing column
+ * would otherwise read as "not stamped". Spread `participationSelect`.
+ */
+export type ParticipationProfile = AgeSource & { onboarded: boolean; under_18_since: Date | null }
+
+/** The columns `participationDenial` needs, for every caller's `select`. */
+export const participationSelect = { onboarded: true, age: true, date_of_birth: true, under_18_since: true } as const
+
+/**
+ * Why this profile may not take part — RSVP, check in, use the board, DM — or
+ * `null` when it may. The one place that decides which refusal an account
+ * gets; every route answers from it.
+ *
+ * - **Known to be under 18** (SCRUM-1169): a derived age under
+ *   `ACCOUNT_MIN_AGE`, or `under_18_since` set, onboarded or not. `kind: "age"`
+ *   with a known age, the answer an event's door gives a known too-young age:
+ *   `AGE_RESTRICTED`, which the app shows as written, with no fix to offer.
+ * - **Not finished** (SCRUM-331): not onboarded and no adult age on file.
+ *   Google and Apple accounts arrive with no age and the app holds them at
+ *   "The basics"; without this the hold was a client convention and the raw
+ *   API let them straight in. `PROFILE_INCOMPLETE`, whose fix is onboarding.
+ *
+ * Onboarded accounts from before age was asked have none and keep working. No
+ * profile at all cannot happen (sign-up and OAuth both create one), so it is a
+ * no.
+ */
+export function participationDenial(
+  profile: ParticipationProfile | null | undefined
+):
+  | { kind: "age"; message: typeof UNDER_18_ACCOUNT; unknownAge: false }
+  | { kind: "unfinished"; message: typeof FINISH_ONBOARDING }
+  | null {
+  if (profile && isKnownMinor(profile)) return { kind: "age", message: UNDER_18_ACCOUNT, unknownAge: false }
+  if (profile && (profile.onboarded || isAdult(ageFrom(profile)))) return null
+  return { kind: "unfinished", message: FINISH_ONBOARDING }
+}
+
+/** Whether this account is known to be under 18: stamped, or a derived age under `ACCOUNT_MIN_AGE`. */
+export function isKnownMinor(profile: Pick<ParticipationProfile, "under_18_since"> & AgeSource): boolean {
+  const age = ageFrom(profile)
+  return profile.under_18_since != null || (age != null && age < ACCOUNT_MIN_AGE)
+}
+
+/** May this profile take part? `participationDenial` is `null`. */
+export function mayParticipate(profile: ParticipationProfile | null | undefined): boolean {
+  return participationDenial(profile) === null
 }
 
 /** Every intent that is gated on age. `dating` is currently the only one. */
@@ -317,4 +360,29 @@ function calendarDate(input: unknown): Date | null {
   }
 
   return date
+}
+
+/* -------------------------------------------------------------------------- */
+/* The band a room shows before a reveal (D-030, SCRUM-1384)                   */
+/* -------------------------------------------------------------------------- */
+
+export type AgeBand = "18-24" | "25-34" | "35-44" | "45+"
+
+/** How many people who checked in at an event must share a band before any row there shows it. */
+export const AGE_BAND_FLOOR = 3
+
+/** Wide on purpose: a band says roughly how old, never who. Null under 18 and when unknown. */
+export function ageBand(age: number | null): AgeBand | null {
+  if (age === null || age < ACCOUNT_MIN_AGE) return null
+  return age <= 24 ? "18-24" : age <= 34 ? "25-34" : age <= 44 ? "35-44" : "45+"
+}
+
+/** The bands at least `AGE_BAND_FLOOR` people share, from an event's age histogram. */
+export function bandsShown(histogram: { age: number; people: number }[]): Set<AgeBand> {
+  const counts = new Map<AgeBand, number>()
+  for (const { age, people } of histogram) {
+    const band = ageBand(age)
+    if (band) counts.set(band, (counts.get(band) ?? 0) + people)
+  }
+  return new Set([...counts].filter(([, n]) => n >= AGE_BAND_FLOOR).map(([band]) => band))
 }

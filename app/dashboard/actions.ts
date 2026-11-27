@@ -58,8 +58,8 @@ const WINDOW_WEEKS = 8
  * The events every platform number is about: live ones, never a venue day — a
  * venue's daily live room is not a night anybody published (step 3).
  */
-function eventScope(userId?: string) {
-  return { deleted_at: null, ...realEventsWhere, ...(userId ? { organizer_id: userId } : {}) }
+function eventScope() {
+  return { deleted_at: null, ...realEventsWhere }
 }
 
 /**
@@ -86,10 +86,10 @@ function eventScope(userId?: string) {
  * `lib/event-host.ts` answers the same question for the mobile payload and
  * says the same thing: the curating admin is never the host.
  */
-function hostSupply(userId?: string) {
+function hostSupply() {
   // Hosts are organisers (the owner's ruling, SCRUM-314): an admin's own events
   // are seeded supply, not a host's, whether or not they carry `curated_at`.
-  return { ...eventScope(userId), curated_at: null, organizer: { role: "organizer" as const, deletedAt: null } }
+  return { ...eventScope(), curated_at: null, organizer: { role: "organizer" as const, deletedAt: null } }
 }
 
 function pct(part: number, whole: number) {
@@ -690,7 +690,6 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
           venue: { select: { name: true } },
           max_capacity: true,
           status: true,
-          organizer_id: true,
           organizer_org_id: true,
         },
         orderBy: { start_time: "asc" },

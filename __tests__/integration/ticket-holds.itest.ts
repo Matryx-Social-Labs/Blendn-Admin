@@ -365,8 +365,16 @@ describe("refusals", () => {
     expect(await reserve(eventId, buyer, one(ids[0]))).toEqual({ ok: false, reason: "no_access" })
     const { organizer_id: host } = await db.events.findUniqueOrThrow({ where: { id: eventId }, select: { organizer_id: true } })
     await onboard(host)
-    expect(await reserve(eventId, host, one(ids[0]))).toEqual({ ok: false, reason: "private" })
-    expect((await typeRow(ids[0])).held).toBe(0)
+    // The door lets the host in as a member of the organisation running it — never for having created the row (SCRUM-1250).
+    const org = await db.organisations.create({ data: { display_name: testId("th-org"), status: "verified" } })
+    try {
+      await db.organisation_members.create({ data: { org_id: org.id, user_id: host, role: "owner" } })
+      await db.events.update({ where: { id: eventId }, data: { organizer_org_id: org.id } })
+      expect(await reserve(eventId, host, one(ids[0]))).toEqual({ ok: false, reason: "private" })
+      expect((await typeRow(ids[0])).held).toBe(0)
+    } finally {
+      await db.organisations.delete({ where: { id: org.id } })
+    }
   })
 
   it("a buyer under the event's minimum age, by birth date, and one whose age is unknown (security M5)", async () => {

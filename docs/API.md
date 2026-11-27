@@ -74,7 +74,8 @@ Returns **201**: `{ accessToken, refreshToken, user: { id, email, name, profile 
 and no account is written. Google and Apple create profiles without an age;
 those accounts cannot finish onboarding until a date of birth of 18+ is on file
 (see `PUT /profiles/:userId`). Accounts made before the ruling keep whatever age
-they have. Prefer
+they have; one known to be under 18 takes part nowhere (see *Taking part* under
+`PUT /profiles/:userId`). Prefer
 `dateOfBirth` on `PUT /profiles/:userId` over this `age` — see *The age is
 derived, never remembered* below for why the number alone is not enough.
 
@@ -86,6 +87,15 @@ case: `Priya@Example.com` is saved as `priya@example.com`, and `user.email` in
 the response is the lowercase form. A second signup in another case gets the
 same **409** as any taken address. `signin`, Google, Apple, the dashboard and
 password reset all lowercase what they are given too (SCRUM-328).
+
+**One inbox, one account, and a suspended person cannot sign up again**
+(SCRUM-1172). An address is compared as one inbox: lower case, without a
+`+tag`, and for Gmail without dots (`googlemail.com` is `gmail.com`), by the
+SQL function `identity_email`. One that any account already holds gets the
+same **409** `CONFLICT` "Email already registered" as the exact address, and no
+account is written, whoever holds it. Google and Apple, which prove the inbox,
+answer a new account for an inbox a suspended account holds with the suspended
+**403** below.
 
 **Password rules.** At least **12 characters**, and rejected if it is an obvious
 choice (`password1234` is twelve characters and fails) or built from the local
@@ -155,7 +165,9 @@ generic sentence: "This account has been suspended. Contact support@blendn.app
 if you think that's a mistake."
 
 On `signin` it is checked **after** the password, so the response cannot be used
-to discover which addresses are suspended.
+to discover which addresses are suspended. `google` and `apple` also answer it
+when they would create an account for the same inbox as a suspended one (see
+`POST /auth/signup`).
 
 On `refresh` it is answered even for the token the suspension **revoked** — which
 is every live token, since suspending revokes them all. A token we signed, not
@@ -301,7 +313,9 @@ below the line has no `reasonCode`. **`reasonCode` is on the event doors only**:
 messaging and friend routes (conversations, message requests, friend requests and
 invites) answer the same unfinished-profile 403 with `FORBIDDEN` and no
 `reasonCode`, and the regulars opt-in answers `AGE_RESTRICTED` with none; nothing
-has been rolled out to them.
+has been rolled out to them. An account **known to be under 18** (SCRUM-1169) is
+the exception on every route that takes part, the messaging ones included:
+`errorCode` and `reasonCode` both `AGE_RESTRICTED`, sentence “Blend’n is for people 18 and over. If your date of birth is wrong, write to grievance@blendn.app.”.
 
 
 ### Password reset
@@ -357,7 +371,9 @@ Crossing from one column to the other is the message request, and it is the only
 crossing: `GET /events/:eventId/checkins` returns pseudonyms, never real names or
 photos — except for someone who turned on "Show who I am" in that room
 (`event_match_preferences.revealed`), who is listed by name with `image`, the
-same rule the Grid card already applied. Blocks are honoured in both directions everywhere, and are reported as
+same rule the Grid card already applied. Beside a pseudonym `age` and
+`location` are null and the row carries `ageBand` and `tenure` instead (D-030,
+see *Matches*). Blocks are honoured in both directions everywhere, and are reported as
 "not found" rather than "blocked" — confirming an account exists tells a blocked
 person they were blocked.
 
@@ -429,10 +445,11 @@ an opaque, url-safe string. Field names and shapes did not change.
   on `friends_see_me_in_rooms`. A reveal at another event, a mutual like or an
   open conversation does not name them through this room's handle — a raw id
   still answers as before. For somebody the room keeps anonymous,
-  `GET /users/:userId` returns only `{ id, name, pseudonym, age, location,
-  isOwnProfile, identityVisible: false }` with `name` their pseudonym in that room;
-  `GET /profiles/:userId` returns only `{ id, name, pseudonym, profile: { id, age,
-  onboarded, location } }`; and `GET /profiles/:userId/interests` returns an
+  `GET /users/:userId` returns only `{ id, name, pseudonym, age: null, location:
+  null, ageBand, tenure, isOwnProfile, identityVisible: false }` with `name` their
+  pseudonym in that room and `ageBand`/`tenure` the roster's (see *Matches*:
+  D-030); `GET /profiles/:userId` returns only `{ id, name, pseudonym, profile: {
+  id, age: null, onboarded, location: null, ageBand, tenure } }`; and `GET /profiles/:userId/interests` returns an
   empty list. `pseudonym` (SCRUM-1046, 2026-11-20) is that same name as a
   contract: present exactly when `name` IS a room pseudonym, so it is never a
   real name, never on a raw id's answer or a named card, and absent (with
@@ -440,7 +457,10 @@ an opaque, url-safe string. Field names and shapes did not change.
   `POST /message-requests` and whether `POST /friends/requests` is refused.
   Otherwise `GET /users/:userId` also sends `work_field`, and, when
   `identityVisible` is false, `blurPhoto` (the stored derivative) in place of
-  `image` and `photos` (SCRUM-458).
+  `image` and `photos` (SCRUM-458), with `age`, `location`, `ageBand` and
+  `tenure` all null and no `memberSince` or `stats`; `GET /profiles/:userId`
+  then sends `profile.age`/`location`/`ageBand`/`tenure` null and no
+  `createdAt` (D-030). A raw id has no room to count a band over.
 - **A raw id of a friend is named** (SCRUM-863): with a friendship row, no block
   either way and no open pseudonymous conversation between you, `GET /users/:userId`
   and `GET /profiles/:userId` answer as for somebody you may see
@@ -450,9 +470,10 @@ an opaque, url-safe string. Field names and shapes did not change.
   `friends_see_me_in_rooms` on.
 - **A crew's, Mix's or Lobby post's handle is a room card** (SCRUM-864), for a
   caller that room admits now and a person it admits now; otherwise 404 as before.
-  `GET /users/:userId` returns `{ id, name, age, location, isOwnProfile: false,
-  identityVisible: false }` and `GET /profiles/:userId` the `{ id, name,
-  profile: { id, age, onboarded, location } }` subset, with `name` the room's own
+  `GET /users/:userId` returns `{ id, name, age: null, location: null, ageBand:
+  null, tenure, isOwnProfile: false, identityVisible: false }` and `GET
+  /profiles/:userId` the `{ id, name, profile: { id, age: null, onboarded,
+  location: null, ageBand: null, tenure } }` subset (no event, so no band), with `name` the room's own
   name for them: a crew's first name only, a Mix's or a Lobby post's pseudonym.
   `pseudonym` repeats the name for a Mix's or a Lobby post's card, never for a
   crew's (a first name). No photos, bio or interests. A block either way is a 404.
@@ -489,13 +510,15 @@ withholds. No id in the path: it is only ever yours.
 
 ```json
 { "pseudonym": "Velvet Otter",
-  "anonymous": { "id": "<you>", "name": "Velvet Otter", "pseudonym": "Velvet Otter", "age": 27, "location": "Toronto", "isOwnProfile": false, "identityVisible": false },
+  "anonymous": { "id": "<you>", "name": "Velvet Otter", "pseudonym": "Velvet Otter", "age": null, "location": null, "ageBand": "25-34", "tenure": "regular", "isOwnProfile": false, "identityVisible": false },
   "named": { "id": "<you>", "name": "Priya", "work_field": null, "image": "…", "photos": ["…"], "bio": "…", "occupation": null, "education": null,
              "languages": [], "homeState": null, "sign": null, "age": 27, "location": "Toronto", "interests": [], "memberSince": "…",
              "stats": { "eventsAttended": 3, "eventsFavorited": 1, "eventsOrganized": 0 }, "isOwnProfile": false, "identityVisible": true, "badges": [] } }
 ```
 
-- `anonymous` — before you reveal: your pseudonym, age and city, nothing else.
+- `anonymous` — before you reveal: your pseudonym, and the `ageBand` and
+  `tenure` that room shows beside it (D-030; the band from the room `pseudonym`
+  comes from), with `age` and `location` null. Nothing else.
 - `named` — to somebody who may see who you are in a room: first name, photos and
   the rest; `badges` only while "Show my badges" is on.
 - `pseudonym` is the one you carry in the event room you joined last; `null`
@@ -717,6 +740,7 @@ it in the old kind and shape (`kind` and `data.type` `event_update`, the rest of
 | Event is age-restricted and the viewer's known age is below it | 403 | `AGE_RESTRICTED` | `AGE_RESTRICTED` |
 | Taking part (RSVP, save, Lobby, check-in) in one with no age on file | 403 | `AGE_RESTRICTED` | `AGE_UNKNOWN` |
 | Taking part with an unfinished profile | 403 | `FORBIDDEN` | `PROFILE_INCOMPLETE` |
+| Taking part as an account known to be under 18 (a derived age under 18, or `profiles.under_18_since` set; SCRUM-1169), onboarded or not | 403 | `AGE_RESTRICTED` | `AGE_RESTRICTED` |
 | A new `going` or `maybe` RSVP on a cancelled event (`POST /events/:id/rsvp`; SCRUM-892) | 409 | `CONFLICT` | `EVENT_CANCELLED` |
 | The event was live and its organisation was suspended, and you are going (or maybe, or waitlisted) or are of the organisation | 404 | `NOT_FOUND` | `ORGANISER_SUSPENDED` |
 | The same event, and you are a stranger or said `not_going` (public or private alike) | 404 | `NOT_FOUND` | none |
@@ -896,6 +920,7 @@ each other still answer the same body.
 | Where | Status | `errorCode` | `reasonCode` |
 |---|---|---|---|
 | Any friends or DM route, unfinished profile | 403 | `FORBIDDEN` | `PROFILE_INCOMPLETE` |
+| Any friends or DM route, an account known to be under 18 (SCRUM-1169) | 403 | `AGE_RESTRICTED` | `AGE_RESTRICTED` |
 | `POST /friends/requests` `{ userId }`, out of reach | 404 | `NOT_FOUND` | `PERSON_UNAVAILABLE` |
 | `POST /friends/requests` `{ token }`, link does not work | 404 | `NOT_FOUND` | `INVITE_UNAVAILABLE` |
 | `POST /friends/requests` to yourself | 400 | none | `CANNOT_ADD_SELF` |
@@ -1164,9 +1189,29 @@ Each card names what the two of you share rather than who the other person is:
 
 ```json
 { "userId": "...", "displayName": "Cosmic Panda", "revealed": false, "photo": null,
+  "age": null, "ageBand": "25-34", "tenure": "regular",
   "sharedInterests": ["Techno", "Board games"],
   "sharedIntents": ["networking"], "insideNow": true, "youLiked": false }
 ```
+
+**Before a reveal: a band and a chip, never the age** (D-030, SCRUM-1384,
+2026-11-27). A row the room keeps anonymous carries `age: null` (the key stays
+for installed builds), and in its place:
+
+- `ageBand` — `"18-24"`, `"25-34"`, `"35-44"`, `"45+"` or `null`. Shown only
+  when **3 or more people who ever checked in at this event as attendees**
+  share it; null below that, and when the age is unknown. That population is
+  the same for every viewer and every route (this deck, `/people`,
+  `/checkins`, the room card on `/users/:id` and `/profiles/:id`), and only
+  grows, so comparing two of them shows nothing. Ages are taken at the event's
+  start. A revealed row carries its band too, beside the exact `age`.
+- `tenure` — `"regular"` once they came to 2 or more distinct events (a
+  multi-day event is one), else `"new"`. Two values, never a count.
+- **Somebody who runs or hosts the event** (the organizing organisation, the
+  venue's, an admin) gets `age`, `ageBand` and `tenure` all `null`: hosts see
+  totals only.
+- No city, join date or counts on any of these rows. `sharedEvents`,
+  `sharedPlans` and `badges` are unchanged (the client decides what it draws).
 
 `displayName` is the room pseudonym and `photo` is null unless that person chose
 to be revealed at this event. `revealed` says which (SCRUM-1067): true exactly when
@@ -1280,9 +1325,10 @@ anonymous conversation.
   inside, `NOT_CHECKED_IN` after leaving), before anything about the recipient
   is read; nothing is stored and nobody is pinged. A client should offer
   "Turn on Show online to wave" from its own setting rather than wait for this.
-  A new wave at the
-  same person within 10 minutes in another room is `429 WAVE_TOO_SOON` (a wave
-  back is never held by it).
+  Nothing limits the
+  pair across rooms: a wave at the same person in another room is a first wave
+  there (SCRUM-1385), so a handle is answered the same whoever is behind it.
+  `WAVE_TOO_SOON` is no longer sent (installed clients still map it).
 
 `GET /events/:eventId/waves?cursor=` — who waved at you here, newest first, 20 a
 page: `{ open, total, waves: [{ userId, displayName, wavedAt, wavedBack }], nextCursor }`.
@@ -1397,15 +1443,17 @@ GET /events/:eventId/people?limit=30&cursor=rh_…
 { "success": true, "data": {
   "open": true, "total": 5120, "nextCursor": "rh_…",
   "people": [
-    { "userId": "rh_…", "displayName": "Cosmic Panda", "photo": null, "age": 27,
-      "insideNow": false, "youLiked": false, "overlap": "You both picked chai over filter coffee" }
+    { "userId": "rh_…", "displayName": "Cosmic Panda", "photo": null, "age": null,
+      "ageBand": "25-34", "tenure": "new", "insideNow": false, "youLiked": false, "overlap": "You both picked chai over filter coffee" }
   ]
 } }
 ```
 
 - **As the room shows them.** `userId` is the person's handle in this room,
   never an account id; `displayName` is their pseudonym, or their name (with a
-  `photo`) only where they revealed here — the roster's rule.
+  `photo`) only where they revealed here — the roster's rule. `age` only beside
+  a name; beside a pseudonym `age: null` with `ageBand` and `tenure`, as on the
+  deck (*Matches*, D-030).
 - **Never listed:** you; staff; anyone in a block with you, either way; anyone
   you closed a conversation with; **your friends**, whatever their "friends can
   see me in rooms" setting — friends never meet as stranger cards (owner,
@@ -1817,7 +1865,8 @@ holds the seats for 10 minutes and answers 201
 
 First the RSVP's door, with exactly the answers `POST /events/:eventId/rsvp`
 gives: 404 for a draft or a stranger's private event, 403 `AGE_RESTRICTED`
-(`reasonCode` `AGE_RESTRICTED` / `AGE_UNKNOWN`) under the event's minimum age,
+(`reasonCode` `AGE_RESTRICTED` / `AGE_UNKNOWN`) under the event's minimum age or
+for an account known to be under 18,
 403 `FORBIDDEN` + `PROFILE_INCOMPLETE` for an account not set up: whoever may
 not say "going" may not buy their way in. Then refusals are 409 with the code in
 `errorCode`: `sold_out`, `not_on_sale`, `over_order_limit`, `over_buyer_limit`
@@ -2029,7 +2078,7 @@ per person, then 429.
 
 One venue, as the Go Live screen needs it. 404 for an unknown, archived or
 deleted venue; 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) for a profile not onboarded, `AGE_RESTRICTED`
-(`reasonCode` `AGE_UNKNOWN` when no age is on file) for one without a known adult age (as at its door). 60 a minute per person, then
+(`reasonCode` `AGE_UNKNOWN` when no age is on file, `AGE_RESTRICTED` for an account known to be under 18) for one without a known adult age (as at its door). 60 a minute per person, then
 429.
 
 ```json
@@ -2143,7 +2192,7 @@ today (choosing it again does not restart the four hours). Anything else is
 | Refusal | When |
 |---|---|
 | 404 | Unknown, archived or deleted venue, or today's room there was deleted |
-| 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) / `AGE_RESTRICTED` (`reasonCode` `AGE_UNKNOWN` when no age is on file) | Not onboarded / no adult age (an unknown age is refused here) |
+| 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) / `AGE_RESTRICTED` (`reasonCode` `AGE_UNKNOWN` when no age is on file, `AGE_RESTRICTED` for an account known to be under 18) | Not onboarded / no adult age (an unknown age is refused here) |
 | 409 `EVENT_LIVE_HERE` | A public event at this venue (link confirmed, or its own area at the venue) is on, or starts within the hour. The body carries `eventId`: hand off to that event's check-in. Checked before the fence |
 | 400 `GPS_TOO_VAGUE` | A fix worse than 150 m (`deviceInfo.gpsAccuracy`): a better fix where you stand, not directions |
 | 400 `VALIDATION_FAILED` | `deviceInfo.gpsAccuracy` below 0 (a platform's "no fix"): leave the field out instead. Also on `POST /checkins/inside` |
@@ -2578,7 +2627,7 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 ```json
 { "content": "string", "type": "text", "parentId": "uuid?", "clientId": "uuid?" }
 ```
-**Words only (R9, SCRUM-626).** A room takes no media: `type` other than `text`, or any `metadata` at all, is `400 VALIDATION_FAILED` with `errors[].message` "Photos can only be sent in a direct message". Photos go in a DM (`POST /conversations/:id/messages`). `metadata` was `{ mediaUrl }` (SCRUM-426), and before that a free record an attendee could use to draw a message as a sponsored card; the server's own writers (sponsored messages, broadcasts) still set a message's `metadata` and `type`, and older image messages are still read back as they were. The same rules apply to `POST /events/:eventId/chat`.
+**Words only (R9, SCRUM-626).** A room takes no media: `type` other than `text`, or any `metadata` at all, is `400 VALIDATION_FAILED` with `errors[].message` "Photos can’t be sent in a room". `metadata` was `{ mediaUrl }` (SCRUM-426), and before that a free record an attendee could use to draw a message as a sponsored card; the server's own writers (sponsored messages, broadcasts) still set a message's `metadata` and `type`, and older image messages are still read back as they were. The same rules apply to `POST /events/:eventId/chat`.
 
 **Moderation (pre-emit):** Messages go through a 3-layer pipeline **before** being broadcast to other users:
 1. **Spam check** (sync) — burst rate, duplicate, link density → blocks with 429. A resend with a `clientId` that already landed is answered with the first write before this check, on both room write paths, so it never counts toward the burst (SCRUM-1050)
@@ -2666,7 +2715,7 @@ does not offer Delist.
 | POST | `/conversations` | Open a conversation — **requires an accepted request**; a closed pair gets 409 "This conversation was closed and cannot be reopened", as the respond route answers (SCRUM-300) |
 | GET | `/conversations/:id` | Get conversation |
 | GET | `/conversations/:id/messages` | Get messages |
-| POST | `/conversations/:id/messages` | Send message. See **Photos in a DM** below |
+| POST | `/conversations/:id/messages` | Send message. Words only: see **Words only** below |
 | DELETE | `/conversations/:id` | **Leave — closes it for both people, permanently** |
 
 #### Opening a thread, delivery, replies and retries (SCRUM-406, 408, 409, 410)
@@ -2680,10 +2729,7 @@ does not offer Delist.
 - **Replies.** `POST` takes `replyToId`, which must be a message in the same conversation, otherwise `400`. Every message carries `replyTo: { id, senderName, text, mediaType, unavailable }`. `senderName` resolves through the reveal rules (a pseudonym until revealed). A quote of a hidden message is `unavailable: true` with no text.
 - **Retries.** `POST` takes `clientId` (a uuid the app makes per message). A repeat with the same `clientId` returns the first write instead of writing a second; a `clientId` already used in another conversation gets `409`. Both room write paths accept `clientId` the same way.
 - **Rate limit.** 30 sends a minute per person → `429 RATE_LIMITED`, counted before the conversation is looked up, so sends refused with `404`/`403`/`400` count too (SCRUM-451). A retry of a send that landed is answered over the limit and does not count.
-- **Photos in a DM (R9, SCRUM-626).** `{ "text?": "…", "mediaUrl?": "url", "mediaType?": "image" }`, text or a photo or both. A photo only, so `mediaType` is `image` or left out (`video` is `400`) and the row's `mediaType` is always `image`.
-  - **Whose:** `mediaUrl` must be the sender's own chat upload (`POST /uploads/presigned-url` with `folder: "chat"`, so `chat/<yourId>/…` on our bucket), or `400` "Send photos through the app rather than linking to them" (SCRUM-426).
-  - **When:** once both people are named to each other (both revealed, or a conversation that never had pseudonyms, such as an accepted message request) or are friends. Before that, `403` "You can send photos once you have both revealed who you are", and nothing is stored. Text is not gated.
-  - **What is stored:** a copy of the upload nobody can write to (SCRUM-425), under `chat/sealed/<uuid>`, which names nobody (SCRUM-448), so `mediaUrl` comes back different from the one you sent. The copy is the picture with its metadata removed: EXIF (with its GPS position), XMP, comments and anything after the image's end. An upload that never arrived, is over 10 MB, or is not a JPEG, PNG or WebP (by its bytes, whatever it was uploaded as) is `400`.
+- **Words only (SCRUM-1165).** `{ "text": "…", "replyToId?": "uuid", "clientId?": "uuid" }`; `text` is required, 1–5000 characters. A send carrying `mediaUrl` (any value, with or without `text`, a `clientId` retry included) is `403 FORBIDDEN` "Photos can’t be sent in messages yet.", a sentence the app shows as it is, and nothing is stored. Photos sent before are still returned in `mediaUrl` and `mediaType` on `GET`, signed (SCRUM-427).
 
 `POST /conversations` does not create a channel out of nothing. It requires an
 accepted message request between the two people, or a conversation that already
@@ -3195,7 +3241,8 @@ racing a block never leaves a blocked person on the list. Refusals cost the
 same work as a link that never existed, so timing tells a caller nothing either.
 
 **Why a send, an accept or an invite open was refused.** An unfinished profile
-is `403` `errorCode: "FORBIDDEN"` with `reasonCode: "PROFILE_INCOMPLETE"`; a
+is `403` `errorCode: "FORBIDDEN"` with `reasonCode: "PROFILE_INCOMPLETE"`; an
+account known to be under 18 is `403` with both codes `"AGE_RESTRICTED"`; a
 rate limit is `429` `errorCode: "RATE_LIMITED"` with `reasonCode:
 "RATE_LIMITED"` and `retryAfter` (seconds; also the `Retry-After` header) —
 on `POST /friends/requests`, `POST /friends/requests/:id`, `GET
@@ -3955,13 +4002,20 @@ and only the second is worth blocking.
 
 ### Broadcasting into an event's room
 
-`POST /events/:eventId/announce` takes a `kind`, defaulting to `announcement`:
+`POST /events/:eventId/announce` takes a `kind`, defaulting to `announcement`
+(any other value is a 400 `kind is announcement or system`):
 
 | kind | who | media |
 |---|---|---|
-| `announcement` | `canEdit` — the organising org, or an `app_admin`. **Not** the venue owner | no |
-| `sponsored` | one organisation holding `may_sponsor` **and** an approved placement at this event, or an `app_admin` | not yet: refused with 400 (nothing stores it) |
-| `system` | `app_admin` only — it speaks as Blend'n | no |
+| `announcement` | `canEdit` — the organising org, or an `app_admin`. **Not** the venue owner | no: 400 `Announcements carry text only` |
+| `system` | `app_admin` only — it speaks as Blend'n | no: 400, as above |
+| `sponsored` | nobody: **400** `Sponsored content goes out through a campaign`, nothing written | — |
+
+**Sponsored content reaches a room only through a campaign** (SCRUM-1070,
+D-050): `/api/events/:id/sponsored-messages` on the dashboard, sent by
+`lib/sponsored-scheduler.ts`, where a person reviews the creative, a room has
+at most one sponsored post every 20 minutes and every send is counted. The
+gate below (`may_sponsor` and an approved placement) is that path's.
 
 **This route used to compare two user ids.** `event.organizer_id !== caller.id`,
 which is exactly the mistake `lib/rbac.ts` exists to end: an `app_admin` could
@@ -3993,16 +4047,15 @@ in.
 send one could issue a safety notice, or a "verified by Blend'n" claim, in the
 platform's voice.
 
-**Media rides on `sponsored` alone, and that is a safety rule.** The event room
+**This route carries words only, and that is a safety rule.** The event room
 is pseudonymous, and a photograph is an identity — of whoever is *in* it, who is
 not always the person posting. Attendee media is not built at all. An
 announcement is a host addressing that same room, so it inherits the rule.
-Sponsored artwork depicts nobody in the room, which is what makes it the
-exception.
+Media in a room is a campaign's creative alone (`broadcastMayCarryMedia`):
+artwork that depicts nobody in the room, reviewed before it runs.
 
-**One refusal message for all three.** "Your organisation is not approved for
-sponsored messages" tells an attacker probing the API which flag to go after, and
-tells an organizer about a capability they cannot self-serve anyway.
+**One refusal message for both kinds.** Which rule refused is not the caller's
+to probe: `403 You cannot broadcast to this event`.
 
 **The role is read from the database, not the token.** The mobile JWT carries
 `{ userId, email }` and no role, which is the right call: with a 30-day refresh
@@ -4049,10 +4102,10 @@ member gets `403` with the room's ban sentence, and `muted` and `left` members
 still read. A vote additionally needs an `active` or `muted` membership and an
 open room (`409`). Before SCRUM-298 the read loaded the poll by id alone.
 
-Who may post one is the same table as above: an `announcement` poll needs
-`canEdit`, a `sponsored` poll needs the same grant a sponsored message needs.
-A poll from a brand carries that brand's name into the room and takes the same
-attention, so it does not get a weaker gate because the payload is a question.
+Who may post one is the same table as above: a poll is an `announcement` and
+needs `canEdit`. `createPoll` refuses `kind: "sponsored"` with `Sponsored
+content goes out through a campaign` and writes nothing: a poll from a brand
+would carry its name into the room outside the campaign's review, gap and count.
 
 **Every count is disclosed before it leaves the server.** `null` means WITHHELD.
 It never means zero, and rendering it as zero turns "we are not telling you" into
@@ -4134,9 +4187,9 @@ can tell "no specialisms here" from "this field is unknown to me".
 
 **Suppressed in small rooms.** A match card omits `workField` when the room has
 fewer than 8 other attendees. The roster already gives an unrevealed person an
-age and a city; adding a field of work makes four attributes, and "29,
-Bengaluru, works in fintech, into techno and board games" is one specific person
-in a room of eight. Ranking still uses it there — the score never leaves the
+age band and a new / regular chip (D-030); adding a field of work makes four
+attributes, and "25-34, a regular, works in fintech, into techno and board
+games" is one specific person in a room of eight. Ranking still uses it there — the score never leaves the
 server, so suppressing the *attribute* costs nothing in ordering.
 
 **`sharedWorkField` is suppressed by the same floor, and must be.** The card also
@@ -4220,15 +4273,23 @@ Five consequences worth knowing about:
   that is not yet onboarded is **403** "Blend'n is for people 18 and over. Add
   your date of birth to finish." unless the age after the request is 18+ — send
   `dateOfBirth` in the same call or before it. Google and Apple accounts start
-  with no age, so this is where they are held. A profile already onboarded
-  (including one under 18 from before the ruling) is not re-checked.
+  with no age, so this is where they are held. A profile already onboarded is
+  not re-checked here; one known to be under 18 takes part nowhere (below).
 - **Taking part needs the same.** RSVP, favourite, the Lobby, check-in,
   starting a conversation, a message request and a DM send answer **403**
   `FORBIDDEN` "Finish setting up your profile first. Blend'n is for people 18
   and over." to a profile that is neither onboarded nor of a known adult age
   (SCRUM-331), so the hold above is not only the app's. Viewing events is not
   gated; neither are replies to a message request (decline and block are
-  safety actions). An onboarded profile with no age keeps taking part.
+  safety actions), except that accepting one is refused for an account known
+  to be under 18 (below). An onboarded profile with no age keeps taking part.
+- **An account known to be under 18 takes part nowhere** (SCRUM-1169, D-026):
+  a derived age under 18, or `profiles.under_18_since` set, onboarded or not.
+  The same routes, and accepting a message request, answer **403** with `errorCode` and `reasonCode` both
+  `AGE_RESTRICTED` and “Blend’n is for people 18 and over. If your date of birth is wrong, write to grievance@blendn.app.” The
+  stamp is set by `scripts/under-18-accounts.ts --apply`, which lists stamped
+  accounts for deletion 14 days on; staff clear it with `--correct` on a
+  corrected birth date. Viewing events is unchanged.
 - **Check-in filters rather than refuses.** A profile written before this rule
   can still carry `dating`; copying it onto a check-in row drops it silently,
   because nobody should be kept out of a room over a stale profile field.
@@ -4331,6 +4392,20 @@ venue, invite, send a domain email or file an event claim.
 
 Set by the organizer in the dashboard event form, bounded 13–25.
 
+**A moderator's delisting sticks** (SCRUM-1394). The report queue's `delist`
+sets the event `unlisted` and records when and by whom (`events.delisted_at`,
+`delisted_by`); its audit row (`report.delist`) keeps the title and
+description as they were when it was delisted. From then on
+`PATCH /api/events/:id` answers **403** with *"A moderator set this event to
+Unlisted, so its visibility can’t be changed. Contact support to ask for a
+review."* to a non-admin whose save changes `visibility`, and writes nothing
+of that save; a save that sends the same `unlisted` goes through. An admin's change to `public` lifts the delisting (both columns
+cleared, audited `event.relist` in the same transaction). A second delist
+keeps the first one's time and moderator. `delisted_by` is `@ignore`d in the
+Prisma client, so no answer carries it: which moderator acted is in the audit
+row, never in a response an organizer reads. Duplicate (`/dashboard/events/new?from=`)
+of a delisted event opens the plain form.
+
 **A suspended organizer's events are drafts** (SCRUM-8). Suspending an
 organisation flips its published events to `draft` and reinstating flips them
 back, so everything above applies: absent from `GET /events` and
@@ -4392,7 +4467,7 @@ Chat is unaffected: posting a message is its own choice to be seen.
 | POST | `/users/:userId/block` | Block/unblock user (`DELETE` to unblock) |
 | GET | `/users/blocked` | The people you blocked. `blocked_id` is an **opaque ref to the block** (`bk_…`), not their account id — somebody blocked by their Lobby post or room handle was never shown one, and this list must not be where it arrives. Send it back to `DELETE /users/:userId/block` to unblock; only a block you made is removed. A raw id still unblocks, for older clients, on your own block only. Name and photo appear only where the identity rules allow. Each row also carries `seen_as` (the pseudonym you were shown for them when you blocked — a room's, the Lobby's or a match's, never a real name; null when none was shown or the block predates 2026-11-20 outside a match), `seen_in` (where you blocked from: the event's title, a venue day's venue, or a crew's, Mix's or post's room name — a message request sent from a Lobby room keeps that room's name; null when not recorded) and `account_deleted`. `?q=` (1–100 characters, trimmed; longer is 400) searches on the server, case-insensitively, over `seen_as`, `seen_in`, a match's pseudonym and a real name **only where this list would show it** — a hidden name finds nobody — with `pagination.totalCount` the number of matches. 60 a minute |
 | GET | `/users/:userId/favorites` | Get your saved events, each with `visibility` — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176); also `changedAt`/`changedFields`, as on `GET /me/rsvps`, and `organizer` as `GET /events/:eventId` sends it (the org, never the creating user) |
-| GET | `/profiles/:userId` | Get a profile. Your own carries `email` and the whole `profile` row except `date_of_birth` (`age` derived) — `name`, `gender`, `interested_in`, `intent_default`, `reveal_by_default`, `blur_photo`, `interests`, `created_at`, `updated_at` included, and `expertise` as slugs. Anybody else's `profile` is `id, age, onboarded, location, interests, work_field, expertise` (labels), plus `bio, occupation, education, photos` if you can see who they are, else `blurPhoto`; no `email`, and `image` only if you can see who they are |
+| GET | `/profiles/:userId` | Get a profile. Your own carries `email` and the whole `profile` row except `date_of_birth` (`age` derived) — `name`, `gender`, `interested_in`, `intent_default`, `reveal_by_default`, `blur_photo`, `interests`, `created_at`, `updated_at` included, and `expertise` as slugs. Anybody else's `profile` is `id, age, onboarded, location, interests, work_field, expertise` (labels), plus `bio, occupation, education, photos` if you can see who they are, else `blurPhoto` with `age`/`location`/`ageBand`/`tenure` null and no `createdAt` (D-030); no `email`, and `image` only if you can see who they are |
 | PUT | `/profiles/:userId` | Update profile |
 | GET | `/profiles/:userId/interests` | Get category interests — 404 when either of you has blocked the other, as the profile answers (SCRUM-299); empty through a room handle for somebody that room keeps anonymous |
 | PUT | `/profiles/:userId/interests` | Update interests |
@@ -4405,13 +4480,14 @@ Chat is unaffected: posting a message is its own choice to be seen.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/uploads/presigned-url` | Get S3 presigned upload URL |
-| DELETE | `/uploads/delete` | Delete uploaded file |
+| DELETE | `/uploads/delete` | Delete your own `profile` or `chat` upload; any other URL is `403` |
 
 ### POST /uploads/presigned-url
 ```json
-{ "filename": "photo.jpg", "contentType": "image/jpeg", "folder": "profile|chat|events", "size": 183422 }
+{ "filename": "photo.jpg", "contentType": "image/jpeg", "folder": "profile|chat", "size": 183422 }
 ```
-Note: `events` folder requires organizer/admin role.
+`folder` is `profile` or `chat`; anything else is `400`. Event media is uploaded
+from the dashboard (`POST /api/uploads/presigned-url`), never from the app.
 
 `size` is the file's byte length. When sent it is signed into the URL as
 `content-length`, so storage refuses a PUT of any other size; a `size` above the
@@ -4428,7 +4504,7 @@ The type is signed into the URL, so any other type, or none, is refused by
 storage with `403 SignatureDoesNotMatch` (SCRUM-425). The URL can write its
 key for 15 minutes, so a profile or a message never stores it: attaching the
 upload stores a **copy** under a new key nobody can upload to, and the URL you
-get back (`photos`, a DM's `mediaUrl`) is the copy's,
+get back (`photos`, a Lobby post's `photo.url`) is the copy's,
 not the `publicUrl` you sent.
 
 **`profile` and `chat` take photos only: JPEG, PNG or WebP, up to 10 MB**
@@ -4438,8 +4514,9 @@ never says where it was taken; the app also re-encodes before uploading.
 
 **Chat media is private (SCRUM-427).** `folder: "chat"` uploads go to the
 private bucket; `publicUrl` is the stored reference, which answers an
-anonymous GET with `403`. Wherever a message's media comes back (the send
-response, history, the `private:message` socket event), `mediaUrl` is a signed
+anonymous GET with `403`. A chat upload is a Lobby post's photo; a room
+message and a DM take none. Wherever stored media comes back (a Lobby post, an
+older message in history or a quote), its URL is a signed
 URL valid for **15 minutes**. Load it when you draw the message, not later;
 refetch the history for a fresh one. Profile photos, event media and sponsored
 creatives stay public.
@@ -4494,6 +4571,31 @@ Requires `OPENAI_API_KEY` env var: Railway production refuses to boot without it
 | POST | `/chat/groups/:chatGroupId/report` | `event_reports` with `chat_group_id` — shown as "Room" |
 | POST | `/events/:eventId/board/:postId/report` | `message_reports` with `message_type: "board_post"` — shown as "Lobby · offer\|seeking\|chat" |
 | POST | `/board/requests/:requestId/report` | `message_reports` with `message_type: "board_request"` — shown as "Lobby ask" |
+
+**Reasons** (`reason`, at most 200 characters) are one list, `lib/report-reasons.ts`,
+each with a severity (S1 first) and an urgent flag. The OpenAPI spec prints it.
+Any other string is still accepted: it is stored as written and read as `other`,
+so an older app's free text keeps working and keeps its words.
+
+| Severity | Reasons |
+|---|---|
+| S1, urgent | `child_safety`, `intimate_image`, `under_18`, `impersonation` |
+| S1 | `threat`, `unsafe` |
+| S2 | `harassment`, `hate_speech`, `pile_on`, `inappropriate_content`, `inappropriate_messages`, `inappropriate_photos`, `offensive`, `fake_profile`, `host_conduct`, `organiser_conduct`, `unsafe_venue` |
+| S3 | `spam`, `contact_details`, `misleading`, `misleading_listing`, `not_real`, `other` |
+
+The crew, offer and Lobby report routes keep their own shorter enums, all from
+this list.
+
+**What a report keeps of the words**, copied when it is filed, in `excerpt`: a
+message report (room or DM, and Unmatch/Block and report with a `messageId`) the
+message itself; a person report the person's last 20 lines (500 characters
+each) in the room or conversation it came from: named by a room's or a
+conversation's handle, from a crew's or Blend's room, or from Unmatch/Block and
+report without a message. Copied only from a room or conversation the reporter
+is in. The copy is for staff review: no mobile response and
+no data export carries it. A dismissed report loses it at 180 days
+(`docs/RETENTION.md`).
 
 ### The Lobby
 
@@ -4578,8 +4680,7 @@ safety, reports and legal requests, and hard-deleted 180 days after the close by
 the chat sweeper (`lib/lobby-retention.ts`): room messages, posts with their asks
 and photos, the posts' rooms, the host's note. Removed or reported content is
 held 180 days from its removal, and anything with a pending report until it is
-decided. Alert switches go at the close. The purge is a dry run that logs what it
-would delete until `LOBBY_PURGE=delete` is set. See `docs/RETENTION.md`.
+decided. Alert switches go at the close. See `docs/RETENTION.md`.
 
 #### Types, spots and the list
 
