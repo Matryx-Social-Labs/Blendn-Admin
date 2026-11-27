@@ -55,7 +55,7 @@ export function FeedbackFeed({
   pageSize,
   timezone,
 }: {
-  /** A host's: exact. Typed as the digest's, which a venue's may floor (`moodSplit`). */
+  /** A host's: exact, or a band beside one held-back category (D-012); a venue's may be a floor (`moodSplit`). */
   total: number | HeldTotal | CountRange
   messages: FeedbackMessage[]
   messagesTotal: number

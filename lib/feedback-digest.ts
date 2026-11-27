@@ -3,7 +3,7 @@ import type { feedback_sentiment, feedback_topic, issue_category } from "@prisma
 
 import { chatClosesAt } from "./chat-window"
 import { db } from "./db"
-import { discloseCategories, discloseGroup, discloseHeadcount, discloseStars, discloseTopics, publishedRaters, spreadsByEventId, discloseNegatives, type CountRange, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type StarSpread } from "./disclosure"
+import { discloseCategories, discloseGroup, discloseHeadcount, discloseStars, discloseTopics, publishedRaters, spreadsByEventId, discloseNegatives, plus, type CountRange, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type StarSpread } from "./disclosure"
 import { publishedRatingGroups } from "./rating-batches"
 import { escalates } from "./sentiment/taxonomy"
 
@@ -199,10 +199,7 @@ export function moodSplit(
   /** The host's negatives as `discloseNegatives` tells them. */
   negative: number | CountRange = counts.negative
 ): Pick<FeedbackDigest, "counts" | "total"> {
-  if (view === "host") {
-    const rest = counts.positive + counts.neutral
-    return { counts: { ...counts, negative }, total: typeof negative === "number" ? rest + negative : { min: rest + negative.min, max: rest + negative.max } }
-  }
+  if (view === "host") return { counts: { ...counts, negative }, total: plus(negative, counts.positive + counts.neutral) }
   const { parts, total } = discloseGroup([counts.positive, counts.neutral, counts.negative])
   return { counts: { positive: parts[0], neutral: parts[1], negative: parts[2] }, total }
 }

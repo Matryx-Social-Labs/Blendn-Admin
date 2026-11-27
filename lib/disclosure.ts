@@ -366,6 +366,9 @@ export function discloseNegatives(
 /** A count as a share bar or an alert threshold reads it: a band at its middle, so nothing drawn is finer than the band. */
 export const midpoint = (c: number | CountRange): number => (typeof c === "number" ? c : (c.min + c.max) / 2)
 
+/** `c` plus `n`: a total from a band and the exact parts beside it is the same band moved up. */
+export const plus = (c: number | CountRange, n: number): number | CountRange => (typeof c === "number" ? c + n : { min: c.min + n, max: c.max + n })
+
 /** A count as plain text (an alert body): a band as "23–27". */
 export const countText = (c: number | CountRange): string => (typeof c === "number" ? String(c) : `${c.min}–${c.max}`)
 

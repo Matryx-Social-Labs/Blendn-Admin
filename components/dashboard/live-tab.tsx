@@ -30,7 +30,7 @@ import { MeetingTonightPanel } from "@/components/dashboard/meeting-tonight-pane
 import { TalkingAbout } from "@/components/dashboard/talking-about"
 import { useOpsSnapshot } from "@/lib/use-ops-snapshot"
 import { countLabel, formatNumber, formatPct } from "@/lib/dashboard-format"
-import { liveCountLabel, midpoint, type CountRange } from "@/lib/disclosure"
+import { liveCountLabel, midpoint, plus, type CountRange } from "@/lib/disclosure"
 import { CONFIRMED_WINDOW_MINUTES } from "@/lib/presence"
 import { cn } from "@/lib/utils"
 import { eventClock, livePhaseFor } from "@/lib/event-phase"
@@ -371,7 +371,7 @@ function SentimentBar({ snapshot }: { snapshot: { sentiment: { positive: number;
   const negative = midpoint(told)
   const total = positive + neutral + negative
   const pct = (n: number) => (total === 0 ? 0 : (n / total) * 100)
-  const totalLabel = typeof told === "number" ? countLabel(total) : countLabel({ min: positive + neutral + told.min, max: positive + neutral + told.max })
+  const totalLabel = countLabel(plus(told, positive + neutral))
 
   return (
     <div className="flex flex-col gap-1.5">

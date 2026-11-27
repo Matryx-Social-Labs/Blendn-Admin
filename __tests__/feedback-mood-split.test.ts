@@ -1,4 +1,4 @@
-import { discloseBreakdown, fewCount, type FewCount, type HeldTotal } from "@/lib/disclosure"
+import { discloseBreakdown, fewCount, type CountRange, type FewCount, type HeldTotal } from "@/lib/disclosure"
 import { countLabel } from "@/lib/dashboard-format"
 import { moodSplit } from "@/lib/feedback-digest"
 import { venueMood } from "@/lib/venue-nights"
@@ -19,7 +19,7 @@ function* everyNight(): Generator<Moods> {
       for (let negative = 0; negative <= MAX; negative++) yield { positive, neutral, negative }
 }
 
-const partsOf = (c: { positive: FewCount; neutral: FewCount; negative: FewCount }) => [c.positive, c.neutral, c.negative]
+const partsOf = (c: { positive: FewCount; neutral: FewCount; negative: FewCount | CountRange }) => [c.positive, c.neutral, c.negative]
 
 /**
  * Every hidden part a reader could pin down from what is shown. Nights that

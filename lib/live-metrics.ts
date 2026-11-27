@@ -8,7 +8,7 @@
  * server-only.
  */
 
-import { countText, liveCountBucket, midpoint, type CountRange, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type LiveCountBucket } from "./disclosure"
+import { countText, liveCountBucket, midpoint, plus, type CountRange, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type LiveCountBucket } from "./disclosure"
 
 export type { FewCount, HeldTotal }
 
@@ -293,12 +293,11 @@ export function deriveAlerts(
   const classified = positive + neutral + midpoint(negative)
   // A threshold on a handful of messages is noise, not a mood.
   if (classified >= 10 && midpoint(negative) / classified >= 0.4) {
-    const total = typeof negative === "number" ? classified : { min: positive + neutral + negative.min, max: positive + neutral + negative.max }
     alerts.push({
       kind: "mood_sliding",
       severity: "warning",
       title: "Mood sliding",
-      body: `${countText(negative)} of ${countText(total)} classified messages in the last 30 minutes are negative.`,
+      body: `${countText(negative)} of ${countText(plus(negative, positive + neutral))} classified messages in the last 30 minutes are negative.`,
     })
   }
 
