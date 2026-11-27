@@ -20,7 +20,7 @@ const WRITES_PROFILES = /\b(?:db|tx|client)\.profiles\.(?:create|createMany|upda
 const ALLOWED = new Set([
   "app/api/mobile/profiles/[userId]/route.ts",
   "lib/tier-b.ts",
-  "app/api/mobile/account/route.ts",
+  "lib/account-erasure.ts",
 ])
 
 const strip = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").replace(/\s\/\/.*$/gm, "")

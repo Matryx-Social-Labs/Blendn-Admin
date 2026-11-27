@@ -181,7 +181,7 @@ describe("a venue never gets a list of its regulars (RG-G01)", () => {
 
   it("only the regulars modules, and the erasure, touch the tables", () => {
     const allowed = [
-      "app/api/mobile/account/route.ts",
+      "lib/account-erasure.ts",
       "lib/offer-actions.ts",
       "lib/offers/deliver.ts",
       "lib/offers/person.ts",

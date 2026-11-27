@@ -28,7 +28,7 @@ describe("deleted_account_records is read by no route, page or helper", () => {
 
   it("scans the tree at all", () => {
     // Without this the assertion below passes vacuously if the walk breaks.
-    expect(files).toContain("app/api/mobile/account/route.ts")
+    expect(files).toContain("lib/account-erasure.ts")
     expect(files).toContain("lib/deleted-account-records.ts")
   })
 
