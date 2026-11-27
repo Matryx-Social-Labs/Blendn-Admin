@@ -1,22 +1,30 @@
-import { PrismaPg } from "@prisma/adapter-pg"
 import { PrismaClient } from "@prisma/client"
 
+import { eraseAccount } from "../lib/account-erasure"
 import { ACCOUNT_MIN_AGE, ageFrom, dateOfBirthRefusal, isKnownMinor, parseDateOfBirth } from "../lib/age"
 import { auditInTx } from "../lib/audit-log"
 import { isStaffEmail } from "../lib/company"
+import { closeDb, db as appDb } from "../lib/db"
 
 /**
  * Accounts known to be under 18 (SCRUM-1169, D-026).
  *
  *   npx tsx scripts/under-18-accounts.ts                     dry run: counts and ids
- *   npx tsx scripts/under-18-accounts.ts --apply             stamp, then list the ones due
+ *   npx tsx scripts/under-18-accounts.ts --apply             stamp, then erase the ones due
  *   npx tsx scripts/under-18-accounts.ts --correct <userId> <YYYY-MM-DD> --by <staff address>
  *
  * A known age under 18 takes part nowhere (`participationDenial`, lib/age.ts).
  * `--apply` stamps `profiles.under_18_since = now()` on every live account with
  * a known age under 18 and no stamp, once: a stamp is never moved. It then
- * lists the accounts stamped `DELETE_AFTER_DAYS` or more days ago as due for
- * deletion. The 14 days are for a birth date entered wrong (D-026).
+ * erases each account stamped `DELETE_AFTER_DAYS` or more days ago through
+ * `eraseAccount` (lib/account-erasure.ts), the erasure the account deletion
+ * runs, one at a time, and stops at the first failure, naming the id. The
+ * 14 days are for a birth date entered wrong (D-026). The dry run lists them.
+ *
+ * In this process `eraseAccount`'s in-memory steps (the token blocklist and
+ * socket eviction) reach only this process; the server refuses the account
+ * from its `deletedAt`. The Apple revoke has no code from the app here, so it
+ * logs and audits "not revoked", as the route does without one.
  *
  * `--correct` is the answer to a person who writes to the grievance address
  * that their birth date is wrong: it sets the birth date (18 or over, a real
@@ -122,6 +130,29 @@ export async function dueForDeletion(db: PrismaClient, now: Date): Promise<strin
   return rows.map((row) => row.id)
 }
 
+/** What erases one account: `eraseAccount`; a test passes its own. */
+type Erase = typeof eraseAccount
+
+/**
+ * Erase every account due, oldest stamp first, one at a time, each one's
+ * deferred work awaited before the next. Stops at the first failure, naming
+ * the id; the ones before it stay erased and the failed one is due again.
+ */
+export async function deleteDue(db: PrismaClient, now: Date, erase: Erase = eraseAccount): Promise<string[]> {
+  const erased: string[] = []
+  for (const id of await dueForDeletion(db, now)) {
+    const deferred: Promise<void>[] = []
+    try {
+      await erase(id, { ipAddress: "script", defer: (task) => void deferred.push(task()) })
+      await Promise.all(deferred)
+    } catch (error) {
+      throw new Error(`Erasing ${id} failed (${erased.length} erased before it): ${error instanceof Error ? error.message : String(error)}`)
+    }
+    erased.push(id)
+  }
+  return erased
+}
+
 /** Set a corrected birth date, clear the stamp, and record who did it. Throws, changing nothing, on a refused date, account or actor. */
 export async function correctBirthDate(
   db: PrismaClient,
@@ -168,7 +199,8 @@ async function main() {
   const refused = environmentRefusal(process.env, command.environment)
   if (refused) throw new Error(`REFUSING: ${refused}`)
 
-  const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) })
+  // The client `eraseAccount` writes through, so the whole run uses one pool.
+  const db = appDb
   const now = new Date()
   try {
     console.log(`database: ${command.environment ?? "local"} (${new URL(process.env.DATABASE_URL ?? "").hostname})  mode: ${command.mode}`)
@@ -179,13 +211,14 @@ async function main() {
     }
     if (command.mode === "apply") {
       printIds("stamped now (known age under 18)", await stampKnownMinors(db, now))
-    } else {
-      printIds("would stamp (known age under 18, no stamp)", await knownMinorsUnstamped(db, now))
+      printIds(`erased (stamped ${DELETE_AFTER_DAYS}+ days ago)`, await deleteDue(db, now))
+      return
     }
-    printIds(`due for deletion (stamped ${DELETE_AFTER_DAYS}+ days ago)`, await dueForDeletion(db, now))
-    if (command.mode === "dry-run") console.log("\nDry run: nothing written. Re-run with --apply to stamp.")
+    printIds("would stamp (known age under 18, no stamp)", await knownMinorsUnstamped(db, now))
+    printIds(`would erase (stamped ${DELETE_AFTER_DAYS}+ days ago)`, await dueForDeletion(db, now))
+    console.log("\nDry run: nothing written. Re-run with --apply to stamp and erase.")
   } finally {
-    await db.$disconnect()
+    await closeDb()
   }
 }
 
