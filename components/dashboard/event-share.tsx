@@ -34,13 +34,16 @@ const REVOKE_AFTER_MS = 2_000
  * `[data-door-slide]` rule in `app/globals.css`).
  */
 export function EventShare({
-  url,
+  doorUrl,
+  linkUrl,
   title,
   when,
   androidOpensApp,
 }: {
-  /** `eventShareUrl(id)`, built on the server. Nothing else is ever encoded. */
-  url: string
+  /** `eventShareUrl(id, "door")`, built on the server: what every code (tab, slide, downloads) encodes. */
+  doorUrl: string
+  /** `eventShareUrl(id, "link")`: the address to copy and paste, so a pasted link is told apart from a scan. */
+  linkUrl: string
   title: string
   /** "4 Oct 2026, 15:31 · The Humming Tree", on the event's clock. */
   when: string
@@ -67,7 +70,7 @@ export function EventShare({
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(url)
+      await navigator.clipboard.writeText(linkUrl)
       toast.success("Link copied")
     } catch {
       toast.error("Could not copy. Select the link and copy it.")
@@ -134,7 +137,7 @@ export function EventShare({
       <Panel>
         <div className="flex flex-wrap items-center gap-8">
           <div ref={svgHolder}>
-            <QR value={url} label={`QR code for ${title}`} size={220} />
+            <QR value={doorUrl} label={`QR code for ${title}`} size={220} />
           </div>
           <div className="flex min-w-0 flex-1 basis-72 flex-col gap-3.5">
             <h2 className="text-[1.25rem] font-bold">Put this on the screen</h2>
@@ -152,7 +155,7 @@ export function EventShare({
             <div className="flex flex-wrap items-center gap-2">
               <Input
                 readOnly
-                value={url}
+                value={linkUrl}
                 aria-label="Event link"
                 onFocus={(e) => e.currentTarget.select()}
                 className="max-w-[360px] flex-1 basis-56 font-mono text-[0.8125rem] pointer-coarse:h-11"
@@ -195,7 +198,7 @@ export function EventShare({
       */}
       {mounted
         ? createPortal(
-            <DoorSlide ref={slide} url={url} title={title} when={when} />,
+            <DoorSlide ref={slide} url={doorUrl} title={title} when={when} />,
             document.body
           )
         : null}

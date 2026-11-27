@@ -14,6 +14,7 @@ import {
   startVenueProCheckout,
 } from "@/lib/billing-actions"
 import { BILLING_PLANS, grossRupees, gstSplit, rupees } from "@/lib/billing-plans"
+import { MIN_CELL } from "@/lib/disclosure"
 import { loadScript } from "@/lib/load-script"
 import { refusalMessage } from "@/lib/refusal"
 
@@ -218,6 +219,9 @@ function SubscriptionBuy({
   )
 }
 
+/** Why a night is missing from the picker: the list holds only ended nights of `MIN_CELL` (lib/analytics-access.ts `worthAPass`). */
+const FLOOR_LINE = `Nights with fewer than ${MIN_CELL} people checked in have nothing to show, so they can't be bought.`
+
 export function EventPassBuy({
   enabled,
   pending,
@@ -239,7 +243,12 @@ export function EventPassBuy({
   const eventId = events.find((e) => e.id === chosen)?.id ?? events[0]?.id ?? ""
 
   if (events.length === 0) {
-    return <p className="text-[0.8125rem] text-muted-foreground">Every event you have already has Event Insights, or you haven&apos;t run one yet.</p>
+    return (
+      <div className="flex flex-col gap-2">
+        <p className="text-[0.8125rem] text-muted-foreground">No ended event to buy it for yet.</p>
+        <p className="text-[0.75rem] text-faint-foreground">{FLOOR_LINE}</p>
+      </div>
+    )
   }
 
   function onBuy() {
@@ -266,6 +275,7 @@ export function EventPassBuy({
         <select
           value={eventId}
           onChange={(e) => setChosen(e.target.value)}
+          aria-describedby="event-pass-floor"
           className="h-9 rounded-md border border-input bg-background px-2 text-[0.8125rem] text-foreground"
         >
           {events.map((e) => (
@@ -275,6 +285,9 @@ export function EventPassBuy({
           ))}
         </select>
       </label>
+      <p id="event-pass-floor" className="text-[0.75rem] text-faint-foreground">
+        {FLOOR_LINE}
+      </p>
       <Button ref={button} variant="outline" aria-disabled={!buy.usable || busy || !eventId} onClick={onBuy}>
         {busy ? "Starting…" : `Buy Event Insights · ${price}`}
       </Button>

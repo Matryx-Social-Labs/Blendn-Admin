@@ -6,7 +6,7 @@ import { flushProductEvents } from "./lib/product-events"
 import { stopSponsoredScheduler } from "./lib/sponsored-scheduler"
 // #265's import, kept deliberately: the naive resolution drops it and
 // `$disconnect()` on shutdown breaks. See docs/MERGE-RUNBOOK.md.
-import { closeDb } from "./lib/db"
+import { closeDb, statementTimeoutMs } from "./lib/db"
 // The four sweepers are started and stopped as one unit now (#276). Importing
 // them individually here is what coupled them to Socket.io in the first place.
 import { startBackgroundWork, stopBackgroundWork } from "./lib/background"
@@ -24,6 +24,14 @@ console.log(`[${new Date().toISOString()}] > NODE_ENV: ${process.env.NODE_ENV}`)
 console.log(`[${new Date().toISOString()}] > PORT: ${port}`)
 console.log(`[${new Date().toISOString()}] > HOSTNAME: ${hostname}`)
 
+/*
+ * The server's statements are capped; scripts that import lib/db are not (SCRUM-1221). Set here, before anything
+ * connects: lib/db reads it when it builds the pool, on the first query. `0` turns the cap off.
+ */
+process.env.DATABASE_STATEMENT_TIMEOUT_MS = process.env.DATABASE_STATEMENT_TIMEOUT_MS?.trim() || "8000"
+// Checked here so a bad value stops the boot instead of failing every query after the port is bound.
+console.log(`[${new Date().toISOString()}] > statement_timeout: ${statementTimeoutMs()} ms`)
+
 // Validate critical environment variables in production (presence AND shape,
 // e.g. secrets must meet their minimum length - not just "is set")
 if (!dev) {
@@ -38,7 +46,7 @@ if (!dev) {
     }
     // Fatal on Railway production (validateEnv); everywhere else say so once.
     if (!process.env.OPENAI_API_KEY?.trim()) {
-      console.warn(`[${new Date().toISOString()}] ⚠ OPENAI_API_KEY unset — moderation is the keyword list alone (Railway production refuses to boot without it)`)
+      console.warn(`[${new Date().toISOString()}] ⚠ OPENAI_API_KEY unset (Railway production refuses to boot without it)`)
     }
     // Same shape, same reason: a half-configured Google client set breaks
     // sign-in for every mobile user while the health check stays green.

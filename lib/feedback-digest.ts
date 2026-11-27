@@ -3,7 +3,7 @@ import type { feedback_sentiment, feedback_topic, issue_category } from "@prisma
 
 import { chatClosesAt } from "./chat-window"
 import { db } from "./db"
-import { discloseCategories, discloseGroup, discloseHeadcount, discloseStars, discloseTopics, mayQuote, publishedRaters, spreadsByEventId, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type StarSpread } from "./disclosure"
+import { discloseCategories, discloseGroup, discloseHeadcount, discloseStars, discloseTopics, publishedRaters, spreadsByEventId, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type StarSpread } from "./disclosure"
 import { publishedRatingGroups } from "./rating-batches"
 import { escalates } from "./sentiment/taxonomy"
 
@@ -101,7 +101,7 @@ export async function buildFeedbackDigest(
    */
   const [members, frozen] = await Promise.all([
     db.chat_group_members.count({ where: { chat_group: { event_id: eventId } } }),
-    db.event_feedback_tallies.findUnique({ where: { event_id: eventId }, select: { population: true, contributors: true, topics: true } }),
+    db.event_feedback_tallies.findUnique({ where: { event_id: eventId }, select: { population: true, contributors: true, topics: true, top_messages: true } }),
   ])
 
   const tally = tallyFeedback(feedback.map((row) => ({ sentiment: row.sentiment, category: row.category, topic: row.topic, userId: row.message?.user_id ?? null })))
@@ -116,11 +116,15 @@ export async function buildFeedbackDigest(
   const population = frozen?.population ?? members
   const categoryContributors = frozen ? new Map(Object.entries(frozen.contributors as Record<string, number>)) : tally.contributors
   const topicPeople = frozen ? new Map(Object.entries((frozen.topics ?? {}) as Record<string, number>)) : tally.topics
+  // A tally frozen before the largest share was recorded has none: dominance is not applied to it, as before (SCRUM-1285).
+  const categoryTop = frozen ? (frozen.top_messages ? new Map(Object.entries(frozen.top_messages as Record<string, number>)) : undefined) : tally.topMessages
+  const categories = discloseCategories(categoryCounts, categoryContributors, population, categoryTop)
 
-  // The categories a quote may come from: the same rule, per category, as before.
-  const quotable = [...categoryContributors]
-    .filter(([, contributors]) => mayQuote({ contributors, population }))
-    .map(([category]) => category as issue_category)
+  /*
+   * The categories a quote may come from: those whose count is shown. A held-back category's quotes would give its
+   * count back (`messagesTotal`), and one person's twenty messages would be most of the list.
+   */
+  const quotable = categories.filter((c) => !c.suppressed).map((c) => c.category as issue_category)
 
   const ratings: StarSpread = spreadsByEventId(ratingGroups).get(eventId) ?? [0, 0, 0, 0, 0]
 
@@ -145,7 +149,7 @@ export async function buildFeedbackDigest(
      * a safety concern was raised -- but the number is null, because "1
      * safety_conduct" in a room of six is a sentence with an author.
      */
-    categories: discloseCategories(categoryCounts, categoryContributors, population),
+    categories,
     topics: venue ? [] : discloseTopics(topicPeople, population),
     // The stars too: under five raters they are individual scores (SCRUM-437).
     ...stars,
@@ -221,20 +225,23 @@ export interface TallyRow {
 export function tallyFeedback(rows: readonly TallyRow[]) {
   const counts = { positive: 0, neutral: 0, negative: 0 }
   const categoryCounts = new Map<string, number>()
-  const people = new Map<string, Set<string>>()
+  // Per category, each person's messages in it.
+  const people = new Map<string, Map<string, number>>()
   const liked = new Map<string, Set<string>>()
   for (const row of rows) {
     counts[row.sentiment] += 1
     if (row.sentiment === "positive" && row.topic && row.userId) liked.set(row.topic, (liked.get(row.topic) ?? new Set<string>()).add(row.userId))
     if (row.sentiment !== "negative" && !escalates(row.category)) continue
     categoryCounts.set(row.category, (categoryCounts.get(row.category) ?? 0) + 1)
-    const who = people.get(row.category) ?? new Set<string>()
-    if (row.userId) who.add(row.userId)
+    const who = people.get(row.category) ?? new Map<string, number>()
+    if (row.userId) who.set(row.userId, (who.get(row.userId) ?? 0) + 1)
     people.set(row.category, who)
   }
   const contributors = new Map([...people].map(([category, who]) => [category, who.size]))
+  // The largest single person's messages per category: the dominance rule's numerator (SCRUM-1285).
+  const topMessages = new Map([...people].map(([category, who]) => [category, Math.max(0, ...who.values())]))
   const topics = new Map([...liked].map(([topic, who]) => [topic, who.size]))
-  return { counts, categoryCounts, contributors, topics }
+  return { counts, categoryCounts, contributors, topMessages, topics }
 }
 
 /**

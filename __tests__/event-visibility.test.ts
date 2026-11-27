@@ -1,4 +1,4 @@
-import { visibleEventsWhere } from "@/lib/event-visibility"
+import { reachedThroughBuilding, visibleEventsWhere } from "@/lib/event-visibility"
 import { hostNotSuspended } from "@/lib/event-access"
 import { actorFor } from "@/lib/org-membership"
 import { db } from "@/lib/db"
@@ -46,7 +46,7 @@ describe("visibleEventsWhere", () => {
   })
 
   it("scopes an organiser to their organisations, plus what they created", async () => {
-    mockActorFor.mockResolvedValue({ id: "user-1", role: "organizer", orgIds: ["org-1", "org-2"] })
+    mockActorFor.mockResolvedValue({ id: "user-1", role: "organizer", orgIds: ["org-1", "org-2"], editOrgIds: ["org-1", "org-2"] })
 
     const where = await visibleEventsWhere({ id: "user-1", role: "organizer" })
 
@@ -68,7 +68,7 @@ describe("visibleEventsWhere", () => {
      * that hides those rows contradicts the authorization layer rather than
      * merely being thin.
      */
-    mockActorFor.mockResolvedValue({ id: "owner-1", role: "venue_owner", orgIds: ["org-9"] })
+    mockActorFor.mockResolvedValue({ id: "owner-1", role: "venue_owner", orgIds: ["org-9"], editOrgIds: ["org-9"] })
     const claimedAt = new Date("2026-09-01T00:00:00Z")
     // The second has no claim date: bad data, and it opens nothing (SCRUM-500).
     mockVenues.mockResolvedValue([
@@ -88,15 +88,27 @@ describe("visibleEventsWhere", () => {
     ])
   })
 
-  it("does not give an organiser the venue clause", async () => {
-    // The mirror of the case above, and the one that would silently widen
-    // access rather than narrow it.
-    mockActorFor.mockResolvedValue({ id: "user-1", role: "organizer", orgIds: ["org-9"] })
-    mockVenues.mockResolvedValue([{ id: "venue-1", claimed_at: new Date() }])
+  it("gives an organizer-role member of a venue-owning org that venue's events from the claim, as the resolver does (SCRUM-1246)", async () => {
+    // The mirror of the case above: the role is not a fact the list reads.
+    const claimedAt = new Date("2026-09-01T00:00:00Z")
+    mockActorFor.mockResolvedValue({ id: "user-1", role: "organizer", orgIds: ["org-9"], editOrgIds: ["org-9"] })
+    mockVenues.mockResolvedValue([{ id: "venue-1", claimed_at: claimedAt }])
     const where = await visibleEventsWhere({ id: "user-1", role: "organizer" })
 
-    expect(JSON.stringify(where.OR)).not.toContain("venue")
-    expect(mockVenues).not.toHaveBeenCalled()
+    expect(where.OR).toEqual([
+      { organizer_org_id: { in: ["org-9"] } },
+      { venue_id: "venue-1", start_time: { gte: claimedAt } },
+      { organizer_id: "user-1", organizer_org_id: null, ...hostNotSuspended },
+    ])
+  })
+
+  it("leaves an organiser whose org owns no venue exactly as before", async () => {
+    mockActorFor.mockResolvedValue({ id: "user-1", role: "organizer", orgIds: ["org-1"], editOrgIds: ["org-1"] })
+    const where = await visibleEventsWhere({ id: "user-1", role: "organizer" })
+    expect(where.OR).toEqual([
+      { organizer_org_id: { in: ["org-1"] } },
+      { organizer_id: "user-1", organizer_org_id: null, ...hostNotSuspended },
+    ])
   })
 
   it("falls back to authorship when somebody belongs to no organisation", async () => {
@@ -107,44 +119,56 @@ describe("visibleEventsWhere", () => {
      * than seeing a row you cannot open, and is why the fallback is here and
      * deliberately NOT in `eventPermissions`.
      */
-    mockActorFor.mockResolvedValue({ id: "lonely-1", role: "organizer", orgIds: [] })
+    mockActorFor.mockResolvedValue({ id: "lonely-1", role: "organizer", orgIds: [], editOrgIds: [] })
 
     const where = await visibleEventsWhere({ id: "lonely-1", role: "organizer" })
 
     expect(where.OR).toEqual([{ organizer_id: "lonely-1", organizer_org_id: null, ...hostNotSuspended }])
   })
 
-  it("gives a sponsor nothing but their own authorship, even inside an organising org", async () => {
-    /*
-     * Found by a security pass, in code I had written that afternoon — and the
-     * test above walked straight past it, because it iterated `sponsor` and
-     * asserted only `deleted_at`.
-     *
-     * `eventPermissions` denies a sponsor outright, whatever their memberships.
-     * `organisation_members` has no notion of a "sponsor org" versus an
-     * "organiser org" — one row can both run events and hold `may_sponsor` — so
-     * scoping this list on membership alone showed a sponsor every event their
-     * org runs, on a screen the resolver would refuse them row by row.
-     *
-     * The nav hides Events from sponsors. A nav filter is not an authorization
-     * check.
-     */
-    mockActorFor.mockResolvedValue({ id: "sponsor-1", role: "sponsor", orgIds: ["org-1"] })
-
-    const where = await visibleEventsWhere({ id: "sponsor-1", role: "sponsor" })
-
-    expect(where.OR).toEqual([{ organizer_id: "sponsor-1", organizer_org_id: null, ...hostNotSuspended }])
-    // No org SCOPE — the only organizer_org_id left is the creator floor's
-    // "legacy event with no org" arm, which admits nothing of the org's.
-    expect(JSON.stringify(where)).not.toContain('"organizer_org_id":{"in"')
+  it("lists an org's events for any member, whatever User.role says, as the resolver now grants them (SCRUM-1246)", async () => {
+    for (const role of ["sponsor", "attendee"] as const) {
+      mockActorFor.mockResolvedValue({ id: "m-1", role, orgIds: ["org-1"], editOrgIds: ["org-1"] })
+      const where = await visibleEventsWhere({ id: "m-1", role })
+      expect(where.OR).toEqual([
+        { organizer_org_id: { in: ["org-1"] } },
+        { organizer_id: "m-1", organizer_org_id: null, ...hostNotSuspended },
+      ])
+    }
   })
 
   it("never drops the deleted_at filter, whatever the role", async () => {
-    mockActorFor.mockResolvedValue({ id: "u", role: "organizer", orgIds: ["o"] })
+    mockActorFor.mockResolvedValue({ id: "u", role: "organizer", orgIds: ["o"], editOrgIds: ["o"] })
 
     for (const role of ["app_admin", "organizer", "venue_owner", "sponsor"] as const) {
       const where = await visibleEventsWhere({ id: "u", role })
       expect(where.deleted_at).toBeNull()
     }
+  })
+})
+
+/*
+ * Who sees an event's counts held back: anyone who reaches it through the
+ * building rather than running it (SCRUM-501). One rule for the list, the
+ * exports and the venue page, keyed on what the person runs, not their role.
+ */
+describe("reachedThroughBuilding", () => {
+  const actor = { id: "u1", orgIds: ["org-venue"] }
+  const theirs = { organizer_id: "someone", organizer_org_id: "org-host" }
+  const ours = { organizer_id: "someone", organizer_org_id: "org-venue" }
+
+  it("holds back another host's event for any non-admin, organizer role included", () => {
+    for (const role of ["venue_owner", "organizer", "attendee", "sponsor"] as const) {
+      expect(reachedThroughBuilding(role, actor, theirs)).toBe(true)
+    }
+  })
+
+  it("never for an event their org runs, or one they created", () => {
+    expect(reachedThroughBuilding("organizer", actor, ours)).toBe(false)
+    expect(reachedThroughBuilding("organizer", actor, { organizer_id: "u1", organizer_org_id: null })).toBe(false)
+  })
+
+  it("never for the platform's admin", () => {
+    expect(reachedThroughBuilding("app_admin", actor, theirs)).toBe(false)
   })
 })

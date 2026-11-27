@@ -15,8 +15,8 @@ list, the live tab, the feedback digest and the chatrooms index all show the
 attendee roster at `/dashboard/attendees` used to be the exception -- by
 "decision 7" it showed organizers real names -- and since SCRUM-383 (owner
 ruling b, 2026-09-28) it shows the same HMAC label as the CSV export, with the
-counts, and no name, email, phone or photo. `DESIGN_BRIEF_VENUES_AND_CONTROL.md:134`
-("never show a host a real attendee name") now holds on every host surface;
+counts, and no name, email, phone or photo. The rule that a host never sees a
+real attendee name now holds on every host surface;
 `app_admin` keeps the person on `/dashboard/users` and in the room feed.
 Venue owner and sponsor get the
 room read-only and the pseudonyms; sponsor is bounced from an event they do not

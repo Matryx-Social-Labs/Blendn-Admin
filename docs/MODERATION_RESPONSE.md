@@ -1,205 +1,96 @@
-# Moderation: the human half
+# Moderation on call: reports, grievances, takedowns, child safety
 
-The pipeline works. `lib/moderation/` runs keyword matching, spam detection and
-the OpenAI moderation API before a message is broadcast, and writes to
-`moderation_flags`. `__tests__/` covers it.
+One page for the person on call: what to do, and where in the dashboard. Every
+path, button and action below was checked against `dev` on 2026-11-26. Who is
+on call, response targets and anything private are in the on-call sheet
+(SCRUM-1407). Legal questions go to the lawyer under Jira Epic SCRUM-1122.
 
-None of that answers the question this document exists for: **it is 11pm on a
-Saturday, a woman at an event has just been threatened in the chatroom, and she
-has pressed report. What happens next?**
+Someone in danger now: emergency services first (112 in India, 911 in Canada).
 
-Today the honest answer is "the flag sits in a queue until someone opens the
-dashboard on Monday". That is the gap.
+## Who
 
-An engineering review initially recorded "moderation is core product" as having
-no deliverable, on the grounds that the classifier already exists. That was
-wrong, and the correction is the reason this file exists: a moderation pipeline
-with no human attached to it is a filing cabinet.
+| Role | Who |
+|---|---|
+| On call, who covers, the engineer on call, where alerts land | The on-call sheet (SCRUM-1407) |
+| Grievance officer, `grievance@blendn.app` | Likhith Gowda, Chief Operating Officer (`lib/company.ts:19`; Matrix Social Labs, legally Matryx Social Labs Private Limited) |
+| Decides what is reported to the authorities | `OWNER: name`, on the lawyer's answer (SCRUM-1398) |
 
----
+## What arrives
 
-## What Yik Yak actually teaches
+Staff alerts go to `STAFF_ALERT_SLACK_WEBHOOK_URL` and/or `STAFF_ALERT_EMAIL`.
+Open the queues on the schedule in the on-call sheet as well.
 
-Worth being precise, because the wrong lesson is easy to draw.
+| Message | Do |
+|---|---|
+| `2 new reports, 1 severe flag; oldest pending 14 min.` and a dashboard link | Work the queues (**Act**) |
+| `Moderation degraded: …` | Check `OPENAI_API_KEY` on the service and the provider's status, or tell the engineer on call |
+| `Sexual image pulled (profile). A person must check it for a minor or a non-consensual image. key profile/… user …` | Go to **Suspected image** below. The pull is listed at `/dashboard/audit?action=moderation.sexual_image_hold`, not in the queues |
+| Mail to `grievance@blendn.app` | **Grievances and orders** below |
 
-Yik Yak did **not** die from lack of engagement or lack of context. Context was
-why it worked -- hyperlocal, campus-bounded, extremely sticky. It died in April
-2017 from **harassment**: racist threats, bomb and shooting threats that
-triggered campus evacuations, two students arrested for death threats, and a
-federal complaint against the University of Mary Washington for failing to
-protect students from threats of sexual violence. Campuses banned it. It
-relaunched in 2021 with "community guardrails" and students immediately reported
-the same abuse.
+## Severity and clocks
 
-So the risk here is not that nobody uses the room. It is that **the room turns
-ugly once, publicly, and that ends the product** -- particularly in India,
-particularly with women in it.
+**S1:** threat of violence, sexual threat, anything involving a minor, an
+intimate image shared without consent, a court or government order. **S2:**
+harassment, unwanted sexual content, targeted abuse of one person. **S3:**
+slurs, spam, general unpleasantness. Targets per level: the on-call sheet.
 
-Our structural difference from Yik Yak is not context. It is **accountability**:
-there is a GPS-verified real human behind every pseudonym, pseudonyms are stable
-within an event, and peer ratings route to moderation rather than being
-displayed. None of that helps if nobody is looking.
+Clocks per IT Rules as amended Feb 2026, lawyer to confirm:
 
----
+| Acknowledge a grievance | Resolve a grievance | Grievance about unlawful content | Intimate or morphed image without consent | Court order or government notice |
+|---|---|---|---|---|
+| 24 h | 7 days | 36 h | 2 h | 3 h |
 
-## The escalation path
+## Act
 
-### Severity, and what each one means
+Sign in as `app_admin`. Both queues show the oldest first; the age turns red at
+24 h. Switch with **Flags · N** and **Reports · N**. Every action writes `audit_logs`;
+read them at `/dashboard/audit`.
 
-| | What it is | Response time | Who |
+| To | Where | Press | Audit action |
 |---|---|---|---|
-| **S1** | Credible threat of violence, sexual threat, anything involving a minor, or a coordinated pile-on in progress | **Now.** Minutes, at the event | On-call |
-| **S2** | Harassment, unwanted sexual content, targeted abuse of one person | Same night, before the room closes | On-call |
-| **S3** | Slurs, spam, general unpleasantness the classifier caught | Next business day | Whoever is on the queue |
+| Find a person named in a grievance | `/dashboard/users` | Search by name or email | none |
+| Hide a flagged room message | `/dashboard/moderation`, Pending | **Remove** (or **Keep** to clear it). To suspend the author, see the no-report row below | `moderation.message_removed` / `moderation.flag_approved` |
+| Hide a reported room message | `/dashboard/moderation/reports`, the card | **Remove message** (rooms only; for a DM, act on the person) | `report.remove_message` |
+| Take down a reported Lobby post and its photo | the report card | **Remove post** | `report.remove_message` |
+| Close a report with no action | the report card | **Dismiss** (the reporter hears nothing; acting on a report, such as **Suspend**, sends them a push) | `report.dismiss` |
+| Suspend a person | the report card | **Suspend**: signs them out, blocks sign-in, stops notifications, bans them from every room | `report.suspend` |
+| Suspend a person nobody reported | Signed in as the staff attendee account (where it lives: the on-call sheet), report their user id: `POST /api/mobile/users/<id>/report`, reason `staff: <why>`. Then **Suspend** on the new card; that account gets the "We acted on your report" push. Or ask the engineer on call. Never set `suspended_at` by hand: it skips the sign-out and the room bans | `report.suspend` |
+| Reinstate | `/dashboard/moderation/reports`, **Resolved** (or **Reviewed**) tab, the card | **Reinstate**. Their rooms stay banned; they sign in again | `report.reinstate` |
+| Let a reinstated person back into a room | `/dashboard/chatrooms`, **Open room** (a message report's card also links its event), then **Members**, **Banned** | **Unban**. The list shows room names; if more than one is banned, ask the engineer on call which is theirs. Otherwise they re-enter by checking in again | `chat.member_unban` |
+| Remove a profile photo | Ask the engineer on call to pull it with `pullPhoto` (`lib/photos.ts`); suspend too if it warrants it | none |
 
-The distinction that matters operationally: **S1 and S2 are live-event
-problems.** The room closes 24 hours after the event ends and the people
-involved are physically in the same building right now. A response on Monday is
-not a slow response, it is no response.
+## Suspected image (a sexual image that may show a minor)
 
-### What "on-call" means while the team is small
+Never assume an image was machine-screened. Treat every reported or paged image
+as unreviewed. Until the lawyer answers SCRUM-1398:
 
-Be honest that this is one or two people, not a rota:
+1. Do not delete it, download it or forward it. Share the key and user id with nobody but the grievance officer. **Remove message** and **Remove post** take content down and keep it: use them.
+2. Whether staff may open it to check waits on the lawyer. Until then `OWNER: name` decides: ask before you open it.
+3. Suspend the account (**Act**; if nobody reported them, "Suspend a person nobody reported").
+4. Open the incident ticket (below) with the time of the `moderation.sexual_image_hold` row and what you did. No key, no user id, no description of the image: the audit row holds the key.
+5. Tell `OWNER: name` (the decider) now.
 
-1. **Alerting.** Any `moderation_flags` row at S1 or S2 pages the on-call
-   person. Today nothing does this -- flags land in the table and wait. This is
-   the single highest-value piece of unbuilt moderation work.
-2. **Acknowledge within the response time above.** Even if the action is "read
-   it, judged it S3", the clock stops on acknowledgement.
-3. **Act.** The dashboard already supports hiding a message, and
-   `checkAndAutoMute` exists. Banning from an event chat exists
-   (`chat_group_members.status`).
-4. **Record.** Every S1 and S2 gets a line in the incident log below, whatever
-   the outcome.
+What is kept: a pulled profile or blur photo moves to the private bucket under
+the same key, stays while the account lives, and is kept 180 days after the
+account is deleted. A rejected Lobby photo stays private (`chat/sealed/…`) and
+is kept 180 days after the verdict. Removed or reported room and DM images,
+removed content and report rows are kept 180 days after the author deletes the account
+(IT Rules r.3(1)(g); `lib/retained-media.ts:8-13`, `docs/RETENTION.md`). Whether
+to keep anything longer: lawyer to confirm.
 
-### What the on-call person can actually do today
+## Grievances and orders
 
-| Action | Where | Exists? |
-|---|---|---|
-| Hide a message | Dashboard moderation queue | Yes |
-| Auto-mute a repeat offender | `lib/moderation/actions.ts` `checkAndAutoMute` | Yes, automatic |
-| Ban from an event chat | `chat_group_members.status` | Yes |
-| **See a user report at all** | `/dashboard/moderation/reports` | **Yes, since 0.61.0** |
-| Suspend an account platform-wide | Reports queue, or `users` | Yes, and it now **works on the phone** |
-| Reinstate a suspended account | Reports queue | Yes |
-| **Contact the reporter** | -- | **No** |
-| **Tell the organizer someone at their event is in trouble** | -- | **No** |
-| **Get paged when a report or severe flag lands** | `lib/staff-alert.ts`, once a minute, to `STAFF_ALERT_SLACK_WEBHOOK_URL` / `STAFF_ALERT_EMAIL` | **Yes, once a channel is set** (SCRUM-1161) |
-
-The two gaps above it are the work.
-
----
-
-## Reports: the queue, and what a decision means
-
-Two mobile routes write reports — `POST /users/:userId/report` and
-`POST /messages/:messageId/report` — and until 0.61.0 **nothing anywhere read
-either table**. A harassment report produced a row no human was ever going to
-see. Everything above about response times was, for reports specifically,
-describing a queue that did not exist.
-
-They live at `/dashboard/moderation/reports`, beside the flag queue rather than
-inside it. `moderation_flags.message_id` is NOT NULL with a foreign key to
-`chat_messages`, so it can hold neither a report about a *person* (no message)
-nor one about a private message (wrong table) — and a flag is the pipeline's
-opinion, while a report is a person asking for help. Same screen, one click
-apart; the sidebar badge counts both.
-
-**Three decisions, and they mean different things.**
-
-| Decision | Status written | What it does |
-|---|---|---|
-| **Dismiss** | `reviewed` | A human looked and took no action |
-| **Remove message** | `resolved` | Soft-deletes the message. **Group rooms only** |
-| **Suspend** | `resolved` | Blocks the account everywhere and signs it out |
-
-`reviewed` versus `resolved` is the difference between "we found nothing" and
-"we acted", which is the question that gets asked about a report six weeks
-later. Every decision writes `audit_logs`, and `reviewed_by`/`reviewed_at` on
-the report itself.
-
-**Remove is group-only.** `private_messages` has no `deleted_at` column, so
-there is nothing to soft-delete in a DM — and adding one means filtering it in
-the socket handlers and every DM query, to remove evidence from a conversation
-only two people can see. The lever against a DM is the person, not the message.
-
-**Suspension now reaches the app.** `users.suspended_at` had been read in
-exactly one place, `socket-ops-auth.ts`, which guards the *organizer* ops
-socket. Suspending an attendee stopped them opening a dashboard they never had
-and changed nothing about the app they were in. It is now checked wherever a
-mobile token is issued — sign-in, Google, Apple, refresh, session — and
-suspending revokes the account's refresh tokens, so a live session dies within
-one 15-minute access token. The person is told they are suspended and given an
-address to appeal to; a silent failure to sign in is indistinguishable from a
-bug and produces a support thread instead of an appeal.
-
-**Reinstate is on the same row**, including after the fact. A suspension only an
-engineer with database access can reverse is not reversible in any sense the
-product can rely on.
-
----
-
-## The reporting path has a hole in it right now
-
-**A user cannot report a message in group chat.** `app/chat/[id].tsx:655` in the
-Expo app shows a confirmation tray, fires a haptic, and calls nothing. The DM
-path reports properly; the group path is a stub.
-
-So the room where abuse is most likely has a report button that does nothing,
-and the person who pressed it believes they have reported and concludes we
-ignored them. That is worse than having no button.
-
-`POST /api/mobile/messages/:messageId/report` exists and works, and now lands in
-a queue somebody reads. Wiring the tray to it is the fix, and it is tracked as
-T5 in the eng review.
-
----
-
-## Group chats will make this harder
-
-When group-to-group matching ships, the shapes change:
-
-- **Pile-ons.** Four people against one is a different thing from one-to-one
-  abuse, and per-message classification does not see it. Needs a rate/ratio
-  signal, not a content signal.
-- **Coordinated harassment.** A group can form specifically to target someone.
-  The group is durable, so they can do it repeatedly across events.
-- **Pressure to reveal.** The per-pair mutual reveal was designed so nobody can
-  be pressured into unmasking, but social pressure in the chat itself ("why
-  won't you show your face") is a content problem the classifier will not catch.
-- **Post-event persistence.** A group conversation outliving the event means
-  someone can be pursued after leaving the venue, which is precisely the
-  situation the co-presence rule was meant to prevent.
-
-None of these are solved. They are the design work in T7 and they should be
-designed before group chat ships, not after the first incident.
-
----
+Acknowledge from `grievance@blendn.app`, act with **Act** above, reply with what
+was done. The product cannot reply to a person who reported in the app: their
+only answer is the push when a report is acted on. Send a court order or
+government notice to the grievance officer and `OWNER: name` at once. To answer
+a data request, follow `docs/RETENTION.md` § Answering a legal request.
 
 ## Incident log
 
-Every S1 and S2, whatever the outcome. Blameless: the point is patterns, not
-fault.
+Every S1, S2 and grievance gets one Jira ticket under Epic SCRUM-1127 with these
+columns. Never in this file: the repo is public.
 
-| Date | Severity | Event | What happened | Action | Time to ack |
+| Date | Sev | What came in | Action | Who decided | Time to act |
 |---|---|---|---|---|---|
-| _(none yet -- pre-launch)_ | | | | | |
-
----
-
-## What to build, in order
-
-1. **Paging on S1/S2 flags.** Without it every response time here is fiction.
-2. **Wire the group-chat report button** (T5, app-side).
-3. **A way to reply to a reporter.** Silence after a report reads as dismissal.
-   The queue now shows the reporter's name; it still cannot say anything back.
-4. **A way to tell an organizer** that something is happening at their event,
-   without disclosing who reported it.
-5. **Group-chat abuse controls** (T7), before group chat ships.
-
-## Reference
-
-- `lib/moderation/` -- the pipeline
-- `docs/chat-moderation.md` -- how it works
-- `docs/client-chat-moderation-guide.md` -- what the app must render
-- `docs/SECURITY_BACKLOG.md` -- the security ledger
+| _(none yet)_ | | | | | |

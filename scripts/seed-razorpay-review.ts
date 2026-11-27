@@ -16,7 +16,7 @@
  * `razorpay.review@blendn.app`, an organizer (never an admin), owning its own
  * organisation with one draft, private event at a free-text venue. An
  * organizer because that is the role the Plan page sells to, with Razorpay
- * Checkout; a venue owner's Venue Pro is refused until a venue has four weeks
+ * Checkout; a venue owner's Venue Pro is refused until a venue has three months
  * of data. Its own organisation, so it sees no real person's data.
  *
  * ## It never takes over an account it did not make

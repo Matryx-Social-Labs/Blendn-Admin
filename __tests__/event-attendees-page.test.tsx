@@ -16,7 +16,7 @@ const mockSession = { user: { id: "u1", role: "organizer" } }
 let mockOrg = "org-a"
 jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(mockSession) }))
 jest.mock("@/lib/org-membership", () => ({
-  actorFor: (user: { id: string; role: string }) => Promise.resolve({ ...user, orgIds: ["org-a"] }),
+  actorFor: (user: { id: string; role: string }) => Promise.resolve({ ...user, orgIds: ["org-a"], editOrgIds: ["org-a"] }),
 }))
 jest.mock("@/lib/db", () => ({
   db: {
@@ -85,7 +85,7 @@ it("renders the label table for whoever runs the event, and does not redirect", 
     noShows: 0,
   }
   const html = await render()
-  expect(mockEventAttendees).toHaveBeenCalledWith(expect.objectContaining({ id: "u1", orgIds: ["org-a"] }), "e1", expect.any(Date))
+  expect(mockEventAttendees).toHaveBeenCalledWith(expect.objectContaining({ id: "u1", orgIds: ["org-a"], editOrgIds: ["org-a"] }), "e1", expect.any(Date))
   expect(html).toContain('aria-label="Attendees of this event"')
   expect(html).toContain("attendee-0123456789ab")
   // Whether they came, never when (SCRUM-887).

@@ -166,6 +166,8 @@ async function eventsInside(userId: string, cityWhere: CityWhere, point: LatLng,
       ...realEventsWhere,
       deleted_at: null,
       status: "published",
+      // The App Review event (seed:review) is unlisted and stays so on the spot: a passer-by at its pin is not shown it.
+      review_demo: false,
       start_time: { lte: lead },
       end_time: { gte: now },
       // A polygon-only event may have no pin: kept for the fence test rather than lost to the box.

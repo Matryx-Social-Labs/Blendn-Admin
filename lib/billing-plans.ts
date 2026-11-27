@@ -21,6 +21,16 @@
 
 export const GST_RATE_PERCENT = 18
 
+/**
+ * Where these plans are sold: the market the prices above are in (rupees, GST).
+ * Elsewhere Analytics stays free (DECISIONS: Canada until a Canadian host asks
+ * to pay). The rule that applies it is `mayBuyHere` (lib/plan-market.ts).
+ */
+export const PLAN_MARKET = "IN"
+
+/** What the Plan page says in place of a price and Buy where plans are not sold (SCRUM-1151). */
+export const FREE_WHILE_LAUNCHING = "Free while we launch in your city."
+
 export type BillingPlanKey =
   | "analytics_monthly"
   | "analytics_yearly"
@@ -133,6 +143,10 @@ export function rupees(amount: number): string {
     maximumFractionDigits: 0,
   }).format(amount)
 }
+
+/** A plan date as the Plan page says it: "3 Jan 2027", on India's clock, no zone label (plans are sold in India only). */
+const PLAN_DAY = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })
+export const planDay = (d: Date): string => PLAN_DAY.format(d)
 
 /** The card's small print: "₹1,999 + ₹360 GST". */
 export function gstSplit(plan: BillingPlan): string {

@@ -2,7 +2,7 @@ import Link from "next/link"
 
 import { Panel, ProTag } from "@/components/dashboard/kit"
 import { PlanCard } from "@/components/dashboard/plan-card"
-import { BILLING_PLANS, grossRupees, gstSplit, rupees } from "@/lib/billing-plans"
+import { BILLING_PLANS, FREE_WHILE_LAUNCHING, grossRupees, gstSplit, rupees } from "@/lib/billing-plans"
 import { VENUE_DATA_DAYS, type VenuePlanPage, type VenuePlanRow } from "@/lib/venue-plan"
 
 import { CancelAnalytics, CheckoutProvider, VenueProBuy } from "./checkout"
@@ -11,11 +11,17 @@ import { CancelAnalytics, CheckoutProvider, VenueProBuy } from "./checkout"
  * A venue owner's Plan page (plan v2 §9.1b, audit §6.2): every venue the
  * organisation owns, Listed or on Venue Pro, and what Pro adds.
  *
- * Nothing is charged until a venue has four weeks of venue-day data; each
+ * Nothing is charged until a venue has three months of venue-day data; each
  * venue's row says how far along it is (the screen's memorable detail: "19 of
- * 28 days of data"), and Buy appears only when it is past it, payments are on
+ * 90 days of data"), and Buy appears only when it is past it, payments are on
  * and the person may buy. The plan itself is read from the server's own rows;
  * `?status=pending` only holds Buy back while the webhook is awaited.
+ *
+ * Where plans are not sold (`mayBuyHere`, SCRUM-1151), no row offers Buy or
+ * counts down to a charge, and "Free while we launch in your city." is said
+ * once: in the Venue Pro card's price place when no venue of theirs is sold
+ * here, or on each such row when another venue still is (one person in an
+ * Indian and a Canadian organisation).
  */
 
 const DAY = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })
@@ -31,7 +37,6 @@ const PRO = [
   "12 months of guests by day and time, regulars and returning share",
   "Your venue's history from before your claim, as totals",
   "Blind offers to your regulars, with a monthly send quota (coming)",
-  "Perks for Blendn+ members (coming)",
 ]
 
 /**
@@ -41,30 +46,39 @@ const PRO = [
  * L7). The checkout refuses all three (`lib/billing-actions.ts`); an
  * abandoned `created` one of ours is replaced by a new purchase.
  */
-const proBuyable = (v: VenuePlanRow) => !v.pro && !v.openElsewhere && v.subscriptions.every((s) => s.status === "created")
+const proBuyable = (v: VenuePlanRow) =>
+  v.mayBuyHere && !v.pro && !v.openElsewhere && v.subscriptions.every((s) => s.status === "created")
 
 export function VenuePlan({ view, pending }: { view: VenuePlanPage; pending: boolean }) {
   const monthly = BILLING_PLANS.venue_pro_monthly
   const yearly = BILLING_PLANS.venue_pro_yearly
   const anyBuyable = view.paymentsOn && view.venues.some((v) => v.mayBuy && v.readiness.chargeable && proBuyable(v))
+  // The card keeps its price while any venue of theirs is sold here; then an unsold row says the line itself.
+  const soldHere = view.venues.every((v) => !v.owned) || view.venues.some((v) => v.owned && v.mayBuyHere)
 
   const cards = (
     <div className="grid grid-cols-1 gap-5 @3xl/main:grid-cols-2">
       <PlanCard name="Listed" items={LISTED}>
-        <p className="text-[1.625rem] font-bold tabular-nums">₹0</p>
+        {soldHere ? <p className="text-[1.625rem] font-bold tabular-nums">₹0</p> : null}
       </PlanCard>
       <PlanCard name="Venue Pro" tag={<ProTag plan="Venue Pro" />} brand items={PRO}>
-        <div className="flex flex-col gap-1">
-          <p className="text-[1.625rem] font-bold tabular-nums">
-            {rupees(grossRupees(monthly))} <span className="text-[0.8125rem] font-normal text-muted-foreground">/ month per venue</span>
-          </p>
-          <p className="text-[0.75rem] tabular-nums text-faint-foreground">
-            {gstSplit(monthly)} · or {rupees(grossRupees(yearly))} a year, two months free
-          </p>
-        </div>
-        <p className="text-[0.8125rem] text-muted-foreground">
-          Nothing is charged until a venue has {VENUE_DATA_DAYS / 7} weeks of data from people going live there.
-        </p>
+        {soldHere ? (
+          <>
+            <div className="flex flex-col gap-1">
+              <p className="text-[1.625rem] font-bold tabular-nums">
+                {rupees(grossRupees(monthly))} <span className="text-[0.8125rem] font-normal text-muted-foreground">/ month per venue</span>
+              </p>
+              <p className="text-[0.75rem] tabular-nums text-faint-foreground">
+                {gstSplit(monthly)} · or {rupees(grossRupees(yearly))} a year, two months free
+              </p>
+            </div>
+            <p className="text-[0.8125rem] text-muted-foreground">
+              Nothing is charged until a venue has three months of data from people going live there.
+            </p>
+          </>
+        ) : (
+          <p className="text-[0.9375rem] font-medium">{FREE_WHILE_LAUNCHING}</p>
+        )}
       </PlanCard>
     </div>
   )
@@ -80,7 +94,7 @@ export function VenuePlan({ view, pending }: { view: VenuePlanPage; pending: boo
         ) : (
           <ul className="flex flex-col">
             {view.venues.map((v) => (
-              <VenueRow key={v.venueId} venue={v} paymentsOn={view.paymentsOn} pending={pending} />
+              <VenueRow key={v.venueId} venue={v} paymentsOn={view.paymentsOn} pending={pending} sayLine={soldHere} />
             ))}
           </ul>
         )}
@@ -88,7 +102,7 @@ export function VenuePlan({ view, pending }: { view: VenuePlanPage; pending: boo
 
       {cards}
 
-      {!view.paymentsOn ? (
+      {soldHere && !view.paymentsOn ? (
         <p className="text-[0.8125rem] text-muted-foreground">
           Payments aren&apos;t switched on here yet, so nothing can be bought on this page.
         </p>
@@ -131,7 +145,18 @@ export function VenuePlan({ view, pending }: { view: VenuePlanPage; pending: boo
 }
 
 /** One venue: its plan, how close it is to chargeable, and what may be done about it. */
-function VenueRow({ venue, paymentsOn, pending }: { venue: VenuePlanRow; paymentsOn: boolean; pending: boolean }) {
+function VenueRow({
+  venue,
+  paymentsOn,
+  pending,
+  sayLine,
+}: {
+  venue: VenuePlanRow
+  paymentsOn: boolean
+  pending: boolean
+  /** The card shows prices, so a venue not sold here says why on its own row. */
+  sayLine: boolean
+}) {
   const { readiness, pro } = venue
   const halted = venue.subscriptions.some((s) => s.status === "halted")
   const state = !venue.owned
@@ -154,8 +179,9 @@ function VenueRow({ venue, paymentsOn, pending }: { venue: VenuePlanRow; payment
           </Link>
           <span className="font-normal text-muted-foreground"> · {state}</span>
         </p>
-        {venue.owned ? <DataMeter venue={venue} /> : null}
-        {venue.owned && !venue.mayBuy ? (
+        {venue.owned && venue.mayBuyHere ? <DataMeter venue={venue} /> : null}
+        {venue.owned && !venue.mayBuyHere && sayLine ? <p className="text-[0.75rem] text-faint-foreground">{FREE_WHILE_LAUNCHING}</p> : null}
+        {venue.owned && venue.mayBuyHere && !venue.mayBuy ? (
           <p className="text-[0.75rem] text-faint-foreground">Only an owner or admin of {venue.orgName} can change this venue&apos;s plan.</p>
         ) : null}
       </div>
@@ -176,7 +202,7 @@ function VenueRow({ venue, paymentsOn, pending }: { venue: VenuePlanRow; payment
 }
 
 /**
- * The no-charge rule, said as a count: days of venue-day data out of the 28
+ * The no-charge rule, said as a count: days of venue-day data out of the 90
  * that must pass before a venue can be charged.
  */
 function DataMeter({ venue }: { venue: VenuePlanRow }) {

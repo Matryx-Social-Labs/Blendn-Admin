@@ -6,6 +6,7 @@ import { logger } from "./logger"
 import { readLiveSnapshot } from "./live-snapshot"
 import { deriveAlerts, type LiveAlert } from "./live-metrics"
 import { realEventsWhere } from "./event-kind"
+import { mailLiveAlert, type OpenedIssue } from "./live-alert-mail"
 
 /**
  * Alerts, with a memory.
@@ -107,6 +108,7 @@ export async function recordIssuesFor(eventId: string, now: Date = new Date()): 
 
   let opened = 0
   let stillOpen = 0
+  const toMail: OpenedIssue[] = []
   for (const alert of alerts) {
     const existing = openByKind.get(alert.kind)
     if (existing) {
@@ -123,7 +125,7 @@ export async function recordIssuesFor(eventId: string, now: Date = new Date()): 
       })
       stillOpen += 1
     } else {
-      await db.event_issues.create({
+      const { id } = await db.event_issues.create({
         data: {
           event_id: eventId,
           occurrence_id: occurrenceId,
@@ -134,8 +136,11 @@ export async function recordIssuesFor(eventId: string, now: Date = new Date()): 
           opened_at: now,
           last_seen_at: now,
         },
+        select: { id: true },
       })
       opened += 1
+      // Once per opening, never on the bump above (a kind's severity never changes, `deriveAlerts`).
+      if (alert.severity === "critical") toMail.push({ id, eventId, kind: alert.kind, title: alert.title, body: alert.body, openedAt: now })
     }
   }
 
@@ -152,6 +157,9 @@ export async function recordIssuesFor(eventId: string, now: Date = new Date()): 
       data: { resolved_at: now },
     })
   }
+
+  // After the pass's own writes, and not awaited: a slow Resend must not hold the sweep, and it never rejects (SCRUM-1286).
+  for (const issue of toMail) void mailLiveAlert(issue)
 
   return { opened, stillOpen, resolved: stale.length }
 }

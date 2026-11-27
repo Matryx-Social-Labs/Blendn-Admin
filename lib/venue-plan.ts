@@ -7,23 +7,25 @@ import { BILLING_PLANS, isBillingPlanKey } from "./billing-plans"
 import { db } from "./db"
 import { liveEntitlement, type LiveEntitlement } from "./entitlements"
 import { activeMembership } from "./org-membership"
+import { mayBuyHere } from "./plan-market"
 import { mayManageVenueBilling } from "./rbac"
 
 /**
  * A venue's plan: Listed (free) or Venue Pro (plan v2 §9.1b, audit §6.2).
  *
- * ## No charge before four weeks of venue-day data
+ * ## No charge before three months of venue-day data
  *
  * The owner ruled it: nothing is charged until venue days are live AND the
- * venue has at least four weeks of data. Venue days are the venue's own live
- * room (lib/venue-day.ts); "data" starts with the first person who went live
- * there. So a venue becomes chargeable 28 days after its first venue-day
- * check-in, and before that the Plan page says when, and the checkout action
+ * venue has three months of data, the same three months free as organisers
+ * (DECISIONS 2026-11-25 night). Venue days are the venue's own live room
+ * (lib/venue-day.ts); "data" starts with the first person who went live
+ * there. So a venue becomes chargeable `VENUE_DATA_DAYS` days after its first
+ * venue-day check-in, and before that the Plan page says when, and the checkout action
  * refuses (`lib/billing-actions.ts`). A founding grant (3 months of Pro) is
  * not a charge and is open at any time.
  */
 
-export const VENUE_DATA_DAYS = 28
+export const VENUE_DATA_DAYS = 90
 const DAY_MS = 24 * 60 * 60 * 1000
 
 export interface VenueReadiness {
@@ -88,6 +90,8 @@ export interface VenuePlanRow {
    * closes. A yes or no, never whose, which plan or how much.
    */
   openElsewhere: boolean
+  /** Plans are sold where the owning organisation is (`mayBuyHere`, SCRUM-1151); elsewhere, no Buy and no charge date. */
+  mayBuyHere: boolean
 }
 
 /** A venue's mandate as its row needs it; the plan key may be one the price table has retired. */
@@ -127,7 +131,8 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
     select: { id: true, name: true, city: true, owner_org_id: true, owner_org: { select: { display_name: true } } },
   })
   const ids = venues.map((v) => v.id)
-  const [since, subs, paid, pros] = await Promise.all([
+  const owners = [...new Set(venues.map((v) => v.owner_org_id).filter((id): id is string => id !== null && roleIn.has(id)))]
+  const [since, subs, paid, pros, sold] = await Promise.all([
     venueDataSince(ids),
     ids.length
       ? db.billing_checkouts.findMany({
@@ -154,6 +159,7 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
         })
       : [],
     Promise.all(ids.map((id) => liveEntitlement({ kind: "venue", id }, "venue_pro", now))),
+    Promise.all(owners.map(async (id) => [id, await mayBuyHere(id)] as const)).then((pairs) => new Map(pairs)),
   ])
 
   return {
@@ -176,8 +182,8 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
         name: v.name,
         city: v.city,
         owned,
-        mayBuy: memberRole ? mayManageVenueBilling(user.role, memberRole) : false,
-        mayCancel: payerRoles.some((r) => r !== undefined && mayManageVenueBilling(user.role, r)),
+        mayBuy: memberRole ? mayManageVenueBilling(memberRole) : false,
+        mayCancel: payerRoles.some((r) => r !== undefined && mayManageVenueBilling(r)),
         // A venue this organisation no longer owns shows only its own
         // mandate: not who owns it now, nor that owner's plan or data.
         orgName: owned ? (v.owner_org?.display_name ?? "") : "",
@@ -186,6 +192,8 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
         readiness: owned ? readinessFrom(since.get(v.id) ?? null, now) : readinessFrom(null, now),
         subscriptions,
         openElsewhere: here.some((s) => !roleIn.has(s.org_id)),
+        // Only an owned venue is offered anything; one merely still paid for asks nothing.
+        mayBuyHere: v.owner_org_id ? (sold.get(v.owner_org_id) ?? true) : true,
       }
     }),
     payments: paid.map((p) => ({

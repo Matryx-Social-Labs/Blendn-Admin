@@ -41,6 +41,8 @@ const NOT_ABOUT_PEOPLE: Record<string, string[]> = {
   "lib/venue-types.ts": ["college"],
   // A picture's pixel height (event_media.height, SCRUM-1066), never a person's.
   "lib/event-media.ts": ["height"],
+  // The same picture's pixel height, carried into a duplicated event's form (SCRUM-1153).
+  "lib/event-duplicate.ts": ["height"],
   "lib/media-size.ts": ["height"],
   "lib/media-fit.ts": ["height"],
   "lib/media-clip.ts": ["height"],

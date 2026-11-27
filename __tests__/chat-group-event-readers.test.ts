@@ -38,6 +38,7 @@ const NAMES = new Set(["event", "event_id"])
 
 /** `file#function` → why a read of a room's event there is right for a room of any kind. */
 const READERS: Record<string, string> = {
+  "lib/public-profile.ts#latestRoom": "the event room joined last (kind: 'event' in its where), for the preview's band (D-030); no event reads as no room, so no band",
   "lib/audit-log.ts#resolve": "a flagged message's room → its event's host organisation, for whose log the row is; a room with no event belongs to no organisation's log (step 18, M3)",
   "lib/met-in.ts#lobbyMetInFor": "a Lobby post's own event (typed as metInFor's nullable one), never a room's: the night's name for \"Met in the Lobby\"; none, gone or hidden reads as no room (Flow 5 C5)",
   "lib/room-kind.ts#roomOwnerDenial": "the door: switches on kind, and an event room without its event is refused",
@@ -63,6 +64,7 @@ const READERS: Record<string, string> = {
   "lib/room-delivery.ts#pushReplyAuthor": "a venue day's liveness for the reply push, asked only when there is an event; the door runs first",
   "lib/crews/blends.ts#blendsOf":
     "tonight's pseudonyms, read from the event rooms its where selects by event id (so the id is there); a Blend room has no event and is never asked for one",
+  "scripts/export-user.ts#collect": "a person's copy of their own data lists each room's event id as stored; null for a room of any other kind, and nothing is decided by it",
   // Not rooms: an Event Pass names its event (step 16). These read that column.
   "lib/entitlements.ts#eventPassesFor": "an Event Pass's event; the CHECK makes it non-null on every pass, and a null is dropped, never matched",
   "lib/razorpay-webhook.ts#applyOrderPaid": "an Event Pass order's event; an order without one is refused as unknown_ref before any use",

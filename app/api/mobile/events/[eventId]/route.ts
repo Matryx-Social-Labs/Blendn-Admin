@@ -10,7 +10,7 @@ import { eventTallies } from "@/lib/event-tallies"
 import { offersClaim } from "@/lib/curation"
 import { dashboardUrl } from "@/lib/email"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { PRODUCT_EVENTS, record } from "@/lib/product-events"
+import { PRODUCT_EVENTS, acquisitionSource, record } from "@/lib/product-events"
 import { cancelEventCheckIns, eventWriteAction, isCancellingEvent } from "@/lib/event-cancellation"
 import { auditLog } from "@/lib/audit-log"
 import { notifyEventCancelled } from "@/lib/services/event-notifications.service"
@@ -52,18 +52,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     // Get authenticated user
     const authUser = await getAuthenticatedUser(request)
-
-    /*
-     * Per person per event per day, so the count answers "how many people
-     * looked at this event" rather than "how many times was it rendered" — the
-     * second is a measure of the client's re-fetching, not of interest.
-     */
-    record({
-      name: PRODUCT_EVENTS.event_viewed,
-      userId: authUser?.userId,
-      entityKind: "event",
-      entityId: eventId,
-    })
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
@@ -73,8 +61,24 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const denied = await attendeeEventAccess(authUser.userId, eventId, "view")
     if (denied) return eventAccessResponse(denied)
 
-    // Parse optional coordinates from query
     const searchParams = request.nextUrl.searchParams
+    /*
+     * Per person per event per day, so the count answers "how many people
+     * looked at this event" rather than "how many times was it rendered" — the
+     * second is a measure of the client's re-fetching, not of interest. Below
+     * the access check: a refused view is not a view (SCRUM-1273). `?s=` is
+     * where the person came from (door QR, link, ...); an unknown one is none.
+     */
+    const source = acquisitionSource(searchParams.get("s"))
+    record({
+      name: PRODUCT_EVENTS.event_viewed,
+      userId: authUser.userId,
+      entityKind: "event",
+      entityId: eventId,
+      ...(source && { props: { source } }),
+    })
+
+    // Parse optional coordinates from query
     const userLat = searchParams.get("lat")
       ? parseFloat(searchParams.get("lat")!)
       : undefined

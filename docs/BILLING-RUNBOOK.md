@@ -89,8 +89,8 @@ the organisation. One open subscription per venue
 (`billing_checkouts_one_open_subscription_per_venue`); an organisation's own
 Analytics keeps its own index.
 
-- **No charge before four weeks of venue-day data.** Checkout refuses until 28
-  days after the first person went live at the venue (`lib/venue-plan.ts`);
+- **No charge before three months of venue-day data.** Checkout refuses until 90
+  days (`VENUE_DATA_DAYS`) after the first person went live at the venue (`lib/venue-plan.ts`);
   the Plan page shows each venue's days of data. Nothing to do by hand.
 - **Founding grant: 3 months per claimed Bengaluru venue.** An admin gives it
   from the venue's page (Venue Pro panel), with a reason; it is audited on the
@@ -132,6 +132,27 @@ Analytics keeps its own index.
   `billing.duplicate_subscription`; **refund that payment** from the Razorpay
   dashboard. A checkout we had expired and the customer paid anyway takes the
   open slot, and the unpaid one beside it is cancelled.
+
+## Where plans are sold (SCRUM-1151)
+
+Analytics, Event Insights and Venue Pro are priced in rupees with GST, so they
+are sold only in India (`PLAN_MARKET`, `lib/billing-plans.ts`). Canada stays
+free until a Canadian host asks to pay (DECISIONS 2026-11-25).
+
+- **The rule is `mayBuyHere`** (`lib/plan-market.ts`): every city of the
+  organisation's events (any status, not deleted) and of the venues it owns,
+  through the city catalogue. One city in another market means no. A city the
+  catalogue does not know, and an organisation with neither, count as India.
+- **The server is the gate.** `startAnalyticsCheckout`, `startEventPassCheckout`
+  and `startVenueProCheckout` refuse with "Plans aren’t sold in your city yet.
+  Free while we launch there." before any lock, row or Razorpay call. The Plan
+  page shows "Free while we launch in your city." where the price and Buy were.
+- **Never refused:** cancelling, and Razorpay's own renewals and webhooks. An
+  Indian organisation that already pays and then runs a night in Toronto keeps
+  its plan and can cancel it; it cannot start a new purchase.
+- **A Canadian host shown Buy** has a city the catalogue does not know, for
+  example "Toronto Downtown". The fix is a `match_names` row on the city
+  (`/dashboard/markets`), not code.
 
 ## Razorpay's retries, and when it gives up
 

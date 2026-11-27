@@ -28,6 +28,8 @@ import { stripComments } from "./support/strip-comments"
 const ROOT = join(__dirname, "..")
 const QA_SCALE_SEED = "scripts/seed-qa-scale.ts"
 const PRO_PERSONAS_SEED = "scripts/seed-pro-personas.ts"
+// A person's copy of their own data (SCRUM-1249): reads their grants, writes nothing.
+const EXPORT_SCRIPT = "scripts/export-user.ts"
 const SEARCH = ["app", "components", "lib", "scripts"]
 
 function walk(dir: string): string[] {
@@ -107,8 +109,15 @@ describe("entitlements are read and written in one place", () => {
     expect(rels).toContain("lib/revenuecat-webhook.ts")
   })
 
-  it("only lib/entitlements.ts touches the table, and the two QA seeds for their comps and grants", () => {
-    expect(files.filter((f) => touchesTable(f.code)).map((f) => f.rel)).toEqual(["lib/entitlements.ts", PRO_PERSONAS_SEED, QA_SCALE_SEED])
+  it("only lib/entitlements.ts touches the table, the two QA seeds for their comps and grants, and the export", () => {
+    expect(files.filter((f) => touchesTable(f.code)).map((f) => f.rel)).toEqual(["lib/entitlements.ts", EXPORT_SCRIPT, PRO_PERSONAS_SEED, QA_SCALE_SEED])
+  })
+
+  it("the export only reads them", () => {
+    const code = files.find((f) => f.rel === EXPORT_SCRIPT)?.code ?? ""
+    expect(code).toMatch(/\.entitlements\.findMany\(/)
+    expect(code).not.toMatch(/\.entitlements\.(create|update|upsert|delete)/)
+    expect(code).not.toMatch(/\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+"?entitlements\b/i)
   })
 
   it("the pro personas seed writes admin-shaped grants for its two products and nothing paid (SCRUM-561)", () => {
@@ -121,8 +130,8 @@ describe("entitlements are read and written in one place", () => {
   })
 
   it("the QA scale seed writes a comp for a throwaway and nothing paid: source grant, its own reference, only qa.* addresses", () => {
-    // lib/entitlements.ts cannot load under tsx (`server-only`), so the seed writes the one row the Users-page
-    // grant writes (`grantEntitlement`) itself; this pins it to that row and to the throwaways.
+    // The seed writes the one row the Users-page grant writes (`grantEntitlement`) itself (from when
+    // lib/entitlements.ts could not load under tsx); this pins it to that row and to the throwaways.
     const code = files.find((f) => f.rel === QA_SCALE_SEED)?.code ?? ""
     expect(code).toMatch(/source:\s*"grant"/)
     expect(code).toContain("PLUS_REF_PREFIX")

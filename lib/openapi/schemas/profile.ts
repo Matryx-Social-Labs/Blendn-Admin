@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { ACCOUNT_MAX_AGE } from "@/lib/age"
 import { registry } from "@/lib/openapi/registry"
-import { FriendOfferSchema, PagedPaginationSchema, RoomLensSchema, UserRefParamSchema } from "./common"
+import { FriendOfferSchema, PagedPaginationSchema, RoomLensSchema, RoomPersonFactsFields, UserRefParamSchema } from "./common"
 
 /**
  * These mirror `lib/validations/profile.ts`, and a test holds them to it.
@@ -177,6 +177,13 @@ export const UpdateProfileRequestSchema = z
     sign_system: z.enum(["western", "rashi"]).optional().nullable().describe("Which calendar the sign is in: `western` or `rashi`."),
     shows_up_badge: z.boolean().optional().describe("Show \"Shows up\" on your card. Off unless turned on."),
     show_badges: z.boolean().optional().describe("Show the badges your check-ins earned on your card. On unless turned off."),
+    source: z
+      .string()
+      .optional()
+      .describe(
+        "Where the account came from: `door`, `link`, `invite`, `web` or `share` (SCRUM-1273). The first one sent is kept; later ones " +
+          "are ignored, as are unknown values (never refused). Never read back in a response."
+      ),
   })
   .openapi("UpdateProfileRequest")
 
@@ -215,7 +222,7 @@ export const ProfileResponseSchema = z
       .string()
       .datetime()
       .optional()
-      .describe("Absent through a room handle for somebody that room keeps anonymous."),
+      .describe("Only when you may see who this is: absent for a room card and for a raw id that does not name them (D-030)."),
     friend: FriendOfferSchema.optional().describe(
       "Only on somebody else's profile you may see, never your own or a stranger's or a room-anonymous card."
     ),
@@ -223,8 +230,10 @@ export const ProfileResponseSchema = z
       id: z.string().uuid(),
       phone: z.string().nullable(),
       name: z.string().nullable(),
-      age: z.number().nullable(),
-      location: z.string().nullable(),
+      age: z.number().nullable().describe("Null for somebody you may not see who this is (a room card, or a raw id that does not name them; D-030). The key stays."),
+      location: z.string().nullable().describe("Null for somebody you may not see who this is (D-030). The key stays."),
+      ageBand: RoomPersonFactsFields.ageBand.optional().describe("Only for somebody you may not see who this is: a room card's band (`GET /users/{userId}` has the rule), null for a raw id."),
+      tenure: RoomPersonFactsFields.tenure.optional().describe("Only for somebody you may not see who this is: new / regular on a room card, null for a raw id."),
       bio: z.string().nullable(),
       occupation: z.string().nullable(),
       education: z.string().nullable(),
@@ -319,7 +328,8 @@ export const ProfileResponseSchema = z
     }).nullable().describe(
       "Your own profile: every column but `date_of_birth`, with `age` derived. Anybody else's is a subset: " +
         "`id, age, onboarded, location, interests, work_field, expertise`, plus `bio, occupation, education, photos` " +
-        "(and `orientations` when shown) if you can see who they are, else `blurPhoto`."
+        "(and `orientations` when shown) if you can see who they are, else `blurPhoto`, with `age` and `location` null and " +
+        "`ageBand`/`tenure` null (D-030). A room card is `id, age: null, onboarded, location: null, ageBand, tenure`."
     ),
     interests: z
       .array(InterestSchema)
@@ -358,8 +368,10 @@ export const UserPublicProfileSchema = z
       ),
     image: z.string().nullable().optional(),
     photos: z.array(z.string()).optional(),
-    age: z.number().nullable(),
-    location: z.string().nullable(),
+    age: z.number().nullable().describe("Null when `identityVisible` is false (D-030). The key stays for installed builds."),
+    location: z.string().nullable().describe("Null when `identityVisible` is false (D-030). The key stays."),
+    ageBand: RoomPersonFactsFields.ageBand.optional().describe("Only when `identityVisible` is false. " + (RoomPersonFactsFields.ageBand.description ?? "")),
+    tenure: RoomPersonFactsFields.tenure.optional().describe("Only when `identityVisible` is false. " + (RoomPersonFactsFields.tenure.description ?? "")),
     bio: z.string().nullable().optional(),
     occupation: z.string().nullable().optional(),
     education: z.string().nullable().optional(),
@@ -384,7 +396,7 @@ export const UserPublicProfileSchema = z
       .string()
       .datetime()
       .optional()
-      .describe("Absent through a room handle for somebody that room keeps anonymous."),
+      .describe("Only when `identityVisible` is true: absent for a room card and for a raw id that does not name them (D-030)."),
     stats: z
       .object({
         eventsAttended: z.number(),
@@ -396,7 +408,7 @@ export const UserPublicProfileSchema = z
           .describe("Your own profile only: how many events your default (upcoming) saved list holds. Additive."),
       })
       .optional()
-      .describe("Absent through a room handle for somebody that room keeps anonymous."),
+      .describe("Only when `identityVisible` is true: absent for a room card and for a raw id that does not name them (D-030)."),
     sharedInterests: z
       .array(z.string())
       .optional()
@@ -417,7 +429,7 @@ export const UserPublicProfileSchema = z
     identityVisible: z
       .boolean()
       .describe(
-        "Whether the caller may see who this is. A room handle is answered in that room's terms: revealed there, or a friend with `friends_see_me_in_rooms` on. When false, image, photos, bio, occupation and education are absent; `name` is \"Attendee\" by raw id, or their pseudonym in that room by handle — which then also omits interests, memberSince and stats."
+        "Whether the caller may see who this is. A room handle is answered in that room's terms: revealed there, or a friend with `friends_see_me_in_rooms` on. When false, image, photos, bio, occupation and education are absent; `name` is \"Attendee\" by raw id, or their pseudonym in that room by handle; `age` and `location` are null and memberSince and stats absent (D-030)."
       ),
     connection: z
       .object({

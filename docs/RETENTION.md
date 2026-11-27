@@ -80,9 +80,7 @@ deletes their account:
   report was filed before the deletion and is still pending waits on a pointer (`retained_report_media`: account id, object key,
   message id) until the report is decided, and for at most 15 days past the purge (`REPORT_HOLD_DAYS`, the grievance period of
   IT Rules 2021 r.3(2)(a)(i)); the sweep warns in the last 5. The record, profile media and photo checks go on schedule. A flag
-  nobody cleared loses its image at 180 days. Nothing in the product records a legal hold. Images sent since SCRUM-427 are in the private bucket and served
-  only through signed URLs. Known gaps: images from before SCRUM-427 that are
-  kept stay in the public bucket until then. A report filed after the deletion
+  nobody cleared loses its image at 180 days. Nothing in the product records a legal hold. A report filed after the deletion
   finds the image already gone, and the reports screen says so with the date.
 - **Profile photos** (SCRUM-479): a photo moderation pulls, and the blur of a
   pulled primary, are recorded `photo_checks.hidden` and moved from the public
@@ -119,7 +117,7 @@ Alert switches (`board_alert_preferences`) go at the close.
 
 **What the room felt is kept, anonymously** (owner, 2026-11-06). The purge does
 not delete `event_feedback`: before it takes an event's first message it freezes
-the event's figures in `event_feedback_tallies` (distinct people per category and per positive topic,
+the event's figures in `event_feedback_tallies` (distinct people per category and per positive topic, the largest single person's messages per category for the dominance rule,
 counted as the digest counts them, and the room's member count), then detaches
 each feedback row from its message (`message_id` null) and from the staff member
 who corrected it (`corrected_by` null). What stays is mood, category, topic,
@@ -154,16 +152,20 @@ report upheld (`resolved`) within 180 days. Anything with a report still
 `pending` is held until it is decided. A held message keeps its post and its
 room. A storage delete that fails keeps its row for the next pass.
 
-**Not yet:** the purge is a dry run that logs counts until `LOBBY_PURGE=delete`
-is set on the service. Turn it on once the privacy policy says these windows
-(draft: `.context/plans/privacy-retention-draft.md`).
+**It deletes, on every pass** (SCRUM-1227). There is no dry run and no switch:
+the sweeper's pass hard-deletes what is past its time and logs the counts
+("Lobby purge"). The windows are decided (register D-029, 2026-11-26): room and
+Lobby content 180 days after the room closes, the holds above unchanged. The
+privacy policy's retention section states them (SCRUM-1138), and production
+takes this purge only once that section is live. Owed, not a gate: a lawyer's read on DPDP Rule 8(3)
+before 13 May 2027, which may ask one year for "personal data, traffic data and
+logs"; if it covers message content, `RETENTION_DAYS` goes up.
 
 **Tonight's question answers go at 30 days** (owner, 2026-11-10):
 `event_match_preferences.tonight_answer`, and `work_intent` beside it (why they
 were there, read by the same people), are set NULL 30 days after the event's
 last night ends (`purgeTonightAnswers`, same sweeper). The row and the person's
-other preferences stay. It is not behind `LOBBY_PURGE`: an answer is not held
-content. One refused by moderation is never stored, and no report copies an
+other preferences stay. An answer is not held content. One refused by moderation is never stored, and no report copies an
 answer (a person report keeps only the reporter's reason and description), so
 an open report holds nothing here.
 
@@ -174,7 +176,7 @@ reads them once the room closes; a returned wave already opened its
 conversation, which stays. The host's connection counts come from them, so the
 event's insight counts are frozen first (`event_insight_tallies`) and the delete
 waits for them; the admin funnel's "matched" counts the conversations matches
-opened, never these rows. Not behind `LOBBY_PURGE`: no report copies a wave. Crew likes
+opened, never these rows. No report copies a wave, so nothing holds one. Crew likes
 that made no Blend go 12 hours after their night (`purgeLapsedCrewLikes`), and
 crew invite links once their 7-day week is over, used, revoked or lapsed
 (`purgeLapsedCrewLinks`).
@@ -184,13 +186,3 @@ server's sealed copy (`sealUpload`), stored with `Cache-Control: no-cache`, so
 deleting it (account deletion, a removed photo, a moderation takedown) stops it
 being served at once. Objects sealed before SCRUM-445 keep the storage default
 and stay fetchable at the edge for up to an hour after a delete.
-
-**Known gaps, not yet fixed:**
-
-- **User file deletes.** `DELETE /api/mobile/uploads/delete` lets a user delete
-  their own files in `profile/`, `chat/` and `events/` whatever their moderation
-  state. That includes images in hidden or reported messages.
-- **Delisted events.** After an admin delists an event, the organizer can still
-  edit its title and description, and its `visibility` too
-  (`PUT /api/events/[id]`). The delisting's audit entry keeps only the subject
-  id, so nothing keeps the original text.

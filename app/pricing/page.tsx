@@ -98,7 +98,7 @@ export default function PricingPage() {
       <h2>Venues</h2>
       <PriceTable caption="Plans for venues" rows={VENUES} />
       <p className="mt-3 text-[0.8125rem]">
-        Listing a venue on Blend&apos;n is free. Venue Pro can be bought once the venue has four weeks of data.
+        Listing a venue on Blend&apos;n is free. Venue Pro can be bought once the venue has three months of data.
       </p>
 
       <h2>Sponsors</h2>
@@ -110,12 +110,9 @@ export default function PricingPage() {
       <h2>How you pay</h2>
       <p>
         Plans are bought on the dashboard&apos;s Plan page, by the organisation&apos;s owner or an admin, and paid
-        through Razorpay&apos;s checkout. Monthly and yearly plans renew automatically until cancelled; an Event
-        Pass is a single payment. Every payment is listed on the Plan page with its Razorpay payment reference.
+        through Razorpay&apos;s checkout. Monthly and yearly plans renew automatically until cancelled; Event
+        Insights is a single payment. Every payment is listed on the Plan page with its Razorpay payment reference.
       </p>
-
-      <h2>Not sold here</h2>
-      <p>Blend&apos;n+ for attendees is bought inside the Blend&apos;n app, through the App Store or Google Play.</p>
     </PolicyPage>
   )
 }

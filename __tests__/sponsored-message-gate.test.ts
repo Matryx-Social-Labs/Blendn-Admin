@@ -80,7 +80,7 @@ beforeEach(() => {
   // An organiser who genuinely operates this event: `canEdit` would say yes.
   mockAuth.mockResolvedValue({ user: { id: USER, role: "organizer" } })
   mockDb.events.findUnique.mockResolvedValue({ organizer_org_id: ORG, venue: null })
-  mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: ORG }])
+  mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: ORG, role: "owner" }])
   mockDb.event_sponsored_messages.create.mockResolvedValue({ id: "new" })
   mockDb.sponsored_creatives.create.mockResolvedValue({ id: "creative" })
   // The brand named in the body does place at this event, and belongs to the

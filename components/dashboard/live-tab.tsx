@@ -12,6 +12,7 @@ import {
 } from "@tabler/icons-react"
 
 import { ArrivalCurve, CategoryBars, type ArrivalPoint } from "@/components/dashboard/charts"
+import { Callout } from "@/components/dashboard/kit"
 import { OccupancyHero } from "@/components/dashboard/occupancy-hero"
 import { EmptyState, MetricTile } from "@/components/dashboard/primitives"
 import { Button } from "@/components/ui/button"
@@ -179,6 +180,12 @@ export function LiveTab({
     )
   }
 
+  // The connection dropped after figures arrived: they stay up, said to be from
+  // then, until the next snapshot (SCRUM-1348). A frozen board must not read
+  // as a quiet room. When this shows is `useOpsSnapshot`'s rule.
+  const stale = status === "error"
+  const at = clock.time(new Date(snapshot.at))
+
   /*
    * Two copies of one screen. Whoever runs the event (or an admin) gets the
    * figures; the venue it is held at, watching a night it does not run or its
@@ -187,12 +194,18 @@ export function LiveTab({
    */
   return (
     <div className="flex flex-col gap-5">
+      {/* On the page before it is filled, so the line is announced when it
+          appears; empty, its negative margin takes back the column's gap. */}
+      <div role="status" className="empty:-mb-5">
+        {stale ? <Callout title={`Connection lost at ${at}. These figures are from then; reconnecting.`} /> : null}
+      </div>
       <div className="grid gap-5 @3xl/main:grid-cols-[3fr_2fr]">
         <div className="flex flex-col gap-4">
           <OccupancyHero
             occupancy={snapshot}
             unreliable={snapshot.view === "host" ? occupancyMostlyInferred(snapshot) : snapshot.mostlyInferred}
-            time={clock.time(new Date(snapshot.at))}
+            time={at}
+            stale={stale}
             description={snapshot.view === "host" ? hostDescription(snapshot) : venueDescription(snapshot)}
           />
 
@@ -236,8 +249,14 @@ export function LiveTab({
             <h3 className="text-sm font-bold">Alerts</h3>
             {alerts.length === 0 ? (
               <p className="rounded-md border border-border px-3 py-2.5 text-[0.8125rem] text-muted-foreground">
-                Nothing needs attention. Alerts combine chat and check-in signal — neither
-                fires on its own.
+                {stale ? (
+                  `Nothing needed attention at ${at}.`
+                ) : (
+                  <>
+                    Nothing needs attention. Alerts combine chat and check-in signal — neither
+                    fires on its own.
+                  </>
+                )}
               </p>
             ) : (
               alerts.map((alert) => <AlertCard key={alert.kind} alert={alert} />)

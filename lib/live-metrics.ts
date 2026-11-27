@@ -12,6 +12,9 @@ import { liveCountBucket, type DisclosedCategory, type DisclosedTopic, type FewC
 
 export type { FewCount, HeldTotal }
 
+/** How often a watched event's snapshot is sent: the server's loop, and the Live tab's measure of a quiet socket. */
+export const OPS_INTERVAL_MS = 5000
+
 /** The exact figures, and what the alert rules read. Never sent to a venue. */
 export interface LiveFigures {
   eventId: string

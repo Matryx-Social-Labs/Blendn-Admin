@@ -204,6 +204,15 @@ describe("no channel configured", () => {
   it("notifyStaff says so rather than throwing", async () => {
     await expect(notifyStaff("x")).resolves.toBe("unconfigured")
   })
+
+  it.each([["production"], ["staging"]])("logs the hint but not the page text (%s)", async (name) => {
+    process.env.RAILWAY_ENVIRONMENT_NAME = name
+    await notifyStaff("Image pulled: key uploads/K-key-123.jpg user U-user-456")
+    const logged = JSON.stringify(Object.values(mockLogger).map((f) => f.mock.calls))
+    expect(logged).toContain("STAFF_ALERT_SLACK_WEBHOOK_URL")
+    expect(logged).not.toContain("K-key-123")
+    expect(logged).not.toContain("U-user-456")
+  })
 })
 
 describe("a channel that fails", () => {

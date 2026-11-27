@@ -24,12 +24,6 @@ import { readMark, writeMark } from "./rate-limit-store"
  * restart repeats at most one message. The mark is kept in Redis when there is
  * one, and in memory too (the later of the two wins, so a Redis write that
  * failed never re-announces an old window).
- *
- * ponytail: without a readable Redis mark, a new process's first window is one
- * interval wide, ending COMMIT_GRACE_MS before boot, so a report written while
- * no process was up for longer than that is not announced (it is still in the
- * queue). Railway overlaps the old and new containers on a deploy; set REDIS_URL
- * if crashes with long gaps matter. One replica at launch: two would each announce.
  */
 const STAFF_ALERT_INTERVAL_MS = 60_000
 /**
@@ -39,7 +33,7 @@ const STAFF_ALERT_INTERVAL_MS = 60_000
  * interactive one at 5 s; 10 s is that with room.
  */
 const COMMIT_GRACE_MS = 10_000
-/** Room lines delivered unchecked in the last hour above which the message says moderation is degraded (the breaker stuck open). */
+/** More `unchecked` room lines than this in the last hour, and the message says moderation is degraded. */
 export const DEGRADED_UNCHECKED_PER_HOUR = 20
 /** A pending flag this confident is severe whatever its category (the dashboard's high-confidence line). */
 const SEVERE_CONFIDENCE = 0.9
@@ -51,14 +45,13 @@ const HOUR_MS = 60 * 60 * 1000
 
 export type StaffNotice = "sent" | "unconfigured" | "failed"
 
-/** Tell staff something now, in counts and links only (task 03 pages through this). Never throws. */
+/** Tell staff something now: the sweep's counts, or a pulled image's page (`moderation/sexual-image-hold.ts`). Never throws. */
 export async function notifyStaff(text: string): Promise<StaffNotice> {
   const channels = channelsFrom("STAFF_ALERT_SLACK_WEBHOOK_URL", "STAFF_ALERT_EMAIL")
   if (!channels) {
-    // Quiet where no channel is the plan (staging, local); in production nobody being told is an error.
+    // An error in production, an info line elsewhere.
     const log = process.env.RAILWAY_ENVIRONMENT_NAME === "production" ? logger.error : logger.info
     log("Staff alert not sent, no channel configured", {
-      text,
       hint: "set STAFF_ALERT_SLACK_WEBHOOK_URL, or STAFF_ALERT_EMAIL with RESEND_API_KEY and EMAIL_FROM",
     })
     return "unconfigured"
@@ -83,12 +76,18 @@ async function severeFlags(since: Date, until: Date): Promise<number> {
   const patterns = SEVERE_CATEGORY_PREFIXES.map((p) => `${p}%`)
   // CASE, not AND: SQL does not promise to short-circuit, and jsonb_object_keys
   // raises on the sentiment sweeper's array-shaped categories.
+  // A flag whose only key is `profanity` (the keyword list's swear-word hide,
+  // lib/moderation/keyword-filter.ts) is not severe by confidence; such flags
+  // are also left out of the auto-mute count (abuseHiddenCount in
+  // lib/moderation/actions.ts). Any other key beside it keeps the flag severe.
+  // The comparison never raises: `->` gives NULL on an array or a scalar.
   const [row] = await db.$queryRaw<{ n: number }[]>`
     SELECT count(*)::int AS n
       FROM moderation_flags
      WHERE status = 'pending'
        AND created_at > ${since} AND created_at <= ${until}
-       AND (confidence >= ${SEVERE_CONFIDENCE}
+       AND ((confidence >= ${SEVERE_CONFIDENCE}
+             AND categories <> jsonb_build_object('profanity', categories -> 'profanity'))
             OR CASE WHEN jsonb_typeof(categories) = 'object'
                  THEN EXISTS (SELECT 1 FROM jsonb_object_keys(categories) k WHERE k LIKE ANY (${patterns}))
                  ELSE false END)`
@@ -125,7 +124,6 @@ export async function runStaffAlertSweep(now: Date = new Date()): Promise<void> 
     const [users, messages, events, severe, unchecked] = await Promise.all([
       db.user_reports.count({ where: pending }),
       db.message_reports.count({ where: pending }),
-      // ponytail: event_reports has (status) only, so this reads every pending one; add (status, created_at) if they pile up.
       db.event_reports.count({ where: pending }),
       severeFlags(since, until),
       // `deleted_at: null` so the partial index chat_messages_unchecked_idx serves it.

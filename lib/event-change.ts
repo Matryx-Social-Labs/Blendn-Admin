@@ -1,6 +1,7 @@
 import { ticketTimesRefusal, type TimesRefusal } from "./ticket-times"
 import { Prisma, type event_status } from "@prisma/client"
 import { db } from "@/lib/db"
+import { auditInTx } from "@/lib/audit-log"
 
 /**
  * "Changed while you're going" (Flow 3 · 3.1): when the time, the venue or the
@@ -220,9 +221,22 @@ export class EventTimesRefusedError extends Error {
   }
 }
 
+/** A delisted event's visibility, changed by somebody who is not an admin: refused under the row lock. The message is the editor's toast. */
+export class EventDelistedError extends Error {
+  constructor() {
+    super("A moderator set this event to Unlisted, so its visibility can’t be changed. Contact support to ask for a review.")
+  }
+}
+
+/**
+ * `relistBy`: the admin's user id, passed only by a caller that knows the
+ * person is `app_admin`. Without it, a write that changes a delisted event's
+ * visibility is refused with `EventDelistedError`; with it, a move back to
+ * public lifts the delisting and is audited in the same transaction.
+ */
 export async function updateEventTracked(
   args: Prisma.eventsUpdateArgs,
-  opts: { fromStatus?: string } = {}
+  opts: { fromStatus?: string; relistBy?: string } = {}
 ) {
   const eventId = args.where.id
   if (!eventId) throw new Error("updateEventTracked needs the event's id")
@@ -231,11 +245,29 @@ export async function updateEventTracked(
     await tx.$queryRaw`SELECT id FROM events WHERE id = ${eventId}::uuid FOR UPDATE`
     const before = await tx.events.findUniqueOrThrow({
       where: { id: eventId },
-      select: { start_time: true, end_time: true, venue_name: true, address: true, status: true, changed_from: true },
+      select: {
+        start_time: true,
+        end_time: true,
+        venue_name: true,
+        address: true,
+        status: true,
+        changed_from: true,
+        visibility: true,
+        delisted_at: true,
+      },
     })
     if (opts.fromStatus !== undefined && before.status !== opts.fromStatus) throw new EventStatusMovedError(before.status)
     const updated = await tx.events.update(args)
     if (updated.start_time.getTime() >= updated.end_time.getTime()) throw new EventTimesOrderError()
+    // A moderator's delisting (SCRUM-1394): only an admin changes its visibility, and only a move back to public lifts it.
+    const delistedMove = before.delisted_at !== null && updated.visibility !== before.visibility
+    if (delistedMove && !opts.relistBy) throw new EventDelistedError()
+    const relisted = delistedMove && updated.visibility === "public"
+    if (relisted) {
+      // `delisted_by` is @ignore'd (schema.prisma), so it is cleared here; `delisted_at` with the write below.
+      await tx.$executeRaw`UPDATE events SET delisted_by = NULL WHERE id = ${updated.id}::uuid`
+      await auditInTx(tx, { userId: opts.relistBy, action: "event.relist", resource: "event", resourceId: updated.id, details: { from: before.visibility } })
+    }
     // Every writer through here: a sold event's times only move later, decided under the row lock (security review 7).
     const timesRefusal = await ticketTimesRefusal(tx, { id: updated.id, start_time: before.start_time, end_time: before.end_time }, updated)
     if (timesRefusal) throw new EventTimesRefusedError(timesRefusal)
@@ -249,12 +281,13 @@ export async function updateEventTracked(
      * `start_time` on an existing event.
      */
     const startMoved = before.start_time.getTime() !== updated.start_time.getTime()
-    if (!next && !startMoved) return updated
+    if (!next && !startMoved && !relisted) return updated
     return tx.events.update({
       where: { id: eventId },
       data: {
         ...(next && { changed_at: next.changed_at, changed_from: next.changed_from ?? Prisma.DbNull }),
         ...(startMoved && { reminded_at: null }),
+        ...(relisted && { delisted_at: null }),
       },
     })
   })

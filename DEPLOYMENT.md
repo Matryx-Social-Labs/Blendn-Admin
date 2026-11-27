@@ -159,9 +159,9 @@ the statements it excuses.
 Staging's pre-deploy command is `npm run railway:predeploy`
 (`.railway/railway.ts`; production's is `npm run db:migrate`, the migrations only): the
 migrations, then `scripts/test-accounts.ts`. That creates or repairs one
-dashboard account per role — `admin@`, `organizer@`, `venue.owner@` and
-`sponsor@blendn.app` — with their organisations and memberships, and sets their
-password to `SEED_PASSWORD`.
+dashboard account per role — admin, organizer, venue owner and sponsor; the
+addresses are `TEST_ACCOUNTS` in that script — with their organisations and
+memberships, and sets their password to `SEED_PASSWORD`.
 
 - **Staging only.** It writes nothing when `SEED_PASSWORD` is unset, and nothing
   on any Railway environment but `staging` even when it is set — production and
@@ -256,16 +256,35 @@ was cleared after it was created — the build is rejected, and you find out day
 later rather than at deploy time. The script is idempotent, so running it when
 it is not needed costs nothing; forgetting it costs a review cycle.
 
-It also creates an event if none is upcoming. An empty Events tab reads as a
-broken app to a reviewer, which is a likelier rejection than anything about
-sign-in — and the event now gets its `event_occurrences` rows, without which
-**check-in refuses with "Event has already ended"** on an event starting
-tomorrow. `occurrence_id` is NOT NULL and `resolveOccurrence` treats "no
-occurrences" as over.
+It also makes the review event, every run: one row, slug `review-demo-event`,
+found again on a re-run rather than made twice. An empty Events tab reads as a
+broken app to a reviewer, and the reviewer is not in Bengaluru, so it is:
 
-After running it, sanity-check the reviewer's whole path once: sign in, open the
-event, check in. It takes a minute and it is the exact sequence a rejection
-would come from.
+- **Unlisted.** No feed or search shows it, nor the "you're here" list to
+  somebody standing at its pin, so real users never meet a fake "Rooftop
+  Sessions". The reviewer opens it from its share link, the same
+  `/event/<id>` address the app's Share button sends (`eventShareUrl`, on
+  `PUBLIC_SITE_ORIGIN`), which the script prints. Paste that link into the App
+  Review notes. Run the script with `PUBLIC_SITE_ORIGIN` as the target
+  environment has it (unset is `www`, production's).
+- **Open for a week.** From an hour before the run to a minute short of seven
+  days after that, in daily sessions that run into each other
+  (`syncOccurrences`), so check-in is open at any hour of a review that takes
+  days. **Run it again on submission day**: a re-run moves the window to start
+  then, on the same row, puts back anything changed on it (visibility, status,
+  a called-off day), and keeps any day somebody checked in to.
+- **Filed under the oldest active organizer or app_admin**, re-checked every
+  run: the event's public page is hidden while its host is suspended or
+  deleted. With no such account the script refuses.
+
+It refuses, writing nothing, when `review-demo-event` is an event it did not
+make (an organiser can title one "Review Demo Event") and when
+`APP_REVIEW_EMAIL` belongs to a staff account, whose password it would
+otherwise reset. Events from earlier runs (slugs `review-demo-event-<date>`)
+lose `review_demo`, so there is one review event. It prints the event id, the
+window and the share link. After running it,
+sanity-check the reviewer's whole path once: sign in, open the share link, check
+in. It takes a minute and it is the exact sequence a rejection would come from.
 
 Two constraints on the password, both enforced by the script rather than left to
 be discovered:
@@ -312,11 +331,9 @@ APP_REVIEW_EMAIL=... APP_REVIEW_PASSWORD=... npm run seed:review
 REVIEW_ACCOUNT_IDS=<user id from step 1>
 ```
 
-Only the event `seed:review` creates is ever `review_demo`, so the reviewer is
-never put in a real room with real people. It creates one only when nothing
-upcoming is published; on a database with real upcoming events there is no
-`review_demo` event, and the geofence half of the aid has nothing to apply to.
-Turn the aid off after approval by deleting the variable.
+Only the event `seed:review` makes is ever `review_demo`, so the reviewer is
+never put in a real room with real people. Turn the aid off after approval by
+deleting the variable.
 
 ### 8. Populate a room — staging only
 
@@ -325,7 +342,7 @@ SEED_ROOM=yes SEED_ROOM_PASSWORD=<pick one> DATABASE_URL=<staging> npm run seed:
 SEED_ROOM=yes SEED_ROOM_PASSWORD=<same one> DATABASE_URL=<staging> npm run seed:room -- --clean
 ```
 
-The room's organiser is `organizer@blendn.app` in Nightshift Collective, so it
+The room's organiser is the organizer test account in Nightshift Collective, so it
 is on the dashboard people already sign in to. The script only looks that
 account up and refuses if a deploy has not created it yet.
 
@@ -415,6 +432,11 @@ so it is never related to session or login state.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `MIGRATE_DATABASE_URL` | No | The owner role's connection string, for `prisma migrate deploy` (pre-deploy) only (`prisma.config.ts`). Set it when `DATABASE_URL` is the app role `blendn_app`, which reads and writes rows and is refused DDL (SCRUM-1358, migration `20261126190000_blendn_app_role`). Keep it the role that ran that migration: its default privileges give `blendn_app` the tables later migrations create only when the same role creates them. Unset: migrations use `DATABASE_URL` |
+| `MOBILE_MIN_APP_VERSION`, `MOBILE_MIN_APP_BUILD_IOS`, `MOBILE_MIN_APP_BUILD_ANDROID` | No | The oldest app version, or store build number per platform, the mobile API serves; older builds get 426 `UPDATE_REQUIRED`. Unset: no minimum. Set only once the fixed build is live (Operating production, step 5; `docs/API.md`) |
+| `DATABASE_POOL_MAX` | No | Connections this process may hold (default 20), shared by every request, Socket.io and every background loop (`lib/background.ts`). A query waiting for one fails after 5 s ("timeout exceeded when trying to connect") instead of queueing for ever (SCRUM-1221); `/api/health` reports `pool.waiting` |
+| `HEALTH_METRICS_TOKEN` | Production: yes, before the ops monitor | 32+ characters (`openssl rand -hex 32`). `/api/health` adds `pool`, `eventLoopDelayMs` and `sockets` only for `Authorization: Bearer <this>`; anyone else gets the plain payload, still 200, so Railway's healthcheck is unaffected. Unset: the numbers are omitted on Railway `production` and shown to anyone elsewhere (staging, local). Set but under 32 characters, `validateEnv` fails. Not set by an agent: the owner sets it (SCRUM-1221) |
+| `DATABASE_STATEMENT_TIMEOUT_MS` | No | Postgres `statement_timeout` for the server's connections. `server.ts` sets **8000** when unset, so a runaway statement is cancelled (`57014`) rather than holding its connection; `0` turns the cap off. Scripts that import `lib/db` (seeds, backfills, imports) do not set it and have no cap. Not whole milliseconds: the server refuses to boot (SCRUM-1221) |
 | `NEXTAUTH_URL` | Yes | Full URL of admin dashboard |
 | `NEXTAUTH_SECRET` | Yes | Secret for NextAuth (min 32 chars) |
 | `MOBILE_JWT_SECRET` | Yes | Secret for mobile API JWT (min 32 chars) |
@@ -426,12 +448,15 @@ so it is never related to session or login state.
 | `TIGRIS_REGION` | No | Bucket region (default: auto) |
 | `MEDIA_WORKER_URL` | No | The media worker's private address (`services/media-worker/README.md`). Clips are not checked unless this and its secret are both set |
 | `MEDIA_WORKER_SECRET` | No | Shared with the media worker (min 32 chars) |
-| `OPENAI_API_KEY` | Required in production | AI moderation. Railway `production` refuses to boot without it (`openaiKeyProblem`, `lib/env.ts`); elsewhere the server boots with a warning and moderation is keyword matching only |
+| `OPENAI_API_KEY` | Required in production | AI moderation. Railway `production` refuses to boot without it (`openaiKeyProblem`, `lib/env.ts`); elsewhere the server boots with a warning |
+| `SENTIMENT_MODEL` | No | The mood classifier's OpenAI chat model (`lib/sentiment/classify.ts`). Unset: `gpt-6-luna` (`DEFAULT_SENTIMENT_MODEL`, `lib/env.ts`). The call sends `reasoning_effort: "none"` and no `temperature`, so the model must accept that. Set it when OpenAI's deprecations page retires the default; a model that fails shows in Sentry as "Sentiment classification failed" with its status and model, and the room's mood falls back to the word list |
 | `RESEND_API_KEY` | No | Transactional email. Without it onboarding and invites still work, but nothing is sent — the dashboard shows the link/password to pass on by hand |
 | `EMAIL_FROM` | No | Sender, `"Blend'n" <hello@blendn.app>`. Quote the display name — the apostrophe is legal unquoted per RFC 5322 but quoting is free. Required alongside `RESEND_API_KEY`; email is off unless both are set |
-| `STAFF_ALERT_SLACK_WEBHOOK_URL` | No | A Slack (or Discord-compatible) incoming webhook that hears about new reports and severe flags: one message a minute at most, counts, the oldest pending age and a dashboard link only (`lib/staff-alert.ts`, SCRUM-1161). A bearer secret, never logged. With neither this nor `STAFF_ALERT_EMAIL` set nobody is told: the server logs one info line per batch instead |
-| `STAFF_ALERT_EMAIL` | No | An address or alias for the same staff alert, sent through Resend (needs `RESEND_API_KEY` and `EMAIL_FROM`; outside production also `EMAIL_ALLOWLIST` or one of our domains). Set either, both, or neither |
+| `STAFF_ALERT_SLACK_WEBHOOK_URL` | No | Where staff alerts are sent: a Slack (or Discord-compatible) incoming webhook for new reports, severe flags and pulled sexual images: counts, the oldest pending age and a dashboard link; a pulled image also carries its storage key and user id (`lib/staff-alert.ts`, `lib/moderation/sexual-image-hold.ts`, SCRUM-1161). A bearer secret, never logged |
+| `STAFF_ALERT_EMAIL` | No | An address or alias for the same staff alert, sent through Resend (needs `RESEND_API_KEY` and `EMAIL_FROM`; outside production also `EMAIL_ALLOWLIST` or one of our domains). Set either or both |
 | `EMAIL_ALLOWLIST` | No | Outside production (`RAILWAY_ENVIRONMENT_NAME` other than `production`, staging and local included) mail goes only to `blendn.app`, `matrixsociallabs.com` and `resend.dev`, plus the exact addresses listed here, comma-separated. Anything else is not sent and reads as not configured (SCRUM-452) |
+| `EMAIL_REPLY_TO` | No | Reply-To on every mail (`reply_to`, lib/email.ts). Unset, there is no Reply-To and a reply goes to `EMAIL_FROM`'s mailbox (`hello@blendn.app`, Google Workspace), which the "reply to this email" lines rely on. A value that is not an address fails boot |
+| `RESEND_WEBHOOK_SECRET` | No | The signing secret (`whsec_…`) of the Resend webhook at `https://<api host>/api/webhooks/resend`, subscribed to `email.bounced` and `email.complained` (Resend → Webhooks). It records hard bounces and complaints in `email_suppressions`, and `sendEmail` stops mailing those addresses (a complaint still gets a password reset they ask for). Unset, the route answers 401 to everything and nothing is suppressed (SCRUM-1280) |
 | `PUBLIC_APPLY_URL` | No | Host for the public apply flow, e.g. `https://organizers.blendn.app`. Only the apply/confirm emails follow it — invite, approval and domain links stay on `NEXTAUTH_URL` because they need a session. Unset, everything uses `NEXTAUTH_URL` |
 | `EMAIL_FOOTER_ADDRESS` | No | Registered office, shown in the email footer. Omitted entirely when unset — a made-up address in a compliance footer is worse than none. Set it before any bulk sending |
 | `CRON_SECRET` | Yes | Bearer token for `/api/cron/*`. The endpoint rejects everything when unset |
@@ -472,9 +497,14 @@ Returns:
   "timestamp": "2024-01-01T00:00:00.000Z",
   "service": "blendn-admin",
   "version": "0.1.0",
-  "database": "connected"
+  "database": "connected",
+  "pool": { "total": 6, "idle": 5, "waiting": 0 },
+  "eventLoopDelayMs": { "p50": 10, "p99": 12, "max": 14 },
+  "sockets": 42
 }
 ```
+
+`pool`, `eventLoopDelayMs` and `sockets` are counts about this process (SCRUM-1221), present only with `Authorization: Bearer $HEALTH_METRICS_TOKEN` (or anywhere but Railway production while the token is unset); the monitor that alerts on them must send that header. `pool` is `null` before the first query; `sockets` is `null` where Socket.io is not attached. `eventLoopDelayMs` is the last full minute, rotated inside the process and never reset by a read (the endpoint is public), `null` for the first minute; the 10 ms resolution of `monitorEventLoopDelay` is its floor. A rising `eventLoopDelayMs.p99` is the one process saturating, and `pool.waiting` above 0 is requests queued for a connection; the alert thresholds are kept with the other monitor settings (see Monitoring under [Operating production](#operating-production)).
 
 ## Troubleshooting
 
@@ -512,13 +542,130 @@ npm run build
 npm start
 ```
 
-## Monitoring
+## Retention purges have no switch
 
-Railway provides built-in monitoring:
-- CPU/Memory usage
-- Request logs
-- Error tracking
+The chat sweeper hard-deletes room and Lobby content 180 days after a room
+closes, on every pass from boot (`lib/lobby-retention.ts`, `docs/RETENTION.md`).
+There is no environment variable that makes it a dry run or turns it off, so a
+deploy that carries it deletes. Production takes it only once the privacy
+policy's retention section is live (SCRUM-1138). To stop it in an emergency,
+roll back to a deployment from before it: there the purge is a dry run, unless
+the service has `LOBBY_PURGE=delete` set. A pass that has already started
+finishes its batch.
 
-For advanced monitoring, consider adding:
-- Sentry for error tracking
-- LogDNA/Papertrail for log aggregation
+## Operating production
+
+What to do when production breaks. One replica, no over-the-air updates, and a
+rollback that never touches the schema.
+
+**Who.** The owner, and the on-call person. How to reach each is in the password
+manager note "Blendn on-call", never in git; how alerts reach them and the
+response targets are on the ops runbook ticket (SCRUM-1198).
+
+**Severity.**
+- **S1:** the API or sign-in is down, or data is exposed or lost. Call the owner at once.
+- **S2:** one feature is broken for many people.
+- **S3:** the rest, and anything on staging. A Jira ticket.
+
+**First steps in an S1.** Open a Jira ticket in project SCRUM, label
+`incident`, and keep the timeline in it. Consoles: railway.com (project Blendn,
+service Blendn-Admin, environment production) and Sentry (project
+`blendn-admin`; the address is on SCRUM-1198). For
+the CLI, once, in a clone of `Matryx-Social-Labs/Blendn-Admin`:
+`railway link --project Blendn --environment production --service Blendn-Admin`.
+Do step 1, then the first of steps 2 to 6 that matches.
+1. **Look.** `curl -s -m 10 https://api.blendn.app/api/health` (200 and `"database":"connected"` is up;
+   503 is up with the database unreachable: open the Postgres service in the console;
+   a timeout is down) and `curl -s -m 10 -o /dev/null -w '%{http_code}\n' https://dashboard.blendn.app/login` (200).
+   `railway deployment list` shows the deployments and their times;
+   `railway logs --deployment --lines 200` (a flag, no value) shows the running one.
+   Logs can hold personal data: quote the error, never paste lines into the ticket or a reply.
+2. **Data exposed.** Call the owner. Contain it: revoke an exposed credential where it
+   was issued; for a leaking route the owner decides whether to take the service down.
+   Do not restart or redeploy before the logs are read (a restart loses the process's
+   state). Whether anyone must be notified is the owner's call.
+3. **Crashed or hung.** The console shows the deployment Crashed (Railway restarts a crash
+   at most 3 times, then leaves it down), or health times out while it shows Active
+   (Railway does not restart that: its healthcheck runs only during a deploy). Restart:
+   `railway restart --yes`, or Restart in the console. It does not rebuild.
+4. **The last deploy caused it** (the outage began within an hour of the newest
+   SUCCESS deployment). Roll back: in the console, Deployments, the previous SUCCESS
+   deployment, its ⋮ menu, Redeploy (`railway redeploy` can only repeat the newest).
+   An S1 skips the live-room check below. If that deployment's commit carried a
+   migration, the schema stays: never hand-revert it, forward-fix in a new migration
+   ([A migration is additive for one release](#a-migration-is-additive-for-one-release)).
+   If the redeploy's pre-deploy step fails, or health is not 200 within 15 minutes,
+   stop and call the owner.
+5. **A client build caused it.** Ship a fixed build (Hotfix path, below). Only once it is
+   live in both stores, retire the bad one (console: Blendn-Admin, production, Variables;
+   checked twice; saving redeploys): `MOBILE_MIN_APP_VERSION` (a version like `1.0.3`)
+   if the fix has a higher version, else `MOBILE_MIN_APP_BUILD_IOS` / `_ANDROID` (the
+   store build number). Older builds then get 426 "update required"; a build that sends
+   no version or build header is never refused (`docs/API.md`, Update required).
+6. **Data lost.** Change nothing more and call the owner.
+
+**Comms.** The app cannot show a message without the API. In an S1, reply to
+store reviews that report it (App Store Connect, Ratings and Reviews;
+Play Console, Reviews; logins in the password manager) and put the same text at the
+top of www.blendn.app (no banner switch exists: a commit to `main` in the
+BlendnLanding repo, which deploys itself; revert it after):
+
+> Blend'n is having trouble right now: <what people see>.
+> We are working on it<, and expect it back by <time>, India time>.
+> <Only once checked: nothing you posted is lost. Otherwise: we are checking what was affected.>
+
+After an S1, the post-incident note on the ticket: **what** happened, **when**
+(started, noticed, fixed), **why**, and **the check that would have caught it**.
+
+**One replica.** Production runs one process (`.railway/railway.ts`, one
+replica in `asia-southeast1-eqsg3a`). Polling clients, the ops broadcast loop and the sweepers are not
+safe on two: there is no shared Socket.io adapter, so a second process splits a
+room. A crash is restarted at most 3 times (`restartPolicyMaxRetries: 3`, applied to
+both environments on 2026-11-25), then the service stays down until someone acts. A deploy must
+not be two processes either: `.railway/railway.ts` sets `overlapSeconds: 0` (the
+old process stops when the new one is healthy) and `drainingSeconds: 15` (15 s from
+SIGTERM to SIGKILL, over `server.ts`'s own 10 s force-exit, so the shutdown gets to
+flush, close the pool and print "Socket.io closed" and "HTTP server closed"). **Those
+two are not applied yet:** the file reaches Railway only through `railway config
+apply` ([The deploy settings are on the Railway service](#the-deploy-settings-are-on-the-railway-service));
+staging after 2026-11-29, production with the production promotion. Until then
+Railway's default, 0 s of draining, kills the old process at once. So: **no deploy
+or promotion while a room is live** (an S1 rollback excepted). Before one, open
+`railway connect Postgres` for that environment, run
+`SET default_transaction_read_only = on;`, then this; both must be 0:
+
+```sql
+SELECT count(DISTINCT o.id) FILTER (WHERE e.kind = 'event') AS live_events, count(c.id) FILTER (WHERE c.status = 'checked_in' AND (c.expires_at IS NULL OR c.expires_at > now())) AS checked_in_now FROM event_occurrences o JOIN events e ON e.id = o.event_id LEFT JOIN event_check_ins c ON c.occurrence_id = o.id WHERE o.cancelled_at IS NULL AND e.deleted_at IS NULL AND e.status <> 'draft' AND now() BETWEEN o.start_time - interval '90 minutes' AND o.end_time;
+```
+
+(Live is from doors, 90 minutes before the start, to the end. A venue day is open
+all day, so it counts only through the people checked in. The room's 24 hours of
+chat after the end are not gated: a deploy then costs a reconnect, not a night.)
+
+**Pool budget.** Processes × `DATABASE_POOL_MAX` (default 20, `lib/db.ts`) stays
+under 80% of `SHOW max_connections`. Read 2026-11-26: production 500, staging 500,
+so the ceiling is 400 and one replica uses 20.
+
+**Hotfix path for 1.0.** There are no over-the-air updates (the app has no
+`expo-updates`). A client defect is fixed by a new store build (the client repo's
+`docs/RELEASING.md`; the owner holds the store accounts): Apple, request an
+expedited review in App Store Connect; Play has no expedited review, submit to the
+production track. Then retire the bad build once the fix is live (step 5). A server defect is a
+normal merge and promotion, or the rollback above.
+
+**Monitoring.** Sentry, project `blendn-admin`. The app reports errors and
+traces only with `NEXT_PUBLIC_SENTRY_DSN` set. Server and edge events carry the
+Railway environment (`RAILWAY_ENVIRONMENT_NAME`, `sentry.server.config.ts`,
+`sentry.edge.config.ts`), so an alert that names `staging` is not a production
+incident; browser events carry none and read as `production`, so check the host
+of a browser error before calling it one. Uptime checks, metric
+monitors and the alert rules that email the team live in the Sentry console
+(Alerts, Monitors), not in this repo; which are on, their ids and their
+thresholds are on SCRUM-1198, not here. After a deploy: step 1's
+two `curl`s, `railway deployment list` shows the new deployment SUCCESS,
+`railway logs --deployment --lines 200` has no `Health check - Database error`,
+and the project's Issues for that environment show nothing new since the deploy.
+
+Railway's own graphs (CPU, memory, HTTP) are on the service's Metrics tab;
+`/api/health` reports the pool, event-loop delay and sockets only to a request with
+the `HEALTH_METRICS_TOKEN` header (see Health Check, above).

@@ -83,12 +83,12 @@ to verify, not research. The dashboard shows prices including GST.
 
 - **Organizers run events free, forever.** Everything already shipped stays
   free; Analytics sells only what is new (step 16). **Event Pass** ₹499 per
-  event; **Analytics** ₹1,999/mo or ₹19,990/yr — shown and charged as ₹589,
+  event, sold only for a night that has ended with at least 5 people checked in (SCRUM-1363); **Analytics** ₹1,999/mo or ₹19,990/yr — shown and charged as ₹589,
   ₹2,359 and ₹23,588 with GST (`lib/billing-plans.ts`, the one price table). The paywall starts 90 days after the
   organisation's first event with at least 8 people checked in (SCRUM-1269). Founding grant: 6
   months of Analytics.
-- **Venues pay nothing until venue days are live and a venue has 4 weeks of
-  data.** Listed is free, with 30 days of aggregate insights. **Venue Pro**
+- **Venues pay nothing until venue days are live and a venue has three months
+  (90 days) of data** (SCRUM-1320). Listed is free, with 30 days of aggregate insights. **Venue Pro**
   ₹2,999/mo per venue. Venue Max is deferred. Promoted nights are sold à la
   carte at ₹699–999 a night; Pro includes 4. Founding grant: 3 months of Pro per
   claimed Bengaluru venue.
@@ -102,7 +102,7 @@ to verify, not research. The dashboard shows prices including GST.
 
 
 **Leaving a match.** Reviewed twice by `/plan-eng-review` and Codex; the second
-pass found a live exploit path rather than a gap.
+pass found an exploit path (T17, below), closed in #197.
 
 | # | What | State |
 |---|---|---|
@@ -206,9 +206,6 @@ that function. It is now `lib/events-cache-key.ts`, out of the route so it can
 be tested, and `__tests__/events-cache-key.test.ts` asserts the property
 directly: two requests that would compute different lists never share a key.
 
-**Still open:** `app/api/geocode/route.ts` restricts geocoding to
-`countrycodes=in`, which quietly makes the product India-only.
-
 
 **Onboarding, and the age that goes stale underneath it.** The app has one
 "about you" screen; the Figma *🕓 Updates* canvas has nine, with per-step save
@@ -291,31 +288,29 @@ starts. "App" in a row means the work is client-side and tracked in
 | 18 | **Admin and public screens to the kit**, including the venue claim page from step 1 | §10 |
 
 
-### Sponsors have no surface at all — backlog, after the app
+### Sponsors: sold by hand through the admin path (corrected 2026-11-27)
 
-`organisations.may_sponsor` shipped in #259 and has **one reader and zero
-writers**. Nothing is broken — it fails closed, which is correct — but the flag
-is currently ungrantable except by a direct database write, so `sponsored`
-messages cannot be sent by anybody except an `app_admin`.
+This section said `organisations.may_sponsor` had "one reader and zero writers"
+and that sponsors had no surface. Both stopped being true; what exists now:
 
-What is missing, and none of it is designed:
+- **The flag has writers.** An admin grants or revokes it on the Organisations
+  screen (`setOrganisationMaySponsor`, audited), and approving a sponsor's
+  application sets it (`approveOnboardingRequest`).
+- **Placement is an object.** An organizer attaches a brand to an event
+  (`event_sponsors`, at most `SPONSORSHIP.MAX_PLACEMENTS_PER_EVENT`); a claimed
+  brand accepts it (`proposed` → `approved`). Posting `sponsored` needs one
+  organisation holding both the flag and an approved placement at the event
+  (`resolveSponsorGrant` + `canBroadcast`).
+- **A person reviews every campaign creative** (`/dashboard/creative-review`)
+  before the scheduler sends it, and the scheduler sends at most one sponsored
+  post per room per 20 minutes (`SPONSORSHIP.ROOM_MIN_GAP_MINUTES`).
+- **Money:** an admin prices the placement, marks it agreed and sends a Razorpay
+  Payment Link; `payment_link.paid` settles it (`lib/charge-actions.ts`,
+  `docs/BILLING-RUNBOOK.md`). Reach is counted privately after the night.
 
-- **An admin control to grant `may_sponsor`** per organisation. The smallest
-  useful thing, and the only one blocking the feature from working at all.
-- **A sponsor surface**: which events an org may place into, what ran, when, and
-  how it performed. Today a sponsored message is fire-and-forget with no record
-  beyond the `chat_messages` row.
-- **Placement as an object.** A sponsored message is currently a message. If
-  placements are ever sold, they need a lifecycle — drafted, approved, scheduled,
-  run, reported — and that is a different model, not a flag.
-- **Who approves the creative.** Media rides on `sponsored` alone (#259), so a
-  sponsor can put an image in a pseudonymous room. Nothing reviews it.
-
-Deliberately not designed yet: the app side comes first, and the shape of this
-depends on whether placement is sold per-event, per-venue or per-city — a
-commercial decision, not an engineering one. **Decided 2026-10-01 by the
-owner:** placements are priced by delivered reach band and paid by Razorpay
-payment link (plan v2 §9.1b, steps 0 and 17).
+Not built: a GST invoice (a charge is not one), any record of Blend'n's cut or
+of a payout to the venue or organizer from sponsor money, and the brand's name
+in the room (the client shows "Partner").
 
 
 ### The bio is a hole in the pseudonym
@@ -438,7 +433,7 @@ testing is complete; branded to the product; developer docs later and private.
 
 ### 4. Designed features still in scope
 
-From `DESIGN_HANDOFF.md`. In the Figma, in neither repo. **Profile strength was
+These are designed in the Figma and built in neither repo. **Profile strength was
 cut** — see *Validated — not doing*. None of these three is a wedge; do them when
 they are cheap, not before the three items above.
 
@@ -869,7 +864,7 @@ so ranking on it buys nothing and would cluster rooms by stars.
   including one in Germany, age gating, polygon and circle fences, draft and
   private negatives — and completely changed in what it looks like.
 
-  Every identifier was `QA`: accounts `qa-admin@blendn.app`, orgs "Blendn QA
+  Every identifier was `QA`: accounts (the QA admin and its siblings, now `RETIRED_TEST_ACCOUNTS` in `scripts/test-accounts.ts`), orgs "Blendn QA
   Events", venues "QA Circle Venue", events "QA Baseline — Bengaluru". Staging
   holds nothing but test data, so the prefix bought nothing and cost realism —
   and a fixture called "QA Event Without A Cover Image" is not a card anybody

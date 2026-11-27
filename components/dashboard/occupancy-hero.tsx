@@ -44,6 +44,7 @@ export function OccupancyHero({
   occupancy,
   time,
   unreliable,
+  stale,
   description,
 }: {
   /**
@@ -72,6 +73,8 @@ export function OccupancyHero({
    * by a confidently wrong number.
    */
   unreliable?: boolean
+  /** The connection dropped and these are the last figures: no "· live" (SCRUM-1348). */
+  stale?: boolean
   description?: string
 }) {
   const { inside, guestsInside, capacity } = occupancy
@@ -106,7 +109,8 @@ export function OccupancyHero({
 
       <div className="flex flex-wrap items-center gap-2.5">
         <p className="text-[0.75rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">
-          In the room · {time} · live
+          In the room · {time}
+          {stale ? null : " · live"}
         </p>
         {unreliable ? (
           <span className="inline-flex items-center gap-1.5 rounded-full border border-warning bg-[color-mix(in_oklch,var(--warning)_8%,transparent)] px-2.5 py-0.5 text-[0.7188rem] font-bold text-warning">

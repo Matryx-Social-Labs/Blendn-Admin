@@ -25,12 +25,38 @@ describe("scrubString", () => {
     expect(out).toContain("blendn-media/u/1.jpg")
   })
 
+  it("removes an Expo push token", () => {
+    const token = ["ExponentPushToken", "[xxxxxxxxxxxxxxxxxxxxxx]"].join("")
+    expect(scrubString(`"${token}" is not a registered push notification recipient`)).not.toContain(token)
+  })
+
+  /*
+   * Prisma prints a validation error's whole query into its message, values
+   * included, in production's "minimal" format too (measured on 7.10; SCRUM-1397).
+   * Since logger.error reports, a handled one reaches Sentry: its coordinates and
+   * text must not. The reason after the block stays.
+   */
+  it("removes the query arguments Prisma prints into a validation error, and keeps the reason", () => {
+    const prisma =
+      "\nInvalid `prisma.event_check_ins.create()` invocation:\n\n{\n  data: {\n    latitude: 12.97159,\n    longitude: 77.59456,\n" +
+      '    note: "hello private text",\n+   event: {\n+     connect: eventsWhereUniqueInput\n+   }\n  }\n}\n\nArgument `event` is missing.'
+    const out = scrubString(prisma)
+    expect(out).not.toMatch(/12\.97159|77\.59456|hello private text/)
+    expect(out).toContain("Invalid `prisma.event_check_ins.create()` invocation")
+    expect(out).toContain("Argument `event` is missing.")
+  })
+
   it("leaves ordinary text alone", () => {
     expect(scrubString("Event not found")).toBe("Event not found")
   })
 })
 
 describe("beforeSend", () => {
+  it("scrubs the fingerprint, which logger.error sets to its message", () => {
+    const event = send({ fingerprint: ["Sign-in failed for zaphod@example.com"] })
+    expect(event.fingerprint).toEqual(["Sign-in failed for [redacted]"])
+  })
+
   it("keeps the user id but drops everything else about them", () => {
     const event = send({
       user: { id: "user_abc", email: "zaphod@example.com", username: "zaphod" },

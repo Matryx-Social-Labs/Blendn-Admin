@@ -112,8 +112,10 @@ describe("the row is written even when no push goes out", () => {
      */
     const src = SENDER()
     const record = src.indexOf("Failed to record a chunk of bulk notifications")
-    const lookup = src.indexOf("const tokenMap = await getBulkUserPushTokens(userIds, data)")
+    // `ringing`: everybody quiet hours did not hold (SCRUM-1276); the held were recorded above with the rest.
+    const lookup = src.indexOf("await getBulkUserPushTokens(ringing, data)")
     expect(record).toBeGreaterThan(-1)
+    expect(lookup).toBeGreaterThan(-1)
     expect(record).toBeLessThan(lookup)
   })
 

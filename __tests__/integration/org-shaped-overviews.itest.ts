@@ -142,6 +142,10 @@ describe("organisation-shaped overviews", () => {
   it("an organiser outside both orgs sees neither", async () => {
     const stranger = await makeUser("stranger", "organizer")
     users.push(stranger)
+    // Of an organisation of their own: a dashboard is a membership (SCRUM-1247).
+    const own = await db.organisations.create({ data: { display_name: testId("stranger-org"), kind: "company", status: "verified" } })
+    orgs.push(own.id)
+    await db.organisation_members.create({ data: { org_id: own.id, user_id: stranger, role: "owner" } })
     as("organizer", stranger)
     const overview = await getDashboardOverview()
     if (overview.role !== "organizer") throw new Error("expected organiser overview")

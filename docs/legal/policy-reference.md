@@ -303,6 +303,10 @@ All chat messages pass through an **automated multi-layer moderation pipeline** 
 | **Message request** | "New message request" / "Someone wants to connect" (no name) | New message request received |
 | **Message request response** | "Message request accepted" / "Your message request was accepted" (no name) | Request accepted (a decline sends nothing) |
 
+### Quiet Hours
+- From 23:00 to 09:00 on the recipient's clock (the event's time zone, else the home city's, else India's), a push is held, not sent: it waits in the in-app notifications list and arrives as one notification at 09:00, or not at all if the person has already read it
+- Always sent at any hour: private messages, replies in a room, message requests and their answers, a crew's arrival, safety notices (a report acted on, a Lobby post taken down), anything about an event the person is going to or checked in at, and every notification while the person is checked in somewhere
+
 ### Notification Channels (Android)
 - `messages` — Chat and private messages
 - `announcements` — Event announcements
@@ -311,7 +315,8 @@ All chat messages pass through an **automated multi-layer moderation pipeline** 
 ### Token Lifecycle
 - Registered when user enables notifications
 - Unregistered on logout or user request
-- Auto-cleaned when Expo reports `DeviceNotRegistered`
+- Auto-cleaned when Expo reports `DeviceNotRegistered` (in a ticket, or in the receipt read about 15 minutes later)
+- Deleted when not refreshed for 90 days (the app refreshes it on every launch)
 
 ### Important for Privacy Policy
 - Push tokens are shared with Expo's notification service

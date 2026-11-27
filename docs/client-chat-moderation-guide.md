@@ -31,7 +31,7 @@ When a message send fails (`POST /api/mobile/chat/groups/{chatGroupId}/messages`
 | `CHAT_LOCKED` | 403 | The room is locked (no control sets this today, SCRUM-893) | Show a banner: "This chat is locked." Disable input. |
 | `NOT_CHECKED_IN` | 403 | User checked out or never checked in | Show: "Check in to the event to send messages." |
 | `SPAM_BLOCKED` | 429 | Sending too fast or duplicate messages | Show a brief toast: "Slow down — you're sending messages too quickly." |
-| `MODERATION_UNAVAILABLE` | 503 | A busy event room (more than 200 inside) while the moderation service is down. Nothing was sent or stored; the body carries `retryAfter` (5) and `Retry-After`. Smaller rooms never see it. | Mark the bubble failed with retry and show the server's `error` text ("This room is busy and messages can’t be checked right now. Try again in a few seconds."). Resend with the same `clientId` after `retryAfter` seconds. |
+| `MODERATION_UNAVAILABLE` | 503 | A busy event room (more than 200 inside) while the moderation service is down or has given no verdict within 8 s. Nothing was sent or stored; the body carries `retryAfter` (5) and `Retry-After`. Smaller rooms never see it. | Mark the bubble failed with retry and show the server's `error` text ("This room is busy and messages can’t be checked right now. Try again in a few seconds."). Resend with the same `clientId` after `retryAfter` seconds. |
 | `FORBIDDEN` | 403 | Generic (not a member, etc.) | Show: "You don't have access to this chat." |
 
 ### Implementation in `apiClient.ts` → `sendChatMessage()`
@@ -133,7 +133,7 @@ const handleBanned: ChatMemberBannedCallback = (data) => {
 
 #### `chat:memberMuted` ← NEW — must add to client
 
-Fires when a user is auto-muted (3+ hidden abusive messages in 1 hour; a message hidden only for a contact detail does not count) or manually muted by admin.
+Fires when a user is auto-muted (3+ hidden abusive messages in 1 hour; a message hidden only for a contact detail or a swear word does not count) or manually muted by admin.
 
 **Step 1:** Add the event type in `lib/socketClient.ts`:
 
@@ -406,7 +406,7 @@ const mapMessage = (m: ApiMessage): Message => ({
 |----------|-------------|-----------------|
 | Keyword filter catches message (pre-emit) | API response has `moderation_hidden: true` — show placeholder immediately, no socket event | Nothing — message never broadcast |
 | OpenAI catches within 1s (pre-emit) | API response has `moderation_hidden: true` — show placeholder immediately | Nothing — message never broadcast |
-| OpenAI catches after emit (post-emit fallback) | Socket `chat:messageDeleted` with `moderation: true` — replace with placeholder | Socket `chat:messageDeleted` — message disappears |
+| OpenAI catches after emit (late verdict; any room but an event room with more than 200 checked in) | Socket `chat:messageDeleted` with `moderation: true` — replace with placeholder | Socket `chat:messageDeleted` — message disappears |
 | Message deleted by admin | Message disappears | Message disappears |
 | Page reload after moderation hide | Placeholder persists (GET API returns it with `moderation_hidden: true`) | Nothing |
 
@@ -456,7 +456,7 @@ User sends "offensive word"
   → Message is NEVER emitted via Socket.io — other users never see it
   → API response to sender: { moderation_hidden: true, content: null }
   → Client should: show placeholder bubble, show warning toast
-  → If 3+ hidden abusive messages in 1 hour (contact-detail hides do not count) → auto-mute
+  → If 3+ hidden abusive messages in 1 hour (contact-detail and swear-word hides do not count) → auto-mute
   → Socket emits "chat:memberMuted" → client disables input
   → After 1 hour with no violations → next send auto-unmutes
 ```
@@ -471,13 +471,32 @@ User sends "I want to harm people" (no keyword match, but OpenAI catches it)
   → API response: { moderation_hidden: true, content: null }
 ```
 
-**Post-emit fallback (OpenAI slow — rare):**
+**Late OpenAI verdict (OpenAI slower than 1s — rare): what happens depends on the room.**
+
+In an event room with more than 200 people checked in, the send waits for the verdict. Nothing is emitted while it waits:
+```
+User sends a message in a big event room
+  → Spam, keyword and contact checks pass → message saved
+  → OpenAI has not answered within 1s → message held from readers; the send keeps waiting, up to 8s in all
+  → Verdict hide → success response with moderation_hidden: true, content: null; never broadcast
+  → Verdict pass → message emitted via Socket.io; normal success response
+  → No verdict   → message deleted, never broadcast; the send answers HTTP 503:
+       Retry-After: 5
+       { "success": false,
+         "error": "This room is busy and messages can’t be checked right now. Try again in a few seconds.",
+         "errorCode": "MODERATION_UNAVAILABLE",
+         "retryAfter": 5 }
+```
+A send in a big event room can take up to about 8 seconds, so a client request timeout must be longer than that. While the moderation service is known to be down, the room answers the same 503 at once, before anything is saved. A 503 means nothing was sent or stored: keep the message as not sent, and resend it with the same `clientId` after `retryAfter` seconds (see `MODERATION_UNAVAILABLE` in section 1).
+
+In every other room, the message is not held:
 ```
 User sends problematic content
-  → Keyword filter passes → message saved
-  → OpenAI times out (>1s) → message emitted via Socket.io
-  → Async moderation catches it later
-  → Socket emits "chat:messageDeleted" with { moderation: true, userId }
+  → Spam, keyword and contact checks pass → message saved
+  → OpenAI has not answered within 1s → message emitted via Socket.io; normal success response
+  → The same check finishes afterwards (still no verdict, after one more try if the call failed: recorded `unchecked` and checked again later)
+  → Verdict hide → Socket emits "chat:messageDeleted" { chatGroupId, messageId, moderation: true, userId }
+       (`userId` is the sender as each recipient's copy named them; the sender gets their own id)
   → OTHER users: message removed from UI
   → SENDER: message replaced with placeholder + toast
 ```

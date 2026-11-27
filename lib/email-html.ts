@@ -3,7 +3,7 @@
  *
  * Table layout and inline CSS throughout, because Outlook's rendering engine is
  * Word and supports neither flexbox nor grid. The one `<style>` block holds the
- * dark-mode media query, which Outlook ignores harmlessly.
+ * dark-mode and phone-width media queries, which Outlook ignores harmlessly.
  *
  * Two shells. The email confirmation and the password reset follow the Claude
  * Design templates (`designEmail`, below); the host emails still use `shell`.
@@ -65,6 +65,10 @@ const DARK_MODE_CSS = `
   .dm-muted{color:#8A8184 !important;}
   .dm-border{border-color:#3A3335 !important;}
   .dm-codebox{background-color:#241F20 !important;border-color:#4A4143 !important;}
+}
+@media only screen and (max-width:620px){
+  .wrap{width:100% !important;}
+  .pad{padding:28px 22px 24px !important;}
 }`.trim()
 
 /**
@@ -94,7 +98,7 @@ function para(text: string): string {
  * `preheader` is the grey line an inbox shows beside the subject. Left unset it
  * leaks the first words of the body, which for these is usually "Hi Asha,".
  */
-function shell(opts: { title: string; preheader: string; body: string }): string {
+function shell(opts: { title: string; preheader: string; body: string; footer?: string }): string {
   const address = process.env.EMAIL_FOOTER_ADDRESS?.trim()
 
   return `<!DOCTYPE html>
@@ -103,18 +107,18 @@ function shell(opts: { title: string; preheader: string; body: string }): string
 <body class="dm-body" style="margin:0;padding:0;background-color:${PAGE_BG};">
 <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">${esc(opts.preheader)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="padding:32px 16px;">
-<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:100%;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="wrap" style="width:600px;max-width:100%;">
 <tr><td style="padding:0 8px 18px;">
   <!-- Monogram as an image, wordmark as live text: with images blocked the
        brand still reads, which is the state a large share of recipients are in. -->
   <img src="${appUrl()}/brand/monogram-gradient.png" alt="" width="26" height="26" style="display:inline-block;width:26px;height:26px;border:0;vertical-align:middle;">
   <span class="dm-text" style="font-family:${FONT};font-size:17px;font-weight:bold;color:${INK};vertical-align:middle;padding-left:8px;">Blend&rsquo;n</span>
 </td></tr>
-<tr><td class="dm-card" bgcolor="#FFFFFF" style="background-color:#FFFFFF;border-radius:14px;padding:34px 36px 30px;">
+<tr><td class="dm-card pad" bgcolor="#FFFFFF" style="background-color:#FFFFFF;border-radius:14px;padding:34px 36px 30px;">
 ${opts.body}
 </td></tr>
 <tr><td style="padding:22px 8px 0;">
-${address ? `  <p class="dm-muted" style="margin:0 0 4px;font-family:${FONT};font-size:11.5px;line-height:17px;color:${MUTED};">${esc(address)}</p>\n` : ""}  <p class="dm-muted" style="margin:0;font-family:${FONT};font-size:11.5px;line-height:17px;color:${MUTED};">This is a transactional email about your Blend&rsquo;n account &mdash; it sends regardless of notification preferences.</p>
+${address ? `  <p class="dm-muted" style="margin:0 0 4px;font-family:${FONT};font-size:11.5px;line-height:17px;color:${MUTED};">${esc(address)}</p>\n` : ""}  <p class="dm-muted" style="margin:0;font-family:${FONT};font-size:11.5px;line-height:17px;color:${MUTED};">${opts.footer ?? "This is a transactional email about your Blend&rsquo;n account &mdash; it sends regardless of notification preferences."}</p>
 </td></tr>
 </table></td></tr></table></body></html>`
 }
@@ -312,12 +316,14 @@ export function approvedHtml(
   name: string,
   orgName: string,
   email: string,
-  setPasswordLink: string | null
+  setPasswordLink: string | null,
+  /** The account's first step (SCRUM-1342); null keeps the Members line, for an account with none to point at. */
+  next: { href: string; label: string } | null
 ): string {
   const signIn = `${appUrl()}/login`
   // The sign-in address is monospaced: it is the one thing in this email the
   // reader has to type exactly. No password travels here (SCRUM-134).
-  const account = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="dm-codebox dm-border" style="margin:22px 0 6px;background-color:#F7F4F3;border:1px solid #E2DAD7;border-radius:10px;"><tr><td style="padding:16px 18px;font-family:'SF Mono',Consolas,Menlo,monospace;font-size:13px;line-height:22px;color:${INK};" class="dm-text"><span style="color:${MUTED};">Email</span><br>${esc(email)}</td></tr></table>`
+  const account = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="dm-codebox dm-border" style="margin:22px 0 6px;background-color:#F7F4F3;border:1px solid #E2DAD7;border-radius:10px;"><tr><td style="padding:16px 18px;font-family:'SF Mono',Consolas,Menlo,monospace;font-size:13px;line-height:22px;color:${INK};word-break:break-all;" class="dm-text"><span style="color:${MUTED};">Email</span><br>${esc(email)}</td></tr></table>`
 
   return shell({
     title: "Your Blend’n host account is ready",
@@ -341,9 +347,9 @@ export function approvedHtml(
             ),
           ]
         : [button(signIn, "Sign in to the dashboard"), fallbackLink(signIn)]),
-      note(
-        "Once you&rsquo;re in, invite your colleagues from Your organisation &rarr; Members."
-      ),
+      next
+        ? `<p style="margin:18px 0 0;font-family:${FONT};font-size:14px;line-height:22px;color:${INK};" class="dm-text">Next: <a class="dm-text" href="${esc(next.href)}" target="_blank" style="color:${INK};font-weight:bold;text-decoration:underline;">${esc(next.label)}</a></p>`
+        : note("Once you&rsquo;re in, invite your colleagues from Your organisation &rarr; Members."),
     ].join("\n"),
   })
 }
@@ -481,5 +487,83 @@ export function ticketOrderHtml(opts: { heading: string; paragraphs: string[]; l
     button: { href: opts.link, label: "Open Blend’n" },
     note: "Questions about this order? Reply to this email with the order reference above.",
     about: "ticket order",
+  })
+}
+
+/**
+ * The host's morning results mail, its zero-check-in twin (SCRUM-1282) and the "list your next" nudge (SCRUM-1284),
+ * each with its own `why` in the footer. `lines` are plain text, written once in
+ * ./email.ts for both parts; escaped here. One button; "List your next night" is a plain link under it, never a
+ * second button (lane advisor, 2026-11-26). The footer replaces "transactional" with the unsubscribe, because this
+ * mail is not one.
+ */
+export function resultsHtml(opts: {
+  title: string
+  preheader: string
+  heading: string
+  lines: string[]
+  button: { href: string; label: string }
+  next: { href: string; label: string } | null
+  note: string | null
+  /** Why this mail came, plain text: the footer's first sentence. */
+  why: string
+  unsubscribeUrl: string
+}): string {
+  const link = (href: string, label: string) =>
+    `<a class="dm-text" href="${esc(href)}" target="_blank" style="color:${INK};font-weight:bold;text-decoration:underline;">${esc(label)}</a>`
+  return shell({
+    title: opts.title,
+    preheader: opts.preheader,
+    body: [
+      heading(opts.heading),
+      ...opts.lines.map((line) => para(esc(line))),
+      button(opts.button.href, opts.button.label),
+      fallbackLink(opts.button.href),
+      ...(opts.next ? [`<p style="margin:18px 0 0;font-family:${FONT};font-size:14px;line-height:22px;">${link(opts.next.href, opts.next.label)}</p>`] : []),
+      ...(opts.note ? [note(esc(opts.note))] : []),
+    ].join("\n"),
+    footer: `${esc(opts.why)} <a href="${esc(opts.unsubscribeUrl)}" target="_blank" style="color:${MUTED};text-decoration:underline;">Unsubscribe from these mails</a>. Invites and account mail still come.`,
+  })
+}
+
+/**
+ * A critical live alert (SCRUM-1286): the alert's own words, one button to the Live tab. Transactional, so the shell's
+ * own footer; nothing here can be unsubscribed from. `lines` are plain text from `liveAlertEmail`, escaped here.
+ */
+export function liveAlertHtml(opts: {
+  title: string
+  heading: string
+  lines: string[]
+  button: { href: string; label: string }
+  note: string
+}): string {
+  return shell({
+    title: opts.title,
+    preheader: opts.lines[0] ?? opts.heading,
+    body: [
+      heading(opts.heading),
+      ...opts.lines.map((line) => para(esc(line))),
+      button(opts.button.href, opts.button.label),
+      fallbackLink(opts.button.href),
+      note(esc(opts.note)),
+    ].join("\n"),
+  })
+}
+
+/**
+ * 14 days before an organisation's free Analytics ends (SCRUM-1275). The
+ * paragraphs come from `freeWindowEndingEmail` (lib/email.ts) as plain text,
+ * so the text and HTML parts say the same thing; each is escaped here.
+ */
+export function freeWindowEndingHtml(opts: { heading: string; paragraphs: string[]; link: string; note: string }): string {
+  return designEmail({
+    title: opts.heading,
+    preheader: opts.paragraphs[0] ?? opts.heading,
+    eyebrow: "Your plan",
+    heading: opts.heading,
+    paragraphs: opts.paragraphs.map((p) => esc(p).replace(/\n/g, "<br>")),
+    button: { href: opts.link, label: "See your plan" },
+    note: esc(opts.note),
+    about: "plan",
   })
 }
