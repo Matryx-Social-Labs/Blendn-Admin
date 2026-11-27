@@ -53,7 +53,7 @@ function validateConfig(): boolean {
 // Create S3 client configured for Tigris
 let s3Client: S3Client | null = null
 
-function getS3Client(): S3Client {
+export function getS3Client(): S3Client {
   if (!s3Client) {
     if (!validateConfig()) {
       throw new Error("Tigris not configured")

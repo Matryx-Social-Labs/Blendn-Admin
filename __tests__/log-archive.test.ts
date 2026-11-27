@@ -186,6 +186,20 @@ describe("archiveLogs", () => {
     expect(result.failures).toEqual([expect.stringMatching(/^2026-11-27T09.*Axiom 503/)])
   })
 
+  it("archives without Axiom while neither Axiom variable is set, and says so; one without the other fails", async () => {
+    delete process.env.AXIOM_TOKEN
+    delete process.env.AXIOM_DATASET
+
+    const result = await archiveLogs(NOW, HOUR)
+
+    expect(result).toEqual({ written: [{ key: "logs/staging/2026-11-27/09.ndjson.gz", lines: 3 }], failures: [], axiom: "not configured" })
+    expect(axiomBodies()).toHaveLength(0)
+
+    process.env.AXIOM_DATASET = "blendn-logs"
+    const half = await archiveLogs(NOW, HOUR)
+    expect(half.failures).toEqual([expect.stringMatching(/AXIOM_TOKEN is not set/)])
+  })
+
   it("fails the hour, and writes nothing for it, when Railway refuses", async () => {
     ;(global.fetch as jest.Mock).mockImplementation(async () => Response.json({ errors: [{ message: "Not Authorized" }] }))
 
