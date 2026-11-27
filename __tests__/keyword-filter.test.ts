@@ -15,11 +15,12 @@ describe("checkKeywords", () => {
   })
 
   it("says whether a hide is a slur or plain profanity: only a slur counts toward a mute (D-052a)", () => {
-    for (const line of ["you are a retard", "you faggot", "chutiya retard"]) {
+    for (const line of ["you are a retard", "you faggot", "chutiya retard", "you cunt, you retard"]) {
       expect(checkKeywords(line)).toMatchObject({ action: "hide", categories: { slur: expect.any(Number) } })
       expect(checkKeywords(line)!.categories).not.toHaveProperty("profanity")
     }
-    for (const line of ["tu ek chutiya hai", "bhenchod", "तू एक चूतिया है", "thevadiya"]) {
+    // "cunt" is swearing (D-057): hidden, never a mute strike.
+    for (const line of ["tu ek chutiya hai", "bhenchod", "तू एक चूतिया है", "thevadiya", "you cunt", "CUNT!"]) {
       expect(checkKeywords(line)).toMatchObject({ action: "hide", categories: { profanity: expect.any(Number) } })
       expect(checkKeywords(line)!.categories).not.toHaveProperty("slur")
     }

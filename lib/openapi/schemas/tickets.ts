@@ -129,6 +129,6 @@ export const TicketRefundStartedSchema = TicketOrderSchema.extend({ message: z.s
 
 export const TICKET_REFUSALS =
   "First the RSVP's door, with the RSVP's own answers: 404 for a draft or a stranger's private event, 403 `AGE_RESTRICTED` (`reasonCode` " +
-  "`AGE_RESTRICTED` or `AGE_UNKNOWN`) under an event's minimum age, 403 `FORBIDDEN` + `PROFILE_INCOMPLETE` for an account not set up. " +
+  "`AGE_RESTRICTED` or `AGE_UNKNOWN`) under an event's minimum age or for an account known to be under 18, 403 `FORBIDDEN` + `PROFILE_INCOMPLETE` for an account not set up. " +
   "Then refusals are 409 with the code in `errorCode`: `sold_out`, `not_on_sale`, `over_order_limit`, `over_buyer_limit` (more than 10 seats for one " +
   "buyer, held, paid and refunded by themselves together), `unknown_ticket_type` (also a hidden type), `private` (someone the door lets in, e.g. its organizer), and `age` as a backstop only. "

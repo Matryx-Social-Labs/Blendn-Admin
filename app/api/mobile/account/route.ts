@@ -195,6 +195,8 @@ export async function DELETE(request: NextRequest) {
           // question and half of an identity-theft pair, and it is worth more
           // to whoever gets the database than the age beside it.
           date_of_birth: null,
+          // The age fact the under-18 stamp carries goes with the birth date (SCRUM-1169).
+          under_18_since: null,
           location: null,
           home_city_id: null,
           bio: null,

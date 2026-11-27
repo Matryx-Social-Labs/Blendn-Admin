@@ -98,7 +98,19 @@ describe("canJoinEvent against a real database", () => {
 
     await expect(canJoinEvent(stranger, pub)).resolves.toBe(true)
     await expect(canJoinEvent(stranger, priv)).resolves.toBe(false)
-    await expect(canJoinEvent(owner, priv)).resolves.toBe(true)
+    // Creating the row is not running it (SCRUM-1250): with no organisation the creator is a stranger too.
+    await expect(canJoinEvent(owner, priv)).resolves.toBe(false)
+
+    // A member of the organisation that runs it is let in.
+    const org = await db.organisations.create({ data: { display_name: `Org ${owner}`, kind: "company", status: "verified" } })
+    await db.organisation_members.create({ data: { org_id: org.id, user_id: owner, role: "owner" } })
+    await db.events.update({ where: { id: priv }, data: { organizer_org_id: org.id } })
+    try {
+      await expect(canJoinEvent(owner, priv)).resolves.toBe(true)
+    } finally {
+      await db.events.update({ where: { id: priv }, data: { organizer_org_id: null } })
+      await db.organisations.delete({ where: { id: org.id } })
+    }
   })
 
   it("treats going/maybe as access but not_going as denial", async () => {

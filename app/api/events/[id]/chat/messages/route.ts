@@ -7,6 +7,7 @@ import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { isUuid } from "@/lib/api-input"
 import { liveCountBucket, liveCountLabel } from "@/lib/disclosure"
+import { displayCategories } from "@/lib/moderation/config"
 import { idForViewer } from "@/lib/room-handle"
 
 interface RouteContext {
@@ -221,7 +222,7 @@ export async function GET(request: Request, { params }: RouteContext) {
         violationCount: violationMap.get(m.user_id) ?? 0,
         recentViolations: (violationsByUser.get(m.user_id) ?? []).slice(0, 5).map((v) => ({
           source: v.source,
-          categories: v.categories,
+          categories: displayCategories(v.categories),
           confidence: v.confidence,
           autoAction: v.auto_action,
           createdAt: v.created_at.toISOString(),

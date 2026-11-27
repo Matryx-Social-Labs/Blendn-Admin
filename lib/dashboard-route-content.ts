@@ -235,7 +235,7 @@ export function routeHeading(pathname: string, role: string | undefined): RouteC
     return { title: "Tickets", description: "Sell tickets, refund them, and see when the money lands." }
   }
   if (pathname.startsWith("/dashboard/events/") && pathname.endsWith("/door")) {
-    return { title: "Check tickets", description: "Type the code on their ticket, or scan it." }
+    return { title: "Door", description: "The door code for guests whose GPS can’t place them, and who came in with it." }
   }
   if (pathname.startsWith("/dashboard/events/")) {
     return { title: "Event", description: "Setup, performance, and what happened on the night." }
