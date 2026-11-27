@@ -258,6 +258,7 @@ export async function purgeClosedLobbies(now: Date = new Date(), mode: PurgeMode
   pass.alertPreferences = await db.$executeRaw`DELETE FROM board_alert_preferences a USING events e WHERE e.id = a.event_id AND ${closesAt} < ${now}`
   pass.seenMarkers = await db.$executeRaw`DELETE FROM board_seen s USING events e WHERE e.id = s.event_id AND ${closesAt} < ${now}`
   pass.excerpts = (await db.message_reports.updateMany({ where: dismissedPastTheirTime(since), data: { excerpt: null, description: null } })).count
+  pass.excerpts += (await db.user_reports.updateMany({ where: dismissedPastTheirTime(since), data: { excerpt: null, description: null } })).count
   return pass
 }
 

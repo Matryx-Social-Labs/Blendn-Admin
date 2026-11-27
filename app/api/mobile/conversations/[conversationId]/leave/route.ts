@@ -18,6 +18,7 @@ import {
 import { isUuid, readOptionalJson, REPORT_REASON_MAX, REPORT_DESCRIPTION_MAX } from "@/lib/api-input"
 import { leaveConversationIn } from "@/lib/leave-conversation"
 import { notifyFriendshipChanged } from "@/lib/room-friends"
+import { dmWords, messageExcerpt, recentLines } from "@/lib/report-evidence"
 
 interface RouteParams {
   params: Promise<{ conversationId: string }>
@@ -125,13 +126,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * had. Checked before the transaction so a bad id is a 404 rather than a
      * rolled-back close.
      */
-    if (report?.messageId) {
-      const belongs = await db.private_messages.findFirst({
-        where: { id: report.messageId, conversation_id: conversationId },
-        select: { id: true },
-      })
-      if (!belongs) return notFoundResponse("Message not found")
-    }
+    const reported = report?.messageId
+      ? await db.private_messages.findFirst({
+          where: { id: report.messageId, conversation_id: conversationId },
+          select: { message_text: true, media_url: true },
+        })
+      : null
+    if (report?.messageId && !reported) return notFoundResponse("Message not found")
+    // The words, kept for the review: the message pointed at, or their last lines here.
+    const excerpt = reported ? messageExcerpt(dmWords(reported)) : report ? await recentLines(authUser.userId, otherId, { conversationId }) : null
 
     await db.$transaction(async (tx) => {
       await leaveConversationIn(tx, { conversationId, userId: authUser.userId, otherId, action })
@@ -144,6 +147,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               message_id: report.messageId,
               message_type: "private",
               reason: report.reason,
+              excerpt,
               // Optional, and the sheet sends `{ reason: "other" }` alone — so
               // "Block and report" and "Unmatch and report" both 500'd and the
               // whole transaction rolled back: no block, no report, thread
@@ -157,6 +161,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               reporter_id: authUser.userId,
               reported_id: otherId,
               reason: report.reason,
+              excerpt,
               ...(report.description !== undefined && { description: report.description }),
             },
           })

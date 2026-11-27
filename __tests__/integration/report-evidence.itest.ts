@@ -10,6 +10,7 @@ import { signAccessToken } from "@/lib/mobile-auth"
 import { recentLines } from "@/lib/report-evidence"
 import { reportReason } from "@/lib/report-reasons"
 import { roomHandle } from "@/lib/room-handle"
+import { exportUser } from "@/scripts/export-user"
 import { cleanup, closeDb, db, makeEvent, makeUser, onboard } from "./helpers"
 
 /*
@@ -172,6 +173,21 @@ describe("a person report from a room or a DM keeps their last lines there", () 
     const lines = (await recentLines(w.ana.id, w.ben.id, { chatGroupId: w.room }))!.split("\n")
     expect(lines).toHaveLength(20)
     expect(lines[19].length).toBeLessThanOrEqual(500)
+  })
+})
+
+describe("who reads an excerpt", () => {
+  it("is never in the reporter's own data export", async () => {
+    const w = await world("ex")
+    await post(messageReport.POST, w.ana, { messageId: w.dmLine }, { messageType: "private", reason: "threat" })
+    await post(userReport.POST, w.ana, { userId: roomHandle(w.eventId, w.ben.id) }, { reason: "harassment" })
+    expect(await db.message_reports.count({ where: { reporter_id: w.ana.id, excerpt: { not: null } } })).toBe(1)
+    expect(await db.user_reports.count({ where: { reporter_id: w.ana.id, excerpt: { not: null } } })).toBe(1)
+
+    const out = JSON.stringify(await exportUser(db, w.ana.id))
+    expect(out).not.toContain("excerpt")
+    expect(out).not.toContain("send me a photo")
+    expect(out).not.toContain("ben line")
   })
 })
 

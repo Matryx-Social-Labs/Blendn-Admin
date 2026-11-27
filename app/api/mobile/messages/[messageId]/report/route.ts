@@ -14,6 +14,7 @@ import {
 } from "@/lib/api-response"
 import { readJson, isUuid, REPORT_REASON_MAX, REPORT_DESCRIPTION_MAX } from "@/lib/api-input"
 import { roomOwnerDenial, withOwnerDoor } from "@/lib/room-kind"
+import { dmWords, messageExcerpt } from "@/lib/report-evidence"
 
 interface RouteParams {
   params: Promise<{ messageId: string }>
@@ -79,6 +80,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               },
               select: {
                 id: true,
+                content: true,
                 chat_group_id: true,
                 chat_group: { select: { kind: true, event: { select: { status: true, deleted_at: true } } } },
               },
@@ -96,7 +98,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
                 OR: [{ user1_id: authUser.userId }, { user2_id: authUser.userId }],
               },
             },
-            select: { id: true },
+            select: { id: true, message_text: true, media_url: true },
           })
 
     if (!visible) {
@@ -109,6 +111,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         message_id: messageId,
         message_type: messageType,
         reason,
+        // The words as they were, kept for the review after the message goes.
+        excerpt: messageExcerpt("content" in visible ? visible.content : dmWords(visible)),
         // Optional in the schema, so `undefined` when the phone omits it — and
         // the client always omits it. strictUndefinedChecks refused the write,
         // so no report from the app ever landed.
