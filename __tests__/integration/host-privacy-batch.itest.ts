@@ -96,7 +96,9 @@ describe("SCRUM-890: a quote that cannot be shown is not a row", () => {
         expect.objectContaining({ category: "entry_queue", count: 5, suppressed: false }),
       ])
     )
-    expect(digest.counts.negative).toBe(6)
+    // Exactly one category held (safety_conduct) beside a shown one: 6 negatives less the shown 5 would be it, so the
+    // negatives are a band of five (SCRUM-1441, D-012).
+    expect(digest.counts.negative).toEqual({ min: 6, max: 10 })
   })
 })
 
