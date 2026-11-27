@@ -281,6 +281,12 @@
       "observed": "A: fails ('read the event and its days once a minute': the second tick costs as many statements as the first). B: fails (activeChatters30m 4, not 3) and the held-tick comparison. Reverted; green.",
       "date": "2026-10-25"
     },
+    "app-db-role.itest.ts": {
+      "guards": "SCRUM-1358: the app role blendn_app (migration 20261126190000_blendn_app_role) reads and writes every public table and nothing else: refused CREATE TABLE/TEMP/SCHEMA/FUNCTION/EXTENSION, DROP, ALTER, DISABLE TRIGGER, TRUNCATE, CREATE INDEX, COPY TO PROGRAM, pg_read_file and _prisma_migrations; no superuser/createrole/createdb/replication/bypassrls, no role memberships; default privileges reach a later table and its sequence; the migration re-runs where the role already exists. The superuser the migrations run as passes every refused statement (control). readFileSync reads the migration to re-run it.",
+      "mutation": "migration.sql: M1 the CREATE ROLE's `EXCEPTION WHEN duplicate_object` handler removed; M2 the REVOKE TEMPORARY replaced by NULL; M2b the same with the closing end-state check's RAISE EXCEPTION made a NOTICE; M3 both ALTER DEFAULT PRIVILEGES lines removed.",
+      "observed": "Before the migration: every case failed (role \"blendn_app\" does not exist). M1 13 of 31 failing (the re-run raises 42710). M2 `prisma migrate deploy` itself refused by the end-state check (the deploy applies nothing). M2b 1 failing (CREATE TEMP TABLE). M3 1 failing (the later table). Restored from a copy; 31/31 on a db:migrate database (Postgres 17).",
+      "date": "2026-11-26"
+    },
     "dashboard-chat-poll.itest.ts": {
       "guards": "perf/loops-dashboard: the organiser feed's ?light=1 poll carries only the restricted members, the shown messages' authors and the active count (not the whole roster) with the same messages and flag count as the full read, and filters the roster in the database.",
       "mutation": "app/api/events/[id]/chat/messages/route.ts: the light status filter on the roster read (`...(light && { status: { in: [banned, muted] } })`) removed.",
