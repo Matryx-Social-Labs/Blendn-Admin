@@ -380,7 +380,7 @@ export async function GET(request: NextRequest) {
         met_in_event: { select: metInSelect },
         met_in_room: { select: metInRoomSelect },
       },
-      orderBy: { created_at: "desc" },
+      orderBy: [{ created_at: "desc" }, { id: "desc" }],
       skip: offset,
       take: limit,
     })

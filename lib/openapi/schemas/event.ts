@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { BadgeSchema, OverlapSchema, PaginationMetaSchema, DeviceInfoSchema, RoomUserRefSchema, RoomLensSchema, RoomPersonFactsFields } from "./common"
+import { BadgeSchema, OverlapSchema, PaginationMetaSchema, DeviceInfoSchema, RoomUserRefSchema, RoomLensSchema, RoomPersonFactsFields, StoredLocationSchema } from "./common"
 import { EventTicketingSchema } from "./tickets"
 
 /** Likes and waves name somebody only by this event's handle (SCRUM-371). */
@@ -937,7 +937,7 @@ export const AttendeeListResponseSchema = z
         name: z.string(),
         image: z.string().nullable().optional(),
         age: z.number().nullable().describe("Only beside their name; null beside a pseudonym (D-030)."),
-        location: z.string().nullable().describe("Only beside their name; null beside a pseudonym (D-030)."),
+        location: StoredLocationSchema.openapi({ description: "Only beside their name; null beside a pseudonym (D-030). Otherwise the city as stored: null while it is still coordinates, and a read never looks it up (SCRUM-1229)." }),
         ...RoomPersonFactsFields,
         checkInTime: z.string().datetime(),
       })

@@ -393,7 +393,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           // A poll message's poll, for `pollId`. One join on the page, not a lookup each.
           poll: { select: { id: true } },
         },
-        orderBy: { created_at: "desc" },
+        orderBy: [{ created_at: "desc" }, { id: "desc" }],
         skip: (page - 1) * limit,
         take: limit,
       }),
