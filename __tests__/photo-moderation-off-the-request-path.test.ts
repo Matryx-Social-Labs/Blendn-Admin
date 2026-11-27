@@ -145,7 +145,7 @@ describe("moderateProfilePhoto (after the response)", () => {
     )
   })
 
-  it("a failure inside the after() task is logged with the user and url, not thrown into console.error", async () => {
+  it("a failure inside the after() task is logged with the user and the object key, not thrown into console.error", async () => {
     // Nothing above this function: Next reports a rejected after() task with
     // a bare console.error, which is not where this app's errors go.
     vendor.mockResolvedValue({ checked: true, result: { action: "hide" } })
@@ -154,8 +154,10 @@ describe("moderateProfilePhoto (after the response)", () => {
     await expect(moderateProfilePhoto(URL, "u1")).resolves.toBeUndefined()
     expect(logger.error).toHaveBeenCalledWith(
       "Profile photo moderation failed; photo left in place",
-      expect.objectContaining({ userId: "u1", url: URL, error: "connection closed" })
+      expect.objectContaining({ userId: "u1", key: "profile/u1/1-a-photo.jpg", error: "connection closed" })
     )
+    // The key says which photo; the link to a person's face stays out of a 180-day log (SCRUM-1512).
+    expect(JSON.stringify((logger.error as jest.Mock).mock.calls)).not.toContain("https://")
     // The verdict went first, so a save that re-sends the URL still drops it.
     expect(pulled).toHaveBeenCalledWith(URL, "u1")
     expect(withdraw).not.toHaveBeenCalled()
