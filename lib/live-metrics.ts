@@ -32,8 +32,8 @@ export interface LiveFigures {
    *
    * Not subtracted from `inside`: silence is not evidence of leaving, because
    * the client polls in the foreground only and a pocketed phone goes quiet
-   * within minutes. This is what lets the screen say which part of the figure
-   * is inferred rather than observed.
+   * within minutes. The host reads `inside − unconfirmed` to `inside` as a
+   * range (`hereRange`, SCRUM-1328); capacity and every alert read `inside`.
    */
   unconfirmed: number
   capacity: number | null
@@ -139,7 +139,7 @@ export interface VenueLiveSnapshot {
   checkedInTotal: LiveCountBucket
   checkedOutTotal: LiveCountBucket
   unconfirmed: LiveCountBucket
-  /** `occupancyMostlyInferred`, on the exact figures. */
+  /** `occupancyMostlyInferred`, on the exact figures. Sent, read by nothing since SCRUM-1328. */
   mostlyInferred: boolean
   capacity: number | null
   overCapacity: boolean
@@ -194,16 +194,13 @@ export const MOSTLY_INFERRED_SHARE = 0.5
  *
  * Nobody is removed from the room for going quiet — the client polls in the
  * foreground only, so a pocketed phone stops reporting within minutes and
- * timing that out would empty a full room. The cost of that choice is that the
- * figure can drift upward if the sweeper stalls, and the price of keeping
- * people in the room is saying plainly when the number is inference.
+ * timing that out would empty a full room.
  *
- * `OccupancyHero` already renders this: a "count unreliable" badge, a `~`
- * prefix, "in the room, roughly", and the over-capacity flag suppressed —
- * because flagging a breach off numbers we have just said we do not trust is
- * how a false evacuation starts. It had no caller until now. The prop was
- * added for the mass-checkout guard, which #278 deleted; the affordance
- * outlived its cause and this is the cause it was actually needed for.
+ * It used to grey the hero ("~", "roughly", "count unreliable") and hide its
+ * over-capacity pill. The host's hero now shows the range itself (SCRUM-1328),
+ * and capacity reads the high end always, so nothing renders this any more.
+ * ponytail: it only fills `VenueLiveSnapshot.mostlyInferred`, kept because the
+ * venue's payload shape may not change in that task; delete both together.
  */
 export function occupancyMostlyInferred(snapshot: {
   inside: number

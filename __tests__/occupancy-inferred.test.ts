@@ -44,22 +44,17 @@ describe("occupancy says when it is mostly inferred", () => {
     expect(occupancyMostlyInferred({ inside: 0, unconfirmed: 0 })).toBe(false)
   })
 
-  it("is actually wired to the screen", () => {
+  it("no longer greys the host's hero: the range replaced it (SCRUM-1328)", () => {
     /*
-     * The prop existed for weeks with no caller: it was added for the
-     * mass-checkout guard, #278 deleted the guard, and the affordance outlived
-     * its cause. A rule that is computed and never rendered is the shape of
-     * defect this codebase keeps finding, so the wiring is asserted rather
-     * than assumed.
+     * It turned the figure into "~52 in the room, roughly" and hid the
+     * over-capacity pill: the safety signal went quiet exactly when a full
+     * room's phones were in pockets. The hero shows "seen – checked in" now and
+     * judges capacity on the high end. What is left of this rule fills the
+     * venue payload's `mostlyInferred`, which nothing renders.
      */
-    const tab = readFileSync(
-      join(__dirname, "..", "components", "dashboard", "live-tab.tsx"),
-      "utf8"
-    )
-    // Both copies: the host's computes it here, the venue's was computed on the
-    // exact figures by `forVenue` before they were rounded (SCRUM-516).
-    expect(tab).toMatch(
-      /unreliable=\{snapshot\.view === "host" \? occupancyMostlyInferred\(snapshot\) : snapshot\.mostlyInferred\}/
-    )
+    const read = (f: string) => readFileSync(join(__dirname, "..", "components", "dashboard", f), "utf8")
+    for (const file of ["live-tab.tsx", "occupancy-hero.tsx"]) {
+      expect(read(file)).not.toMatch(/unreliable|occupancyMostlyInferred|mostlyInferred/)
+    }
   })
 })

@@ -142,7 +142,7 @@ async function currentSlot(eventId: string) {
   return { slot, scope: slot.occurrence ? { occurrenceId: slot.occurrence.id } : { eventId } }
 }
 
-export async function getOccupancy(eventId: string): Promise<Occupancy> {
+export async function getOccupancy(eventId: string): Promise<Occupancy & { unconfirmed: number }> {
   /*
    * Resolved once, and used for the counts as well as the capacity.
    *
@@ -195,7 +195,7 @@ export async function getOccupancy(eventId: string): Promise<Occupancy> {
     }),
   ])
 
-  return occupancyFrom({
+  const occupancy = occupancyFrom({
     inside: insideOf(live),
     staffInside: live.insideStaff,
     /*
@@ -207,6 +207,8 @@ export async function getOccupancy(eventId: string): Promise<Occupancy> {
     uniqueAttendance: uniqueGuests.length,
     capacity: capacityForNow(slot, event?.max_capacity ?? null),
   })
+  // Of `inside`, not seen within the confirmed window: the low end of the host's range (`hereRange`, SCRUM-1328).
+  return { ...occupancy, unconfirmed: live.unconfirmed }
 }
 
 /**
