@@ -171,3 +171,46 @@ it("the cap's window is fixed: requests inside it do not hold it shut", async ()
     clock.mockRestore()
   }
 })
+
+describe("ADMIN_SSO_REQUIRED: an admin signs in with Google, so no reset mail is sent to one (SCRUM-1241)", () => {
+  const saved = process.env.ADMIN_SSO_REQUIRED
+  afterEach(() => {
+    process.env.ADMIN_SSO_REQUIRED = saved
+  })
+
+  async function admin() {
+    const id = await makeUser("l3_admin", "app_admin")
+    users.push(id)
+    const email = `l3-${testId("a").toLowerCase()}@matrixsociallabs.com`
+    await db.user.update({ where: { id }, data: { email, emailVerified: new Date() } })
+    return { id, email }
+  }
+
+  it("answers an admin's address as it answers one with no account, sends nothing and issues nothing", async () => {
+    process.env.ADMIN_SSO_REQUIRED = "true"
+    const { id, email } = await admin()
+    const nobody = await answer(await ask(`l3-nobody-${testId("x").toLowerCase()}@matrixsociallabs.com`))
+    const t0 = Date.now()
+    expect(await answer(await ask(email))).toEqual(nobody)
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(550)
+    await settled()
+    expect(sent).toEqual([])
+    expect(await db.password_reset_tokens.count({ where: { user_id: id } })).toBe(0)
+  })
+
+  it("still sends one to an organizer with the flag on", async () => {
+    process.env.ADMIN_SSO_REQUIRED = "true"
+    const email = await account()
+    await ask(email)
+    await settled()
+    expect(sent.map((m) => m.to)).toEqual([email])
+  })
+
+  it("sends one to an admin while the flag is unset (every environment today)", async () => {
+    delete process.env.ADMIN_SSO_REQUIRED
+    const { email } = await admin()
+    await ask(email)
+    await settled()
+    expect(sent.map((m) => m.to)).toEqual([email])
+  })
+})

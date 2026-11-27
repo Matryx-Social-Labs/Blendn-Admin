@@ -20,10 +20,9 @@ afterAll(async () => {
   await cleanupCrewWorld()
 })
 
-// Distinct per world: a resolved coordinate is cached for the life of the process.
 const coordinatesFor = (n: number, base: number) => Array.from({ length: n }, (_, i) => `${base + i}.5,${70 + i}.25`)
 
-async function world(coordinates: string[]) {
+async function world(coordinates: string[], revealedLocation = "Bengaluru") {
   const viewer = await person("rs-viewer", "Vee Viewer Rao")
   const host = await person("rs-host")
   const { eventId, occurrenceId } = await liveEvent(host.id)
@@ -42,7 +41,7 @@ async function world(coordinates: string[]) {
       where: { id: p.id },
       data: {
         photos: [`https://img.invalid/${l}.jpg`],
-        location: l.startsWith("plain") ? coordinates[Number(l.slice(6)) - 1] ?? "Pune" : "Bengaluru",
+        location: l.startsWith("plain") ? coordinates[Number(l.slice(6)) - 1] ?? "Pune" : l === "revealed" ? revealedLocation : "Bengaluru",
         ...(l === "offline" && { show_online: false }),
       },
     })
@@ -54,7 +53,7 @@ async function world(coordinates: string[]) {
 }
 
 describe("the room roster", () => {
-  it("is what the snapshot says, names a page, and budgets its geocoding", async () => {
+  it("is what the snapshot says, names a page, and geocodes nothing", async () => {
     const { viewer, eventId, label } = await world(coordinatesFor(3, 10))
     // `ageFrom` is clock-relative only through the birth date; these have a fixed age.
     const fetchSpy = jest.spyOn(global, "fetch").mockImplementation(async () => new Response(JSON.stringify({ address: { city: "Testville" } })))
@@ -71,8 +70,8 @@ describe("the room roster", () => {
       expect(res.body.data.pagination.totalCount).toBe(8) // not the viewer's friend or blocked, not "offline"
       expect(label.size).toBe(10)
 
-      // Beside a pseudonym no city is sent (D-030), so none is looked up; the revealed row's is a name, not coordinates.
-      expect(fetchSpy.mock.calls.length).toBe(0)
+      // No read geocodes (SCRUM-1229), and beside a pseudonym no city is sent at all (D-030).
+      expect(fetchSpy).not.toHaveBeenCalled()
 
       // Before: every member of the room; after: the page's ids.
       const pseudonymRead = sql.find((q) => /FROM "public"\."chat_group_members"/.test(q) && /"anonymous_name"/.test(q))!
@@ -82,14 +81,22 @@ describe("the room roster", () => {
     }
   })
 
-  it("reverse-geocodes at most a budget's worth of coordinates per request", async () => {
-    const { viewer, eventId } = await world(coordinatesFor(6, 40))
+  it("reverse-geocodes nothing: coordinates read as no city (SCRUM-1229)", async () => {
+    const { viewer, eventId } = await world(coordinatesFor(6, 40), "12.5,77.25")
     const fetchSpy = jest.spyOn(global, "fetch").mockImplementation(async () => new Response(JSON.stringify({ address: { city: "Testville" } })))
     try {
       const res = await api.checkins(viewer, eventId)
       expect(res.status).toBe(200)
-      // Before: six parallel Nominatim calls on a user-facing read (a 1 req/s courtesy limit).
-      expect(fetchSpy.mock.calls.length).toBeLessThanOrEqual(3)
+      // Six parallel Nominatim calls on a user-facing read once (a 1 req/s courtesy limit), then three; now none.
+      expect(fetchSpy).not.toHaveBeenCalled()
+      // The six coordinate rows sit beside a pseudonym, so D-030 sends them no city at all.
+      const locations = res.body.data.attendees.map((a: { location: string | null }) => a.location)
+      expect(locations.filter((l: string | null) => l === null).length).toBeGreaterThanOrEqual(6)
+      // The revealed row is shown by name, so it does carry a city: its coordinates read as none (storedCity).
+      const revealed = res.body.data.attendees.find((a: { image?: string }) => a.image === "https://img.invalid/revealed.jpg")
+      expect(revealed).toBeDefined()
+      expect(revealed.location).toBeNull()
+      expect(JSON.stringify(res.body)).not.toMatch(/\d+\.5,\d+\.25/)
     } finally {
       fetchSpy.mockRestore()
     }
