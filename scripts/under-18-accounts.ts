@@ -26,8 +26,8 @@ import { closeDb, db as appDb } from "../lib/db"
  * runs, one at a time, and stops at the first failure, naming the id. The
  * 14 days are for a birth date entered wrong (D-026). The dry run lists them.
  *
- * `--limit <n>` is required with `--apply`: a run that would stamp or erase
- * more than n accounts is refused before it writes anything.
+ * `--limit <n>` is required with `--apply`: a run that would stamp more than
+ * n accounts, or erase more than n, is refused before it writes anything.
  *
  * In this process `eraseAccount`'s in-memory steps (the token blocklist and
  * socket eviction) reach only this process. The server reads `deletedAt` and
@@ -77,7 +77,7 @@ export function parseArgs(args: string[]): Command | string {
   if (rest.length === 0) return { mode: "dry-run", ...env }
   if (rest[0] === "--apply" && rest.length <= 3) {
     const limit = rest[1] === "--limit" && /^\d+$/.test(rest[2] ?? "") ? Number(rest[2]) : null
-    if (limit === null || rest.length !== 3) return "--apply needs --limit <n>: the most accounts this run may stamp or erase"
+    if (limit === null || rest.length !== 3) return "--apply needs --limit <n>: the most accounts this run may stamp, and the most it may erase"
     return { mode: "apply", limit, ...env }
   }
   if (rest[0] !== "--correct" || rest.length !== 5 || rest[3] !== "--by") return USAGE
@@ -166,8 +166,8 @@ export async function endStampedCheckIns(db: PrismaClient, now: Date): Promise<s
 
 /**
  * `--apply`: stamp, end the stamped accounts' check-ins, erase the ones due.
- * Refused, before anything is written, when it would stamp or erase more than
- * `limit` accounts.
+ * Refused, before anything is written, when it would stamp more than `limit`
+ * accounts or erase more than `limit`.
  */
 export async function applyRun(db: PrismaClient, now: Date, limit: number, erase: typeof eraseAccount = eraseAccount) {
   const [toStamp, due, notStamped] = await Promise.all([
