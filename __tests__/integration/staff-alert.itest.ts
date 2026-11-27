@@ -80,3 +80,98 @@ it("announces the new pending reports of all three kinds and the severe flags, o
   expect(text).toContain("5 severe flags")
   for (const id of [reporter, reported, host, eventId, group.id]) expect(text).not.toContain(id)
 })
+
+/**
+ * A swear word the keyword list hides (`{"profanity": 0.9}`, one word) is a
+ * pending flag at exactly 0.9. It goes to the queue and is not a severe flag:
+ * only a flag whose sole key is `profanity` loses the confidence arm. Each test
+ * runs its own one-minute window after the one before.
+ */
+describe("profanity-only flags", () => {
+  let reporter: string
+  let reported: string
+  let groupId: string
+  let sweepAt = 120
+
+  beforeAll(async () => {
+    reporter = await makeUser(testId("sa_p_reporter"))
+    reported = await makeUser(testId("sa_p_reported"))
+    const host = await makeUser(testId("sa_p_host"), "organizer")
+    users.push(reporter, reported, host)
+    const eventId = await makeEvent(host)
+    events.push(eventId)
+    groupId = (await db.chat_groups.create({ data: { event_id: eventId, name: "room", status: "active" } })).id
+  })
+
+  /** The next window: rows written now land in it, and `sweep` closes it. */
+  function nextWindow() {
+    sweepAt += 60
+    const rowAt = sec(sweepAt - 50)
+    const flag = async (categories: object, confidence: number, source: "auto_keyword" | "auto_text" = "auto_keyword") => {
+      const message = await db.chat_messages.create({ data: { chat_group_id: groupId, user_id: reported, content: "x" } })
+      await db.moderation_flags.create({
+        data: { message_id: message.id, chat_group_id: groupId, user_id: reported, source, categories, confidence, auto_action: "hidden", created_at: rowAt },
+      })
+    }
+    const report = () => db.user_reports.create({ data: { reporter_id: reporter, reported_id: reported, reason: "x", created_at: rowAt } })
+    const sweep = async (): Promise<string | null> => {
+      fetchMock.mockClear()
+      await runStaffAlertSweep(sec(sweepAt))
+      return fetchMock.mock.calls.length ? (JSON.parse(fetchMock.mock.calls[0][1].body).text as string) : null
+    }
+    return { flag, report, sweep }
+  }
+
+  it("sends nothing for swear-word hides alone, one word or two", async () => {
+    const w = nextWindow()
+    await w.flag({ profanity: 0.9 }, 0.9)
+    await w.flag({ profanity: 0.95 }, 0.95)
+    expect(await w.sweep()).toBeNull()
+  })
+
+  it("alerts on profanity beside another category on one flag", async () => {
+    const w = nextWindow()
+    await w.flag({ profanity: 0.9, harassment: 0.9 }, 0.9)
+    expect(await w.sweep()).toContain("1 severe flag;")
+  })
+
+  it("alerts on a slur hide", async () => {
+    const w = nextWindow()
+    await w.flag({ slur: 0.9 }, 0.9)
+    expect(await w.sweep()).toContain("1 severe flag;")
+  })
+
+  it("alerts on a line the model judged abusive", async () => {
+    const w = nextWindow()
+    await w.flag({ harassment: 0.95 }, 0.95, "auto_text")
+    expect(await w.sweep()).toContain("1 severe flag;")
+  })
+
+  it("alerts on the sentiment sweeper's array-shaped flag at 0.95, and never raises on it", async () => {
+    const w = nextWindow()
+    await w.flag(["safety_conduct"], 0.95, "auto_text")
+    expect(await w.sweep()).toContain("1 severe flag;")
+  })
+
+  it("alerts on a report with no flag", async () => {
+    const w = nextWindow()
+    await w.report()
+    expect(await w.sweep()).toContain("1 new report;")
+  })
+
+  it("counts only the severe flags when a swear-word hide shares the window", async () => {
+    const w = nextWindow()
+    await w.flag({ profanity: 0.9 }, 0.9)
+    await w.flag({ violence: 0.95 }, 0.95, "auto_text")
+    expect(await w.sweep()).toContain("1 severe flag;")
+  })
+
+  it("counts the report only when a swear-word hide sits beside it", async () => {
+    const w = nextWindow()
+    await w.flag({ profanity: 0.9 }, 0.9)
+    await w.report()
+    const text = await w.sweep()
+    expect(text).toContain("1 new report;")
+    expect(text).not.toContain("severe")
+  })
+})

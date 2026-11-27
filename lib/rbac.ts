@@ -272,7 +272,7 @@ export type BroadcastKind = "announcement" | "sponsored" | "system"
  * ## Why this is a tuple and not two booleans
  *
  * It was two booleans, and that was a confused deputy.
- * `lib/org-membership.ts:maySponsorFor` answers "does **any** org you belong to
+ * The deleted `maySponsorFor` answered "does **any** org you belong to
  * hold the flag", and a `placesAtEvent` written the same way answers "does
  * **any** org you belong to have a placement". A person who is staff at Org A
  * (holds `may_sponsor`, no placement) and Org B (has a placement, no flag)

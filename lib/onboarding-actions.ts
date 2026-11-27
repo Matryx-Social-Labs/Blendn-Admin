@@ -655,7 +655,7 @@ export async function setOrganisationStatus(
  *
  * Revoking does NOT stop campaigns already running. `may_sponsor` gates the
  * WRITE path (`canBroadcast`), not the scheduler, and silently killing live
- * placements an organiser has paid for is not a decision this toggle should
+ * placements a sponsor has paid for is not a decision this toggle should
  * make on its own. Cancel the placements to stop the sends.
  */
 export async function setOrganisationMaySponsor(
@@ -680,7 +680,7 @@ export async function setOrganisationMaySponsor(
   if (!org) throw new Refusal("Organisation not found")
 
   /*
-   * A suspended organisation cannot be granted placement.
+   * Only a verified organisation can be granted placement: not a suspended one, nor one still pending.
    *
    * Suspension is how an organisation is stopped; handing it a paid capability
    * in that state would be the two controls contradicting each other, with
