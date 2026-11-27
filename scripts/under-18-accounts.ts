@@ -130,15 +130,13 @@ export async function dueForDeletion(db: PrismaClient, now: Date): Promise<strin
   return rows.map((row) => row.id)
 }
 
-/** What erases one account: `eraseAccount`; a test passes its own. */
-type Erase = typeof eraseAccount
-
 /**
  * Erase every account due, oldest stamp first, one at a time, each one's
  * deferred work awaited before the next. Stops at the first failure, naming
  * the id; the ones before it stay erased and the failed one is due again.
+ * `erase` is `eraseAccount`; a test passes its own.
  */
-export async function deleteDue(db: PrismaClient, now: Date, erase: Erase = eraseAccount): Promise<string[]> {
+export async function deleteDue(db: PrismaClient, now: Date, erase: typeof eraseAccount = eraseAccount): Promise<string[]> {
   const erased: string[] = []
   for (const id of await dueForDeletion(db, now)) {
     const deferred: Promise<void>[] = []

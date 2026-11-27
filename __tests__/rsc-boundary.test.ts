@@ -39,12 +39,12 @@ const FUNCTION_PROP_CLIENT_COMPONENTS = [
   { module: "components/dashboard/data-table", specifier: "@/components/dashboard/data-table" },
 ]
 
-function walk(dir: string, out: string[] = []): string[] {
+function walk(dir: string, out: string[] = [], files = /\.tsx$/): string[] {
   for (const entry of readdirSync(dir)) {
     if (entry === "node_modules" || entry === ".next" || entry.startsWith(".")) continue
     const full = join(dir, entry)
-    if (statSync(full).isDirectory()) walk(full, out)
-    else if (/\.tsx$/.test(full)) out.push(full)
+    if (statSync(full).isDirectory()) walk(full, out, files)
+    else if (files.test(full)) out.push(full)
   }
   return out
 }
@@ -122,7 +122,7 @@ function clientReaches(clientFiles: string[], targets: string[]): string[] {
 
 describe("server modules no client module reaches", () => {
   const clientFiles = [join(ROOT, "app"), join(ROOT, "components")]
-    .flatMap((d) => walkAll(d))
+    .flatMap((d) => walk(d, [], /\.tsx?$/))
     .filter(isClientModule)
 
   it("finds client modules to check (guards against a broken walker)", () => {
@@ -137,13 +137,3 @@ describe("server modules no client module reaches", () => {
     expect(clientReaches(clientFiles, [target])).toEqual([])
   })
 })
-
-function walkAll(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
-    if (entry === "node_modules" || entry === ".next" || entry.startsWith(".")) continue
-    const full = join(dir, entry)
-    if (statSync(full).isDirectory()) walkAll(full, out)
-    else if (/\.tsx?$/.test(full)) out.push(full)
-  }
-  return out
-}
