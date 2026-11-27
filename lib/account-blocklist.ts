@@ -93,7 +93,11 @@ async function refreshBlocklist(): Promise<void> {
     try {
       globalThis.__blendnSocketIo?.in(`user:${id}`).disconnectSockets(true)
     } catch (error) {
-      logger.warn("Could not close a blocked account's sockets", { error: error instanceof Error ? error.message : String(error) })
+      // Its tokens are still refused and its next handshake too; the socket already open is what this names.
+      logger.error("Could not close a blocked account's sockets", {
+        userId: id,
+        error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+      })
     }
   }
   state.phonesEndedAt = new Map(

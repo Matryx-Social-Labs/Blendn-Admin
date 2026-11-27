@@ -13,7 +13,10 @@ export {} // a module, so its names stay out of the global scope the sibling tes
 const mockFindMany = jest.fn()
 jest.mock("@/lib/db", () => ({ db: { user: { findMany: (...args: unknown[]) => mockFindMany(...args) } } }))
 const mockWarn = jest.fn()
-jest.mock("@/lib/logger", () => ({ logger: { warn: (...args: unknown[]) => mockWarn(...args), error: jest.fn() } }))
+const mockError = jest.fn()
+jest.mock("@/lib/logger", () => ({
+  logger: { warn: (...args: unknown[]) => mockWarn(...args), error: (...args: unknown[]) => mockError(...args) },
+}))
 /** The server's `io`, as lib/socket-server.ts leaves it on `globalThis`: each `in(user:<id>).disconnectSockets` is an eviction. */
 const mockEvict = jest.fn()
 globalThis.__blendnSocketIo = {
@@ -52,6 +55,7 @@ beforeEach(() => {
   mockFindMany.mockReset().mockResolvedValue([])
   mockEvict.mockReset()
   mockWarn.mockReset()
+  mockError.mockReset()
 })
 afterEach(() => jest.useRealTimers())
 
@@ -208,6 +212,9 @@ describe("an account locked or erased in another process", () => {
     })
     const { recentlyBlocked } = freshCopy()
     expect(await recentlyBlocked("minor", issued())).toBe(true)
-    expect(mockWarn).toHaveBeenCalledWith("Could not close a blocked account's sockets", { error: "adapter down" })
+    expect(mockError).toHaveBeenCalledWith(
+      "Could not close a blocked account's sockets",
+      expect.objectContaining({ userId: "minor", error: expect.stringContaining("adapter down") })
+    )
   })
 })

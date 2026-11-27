@@ -14,6 +14,7 @@ jest.mock("@/lib/tigris", () => ({
 }))
 
 import type { EraseAccountOptions } from "@/lib/account-erasure"
+import * as checkout from "@/lib/checkout"
 import { deletePrefix } from "@/lib/tigris"
 import {
   applyRun,
@@ -115,14 +116,51 @@ describe("--apply", () => {
 
     const run = await applyRun(db, new Date(), 1000, never)
     expect(run.stamped).toContain(teen)
-    expect(run.checkedOut).toContain(teen)
-    expect(run.checkedOut).not.toContain(adult)
+    expect(run.checkIns.checkedOut).toContain(teen)
+    expect(run.checkIns.checkedOut).not.toContain(adult)
     const status = async (user_id: string) =>
       (await db.event_check_ins.findFirstOrThrow({ where: { user_id, event_id: eventId }, select: { status: true } })).status
     expect(await status(teen)).toBe("checked_out")
     expect(await status(adult)).toBe("checked_in")
     // performCheckout closes the presence session with the check-in: nobody is shown as here.
     expect(await db.presence_sessions.count({ where: { user_id: teen, departed_at: null } })).toBe(0)
+  })
+
+  it("a check-out that fails is named and the others still end; a failure after the stamp names what this run stamped", async () => {
+    const host = await makeUser("u18-host-fail", "organizer")
+    users.push(host)
+    const eventId = await makeEvent(host)
+    events.push(eventId)
+    const occurrence = await occurrenceOf(eventId)
+    const [stuck, fine] = [await person("u18-stuck", { age: 16 }), await person("u18-fine", { age: 16 })]
+    const rows: { id: string }[] = []
+    for (const user_id of [stuck, fine]) {
+      rows.push(await db.event_check_ins.create({ data: { user_id, event_id: eventId, occurrence_id: occurrence, check_in_time: new Date(), status: "checked_in" } }))
+    }
+    const real = checkout.performCheckout
+    const spy = jest.spyOn(checkout, "performCheckout").mockImplementation(async (id, ...rest) => {
+      if (id === rows[0].id) throw new Error("presence write failed")
+      return real(id, ...rest)
+    })
+    try {
+      const run = await applyRun(db, new Date(), 1000, never)
+      expect(run.checkIns.failed).toEqual([`${rows[0].id}: presence write failed`])
+      expect(run.checkIns.checkedOut).toContain(fine)
+      expect(run.stamped).toEqual(expect.arrayContaining([stuck, fine]))
+    } finally {
+      spy.mockRestore()
+    }
+
+    const now = new Date()
+    const due = await person("u18-fail-due", { age: 16, under_18_since: new Date(now.getTime() - 20 * DAY_MS) })
+    const late = await person("u18-fail-late", { age: 16 })
+    try {
+      await expect(applyRun(db, now, 1000, async () => Promise.reject(new Error("storage down")))).rejects.toThrow(
+        new RegExp(`storage down.*this run stamped: [^;]*${late}`)
+      )
+    } finally {
+      await db.user.update({ where: { id: due }, data: { deletedAt: new Date() } })
+    }
   })
 
   it("never stamps or erases an account with a staff role or an organisation membership, and lists it apart", async () => {

@@ -143,18 +143,30 @@ export async function stampKnownMinors(db: PrismaClient, now: Date): Promise<str
   return ids
 }
 
-/** End every open check-in of a live stamped account, the way a check-out does; the ids of the accounts checked out. */
-export async function endStampedCheckIns(db: PrismaClient, now: Date): Promise<string[]> {
+/**
+ * End every open check-in of a live stamped account, the way a check-out does.
+ * One that fails is named (`<check-in id>: <error>`) and the rest still end;
+ * one another writer closed first is `unchanged`.
+ */
+export async function endStampedCheckIns(
+  db: PrismaClient,
+  now: Date
+): Promise<{ checkedOut: string[]; unchanged: string[]; failed: string[] }> {
   const open = await db.event_check_ins.findMany({
     where: { status: "checked_in", user: { deletedAt: null, profile: { is: { under_18_since: { not: null } } } } },
     select: { id: true },
   })
-  const ids: string[] = []
+  const run = { checkedOut: [] as string[], unchanged: [] as string[], failed: [] as string[] }
   for (const { id } of open) {
-    const result = await performCheckout(id, "manual", now)
-    if (result?.changed) ids.push(result.userId)
+    try {
+      const result = await performCheckout(id, "manual", now)
+      if (result?.changed) run.checkedOut.push(result.userId)
+      else run.unchanged.push(id)
+    } catch (error) {
+      run.failed.push(`${id}: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
-  return ids
+  return run
 }
 
 /**
@@ -172,9 +184,14 @@ export async function applyRun(db: PrismaClient, now: Date, limit: number, erase
     throw new Error(`REFUSING: would stamp ${toStamp.length} and erase ${due.length}, over --limit ${limit}. Nothing written.`)
   }
   const stamped = await stampKnownMinors(db, now)
-  const checkedOut = await endStampedCheckIns(db, now)
-  const { erased, skipped } = await deleteDue(db, now, erase)
-  return { stamped, notStamped, checkedOut, erased, skipped }
+  const checkIns = await endStampedCheckIns(db, now)
+  try {
+    return { stamped, notStamped, checkIns, ...(await deleteDue(db, now, erase)) }
+  } catch (error) {
+    // The stamps are written: say which, since a re-run no longer lists them as to stamp.
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(`${reason} (this run stamped: ${stamped.join(", ") || "none"}; checked out: ${checkIns.checkedOut.join(", ") || "none"})`)
+  }
 }
 
 const dueWhere = (now: Date) => ({
@@ -293,9 +310,12 @@ async function main() {
       const run = await applyRun(db, now, command.limit)
       printIds("stamped now (known age under 18)", run.stamped)
       printIds("not stamped or erased (staff role or organisation member: for a person to look at)", run.notStamped)
-      printIds("checked out (stamped, still checked in)", run.checkedOut)
+      printIds("checked out (stamped, still checked in)", run.checkIns.checkedOut)
+      printIds("check-ins already ended by another writer", run.checkIns.unchanged)
+      printIds("check-outs that FAILED (re-run to retry)", run.checkIns.failed)
       printIds(`erased (stamped ${DELETE_AFTER_DAYS}+ days ago)`, run.erased)
       printIds("skipped (no longer due when its turn came)", run.skipped)
+      if (run.checkIns.failed.length > 0) process.exitCode = 1
       return
     }
     printIds("would stamp (known age under 18, no stamp)", await knownMinorsUnstamped(db, now))
