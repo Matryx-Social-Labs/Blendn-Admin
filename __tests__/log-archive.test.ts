@@ -183,7 +183,7 @@ describe("archiveLogs", () => {
     const result = await archiveLogs(NOW, HOUR)
 
     expect(puts().map((c) => c.input.Key)).toEqual(["logs/staging/2026-11-27/09.ndjson.gz"])
-    expect(result.failures).toEqual([expect.stringMatching(/^2026-11-27T09.*Axiom 503/)])
+    expect(result.failures).toEqual([expect.stringMatching(/^2026-11-27T09:00:00.000Z: archived, not in Axiom: Axiom 503/)])
   })
 
   it("archives without Axiom while neither Axiom variable is set, and says so; one without the other fails", async () => {

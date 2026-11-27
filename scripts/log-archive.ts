@@ -42,11 +42,13 @@ const AXIOM_BATCH = 10_000
  * would leave an older live one out; read each deployment's end if that happens.
  */
 const CANDIDATES = 5
+/** `claims` is a private folder, so this is TIGRIS_PRIVATE_BUCKET: never the public one. */
+const PRIVATE_BUCKET = bucketFor("claims")
 const NEVER_SERVED = new Set(["FAILED", "SKIPPED", "BUILDING", "DEPLOYING", "INITIALIZING", "QUEUED", "WAITING"])
 
 type Deployment = { id: string; status: string; createdAt: string }
 type Row = { timestamp: string; message: string; severity: string; attributes: { key: string; value: string }[] }
-export type ArchivedLine = { _time: string; env: string; level: string; message: string; deploymentId: string; attributes: string }
+type ArchivedLine = { _time: string; env: string; level: string; message: string; deploymentId: string; attributes: string }
 export type ArchiveResult = { written: { key: string; lines: number }[]; failures: string[]; axiom?: "not configured" }
 
 function required(name: string): string {
@@ -124,7 +126,7 @@ async function archivedKeys(env: string, hours: number[]): Promise<Set<string>> 
     let token: string | undefined
     do {
       const page = await getS3Client().send(
-        new ListObjectsV2Command({ Bucket: bucketFor("claims"), Prefix: `logs/${env}/${day}/`, ContinuationToken: token }),
+        new ListObjectsV2Command({ Bucket: PRIVATE_BUCKET, Prefix: `logs/${env}/${day}/`, ContinuationToken: token }),
         { abortSignal: AbortSignal.timeout(CALL_TIMEOUT_MS) }
       )
       for (const o of page.Contents ?? []) if (o.Key) keys.add(o.Key)
@@ -160,14 +162,14 @@ async function archiveHour(env: string, hour: number, deployments: Deployment[],
   const key = keyOf(env, hour)
   const body = gzipSync(lines.map((l) => JSON.stringify(l) + "\n").join(""))
   await getS3Client().send(
-    new PutObjectCommand({ Bucket: bucketFor("claims"), Key: key, Body: body, ContentType: "application/gzip", CacheControl: "private, no-store" }),
+    new PutObjectCommand({ Bucket: PRIVATE_BUCKET, Key: key, Body: body, ContentType: "application/gzip", CacheControl: "private, no-store" }),
     { abortSignal: AbortSignal.timeout(CALL_TIMEOUT_MS) }
   )
   if (axiom && lines.length > 0) {
     try {
       await toAxiom(lines)
     } catch (err) {
-      throw new Error(`${new Date(hour).toISOString()} archived, not in Axiom: ${err instanceof Error ? err.message : String(err)}`)
+      throw new Error(`archived, not in Axiom: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
   return { key, lines: lines.length }
