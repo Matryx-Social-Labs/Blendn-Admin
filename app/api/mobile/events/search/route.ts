@@ -135,7 +135,7 @@ export async function GET(request: NextRequest) {
          ${cityFilter(5, 6)}
          AND to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, '') || ' ' || coalesce(venue_name, '') || ' ' || coalesce(city, ''))
              @@ to_tsquery('english', $1)
-       ORDER BY rank DESC, start_time ASC
+       ORDER BY rank DESC, start_time ASC, id ASC
        LIMIT $2 OFFSET $3`,
       tsquery,
       limit,
