@@ -119,7 +119,7 @@ registry.registerPath({
   tags: ["Mobile Profiles"],
   summary: "Your own card as a room member sees it, in both states",
   description:
-    "`anonymous` is what an event room shows before you reveal (your pseudonym, age and city); `named` is what somebody who may see who you are reads there (first name, photos and the rest). " +
+    "`anonymous` is what an event room shows before you reveal (your pseudonym, with `age` and `location` null and the `ageBand` and `tenure` that room shows: D-030); `named` is what somebody who may see who you are reads there (first name, photos and the rest). " +
     "Built by the same functions as `GET /users/{userId}`, so neither can show a field the room withholds. Nothing that depends on a viewer (`tonight`, `wave`, `connection`, `friend`, `sharedInterests`) and nothing that is yours alone (`email`, `stats.savedCount`). " +
     "`pseudonym` is the one you carry in the event room you joined last; null before your first room, when `anonymous.name` is \"Attendee\" with no `pseudonym` key. No id in the path: only ever yours.",
   security: bearerAuth,

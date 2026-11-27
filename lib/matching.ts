@@ -338,8 +338,8 @@ export interface Match {
    *
    * It looks harmless because the viewer already knows which events they went
    * to. It is not: in a small room it narrows a card to the handful of people
-   * who were at those specific nights, and combined with the age and city the
-   * roster already gives, that is a name. The floor is the same one and for the
+   * who were at those specific nights, and combined with the age band and the
+   * new / regular chip the roster gives (D-030), that is a name. The floor is the same one and for the
    * same reason.
    *
    * The **score** still uses it below the floor, because the score is never
@@ -362,12 +362,9 @@ export interface Match {
    */
   sharedPlans: number
   /**
-   * Whole years.
-   *
-   * Unlike `workField` this is **not** suppressed in a small room. It is
-   * already public — `publicProfileFields` returns it to any authenticated
-   * caller — so withholding it here would only make the card disagree with the
-   * profile one tap away, without withholding anything.
+   * Whole years, for the ranking. The card sends it only for somebody the room
+   * names to you; before a reveal it sends `ageBand` instead (D-030,
+   * `roomPersonFacts`), so this is never suppressed here.
    */
   age: number | null
   insideNow: boolean
@@ -606,10 +603,11 @@ export function rankMatches(
   /*
    * The small-room floor.
    *
-   * The roster already gives an unrevealed person an age and a city. Field of
-   * work makes four attributes with the interests, and "29, Bengaluru, works in
-   * fintech, into techno and board games" is one specific person in a room of
-   * eight — at which point the pseudonym is doing nothing.
+   * The roster already gives an unrevealed person an age band and a new /
+   * regular chip (D-030). Field of work makes four attributes with the
+   * interests, and "25-34, a regular, works in fintech, into techno and board
+   * games" is one specific person in a room of eight — at which point the
+   * pseudonym is doing nothing.
    *
    * The count is the people inside now plus the viewer (`peopleInside`, step
    * 10 review M1), not everyone who ever checked in: the anonymity set is who

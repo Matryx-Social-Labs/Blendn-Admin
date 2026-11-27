@@ -659,6 +659,18 @@
       "observed": "2 failing of 3 (the blocked person, and the blocker reading the blocked person's list) — both received 200 with the interest. A one-directional blockedEitherWay (only blocker_id: a, blocked_id: b) is caught by the first test alone, where the caller is the blocked party.",
       "date": "2026-09-25"
     },
+    "age-readers-ratchet.test.ts": {
+      "guards": "D-030 (SCRUM-1384): the files that call ageFrom( under app/ and lib/ are a fixed list, so a new surface that reads a person's age decides whether it is a gate on the caller's own age or a room row that must send roomPersonFacts' ageBand instead.",
+      "mutation": "Add an untracked lib/zz-nc.ts calling ageFrom(null), run, delete it. The first attempt passed vacuously: git grep skips untracked files, so the guard now passes --untracked.",
+      "observed": "1 of 1 failing, naming lib/zz-nc.ts; 1 of 1 after deleting it.",
+      "date": "2026-11-27"
+    },
+    "room-person-facts.itest.ts": {
+      "guards": "D-030 (SCRUM-1384) through the real routes on a db:migrate database: before a reveal matches, people, checkins, users/:id, profiles/:id and me/preview send age and location null, the age band only once 3 attendees of the event share it, the new/regular chip, and no memberSince, stats or createdAt; a host gets age, band and chip null; a revealed person keeps the exact age. Reads tenure back against COUNT(DISTINCT event_id) in event_check_ins.",
+      "mutation": "(a) lib/matches.ts sends `age: m.age` again; (b) roomPersonFacts skips the operatesEvent check; (c) AGE_BAND_FLOOR 3 -> 2 (age-band.test.ts).",
+      "observed": "(a)+(b) together: 5 of 15 failing: the floor pair, the unrevealed matches row, and the host's rows and card. (c): 2 of 12 in age-band.test.ts. Restored from copies; 15 of 15 and 12 of 12 on blendn_security_20.",
+      "date": "2026-11-27"
+    },
     "poll-read-room-gate.itest.ts": {
       "guards": "GET /events/:eventId/polls/:pollId applies the room's read rule (roomReadDenial): 403 to somebody never in the room and to a banned member (the ban sentence), 404 when the URL names another event, when the poll's message is deleted, or the event is a draft; active, muted and left members still read; POST …/vote through another event's URL is 404 and writes no vote (SCRUM-298)",
       "mutation": "In lib/polls.ts (moved out of the \"use server\" poll-actions.ts) — M1: drop the not_member and banned throws after roomReadDenial in getPollResults. M2: drop `room?.event_id !== reader.eventId` from the read's not-found check. M3: drop `poll.message.chat_group.event_id !== eventId` from castVote. M4: drop `poll.message.deleted_at` from the read's not-found check. M5: drop only the `denial === \"hidden\"` throw.",

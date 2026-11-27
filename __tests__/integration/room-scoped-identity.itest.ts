@@ -216,7 +216,7 @@ describe("revealed at A and B, anonymous at C, the viewer at all three", () => {
     expect(seen.get(C)).not.toHaveProperty("image")
   })
 
-  it("the profile by C's handle is the card C shows: her pseudonym, age and city, nothing else", async () => {
+  it("the profile by C's handle is the card C shows: her pseudonym, the room's band and chip, nothing else", async () => {
     const res = await card(hC, viewer)
     expect(res.status).toBe(200)
     expect(res.body.data).toEqual({
@@ -224,8 +224,11 @@ describe("revealed at A and B, anonymous at C, the viewer at all three", () => {
       name: pseudonymAtC,
       // The same name as a contract (SCRUM-1046): it IS her room pseudonym.
       pseudonym: pseudonymAtC,
-      age: 22,
-      location: expect.any(String),
+      // D-030: no age or city before a reveal. 22 is alone in 18-24 at C, so no band; three events, so regular.
+      age: null,
+      location: null,
+      ageBand: null,
+      tenure: "regular",
       isOwnProfile: false,
       identityVisible: false,
     })
@@ -240,7 +243,7 @@ describe("revealed at A and B, anonymous at C, the viewer at all three", () => {
       id: hC,
       name: pseudonymAtC,
       pseudonym: pseudonymAtC,
-      profile: { id: hC, age: 22, onboarded: true, location: expect.any(String) },
+      profile: { id: hC, age: null, onboarded: true, location: null, ageBand: null, tenure: "regular" },
     })
     const wire = JSON.stringify(res.body)
     for (const secret of [REAL_NAME, FIRST_NAME, PHOTO, BLUR, BIO, tanvi.id, "Letterpress", "design"]) expect(wire).not.toContain(secret)
