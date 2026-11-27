@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from "fs"
+import { existsSync, readFileSync, readdirSync, statSync } from "fs"
 import { join } from "path"
 
 /**
@@ -81,3 +81,69 @@ describe("server/client boundary", () => {
     })
   }
 })
+
+/**
+ * Server modules a script process also loads, so they cannot carry
+ * `import "server-only"` (plain `tsx` has no such package): no client module
+ * may reach them through its imports, at any depth. Type-only imports are erased
+ * and do not count.
+ */
+const SERVER_MODULES = ["lib/revenuecat-api.ts", "lib/account-erasure.ts"]
+const IMPORT = /(?:^|\n)\s*(?:import|export)\s+(?!type\b)(?:[^'";]*?\sfrom\s+)?["']([^"']+)["']/g
+
+function resolveImport(spec: string, from: string): string | null {
+  const base = spec.startsWith("@/") ? join(ROOT, spec.slice(2)) : spec.startsWith(".") ? join(from, "..", spec) : null
+  if (!base) return null
+  for (const candidate of [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts"), join(base, "index.tsx")]) {
+    if (existsSync(candidate) && statSync(candidate).isFile() && /\.tsx?$/.test(candidate)) return candidate
+  }
+  return null
+}
+
+/** Each listed module a client module reaches, with the client module that reaches it. */
+function clientReaches(clientFiles: string[], targets: string[]): string[] {
+  const via = new Map<string, string>(clientFiles.map((f) => [f, f]))
+  const queue = [...clientFiles]
+  while (queue.length > 0) {
+    const file = queue.shift()!
+    const src = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+    for (const m of src.matchAll(IMPORT)) {
+      const next = resolveImport(m[1], file)
+      if (next && !via.has(next)) {
+        via.set(next, via.get(file)!)
+        queue.push(next)
+      }
+    }
+  }
+  return targets
+    .filter((t) => via.has(join(ROOT, t)))
+    .map((t) => `${t} reached from ${via.get(join(ROOT, t))!.slice(ROOT.length + 1)}`)
+}
+
+describe("server modules no client module reaches", () => {
+  const clientFiles = [join(ROOT, "app"), join(ROOT, "components")]
+    .flatMap((d) => walkAll(d))
+    .filter(isClientModule)
+
+  it("finds client modules to check (guards against a broken walker)", () => {
+    expect(clientFiles.length).toBeGreaterThan(20)
+  })
+
+  it("the walk follows imports (a module client components import is found)", () => {
+    expect(clientReaches(clientFiles, ["lib/utils.ts"])).toHaveLength(1)
+  })
+
+  it.each(SERVER_MODULES)("%s is reached by no client module", (target) => {
+    expect(clientReaches(clientFiles, [target])).toEqual([])
+  })
+})
+
+function walkAll(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    if (entry === "node_modules" || entry === ".next" || entry.startsWith(".")) continue
+    const full = join(dir, entry)
+    if (statSync(full).isDirectory()) walkAll(full, out)
+    else if (/\.tsx?$/.test(full)) out.push(full)
+  }
+  return out
+}
