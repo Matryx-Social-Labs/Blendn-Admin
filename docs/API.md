@@ -4601,8 +4601,7 @@ safety, reports and legal requests, and hard-deleted 180 days after the close by
 the chat sweeper (`lib/lobby-retention.ts`): room messages, posts with their asks
 and photos, the posts' rooms, the host's note. Removed or reported content is
 held 180 days from its removal, and anything with a pending report until it is
-decided. Alert switches go at the close. The purge is a dry run that logs what it
-would delete until `LOBBY_PURGE=delete` is set. See `docs/RETENTION.md`.
+decided. Alert switches go at the close. See `docs/RETENTION.md`.
 
 #### Types, spots and the list
 
