@@ -9,6 +9,7 @@ import { ALREADY_DECIDED, decisionFrom, refuseUnlessDecided } from "@/lib/decisi
 import { emitChatMessageHidden } from "@/lib/socket-server"
 import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
+import { displayCategories } from "@/lib/moderation/config"
 import { trustSignalsFor } from "@/lib/trust"
 import { clipCharacters } from "@/lib/utils"
 
@@ -162,7 +163,7 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
     eventId: flag.message.chat_group?.event_id ?? null,
     source: flag.source,
     confidence: flag.confidence,
-    category: topCategory(flag.categories, flag.source),
+    category: topCategory(displayCategories(flag.categories), flag.source),
     autoAction: flag.auto_action,
     // An erased account has a null name and a `deleted-<id>@…invalid`
     // address; the fallback rendered that address as the author. The message

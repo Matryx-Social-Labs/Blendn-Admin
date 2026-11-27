@@ -3,11 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { themeColour } from "@/lib/theme-colour"
-import type { Map as LeafletMap, LayerGroup, TileLayer } from "leaflet"
+import type { Map as LeafletMap, LayerGroup } from "leaflet"
 // Its own, not LocationPicker's runtime <link>: pages without that picker got
 // stacked, unclipped tiles and a circle drawn off the map (SCRUM-344).
 import "leaflet/dist/leaflet.css"
-import { cn } from "@/lib/utils"
 import {
   DEFAULT_ACCURACY_POLICY,
   DEFAULT_BUFFER_M,
@@ -91,7 +90,7 @@ export interface GeofenceEditorProps {
 
 /** What a caller's own controls can ask of the map. */
 export interface AreaTools {
-  /** Trace the outline by hand, on the satellite layer. */
+  /** Trace the outline by hand, on the street map. */
   draw: () => void
   /** A circle at the pin instead of an outline. */
   circle: () => void
@@ -126,10 +125,8 @@ export function GeofenceEditor({
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<LeafletMap | null>(null)
   const layerRef = useRef<LayerGroup | null>(null)
-  const tilesRef = useRef<{ map?: TileLayer; sat?: TileLayer }>({})
   const leafletRef = useRef<typeof import("leaflet") | null>(null)
 
-  const [layer, setLayer] = useState<"map" | "sat">("map")
   const [drawing, setDrawing] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importNote, setImportNote] = useState<string | null>(null)
@@ -211,17 +208,15 @@ export function GeofenceEditor({
       const wide = fence.type === "circle" ? fence.radius > 100 : spanOf(fence.ring) > 150
       map.setView(centre, wide ? 16 : 18)
 
-      tilesRef.current = {
-        map: L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          maxZoom: 19,
-          attribution: "© OpenStreetMap",
-        }),
-        sat: L.tileLayer(
-          "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-          { maxZoom: 19, attribution: "Esri" }
-        ),
-      }
-      tilesRef.current.map!.addTo(map)
+      // The one base map. The Satellite layer was Esri World Imagery with no
+      // key, outside Esri's terms, and went with SCRUM-1147. OSM's tile policy
+      // asks for a credit that links to the copyright page; a new tab, because
+      // the map sits inside an unsaved form.
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution:
+          '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" aria-label="OpenStreetMap copyright (opens in a new tab)">OpenStreetMap</a> contributors',
+      }).addTo(map)
       layerRef.current = L.layerGroup().addTo(map)
 
       map.on("click", (e) => {
@@ -252,19 +247,6 @@ export function GeofenceEditor({
     // Mount once. Shape changes are drawn by the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  useEffect(() => {
-    const map = mapRef.current
-    const tiles = tilesRef.current
-    if (!map || !tiles.map || !tiles.sat) return
-    if (layer === "sat") {
-      map.removeLayer(tiles.map)
-      tiles.sat.addTo(map)
-    } else {
-      map.removeLayer(tiles.sat)
-      tiles.map.addTo(map)
-    }
-  }, [layer])
 
   /* --------------------------------------------------------------- draw --- */
 
@@ -504,10 +486,9 @@ export function GeofenceEditor({
 
   const mode = fence.type === "circle" ? "circle" : "polygon"
 
-  /** Trace by hand, on the satellite layer where a building's edges show. */
+  /** Trace by hand, on the street map. */
   function draw() {
     setDrawing(true)
-    setLayer("sat")
     onChange({ type: "polygon", ring: [], buffer: fence.buffer })
   }
 
@@ -547,25 +528,6 @@ export function GeofenceEditor({
         */}
         <div ref={containerRef} style={{ height }} className="bg-[#e8e4de]" />
 
-        <div className="absolute right-2.5 top-2.5 z-[800] flex overflow-hidden rounded-lg border border-border-strong bg-background/90 p-0.5 backdrop-blur">
-          {(["map", "sat"] as const).map((k) => (
-            <button
-              key={k}
-              // Not the shared `Button`, so it does not inherit that default.
-              // Without this, changing the map layer submits the event form.
-              type="button"
-              onClick={() => setLayer(k)}
-              aria-pressed={layer === k}
-              className={cn(
-                "min-h-6 rounded-md px-2.5 py-1 text-[0.71875rem]",
-                layer === k ? "bg-surface-raised font-bold" : "text-muted-foreground"
-              )}
-            >
-              {k === "map" ? "Map" : "Satellite"}
-            </button>
-          ))}
-        </div>
-
         {editable && drawing ? (
           <div className="pointer-events-none absolute left-1/2 top-2.5 z-[800] -translate-x-1/2 whitespace-nowrap rounded-lg border border-border-strong bg-background/90 px-3 py-1.5 text-[0.71875rem] backdrop-blur">
             {fence.type === "polygon" && fence.ring.length === 0
@@ -582,7 +544,9 @@ export function GeofenceEditor({
           </div>
         ) : null}
 
-        <div className="pointer-events-none absolute bottom-2.5 left-2.5 z-[800] flex flex-col gap-1.5 rounded-lg border border-border-strong bg-background/90 px-3 py-2 text-[0.71875rem] backdrop-blur">
+        {/* Above the credit's row, not beside it: on a narrow map the linked
+            credit ran under the legend's corner (SCRUM-1147, at 768). */}
+        <div className="pointer-events-none absolute bottom-7 left-2.5 z-[800] flex flex-col gap-1.5 rounded-lg border border-border-strong bg-background/90 px-3 py-2 text-[0.71875rem] backdrop-blur">
           <Legend token="--chart-1" dash="solid" label={legend?.extent ?? "Extent — the venue itself"} />
           <Legend token="--chart-2" dash="dashed" label={legend?.buffer ?? `Buffer — your tolerance (${fence.buffer} m)`} />
           <Legend

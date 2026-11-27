@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
+import { eventAccessResponse, participationRefusal } from "@/lib/event-access"
 import { rateLimit, userLimit, withReasonCode } from "@/lib/rate-limit"
 import { INVITE_TOKEN, friendState, mayConnect, personCard, personSelect } from "@/lib/friends"
 import {
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     // The owner's name and photo are part of taking part; so is the gate (SCRUM-331).
     const unfinished = await participationRefusal(me)
-    if (unfinished) return unfinishedResponse(unfinished)
+    if (unfinished) return eventAccessResponse(unfinished)
 
     const { token } = await params
     // `errorCode` stays NOT_FOUND; one reason for every way a link can fail.

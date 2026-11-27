@@ -2,14 +2,9 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
+import { actorFor } from "@/lib/org-membership"
 import { broadcastAuthorName, broadcastAuthorSelect } from "@/lib/broadcast-author"
-import {
-  broadcastMayCarryMedia,
-  canBroadcast,
-  eventPermissionSelect,
-  type BroadcastKind,
-} from "@/lib/rbac"
+import { canBroadcast, eventPermissionSelect, type BroadcastKind } from "@/lib/rbac"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { emitChatMessage } from "@/lib/socket-server"
 import {
@@ -66,10 +61,21 @@ export async function POST(
       mediaType?: string
     }
 
-    const KINDS: readonly BroadcastKind[] = ["announcement", "sponsored", "system"]
-    const kind: BroadcastKind = KINDS.includes(rawKind as BroadcastKind)
-      ? (rawKind as BroadcastKind)
-      : "announcement"
+    /*
+     * Sponsored content goes out only through a campaign
+     * (`lib/sponsored-scheduler.ts`): a person reviews the creative, the room
+     * keeps its gap between sponsored posts, and the send is counted
+     * (SCRUM-1070). Any other value that is not one of the two kinds is
+     * refused too, never posted as an announcement the caller did not ask for.
+     */
+    if (rawKind === "sponsored") {
+      return errorResponse("Sponsored content goes out through a campaign", 400)
+    }
+    const KINDS: readonly BroadcastKind[] = ["announcement", "system"]
+    if (rawKind != null && !KINDS.includes(rawKind as BroadcastKind)) {
+      return errorResponse("kind is announcement or system", 400)
+    }
+    const kind = (rawKind as BroadcastKind | undefined) ?? "announcement"
 
     /*
      * The resolver, not a comparison of two user ids.
@@ -100,43 +106,21 @@ export async function POST(
     if (!sender) return forbiddenResponse("You cannot broadcast to this event")
 
     const actor = await actorFor({ id: sender.id, role: sender.role })
-    const grant = kind === "sponsored" ? await resolveSponsorGrant(actor, eventId) : null
 
-    if (!canBroadcast(actor, event, kind, grant ?? undefined)) {
-      /*
-       * One message for all three refusals, deliberately.
-       *
-       * "Your organisation is not approved for sponsored messages" tells an
-       * attacker probing the API which flag to go after, and tells an organiser
-       * about a capability they cannot self-serve anyway.
-       */
+    if (!canBroadcast(actor, event, kind)) {
+      // One message for both refusals: which rule refused is not the caller's to probe.
       return forbiddenResponse("You cannot broadcast to this event")
     }
 
     if (mediaUrl || mediaType) {
       /*
        * The event room is pseudonymous and a photograph is an identity -- of
-       * whoever is in it, who is not always the person posting. Attendee media
-       * is not built at all; an announcement is a host addressing that same
-       * room, so it inherits the rule. Only sponsored artwork depicts nobody in
-       * the room, which is what `broadcastMayCarryMedia` encodes.
-       *
-       * But nothing can PERSIST it. Neither `event_announcements` nor
-       * `chat_messages` has a media column, so a URL accepted here would reach
-       * only the sockets connected at that instant, vanish on reload, and be
-       * invisible to moderation -- an image no moderator can review or delete.
-       * Refusing is better than accepting and silently dropping.
-       *
-       * Sponsored media persists properly in the sponsor plan, on the creative
-       * revision with checksum and version pinning. When that lands, restore
-       * the `broadcastMayCarryMedia(kind)` branch here.
+       * whoever is in it, who is not always the person posting. An announcement
+       * is a host addressing that room, so it carries words only
+       * (`broadcastMayCarryMedia`), and nothing here could persist media anyway:
+       * neither `event_announcements` nor `chat_messages` has a media column.
        */
-      return errorResponse(
-        broadcastMayCarryMedia(kind)
-          ? "Media on sponsored messages is not available yet"
-          : "Only sponsored messages may carry media",
-        400
-      )
+      return errorResponse("Announcements carry text only", 400)
     }
 
     if (!content || typeof content !== "string" || content.trim().length === 0) {
@@ -240,22 +224,6 @@ export async function POST(
          * argument this route already makes about attendee media forty lines up.
          */
         userImage: undefined,
-        /*
-         * Not emitted, deliberately.
-         *
-         * `broadcastMayCarryMedia` permits media on `sponsored`, but there is
-         * no column anywhere to persist it: `event_announcements` has none and
-         * `chat_messages` has none. So a media URL could only ever reach the
-         * clients connected at that instant and would vanish on reload, which
-         * is the same defect this commit fixes for text — and worse, because a
-         * moderator could never review or delete an image that was never
-         * stored.
-         *
-         * Sponsored media persists properly in the sponsor plan (media_url on
-         * the creative revision, with checksum and version pinning). Until that
-         * lands, accepting the field and dropping it is the honest behaviour;
-         * pretending to broadcast it is not.
-         */
         createdAt: chatMsg.created_at.toISOString(),
       }, [], eventId)
     }

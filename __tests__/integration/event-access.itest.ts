@@ -223,8 +223,9 @@ describe("an 18+ event reached by id", () => {
 
   it("is open to everyone once the restriction is lifted (negative control for the guard)", async () => {
     await db.events.update({ where: { id: eventId }, data: { min_age: null } })
-    const minor = await person("ea-minor-2", yearsAgo(17))
-    const r = await everyRoute(eventId, minor.token)
+    // No age on file: refused by the 18+ rule above, let in without it. (A known 17 takes part nowhere: SCRUM-1169.)
+    const noAge = await person("ea-noage-2", null)
+    const r = await everyRoute(eventId, noAge.token)
     expect([r.get, r.rsvp, r.favorite]).toEqual(["ok", "ok", "ok"])
   })
 })

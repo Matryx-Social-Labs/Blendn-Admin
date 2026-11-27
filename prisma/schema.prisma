@@ -273,6 +273,13 @@ model profiles {
   /// here, and storing one invites timezone drift across a birthday, which is
   /// exactly the boundary the gate turns on.
   date_of_birth DateTime? @db.Date
+  /// Since when this account is known to be under 18 (SCRUM-1169, D-026).
+  ///
+  /// Set by `scripts/under-18-accounts.ts --apply` on a known age under 18.
+  /// A stamped account takes part nowhere (`participationDenial` in
+  /// `lib/age.ts`) and is listed for deletion 14 days on. Staff clear it
+  /// with `--correct` when the birth date was entered wrong.
+  under_18_since DateTime? @db.Timestamptz(6)
   location      String?
   bio           String?
   occupation    String?

@@ -5,7 +5,7 @@ import { db } from "@/lib/db"
 import type { Prisma } from "@prisma/client"
 import { openThread, quoteOf, replyToSelect } from "@/lib/dm-thread"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { participationRefusal } from "@/lib/event-access"
+import { messagingRefusalResponse, participationRefusal } from "@/lib/event-access"
 import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -18,14 +18,12 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { z } from "zod"
-import { httpsUrl } from "@/lib/https-url"
 import { displayNameInConversation, mayShowRealName } from "@/lib/conversation-identity"
 import { screenDirectMessage, VISIBLE_DM } from "@/lib/dm-moderation"
 import { emitPrivateMessage } from "@/lib/socket-server"
 import { isReadForViewer } from "@/lib/read-receipts"
 import { notifyPrivateMessage } from "@/lib/push-notifications"
-import { discardSealedChatMedia, DM_PHOTOS_NOT_YET, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia } from "@/lib/validations/chat"
-import { areFriends } from "@/lib/friends"
+import { DM_PHOTOS_OFF } from "@/lib/validations/chat"
 import { idInConversation } from "@/lib/conversation-ref"
 import { readJson, isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
@@ -40,19 +38,14 @@ interface RouteParams {
   params: Promise<{ conversationId: string }>
 }
 
+/** Words only: a send with media is refused before this (SCRUM-1165). */
 const sendMessageSchema = z.object({
-  text: z.string().min(1).max(5000).optional(),
-  mediaUrl: httpsUrl().optional(),
-  /** A photo is all a DM takes (R9, SCRUM-626); stored as one whether or not this says so. */
-  mediaType: z.literal("image").optional(),
+  text: z.string().min(1).max(5000),
   /** The message this one replies to; must be in the same conversation. */
   replyToId: z.string().uuid().optional(),
   /** The app's own id for this send: a retry with it returns the first write. */
   clientId: z.string().uuid().optional(),
-}).refine(
-  (data) => data.text || data.mediaUrl,
-  { message: "Message must have text or media" }
-)
+})
 
 // GET /api/mobile/conversations/[conversationId]/messages - Get messages
 export async function GET(request: NextRequest, { params }: RouteParams) {
@@ -216,7 +209,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * return, and each is marked handled here because a refusal returns without
      * reading the ones after it.
      */
-    // Not onboarded and no adult age on file: may not take part yet (SCRUM-331).
+    // Known to be under 18, or not onboarded with no adult age on file: may not take part (SCRUM-331, SCRUM-1169).
     const unfinishedPending = participationRefusal(authUser.userId)
     const conversationPending = db.private_conversations.findUnique({
       where: { id: conversationId },
@@ -240,18 +233,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     retryPending?.catch(() => undefined)
 
     const unfinished = await unfinishedPending
-    if (unfinished) return forbiddenResponse(unfinished)
+    if (unfinished) return messagingRefusalResponse(unfinished)
+
+    // A DM is words only (SCRUM-1165): a send carrying any media is refused whole, with a sentence the app shows as it is.
+    if ((body as { mediaUrl?: unknown } | null)?.mediaUrl != null) return forbiddenResponse(DM_PHOTOS_OFF)
 
     if (!parsed.success) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { text, mediaUrl, replyToId, clientId } = parsed.data
-
-    // The sender's own upload, or no media (SCRUM-426).
-    if (mediaUrl && !isOwnChatMedia(mediaUrl, authUser.userId)) {
-      return errorResponse(NOT_OWN_MEDIA, 400)
-    }
+    const { text, replyToId, clientId } = parsed.data
 
     /*
      * A retry of a send that already landed (SCRUM-410): the request reached
@@ -350,20 +341,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     /*
-     * A photo once both people are named to each other, or are friends (R9,
-     * SCRUM-626). Until then each knows the other by a pseudonym, and a photo
-     * is a face, or where somebody lives. A conversation that never had
-     * pseudonyms (an accepted message request) has names from the start.
-     */
-    if (
-      mediaUrl &&
-      !(mayShowRealName(conversation, authUser.userId) && mayShowRealName(conversation, recipientId)) &&
-      !(await areFriends(authUser.userId, recipientId))
-    ) {
-      return forbiddenResponse(DM_PHOTOS_NOT_YET)
-    }
-
-    /*
      * The deterministic checks, which this path had none of.
      *
      * `lib/moderation` was imported by exactly two files and both were group
@@ -385,13 +362,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
     const hidden = screen.verdict === "hide"
 
-    /*
-     * What is stored is the upload's sealed copy, which nobody can write to
-     * (SCRUM-425). Made here, after every gate, so a refused send copies nothing.
-     */
-    const media = mediaUrl ? await sealChatMedia(mediaUrl, authUser.userId) : null
-    if (media && "refusal" in media) return errorResponse(media.refusal, 400)
-
     // Create the message
     let message: SentMessage
     try {
@@ -399,15 +369,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       data: {
         conversation_id: conversationId,
         sender_id: authUser.userId,
-        // Optional behind the "text or media" refinement, so a media-only DM
-        // arrived as an explicit undefined — the same outage as the media
-        // columns below, from the other side of the same refinement.
-        message_text: text ?? null,
-        // Both optional in the schema, so undefined whenever a text-only DM is
-        // sent — which is every DM. Explicit undefined threw under
-        // `strictUndefinedChecks`, so sending a DM returned 500. Found by
-        // sending one from the simulator after a match.
-        ...(media != null && { media_url: media.url, media_type: "image" }),
+        message_text: text,
         moderation_status: screen.status,
         ...(replyToId && { reply_to_id: replyToId }),
         ...(clientId && { client_id: clientId }),
@@ -415,7 +377,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       include: sentInclude,
     })
     } catch (error) {
-      await discardSealedChatMedia(media)
       // Two sends with one clientId raced, and the other wrote it first. The
       // driver adapter nests the constraint, so the code is all we can read.
       const raced =
@@ -478,7 +439,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       authUser.userId,
       message.sender.name
     )
-    const messagePreview = text || "📷 Photo"
     if (!hidden) {
       /*
        * What the recipient has not read from this sender, this message
@@ -494,7 +454,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           notifyPrivateMessage({
             recipientId,
             senderName,
-            preview: messagePreview,
+            preview: text,
             conversationId,
             unread,
             conversation,

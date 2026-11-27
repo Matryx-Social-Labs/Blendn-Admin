@@ -75,7 +75,6 @@ export async function venueTonight(
     select: {
       id: true,
       kind: true,
-      organizer_id: true,
       organizer_org_id: true,
       organizer_org: { select: { display_name: true } },
       organizer: { select: { name: true } },

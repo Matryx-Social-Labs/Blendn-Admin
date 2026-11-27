@@ -533,7 +533,9 @@ export const PresignedUrlRequestSchema = z
     contentType: z.string().openapi({
       description: "`profile` and `chat` take image/jpeg, image/png or image/webp only, up to 10 MB (SCRUM-626).",
     }),
-    folder: z.enum(["profile", "chat", "events"]).default("profile"),
+    folder: z.enum(["profile", "chat"]).default("profile").openapi({
+      description: "Event media is uploaded from the dashboard (`POST /api/uploads/presigned-url`), never from the app.",
+    }),
     size: z.number().int().min(1).optional().openapi({
       description: "Byte length of the file you will PUT. Signed into the URL as `content-length` (PUT exactly this many bytes); above the folder's ceiling is 400.",
     }),

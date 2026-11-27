@@ -4,7 +4,7 @@
 // Who may see or take part in an event, from the database alone. The routes' answers for a
 // refusal (`eventAccessResponse` and friends) are lib/event-access.ts, which re-exports all of this.
 import { mayOpenCity } from "./browse-scope"
-import { ageFrom, FINISH_ONBOARDING, mayParticipate, minAgeRefusal } from "./age"
+import { ageFrom, minAgeRefusal, participationDenial, participationSelect } from "./age"
 import { db } from "./db"
 import { canJoinEvent } from "./socket-auth"
 
@@ -14,10 +14,9 @@ export const ORGANISER_SUSPENDED = "ORGANISER_SUSPENDED" as const
 /**
  * The host is not suspended (SCRUM-8). A suspended organisation's published
  * events are flipped to `draft`, so every attendee surface already hides
- * them; this fragment is for the ONE dashboard clause that reads by creator
- * rather than by status — the `organizer_id` fallback in `visibleEventsWhere`
- * and its twins — so a member of a suspended org does not see a list full of
- * rows that do not open. A legacy event with no org passes.
+ * them; this fragment is for the public share pages (`lib/share-public.ts`),
+ * which read a row by its link rather than by status. An event with no org
+ * passes.
  */
 export const hostNotSuspended = {
   OR: [{ organizer_org_id: null }, { organizer_org: { status: { not: "suspended" as const } } }],
@@ -55,9 +54,10 @@ export type EventAccessDenial =
   | { kind: "unfinished"; message: string }
 
 /*
- * `participate` also asks `mayParticipate` (SCRUM-331): finished onboarding, or
- * an adult age on file. It is asked before the event's own age rule because it
- * is about the person, not the event, and it holds everywhere.
+ * `participate` also asks `participationDenial` (SCRUM-331, SCRUM-1169): not
+ * known to be under 18, and finished onboarding or an adult age on file. It is
+ * asked before the event's own age rule because it is about the person, not the
+ * event, and it holds everywhere.
  */
 /**
  * The launch gate for one event: its city is open to this person, or they are
@@ -96,13 +96,9 @@ export async function attendeeEventAccess(
   if (!(await mayOpenEvent(userId, eventId, event.city))) return { kind: "not_found" }
   if (event.min_age == null && intent === "view") return null
 
-  const profile = await db.profiles.findUnique({
-    where: { id: userId },
-    select: { age: true, date_of_birth: true, onboarded: true },
-  })
-  if (intent === "participate" && !mayParticipate(profile)) {
-    return { kind: "unfinished", message: FINISH_ONBOARDING }
-  }
+  const profile = await db.profiles.findUnique({ where: { id: userId }, select: participationSelect })
+  const denial = intent === "participate" ? participationDenial(profile) : null
+  if (denial) return denial
   if (event.min_age == null) return null
   // Derived, never the stored column — see `ageFrom` in lib/age.ts.
   const age = ageFrom(profile)
@@ -163,12 +159,10 @@ async function hasStakeInSuspendedEvent(userId: string, eventId: string, organiz
 
 /**
  * The same rule for the surfaces that are not about one event — starting a
- * conversation, a message request, a DM (SCRUM-331). The sentence, or `null`.
+ * conversation, a message request, a DM, friends (SCRUM-331). The denial, or
+ * `null`; `eventAccessResponse` or `messagingRefusalResponse` answers it.
  */
-export async function participationRefusal(userId: string): Promise<string | null> {
-  const profile = await db.profiles.findUnique({
-    where: { id: userId },
-    select: { age: true, date_of_birth: true, onboarded: true },
-  })
-  return mayParticipate(profile) ? null : FINISH_ONBOARDING
+export async function participationRefusal(userId: string): Promise<ReturnType<typeof participationDenial>> {
+  const profile = await db.profiles.findUnique({ where: { id: userId }, select: participationSelect })
+  return participationDenial(profile)
 }

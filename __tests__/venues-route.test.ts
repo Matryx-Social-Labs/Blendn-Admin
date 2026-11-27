@@ -198,7 +198,7 @@ describe("GET /api/mobile/venues", () => {
   })
 
   it("leaves out the venues an event has taken over, and says liveNow as a bucket to an adult", async () => {
-    mockDb.profiles.findUnique.mockResolvedValue({ age: 30, date_of_birth: null, onboarded: true })
+    mockDb.profiles.findUnique.mockResolvedValue({ age: 30, date_of_birth: null, onboarded: true, under_18_since: null })
     // A confirmed link takes the venue over wherever the event's area is
     // (`atTheVenue`); the integration suite walks every other link state.
     const taken = "44444444-4444-4444-4444-444444444444"
@@ -210,11 +210,13 @@ describe("GET /api/mobile/venues", () => {
     expect((await res.json()).data.venues[0].liveNow).toBe("quiet")
   })
 
-  it("tells nobody the venue page would refuse how many are live: unknown age, under 18, not onboarded", async () => {
+  it("tells nobody the venue page would refuse how many are live: unknown age, under 18, stamped under 18, not onboarded", async () => {
     for (const viewer of [
-      { age: null, date_of_birth: null, onboarded: true },
-      { age: 16, date_of_birth: null, onboarded: true },
-      { age: null, date_of_birth: null, onboarded: false },
+      { age: null, date_of_birth: null, onboarded: true, under_18_since: null },
+      { age: 16, date_of_birth: null, onboarded: true, under_18_since: null },
+      // An adult age on file, but stamped under 18 (SCRUM-1169): the stamp decides.
+      { age: 30, date_of_birth: null, onboarded: true, under_18_since: new Date() },
+      { age: null, date_of_birth: null, onboarded: false, under_18_since: null },
     ]) {
       mockDb.profiles.findUnique.mockResolvedValue(viewer)
       const res = await GET(req())

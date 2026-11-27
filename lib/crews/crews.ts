@@ -5,7 +5,7 @@ import type { Prisma, connection_intent } from "@prisma/client"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 
-import { ageFrom, isAdult, mayParticipate } from "../age"
+import { ageFrom, isAdult, mayParticipate, participationSelect } from "../age"
 import { ErrorCode, errorResponse } from "../api-response"
 import { CREW } from "../constants"
 import { conversationPair } from "../conversations"
@@ -382,7 +382,7 @@ async function textRefusal(userId: string, fields: CrewTexts): Promise<CrewRefus
 export async function mayJoinCrews(userId: string): Promise<boolean> {
   const profile = await db.profiles.findUnique({
     where: { id: userId },
-    select: { onboarded: true, age: true, date_of_birth: true, user: { select: { suspended_at: true, deletedAt: true } } },
+    select: { ...participationSelect, user: { select: { suspended_at: true, deletedAt: true } } },
   })
   if (!profile || profile.user.suspended_at || profile.user.deletedAt || !mayParticipate(profile)) return false
   const age = ageFrom(profile)

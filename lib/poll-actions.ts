@@ -10,8 +10,8 @@ import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { chatWindowState } from "@/lib/chat-window"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
-import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
-import { canBroadcast, eventPermissionSelect, type BroadcastKind } from "@/lib/rbac"
+import { actorFor } from "@/lib/org-membership"
+import { canBroadcast, eventPermissionSelect } from "@/lib/rbac"
 import { emitChatMessage } from "@/lib/socket-server"
 
 /**
@@ -51,7 +51,17 @@ const pollSchema = z.object({
   /** Null means "closes when the event ends", which is the default. */
   closesAt: z.date().nullable().optional(),
   resultsVisible: z.boolean().default(false),
-  kind: z.enum(["announcement", "sponsored"]).default("announcement"),
+  /*
+   * A poll here is the host's announcement. Sponsored content goes out only
+   * through a campaign (`lib/sponsored-scheduler.ts`), where a person reviews
+   * it, the room keeps its gap and the send is counted (SCRUM-1070).
+   */
+  kind: z
+    .literal("announcement", {
+      error: (issue) =>
+        issue.input === "sponsored" ? "Sponsored content goes out through a campaign" : "A poll is an announcement",
+    })
+    .default("announcement"),
 })
 
 export interface CreatePollResult {
@@ -90,14 +100,8 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
 
   const actor = await actorFor(session.user)
 
-  /*
-   * The same gate as any other non-user message. A poll from a brand is a
-   * sponsored broadcast — it carries the brand's name into the room and occupies
-   * the same attention — so it needs the same grant, not a weaker one because
-   * the payload happens to be a question.
-   */
-  const grant = kind === "sponsored" ? await resolveSponsorGrant(actor, eventId) : undefined
-  if (!canBroadcast(actor, event, kind as BroadcastKind, grant ?? undefined)) {
+  // The same gate as any other announcement.
+  if (!canBroadcast(actor, event, kind)) {
     throw new Refusal("Forbidden")
   }
 
@@ -147,13 +151,10 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
       select: { id: true },
     })
 
-    // A sponsored poll is an advert: it never moves the room's place in the chat list (SCRUM-924, owner row A-3).
-    if (kind !== "sponsored") {
-      await tx.chat_groups.update({
-        where: { id: event.chat_group!.id },
-        data: { last_message_at: message.created_at },
-      })
-    }
+    await tx.chat_groups.update({
+      where: { id: event.chat_group!.id },
+      data: { last_message_at: message.created_at },
+    })
 
     return { messageId: message.id, pollId: poll.id, createdAt: message.created_at }
   })
@@ -170,7 +171,6 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
       content: question,
       type: "poll",
       pollId: created.pollId,
-      ...(kind === "sponsored" ? { kind: "sponsored" as const } : {}),
       userId: session.user.id,
       userName: roomSenderName({ type: "poll", metadata: { kind } }, undefined, event),
       createdAt: created.createdAt.toISOString(),
@@ -184,7 +184,7 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
 
   auditLog({
     userId: session.user.id,
-    action: kind === "sponsored" ? "poll.create_sponsored" : "poll.create",
+    action: "poll.create",
     resource: "chat_polls",
     resourceId: created.pollId,
     details: { eventId, question, options: options.length, closesAt: closes.toISOString() },
