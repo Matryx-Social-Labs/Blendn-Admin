@@ -203,14 +203,18 @@ describe("hides the model could not judge", () => {
   /** The window `seconds` on from the last: rows written now land in it, and `sweep` closes it. */
   function windowAfter(seconds: number) {
     sweepAt += seconds
-    const rowAt = sec(sweepAt - 50)
-    const flag = async (categories: object, confidence: number, source: "auto_keyword" | "auto_text" = "auto_keyword") => {
+    const flag = async (
+      categories: object,
+      confidence: number,
+      source: "auto_keyword" | "auto_text" = "auto_keyword",
+      rowAt = sec(sweepAt - 50)
+    ) => {
       const message = await db.chat_messages.create({ data: { chat_group_id: groupId, user_id: reported, content: "x" } })
       await db.moderation_flags.create({
         data: { message_id: message.id, chat_group_id: groupId, user_id: reported, source, categories, confidence, auto_action: "hidden", created_at: rowAt },
       })
     }
-    const report = () => db.user_reports.create({ data: { reporter_id: reporter, reported_id: reported, reason: "x", created_at: rowAt } })
+    const report = () => db.user_reports.create({ data: { reporter_id: reporter, reported_id: reported, reason: "x", created_at: sec(sweepAt - 50) } })
     const sweep = async (): Promise<string | null> => {
       fetchMock.mockClear()
       await runStaffAlertSweep(sec(sweepAt))
@@ -274,5 +278,16 @@ describe("hides the model could not judge", () => {
     w = windowAfter(60)
     await w.flag(UNJUDGED, 0.9)
     expect(await w.sweep()).toBeNull()
+  })
+
+  it("leaves a hide whose model answer may still be on its way (two calls) for a later line, and never loses it", async () => {
+    let w = windowAfter(15 * 60)
+    // 15 s before the sweep: past the 10 s grace, inside two model calls.
+    await w.flag(UNJUDGED, 0.9, "auto_keyword", sec(sweepAt - 15))
+    // The one held over from the last test, not this one.
+    expect(await w.sweep()).toContain("1 hidden line the model could not judge.")
+
+    w = windowAfter(15 * 60)
+    expect(await w.sweep()).toContain("1 hidden line the model could not judge.")
   })
 })

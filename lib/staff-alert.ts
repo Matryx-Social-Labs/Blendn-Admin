@@ -1,11 +1,10 @@
 // Relative imports: started from server.ts via background.ts, which
 // `build:server` compiles with plain tsc -- the `@/` alias would be emitted verbatim.
-import { Prisma } from "@prisma/client"
-
 import { db } from "./db"
 import { dashboardUrl } from "./email"
 import { logger } from "./logger"
-import { SEVERE_CATEGORY_PREFIXES, UNJUDGED_KEY } from "./moderation/config"
+import { SEVERE_CATEGORY_PREFIXES } from "./moderation/config"
+import { MODERATION_TIMEOUT_MS } from "./moderation/openai-moderation"
 import { channelsFrom, sendToChannels } from "./notify-channels"
 import { readMark, writeMark } from "./rate-limit-store"
 
@@ -45,6 +44,12 @@ const SEVERE_CONFIDENCE = 0.9
  * most once in this long; the count then is every one since it was last said.
  */
 const UNJUDGED_REPEAT_MS = 15 * 60 * 1000
+/**
+ * The unjudged count trails the window by this much more: `recordHide` asks the
+ * model up to twice after the flag is written, and a flag whose answer is still
+ * on its way is not yet a line the model could not judge.
+ */
+const UNJUDGED_SETTLE_MS = 2 * MODERATION_TIMEOUT_MS
 
 const MARK_KEY = "staff-alert:mark"
 const HOUR_MS = 60 * 60 * 1000
@@ -68,7 +73,7 @@ export async function notifyStaff(text: string): Promise<StaffNotice> {
 
 let memoryMark: Date | null = null
 let saidDegraded = false
-/** The upper bound of the last window the unjudged line went out for; null since boot. */
+/** The upper bound of the last unjudged count that went out; null since boot. */
 let unjudgedSaidUntil: Date | null = null
 
 async function lastMark(now: Date): Promise<Date> {
@@ -89,7 +94,8 @@ async function severeFlags(since: Date, until: Date): Promise<number> {
   // key (`unjudgedHides` below), is not severe by confidence; such flags are
   // also left out of the auto-mute count (abuseHiddenCount in
   // lib/moderation/actions.ts). Any other key beside it keeps the flag severe.
-  // The comparisons never raise: `->` gives NULL on an array or a scalar.
+  // The key is UNJUDGED_KEY (lib/moderation/config.ts), spelled out here and
+  // below. The comparisons never raise: `->` gives NULL on an array or a scalar.
   const [row] = await db.$queryRaw<{ n: number }[]>`
     SELECT count(*)::int AS n
       FROM moderation_flags
@@ -97,23 +103,21 @@ async function severeFlags(since: Date, until: Date): Promise<number> {
        AND created_at > ${since} AND created_at <= ${until}
        AND ((confidence >= ${SEVERE_CONFIDENCE}
              AND categories <> jsonb_build_object('profanity', categories -> 'profanity')
-             AND categories <> ${profanityUnjudged})
+             AND categories <> jsonb_build_object('profanity', categories -> 'profanity', 'unjudged', categories -> 'unjudged'))
             OR CASE WHEN jsonb_typeof(categories) = 'object'
                  THEN EXISTS (SELECT 1 FROM jsonb_object_keys(categories) k WHERE k LIKE ANY (${patterns}))
                  ELSE false END)`
   return row?.n ?? 0
 }
 
-/** Exactly `{profanity, unjudged}`: a swear-word hide whose flag `recordHide` has not yet marked judged. */
-const profanityUnjudged = Prisma.sql`jsonb_build_object('profanity', categories -> 'profanity', ${UNJUDGED_KEY}::text, categories -> ${UNJUDGED_KEY}::text)`
-
+/** Pending flags that are exactly `{profanity, unjudged}`: swear-word hides `recordHide` has not marked judged. */
 async function unjudgedHides(since: Date, until: Date): Promise<number> {
   const [row] = await db.$queryRaw<{ n: number }[]>`
     SELECT count(*)::int AS n
       FROM moderation_flags
      WHERE status = 'pending'
        AND created_at > ${since} AND created_at <= ${until}
-       AND categories = ${profanityUnjudged}`
+       AND categories = jsonb_build_object('profanity', categories -> 'profanity', 'unjudged', categories -> 'unjudged')`
   return row?.n ?? 0
 }
 
@@ -144,14 +148,15 @@ export async function runStaffAlertSweep(now: Date = new Date()): Promise<void> 
     const since = await lastMark(now)
     const until = new Date(now.getTime() - COMMIT_GRACE_MS)
     const pending = { status: "pending" as const, created_at: { gt: since, lte: until } }
-    const repeatFrom = new Date(until.getTime() - UNJUDGED_REPEAT_MS)
+    const settled = new Date(until.getTime() - UNJUDGED_SETTLE_MS)
+    const repeatFrom = new Date(settled.getTime() - UNJUDGED_REPEAT_MS)
     const mayRepeat = !unjudgedSaidUntil || unjudgedSaidUntil <= repeatFrom
     const [users, messages, events, severe, unjudged, unchecked] = await Promise.all([
       db.user_reports.count({ where: pending }),
       db.message_reports.count({ where: pending }),
       db.event_reports.count({ where: pending }),
       severeFlags(since, until),
-      mayRepeat ? unjudgedHides(unjudgedSaidUntil ?? repeatFrom, until) : 0,
+      mayRepeat ? unjudgedHides(unjudgedSaidUntil ?? repeatFrom, settled) : 0,
       // `deleted_at: null` so the partial index chat_messages_unchecked_idx serves it.
       db.chat_messages.count({
         where: { moderation_status: "unchecked", deleted_at: null, created_at: { gte: new Date(now.getTime() - HOUR_MS) } },
@@ -176,7 +181,7 @@ export async function runStaffAlertSweep(now: Date = new Date()): Promise<void> 
     }
 
     saidDegraded = degraded
-    if (unjudged > 0) unjudgedSaidUntil = until
+    if (unjudged > 0) unjudgedSaidUntil = settled
     memoryMark = until
     await writeMark(MARK_KEY, until.toISOString())
   } catch (error) {

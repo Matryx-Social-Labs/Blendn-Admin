@@ -6,8 +6,9 @@ import { NextRequest } from "next/server"
  * nothing; a threat below its hide line, a severe flag; no verdict, the line
  * "hidden lines the model could not judge". None of them mutes.
  *
- * The tests run in order: the unjudged line is said once and then held for
- * `UNJUDGED_REPEAT_MS`, so the test that expects it comes last.
+ * The unjudged line is said once and then held for 15 minutes, so the test
+ * that expects it reads a sweeper of its own. Its exact count is
+ * staff-alert.itest.ts's.
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 // The model, by what the line says: "[threat]" a threat below its hide line, "[down]" a failed call.
@@ -27,6 +28,7 @@ jest.mock("@/lib/moderation/openai-moderation", () => {
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { AUTO_MUTE_HIDDEN_COUNT } from "@/lib/moderation/config"
+import { MODERATION_TIMEOUT_MS } from "@/lib/moderation/openai-moderation"
 import { runStaffAlertSweep } from "@/lib/staff-alert"
 import { db, closeDb, makeUser, onboard, testId } from "./helpers"
 
@@ -151,13 +153,23 @@ it("alerts a swear-word hide the model flags as a threat as a severe flag, and d
 
 it("tells staff about swear-word hides the model could not judge, in one message, and mutes nobody", async () => {
   const r = await liveRoom()
-  await sweep()
   for (let i = 1; i <= AUTO_MUTE_HIDDEN_COUNT; i++) await sendHidden(r, `${i} [down] chutiya`)
   const flags = await flagsWhen(r, (f) => f.length === AUTO_MUTE_HIDDEN_COUNT)
   expect(flags.map(keys)).toEqual(Array(AUTO_MUTE_HIDDEN_COUNT).fill("profanity,unjudged"))
-  const text = await sweep()
+  // A sweeper just booted: what this database held before is no concern of this test.
+  let fresh!: typeof import("@/lib/staff-alert")
+  jest.isolateModules(() => {
+    fresh = require("@/lib/staff-alert") // eslint-disable-line @typescript-eslint/no-require-imports
+  })
+  const sweepFresh = async (settleMs: number) => {
+    fetchMock.mockClear()
+    await fresh.runStaffAlertSweep(new Date(Date.now() + 10_000 + settleMs))
+    return fetchMock.mock.calls.length ? (JSON.parse(fetchMock.mock.calls[0][1].body).text as string) : null
+  }
+  // Past the settle delay: an answer that was still on its way would have arrived.
+  const text = await sweepFresh(2 * MODERATION_TIMEOUT_MS)
   expect(fetchMock).toHaveBeenCalledTimes(1)
-  expect(text).toContain(`${AUTO_MUTE_HIDDEN_COUNT} hidden lines the model could not judge.`)
-  expect(text).not.toContain("severe")
+  const said = Number(/(\d+) hidden lines the model could not judge\./.exec(text ?? "")?.[1])
+  expect(said).toBeGreaterThanOrEqual(AUTO_MUTE_HIDDEN_COUNT)
   expect(await memberStatus(r)).toBe("active")
 })
