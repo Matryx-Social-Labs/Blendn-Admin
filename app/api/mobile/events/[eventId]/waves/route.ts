@@ -185,14 +185,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Already waved here: the same answer as the first time, and nothing else (W1).
     if (await hasWaved(eventId, fromUserId, toUserId)) return successResponse({ sent: true, mutual: false })
 
-    /*
-     * Stored under the sender's lock, which also counts the live ping's pair
-     * window (W2) — only now, after every refusal, so a wave that could not
-     * have been delivered does not start the clock, and never for a wave back.
-     */
-    const stored = await recordWave(eventId, fromUserId, toUserId, { answering })
+    // Stored under the sender's lock, which re-checks the caps.
+    const stored = await recordWave(eventId, fromUserId, toUserId)
     if (!stored.recorded) {
-      // Two taps at once: the other one stored it. Capped in that same race, or by the pair window.
+      // Two taps at once: the other one stored it, or the caps were reached in that same race.
       return stored.capped ? capResponse(stored.capped) : successResponse({ sent: true, mutual: false })
     }
 
@@ -264,12 +260,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
 /** A sender cap (W3-W6): about the sender only, never the person they waved at. */
 function capResponse(cap: WaveCap): NextResponse {
-  if (cap.cap === "pair") {
-    return NextResponse.json(
-      { success: false, error: "You waved at them a moment ago", errorCode: ErrorCode.WAVE_TOO_SOON, retryAfter: cap.retryAfter },
-      { status: 429, headers: { "Retry-After": cap.retryAfter.toString() } }
-    )
-  }
   const error = cap.cap === "day" ? "You’ve waved a lot today. Try again later." : "You’ve waved a lot in this room. Try again in a bit."
   return NextResponse.json(
     { success: false, error, errorCode: ErrorCode.RATE_LIMITED, retryAfter: cap.retryAfter },

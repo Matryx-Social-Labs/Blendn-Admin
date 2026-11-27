@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { BadgeSchema, OverlapSchema, PaginationMetaSchema, DeviceInfoSchema, RoomUserRefSchema, RoomLensSchema, StoredLocationSchema } from "./common"
+import { BadgeSchema, OverlapSchema, PaginationMetaSchema, DeviceInfoSchema, RoomUserRefSchema, RoomLensSchema, RoomPersonFactsFields, StoredLocationSchema } from "./common"
 import { EventTicketingSchema } from "./tickets"
 
 /** Likes and waves name somebody only by this event's handle (SCRUM-371). */
@@ -712,8 +712,9 @@ export const MatchListResponseSchema = z
           .int()
           .nullable()
           .describe(
-            "Whole years, derived server-side from the birth date. Never a birth date. Already public via `publicProfileFields` on /profiles/{userId}, so this carries no new exposure — and unlike `workField` it is NOT suppressed in a small room, since withholding it would only make the roster disagree with the profile one tap away."
+            "Whole years, derived server-side from the birth date. Never a birth date. Only when `revealed`; null before a reveal (D-030), when `ageBand` and `tenure` say what the row may. The key stays for installed builds."
           ),
+        ...RoomPersonFactsFields,
         insideNow: z
           .boolean()
           .describe("Checked in now. Every `true` card sorts before every `false` one, whatever the score (SCRUM-1055)."),
@@ -919,8 +920,9 @@ export const AttendeeListResponseSchema = z
          */
         name: z.string(),
         image: z.string().nullable().optional(),
-        age: z.number().nullable(),
-        location: StoredLocationSchema,
+        age: z.number().nullable().describe("Only beside their name; null beside a pseudonym (D-030)."),
+        location: StoredLocationSchema.openapi({ description: "Only beside their name; null beside a pseudonym (D-030). Otherwise the city as stored: null while it is still coordinates, and a read never looks it up (SCRUM-1229)." }),
+        ...RoomPersonFactsFields,
         checkInTime: z.string().datetime(),
       })
     ),

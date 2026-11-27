@@ -12,7 +12,14 @@ import { uniqueEventSlug } from "@/lib/event-slug"
 import { resolveEventCity } from "@/lib/location"
 import { eventCityToStore } from "@/lib/cities"
 import { db } from "@/lib/db"
-import { EVENT_TIMES_ORDER_SENTENCE, EventStatusMovedError, EventTimesOrderError, EventTimesRefusedError, updateEventTracked } from "@/lib/event-change"
+import {
+  EVENT_TIMES_ORDER_SENTENCE,
+  EventDelistedError,
+  EventStatusMovedError,
+  EventTimesOrderError,
+  EventTimesRefusedError,
+  updateEventTracked,
+} from "@/lib/event-change"
 import { cancelEventCheckIns, eventWriteAction, isCancellingEvent } from "@/lib/event-cancellation"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
@@ -509,10 +516,21 @@ export async function PATCH(req: Request, { params }: RouteContext) {
             }
           : {}),
       },
-    }, { fromStatus: event.status }).catch((error: unknown) => {
-      if (error instanceof EventStatusMovedError || error instanceof EventTimesOrderError || error instanceof EventTimesRefusedError) return error
+    }, {
+      fromStatus: event.status,
+      // Only an admin changes a delisted event's visibility (SCRUM-1394). `role` is read for app_admin only.
+      ...(session.user.role === "app_admin" && { relistBy: session.user.id }),
+    }).catch((error: unknown) => {
+      if (
+        error instanceof EventStatusMovedError ||
+        error instanceof EventTimesOrderError ||
+        error instanceof EventTimesRefusedError ||
+        error instanceof EventDelistedError
+      )
+        return error
       throw error
     })
+    if (updatedEvent instanceof EventDelistedError) return errorResponse(updatedEvent.message, 403)
     if (updatedEvent instanceof EventStatusMovedError) return errorResponse(updatedEvent.message, 409)
     if (updatedEvent instanceof EventTimesOrderError) return errorResponse(EVENT_TIMES_ORDER_SENTENCE, 400)
     if (updatedEvent instanceof EventTimesRefusedError) return errorResponse(updatedEvent.refusal.sentence, 409, updatedEvent.refusal.code)

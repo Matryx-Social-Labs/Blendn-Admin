@@ -58,7 +58,7 @@ export const ErrorCode = {
    * block would be a way to find out who blocked you.
    */
   RECIPIENT_NOT_HERE: "RECIPIENT_NOT_HERE",
-  /** You waved at this person less than ten minutes ago. */
+  /** Never sent since SCRUM-1385 (no limit on the pair across rooms); kept because installed clients map it. */
   WAVE_TOO_SOON: "WAVE_TOO_SOON",
   /**
    * You left this room yourself. Distinct from `FORBIDDEN` because the remedy

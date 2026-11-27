@@ -171,7 +171,8 @@ export function duplicatePrefill(source: DuplicateSource, now: Date): DuplicateP
 
 /**
  * The prefill for `?from=<id>`, or null: no uuid, no such event, a deleted
- * one, a venue day, one this person may not edit, or one of an organisation
+ * one, a venue day, one a moderator delisted (a copy would be a way back into
+ * the feed, SCRUM-1394), one this person may not edit, or one of an organisation
  * a new event of theirs would not belong to all read the same, so a stranger
  * learns nothing about an id.
  */
@@ -182,7 +183,7 @@ export async function duplicateFor(
 ): Promise<DuplicatePrefill | null> {
   if (!isUuid(from)) return null
   const source = await db.events.findFirst({
-    where: { id: from, deleted_at: null, kind: "event" },
+    where: { id: from, deleted_at: null, delisted_at: null, kind: "event" },
     // The resolver's fragment last, so its columns are its own; the one overlap, `start_time`, is `true` in both.
     select: { ...duplicateSourceSelect, ...eventPermissionSelect },
   })

@@ -57,7 +57,7 @@ const mixedCase = (label: string) => {
   return `${id[0].toUpperCase()}${id.slice(1)}@Case.Test`
 }
 
-async function passwordUser(email: string, role: "attendee" | "organizer" = "attendee") {
+async function passwordUser(email: string, role: "attendee" | "organizer" | "app_admin" = "attendee") {
   const user = await db.user.create({
     data: { email, name: "Case", role, password: await bcrypt.hash(PASSWORD, 4) },
     select: { id: true },
@@ -99,7 +99,8 @@ describe("signup and sign-in", () => {
 
 it("lets an operator into the dashboard whatever case they type", async () => {
   const typed = mixedCase("eio-dash")
-  const id = await passwordUser(typed.toLowerCase(), "organizer")
+  // An admin: since SCRUM-1247 an organiser's dashboard is a membership, and this file is about the address.
+  const id = await passwordUser(typed.toLowerCase(), "app_admin")
   await expect(authorize({ email: typed, password: PASSWORD })).resolves.toMatchObject({ id })
 })
 

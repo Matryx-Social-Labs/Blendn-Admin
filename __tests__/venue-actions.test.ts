@@ -19,6 +19,7 @@ const mockDb = {
 const mockAuth = jest.fn()
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
+jest.mock("@/lib/org-membership", () => ({ ...jest.requireActual("@/lib/org-membership"), sessionAccount: () => mockSessionAccount(mockDb.user.findUnique()) }))
 // As getAuth() returns it: the jwt callback always writes `signedInAt` (lib/session-revocation.ts).
 jest.mock("@/lib/auth", () => ({
   getAuth: async () => {
@@ -40,6 +41,7 @@ import {
   restoreVenue,
   updateVenue,
 } from "@/lib/venue-actions"
+import { mockSessionAccount } from "./support/session-account"
 
 const MY_ORG = "org_mine"
 /** Toit, Indiranagar — a real pin, so the distances below are real distances. */

@@ -5,6 +5,7 @@
  * with the same list the build-time guard reads (`lib/never-build.ts`).
  */
 const mockDb = {
+  $queryRaw: jest.fn((): Promise<Record<string, unknown>[]> => mockSessionRows(mockDb.user.findUnique())),
   categories: {
     findUniqueOrThrow: jest.fn(),
     findUnique: jest.fn().mockResolvedValue(null),
@@ -24,6 +25,7 @@ jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth
 
 import { createCategory, renameCategory } from "@/lib/category-actions"
 import { neverBuildHits } from "@/lib/never-build"
+import { mockSessionRows } from "./support/session-account"
 
 beforeEach(() => {
   jest.clearAllMocks()

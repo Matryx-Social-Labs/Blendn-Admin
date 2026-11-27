@@ -38,6 +38,13 @@ jest.mock("@/lib/live-snapshot", () => ({ readLiveSnapshot: (...a: unknown[]) =>
 jest.mock("@/lib/live-alert-mail", () => ({ mailLiveAlert: jest.fn() }))
 jest.mock("@/lib/deleted-account-records", () => ({ purgeDeletedAccountRecords: async () => 0 }))
 jest.mock("@/lib/leads", () => ({ purgeLeadPii: async () => 0 }))
+const listPublicObjects = jest.fn()
+jest.mock("@/lib/tigris", () => ({
+  bucketFor: (folder: string) => `${folder}-bucket`,
+  listPublicObjects: (...a: unknown[]) => listPublicObjects(...a),
+  deleteFile: jest.fn(),
+  extractKeyFromUrl: jest.fn(),
+}))
 
 import { reminderPassInFlight, startReminderSweeper, stopReminderSweeper } from "@/lib/reminder-sweeper"
 import { startTicketHoldSweeper, stopTicketHoldSweeper } from "@/lib/ticket-hold-sweeper"
@@ -45,6 +52,7 @@ import { startTicketReconciler, stopTicketReconciler } from "@/lib/ticket-reconc
 import { startPayoutReleaser, stopPayoutReleaser } from "@/lib/payout-release"
 import { startIssueSweeper, stopIssueSweeper } from "@/lib/event-issues"
 import { runSweep as runRetentionSweep } from "@/lib/notification-retention"
+import { startOrphanPhotoSweeper, stopOrphanPhotoSweeper } from "@/lib/photo-orphans"
 
 const SWEEP_MS = 5 * 60_000
 
@@ -168,6 +176,36 @@ describe("the retention loop beats only when both drains did not throw", () => {
     executeRaw.mockResolvedValue(0)
     await runRetentionSweep()
     expect(beat).toHaveBeenCalledWith("notification-retention", 6 * 60 * 60 * 1000)
+  })
+})
+
+describe("the photo-orphans loop beats only when both sweeps came back", () => {
+  const HOUR = 60 * 60 * 1000
+  const failing = (bucket: string) => async (_prefix: string, _cursor: string | undefined, listed: string) => {
+    if (listed === bucket) throw new Error("list refused")
+    return { objects: [], next: undefined }
+  }
+  afterEach(() => stopOrphanPhotoSweeper())
+
+  it.each([
+    ["photo", "profile-bucket"],
+    ["chat upload", "chat-bucket"],
+  ])("the %s sweep failing (null): its error, and no beat", async (label, bucket) => {
+    listPublicObjects.mockImplementation(failing(bucket))
+    startOrphanPhotoSweeper()
+    beat.mockClear()
+    await jest.advanceTimersByTimeAsync(0)
+    expect(logError).toHaveBeenCalledWith(`Orphan ${label} sweep failed`, { error: "list refused" })
+    expect(beat).not.toHaveBeenCalled()
+  })
+
+  it("both came back: one beat", async () => {
+    listPublicObjects.mockImplementation(failing("none"))
+    startOrphanPhotoSweeper()
+    beat.mockClear()
+    await jest.advanceTimersByTimeAsync(0)
+    expect(beat).toHaveBeenCalledTimes(1)
+    expect(beat).toHaveBeenCalledWith("photo-orphans", HOUR)
   })
 })
 
