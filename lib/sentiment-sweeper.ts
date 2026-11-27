@@ -54,9 +54,9 @@ import { classifyWithLexicon, lexiconFallback } from "./sentiment/lexicon"
 export const SWEEP_INTERVAL_MS = 60 * 1000
 /**
  * The heartbeat's interval (lib/heartbeat.ts reports a loop after 3 of them), not the sweep's. With the model timing
- * out, one pass is up to 20 calls, 4 at a time (lib/sentiment/classify.ts), × (20 s + 2 s + 20 s) ≈ 3.5 min and still
- * finishes on the word list: 3 × 3 min clears that plus the minute between passes, so a slow OpenAI is not reported as
- * a stalled loop.
+ * out, a pass stops after its first round of 4 calls (42 s); with one call a round still answering it is up to 20
+ * calls, 4 at a time (lib/sentiment/classify.ts), × (20 s + 2 s + 20 s) ≈ 3.5 min. 3 × 3 min clears that plus the
+ * minute between passes, so a slow OpenAI is not reported as a stalled loop.
  */
 const BEAT_INTERVAL_MS = 3 * 60 * 1000
 
@@ -163,7 +163,8 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
   } catch (error) {
     // No feedback row was written, so the next pass finds the same messages again.
     logger.error("Sentiment write failed", { error: error instanceof Error ? error.message : String(error) })
-    return { classified: 0, hasMore }
+    // Not straight back when the model is down too: each pass would spend a failed round of calls.
+    return { classified: 0, hasMore: hasMore && results.deferred === 0 }
   }
   await routeSafety(written, results, rowOf)
 
@@ -172,7 +173,13 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
 
   // The model failed this pass. The next pass waits the interval (coming straight back would only fail again), and the
   // lines about to leave the window are settled now, whether this pass read them or not.
-  const settled = await settleLastPass(windowStart, lastPassBefore)
+  let settled = 0
+  try {
+    settled = await settleLastPass(windowStart, lastPassBefore)
+  } catch (error) {
+    // The pass still ends and beats; the band is settled by the next failed pass, which counts what it missed.
+    logger.error("Sentiment settle failed", { error: error instanceof Error ? error.message : String(error) })
+  }
   return { classified: written.length + settled, hasMore: false }
 }
 
@@ -276,6 +283,10 @@ interface ToClassify {
  * that -- the `WHERE` skips it, and it is not returned. A message deleted while
  * the model was reading it is simply not joined, where a row per message made
  * that one failed write among the rest.
+ *
+ * A row carries its message's time, not the write's (SCRUM-1481): the live
+ * view counts the last 30 minutes' rows, and a line read hours late, after an
+ * outage, must not count as the last 30 minutes' mood.
  */
 async function writeFeedback(
   results: ReadonlyArray<Awaited<ReturnType<typeof classifyMessages>>[number] & { eventId: string }>
@@ -284,8 +295,8 @@ async function writeFeedback(
   const last = new Map(results.map((r) => [r.id, r]))
   const rows = [...last.values()]
   return db.$queryRaw<{ message_id: string }[]>`
-    INSERT INTO event_feedback (id, event_id, message_id, sentiment, category, topic, confidence, source)
-    SELECT gen_random_uuid(), v.event_id, v.message_id, v.sentiment::feedback_sentiment, v.category::issue_category, v.topic::feedback_topic, v.confidence, v.source::feedback_source
+    INSERT INTO event_feedback (id, event_id, message_id, sentiment, category, topic, confidence, source, created_at)
+    SELECT gen_random_uuid(), v.event_id, v.message_id, v.sentiment::feedback_sentiment, v.category::issue_category, v.topic::feedback_topic, v.confidence, v.source::feedback_source, m.created_at
       FROM unnest(
         ${rows.map((r) => r.eventId)}::uuid[], ${rows.map((r) => r.id)}::uuid[], ${rows.map((r) => r.sentiment)}::text[],
         ${rows.map((r) => r.category)}::text[], ${rows.map((r) => r.topic)}::text[], ${rows.map((r) => r.confidence)}::float8[], ${rows.map((r) => r.source)}::text[]

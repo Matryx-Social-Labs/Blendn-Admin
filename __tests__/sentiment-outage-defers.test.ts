@@ -32,6 +32,8 @@ interface Row {
 }
 
 let waiting: Waiting[] = []
+/** Which of the sweeper's statements throw, to drive its failure paths. */
+let broken: { write?: boolean; band?: boolean } = {}
 const rows = new Map<string, Row>()
 const flagged: string[] = []
 const reads: string[] = []
@@ -39,6 +41,7 @@ const reads: string[] = []
 const queryRaw = jest.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
   const sql = strings.join("?")
   if (sql.includes("INSERT INTO event_feedback")) {
+    if (broken.write) throw new Error("connection reset")
     const [, ids, sentiments, categories, , , sources] = values as string[][]
     ids.forEach((id, i) => rows.set(id, { sentiment: sentiments[i], category: categories[i], source: sources[i] }))
     return ids.map((message_id) => ({ message_id }))
@@ -46,6 +49,7 @@ const queryRaw = jest.fn(async (strings: TemplateStringsArray, ...values: unknow
   const open = waiting.filter((m) => !rows.has(m.id))
   if (sql.includes("OVER ()")) {
     reads.push("band")
+    if (broken.band) throw new Error("connection reset")
     const band = open.filter((m) => m.band)
     const cap = values.find((v) => typeof v === "number") as number
     return band.slice(0, cap).map((m) => ({ ...m, waiting: BigInt(band.length) }))
@@ -118,6 +122,7 @@ const saved = process.env.OPENAI_API_KEY
 beforeEach(() => {
   process.env.OPENAI_API_KEY = "test-key"
   waiting = []
+  broken = {}
   rows.clear()
   flagged.length = 0
   reads.length = 0
@@ -199,22 +204,69 @@ describe("an outage costs a round of calls a pass, not a pass's worth", () => {
     expect(rows.size).toBe(0)
   })
 
-  it("keeps calling when a round had one answer: a bad batch is not an outage", async () => {
+  it("takes a 200 with no labels as an answer: the word list settles it, nothing is deferred, the pass goes on", async () => {
+    // A line can make the model answer {} for its batch; that must not defer the batch or stop the pass.
+    // Negative control (the first cut of this change): no row for any line, and 8 calls.
     waiting = Array.from({ length: 10 }, (_, i) => line(`m${i}`, UNCUED, `room-${i}`))
-    let call = 0
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: "{}" } }] }), { status: 200 }))
+
+    const result = await pass()
+
+    expect(fetchMock).toHaveBeenCalledTimes(10)
+    expect(rows.size).toBe(10)
+    expect([...rows.values()].every((r) => r.source === "lexicon")).toBe(true)
+    expect(result.hasMore).toBe(false)
+    expect(reads).toEqual(["pass"])
+  })
+
+  it("keeps calling when a round had one answer: one failed batch is not an outage", async () => {
+    // Rooms 0-4 answer, 5-9 are down: no round is all failures, so every batch is sent.
+    waiting = Array.from({ length: 10 }, (_, i) => line(`m${i}`, UNCUED, `room-${i}`))
     fetchMock.mockImplementation(async (_url, init) => {
-      call += 1
-      // Every other call answers, so every round has one answer.
-      if (call % 2 === 0) return new Response("", { status: 400 })
-      const [sent] = JSON.parse(JSON.parse(String(init.body)).messages[1].content) as Array<{ id: string }>
-      const results = [{ id: sent.id, sentiment: "neutral", category: "other", topic: null, confidence: 0.9 }]
+      const sent = JSON.parse(JSON.parse(String(init.body)).messages[1].content) as Array<{ id: string }>
+      if (Number(sent[0].id.slice(1)) >= 5) return new Response("", { status: 503 })
+      const results = sent.map((m) => ({ id: m.id, sentiment: "neutral", category: "other", topic: null, confidence: 0.9 }))
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ results }) } }] }), { status: 200 })
     })
 
     await pass()
 
+    expect(fetchMock).toHaveBeenCalledTimes(5 + 5 * 2)
+    expect([...rows.keys()].sort()).toEqual(["m0", "m1", "m2", "m3", "m4"])
+  })
+
+  it.each([400, 401, 404])("takes a %i as configuration or a bad request, not an outage: the word list settles at once", async (status) => {
+    // The same on the next pass (a bad request, a bad key, a retired model): deferring it would hold the lines for 6 h
+    // and stop every pass. Negative control (the first cut of this change): no rows, 4 calls.
+    waiting = Array.from({ length: 10 }, (_, i) => line(`m${i}`, UNCUED, `room-${i}`))
+    fetchMock.mockImplementation(async () => new Response("", { status }))
+
+    const result = await pass()
+
     expect(fetchMock).toHaveBeenCalledTimes(10)
-    expect(rows.size).toBe(5)
+    expect([...rows.values()].every((r) => r.source === "lexicon")).toBe(true)
+    expect(rows.size).toBe(10)
+    expect(result.hasMore).toBe(false)
+    expect(reads).toEqual(["pass"])
+  })
+
+  it("defers a batch whose 200 never delivered its body", async () => {
+    // The headers came, then the body stalled past the timeout: nothing was read, so it is an outage, not an answer.
+    waiting = [line("hindi", HINDI_HELP)]
+    fetchMock.mockImplementation(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => {
+            throw new DOMException("The operation was aborted due to timeout", "TimeoutError")
+          },
+        }) as unknown as Response
+    )
+
+    await pass()
+
+    expect(rows.has("hindi")).toBe(false)
   })
 })
 
@@ -296,6 +348,26 @@ describe("a line about to leave the window gets the word list's guess, every one
     const text = JSON.stringify(windowErrors())
     expect(text).not.toContain("hindi-band")
     expect(text).not.toContain("मदद")
+  })
+})
+
+describe("a database failure in an outage pass", () => {
+  it("does not come straight back when the write failed and the model is down too", async () => {
+    // The word list settles one line, so there is a write to fail.
+    waiting = [line("dj", SETTLED), ...Array.from({ length: 250 }, (_, i) => line(`m${i}`, `${UNCUED} ${i}`))]
+    modelDown()
+    broken = { write: true }
+
+    expect(await pass()).toEqual({ classified: 0, hasMore: false })
+  })
+
+  it("ends the pass when the band's settle fails, with its own error", async () => {
+    waiting = [line("band", HINDI_HELP, "room-a", true)]
+    modelDown()
+    broken = { band: true }
+
+    expect(await pass()).toEqual({ classified: 0, hasMore: false })
+    expect(logger.error).toHaveBeenCalledWith("Sentiment settle failed", { error: "connection reset" })
   })
 })
 

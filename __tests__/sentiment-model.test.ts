@@ -148,8 +148,8 @@ describe("a transient failure is retried once", () => {
     const [result] = await classify()
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    // No row: the next pass reads it again (SCRUM-1481).
-    expect(result).toBeUndefined()
+    // A 404 is the same next pass: configuration, not an outage, so the word list settles it (SCRUM-1481).
+    expect(result.source).toBe("lexicon")
   })
 })
 
@@ -200,20 +200,20 @@ describe("a failure that stays reaches Sentry once, through logger.error", () =>
     const [result] = await classify()
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    // No row: the next pass reads it again (SCRUM-1481).
-    expect(result).toBeUndefined()
+    // A 404 is the same next pass: configuration, not an outage, so the word list settles it (SCRUM-1481).
+    expect(result.source).toBe("lexicon")
     expect(captureMessage).toHaveBeenCalledTimes(1)
     expect(captureMessage.mock.calls[0][1]).toMatchObject({ extra: { status: 404 } })
   })
 
-  it("reports a 200 the model left empty, and leaves the batch for the next pass", async () => {
+  it("reports a 200 the model left empty: an answer, so every message is the word list's guess for good", async () => {
     // Was silent: `if (!content) return out`, no log at any level.
     fetchMock.mockResolvedValueOnce(modelReply(null))
 
     const [result] = await classify()
 
-    // No row: the next pass reads it again (SCRUM-1481).
-    expect(result).toBeUndefined()
+    // A 200 is an answer, not an outage: nothing is deferred (SCRUM-1481).
+    expect(result.source).toBe("lexicon")
     expect(captureMessage).toHaveBeenCalledTimes(1)
     expect(captureMessage.mock.calls[0][1]).toMatchObject({ extra: { labelled: 0, sent: 1, model: DEFAULT_MODEL_UNDER_TEST } })
   })
