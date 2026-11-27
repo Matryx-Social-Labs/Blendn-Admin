@@ -14,7 +14,7 @@ import { NextRequest } from "next/server"
 
 import { buildFeedbackDigest } from "@/lib/feedback-digest"
 import { forVenue } from "@/lib/live-metrics"
-import { buildLiveSnapshot } from "@/lib/live-snapshot"
+import { readLiveSnapshot } from "@/lib/live-snapshot"
 import { occurrenceHereNow } from "@/lib/crews/presence"
 import { matchesForEvent } from "@/lib/matches"
 import { signAccessToken } from "@/lib/mobile-auth"
@@ -110,7 +110,7 @@ describe("SCRUM-890: the live snapshot floors a complaint's count", () => {
     await says(eventId, roomId, members[0], "negative", "safety_conduct")
     for (const m of members.slice(1, 6)) await says(eventId, roomId, m, "negative", "entry_queue")
 
-    const snapshot = (await buildLiveSnapshot(eventId))!
+    const snapshot = (await readLiveSnapshot(eventId, undefined, { social: true }).then((r) => r?.snapshot ?? null))!
 
     expect(snapshot.categories).toEqual(
       expect.arrayContaining([
@@ -122,12 +122,9 @@ describe("SCRUM-890: the live snapshot floors a complaint's count", () => {
     expect(alert).toBeDefined()
     expect(alert.body).not.toMatch(/\d/)
     expect(snapshot.alerts.every((a) => !/\d+ (safety|entry)/.test(a.body))).toBe(true)
-    expect(forVenue(snapshot).categories).toEqual(
-      expect.arrayContaining([
-        { category: "safety_conduct", count: "quiet" },
-        { category: "entry_queue", count: "5-9" },
-      ])
-    )
+    // A venue is told what was raised, never how much (SCRUM-1500): a bucket beside its negatives narrowed a held count.
+    const read = (await readLiveSnapshot(eventId))!
+    expect(forVenue(read.snapshot, read.negatives).raised).toEqual(["safety_conduct", "entry_queue"])
   })
 })
 

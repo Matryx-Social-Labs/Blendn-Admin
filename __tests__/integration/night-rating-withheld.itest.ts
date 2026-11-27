@@ -89,7 +89,9 @@ describe("the feedback digest, as a venue reads another host's night (step 15)",
     const venue = await digest(eventId, "venue")
     // The Nights row's rule (`discloseGroup`), so the two pages agree; zero names nobody and stays itself.
     expect(venue).toMatchObject({ view: "venue", total: { atLeast: 2 }, counts: { positive: "few", neutral: 0, negative: "few" } })
-    expect(venue.categories.every((c) => c.count === null && c.suppressed)).toBe(true)
+    // Named, never counted (SCRUM-1500).
+    expect(venue.categories).toEqual([])
+    expect(venue.raised).toEqual(["entry_queue"])
     expect(venue.messages).toEqual([])
     // The organiser reads positive and neutral exactly. The negatives' one category is held with nothing shown beside it,
     // so the negatives are a band of five and the total with them (SCRUM-1441, D-012). No rows: three people cannot be

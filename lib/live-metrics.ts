@@ -8,7 +8,7 @@
  * server-only.
  */
 
-import { countText, liveCountBucket, midpoint, plus, type CountRange, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type LiveCountBucket } from "./disclosure"
+import { countText, liveCountBucket, midpoint, plus, raisedCategories, type CountRange, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type LiveCountBucket } from "./disclosure"
 
 export type { FewCount, HeldTotal }
 
@@ -148,7 +148,11 @@ export interface VenueLiveSnapshot {
   activeChatters30m: LiveCountBucket
   openFlags: number
   sentiment: { positive: LiveCountBucket; neutral: LiveCountBucket; negative: LiveCountBucket }
-  categories: Array<{ category: string; count: LiveCountBucket }>
+  /**
+   * The complaint categories of the last 30 minutes, named without a count (`raisedCategories`, SCRUM-1500): a bucket
+   * beside the negatives' narrowed a held one at its edges (negative 7, crowding "5-9": entry_queue 1 or 2).
+   */
+  raised: string[]
   alerts: LiveAlert[]
 }
 
@@ -287,9 +291,7 @@ export function deriveAlerts(
   // Decided and told on the disclosed figures (D-012): a band's midpoint, as the bar draws it, so the alert firing or
   // its words never narrow a held-back count the screen does not.
   const { positive, neutral, negative } = snapshot.sentiment
-  const classified = positive + neutral + midpoint(negative)
-  // A threshold on a handful of messages is noise, not a mood.
-  if (classified >= 10 && midpoint(negative) / classified >= 0.4) {
+  if (moodSliding(positive, neutral, midpoint(negative))) {
     alerts.push({
       kind: "mood_sliding",
       severity: "warning",
@@ -373,13 +375,34 @@ export function alertsForVenue<T extends { kind: string; body: string }>(alerts:
   })
 }
 
+/** The mood alert's rule. A threshold on a handful of messages is noise, not a mood. */
+function moodSliding(positive: number, neutral: number, negative: number): boolean {
+  const classified = positive + neutral + negative
+  return classified >= 10 && negative / classified >= 0.4
+}
+
+/**
+ * The host's alerts with the mood alert decided again on the window's exact negatives, for a venue: decided on the
+ * band's middle, whether it fired moved with where the held count sat in the band, and beside the exact negatives the
+ * venue reads that narrowed it (SCRUM-1500). The venue's body names no figure (`FOR_THE_VENUE`).
+ */
+function withVenueMood(s: LiveSnapshot, negatives: number): LiveAlert[] {
+  const rest = s.alerts.filter((a) => a.kind !== "mood_sliding")
+  if (!moodSliding(s.sentiment.positive, s.sentiment.neutral, negatives)) return rest
+  return [...rest, { kind: "mood_sliding", severity: "warning", title: "Mood sliding", body: "" }]
+}
+
 /**
  * The host's snapshot as a venue may see it.
  *
  * Field by field rather than a spread, so a figure added to `LiveFigures` later
  * reaches a venue only when somebody writes it in here.
  */
-export function forVenue(s: LiveSnapshot): VenueLiveSnapshot {
+export function forVenue(
+  s: LiveSnapshot,
+  /** The window's exact negatives (`readLiveSnapshot`), never the host's band: see `negatives` there. */
+  negatives: number
+): VenueLiveSnapshot {
   return {
     view: "venue",
     eventId: s.eventId,
@@ -400,9 +423,9 @@ export function forVenue(s: LiveSnapshot): VenueLiveSnapshot {
     sentiment: {
       positive: liveCountBucket(s.sentiment.positive),
       neutral: liveCountBucket(s.sentiment.neutral),
-      negative: liveCountBucket(midpoint(s.sentiment.negative)),
+      negative: liveCountBucket(negatives),
     },
-    categories: s.categories.map((c) => ({ category: c.category, count: liveCountBucket(c.count ?? 0) })),
-    alerts: alertsForVenue(s.alerts),
+    raised: raisedCategories(s.categories, negatives),
+    alerts: alertsForVenue(withVenueMood(s, negatives)),
   }
 }

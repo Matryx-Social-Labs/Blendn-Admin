@@ -1,5 +1,5 @@
 import { getOccupancy, getOccupancies } from "@/lib/occupancy"
-import { buildLiveSnapshot } from "@/lib/live-snapshot"
+import { readLiveSnapshot } from "@/lib/live-snapshot"
 
 import { closeSession, openSession } from "@/lib/presence-sessions"
 import { db, closeDb, makeUser, makeEvent, occurrenceOf, testId, putInRoom } from "./helpers"
@@ -224,7 +224,7 @@ describe("the two screens must agree", () => {
       data: { status: "checked_out", check_out_time: new Date() },
     })
 
-    const snapshot = await buildLiveSnapshot(eventId)
+    const snapshot = await readLiveSnapshot(eventId, undefined, { social: true }).then((r) => r?.snapshot ?? null)
     const occ = await getOccupancy(eventId)
     expect(snapshot).not.toBeNull()
     expect(snapshot!.inside).toBe(occ.inside)
@@ -295,7 +295,7 @@ describe("getOccupancy says how much of the room was seen", () => {
 
     const occ = await getOccupancy(eventId)
     expect(occ).toMatchObject({ inside: 4, guestsInside: 3, staffInside: 1, unconfirmed: 2 })
-    const snapshot = await buildLiveSnapshot(eventId)
+    const snapshot = await readLiveSnapshot(eventId, undefined, { social: true }).then((r) => r?.snapshot ?? null)
     expect(snapshot!.unconfirmed).toBe(occ.unconfirmed)
   })
 })
