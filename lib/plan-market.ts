@@ -32,9 +32,14 @@ export function mayBuyIn(countries: readonly (string | null)[]): boolean {
  * box (SCRUM-1447). The label is free text its owner can type (`updateVenue`, an event's city), the pin is where the
  * door is: a "Toronto" label on a Bengaluru pin, or on no pin, says nothing. Null is "says nothing".
  *
- * Accepted residual: a listing whose label AND pin are both abroad still counts, and a venue owner can create one
- * (owned at once; in a preview city nobody sees it). Closing that needs the venue verified, and nobody is locked
- * before about March 2027 (register D-011, review 2027-02-01).
+ * Accepted residual: a listing whose label AND pin are both abroad still counts, and a host can make one: a venue
+ * owner creates a venue there (owned at once; in a preview city nobody sees it), an organizer publishes an event
+ * there, and either can move it back later (the answer is read now, never kept). Closing that needs the listing
+ * verified, and nobody is locked before about March 2027 (register D-011, review 2027-02-01).
+ *
+ * Known gap the other way: a name the catalogue folds into a city but whose place is outside that city's box (a
+ * Brampton or western Mississauga pin against Toronto's) says nothing, so that Canadian host is offered Buy. The fix
+ * is the city's box, which is data (`/dashboard/markets`).
  */
 export function marketOf(
   catalogue: Catalogue,
@@ -52,8 +57,9 @@ export async function mayBuyHere(orgId: string): Promise<boolean> {
     // Analytics (SCRUM-1277), so the evidence must cost something: a Toronto draft nobody sees would be a free pass.
     // `status` is a non-null enum, so `not` keeps every other row.
     // No `distinct`: with the pin in the select nearly every row is distinct, and Prisma deduped in memory anyway.
-    // ponytail: every live row of the organisation comes back (three columns); at thousands of events per
-    // organisation, group by (city, rounded pin) in SQL, then a partial (organizer_org_id) index if measured slow.
+    // ponytail: every live row of the organisation comes back (three columns, through the plain org-id indexes); at
+    // thousands of events per organisation, select DISTINCT city, latitude, longitude in SQL (exact, never a rounded
+    // pin: rounding can cross a box edge), then a partial index on the live rows if measured slow.
     db.events.findMany({
       where: { organizer_org_id: orgId, deleted_at: null, status: { not: "draft" }, ...realEventsWhere },
       select: { city: true, latitude: true, longitude: true },
