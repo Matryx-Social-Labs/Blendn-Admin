@@ -88,7 +88,10 @@ describe("feedback through the 180-day purge", () => {
 
   it("shows real figures before it: a disclosed category, a held-back one, and quotes", async () => {
     before = { host: await figures("host"), venue: await figures("venue") }
-    expect(before.host.figures.total).toBe(17)
+    // Exactly one category held (safety_conduct) beside entry_queue's 7: the negatives, and the total with them, are a band
+    // of five (SCRUM-1441, D-012). The rows survive the purge, so the test below holds the band too.
+    expect(before.host.figures.total).toEqual({ min: 17, max: 21 })
+    expect(before.host.figures.counts.negative).toEqual({ min: 8, max: 12 })
     expect(before.host.figures.topics).toEqual([{ topic: "music", people: 6 }])
     expect(before.venue.figures.topics).toEqual([])
     expect(before.host.figures.categories).toEqual(

@@ -288,6 +288,22 @@ const chatReferences = () => db.$queryRaw<{ src: string; id: string; ref: string
    WHERE action = ANY(${AUDIT_ACTIONS_WITH_KEYS}) AND details::text ~* ${NAMES_RAW_CHAT}
 `
 
+/**
+ * Every raw chat key a stored string names, by the id of the row naming it, and
+ * the strings `chatKeysIn` cannot read (SCRUM-1471: the room purge leaves an
+ * object in storage while another row still shows it).
+ */
+export async function rawChatReferences(): Promise<{ named: { id: string; key: string }[]; unreadable: { id: string; ref: string }[] }> {
+  const named: { id: string; key: string }[] = []
+  const unreadable: { id: string; ref: string }[] = []
+  for (const { id, ref } of await chatReferences()) {
+    const keys = chatKeysIn(ref)
+    if (keys) keys.forEach((key) => named.push({ id, key }))
+    else unreadable.push({ id, ref })
+  }
+  return { named, unreadable }
+}
+
 const chatTarget: Target = {
   label: "chat upload",
   bucket: bucketFor("chat"),

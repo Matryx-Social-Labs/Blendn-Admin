@@ -1,4 +1,4 @@
-import { discloseBreakdown, fewCount, type FewCount, type HeldTotal } from "@/lib/disclosure"
+import { discloseBreakdown, fewCount, type CountRange, type FewCount, type HeldTotal } from "@/lib/disclosure"
 import { countLabel } from "@/lib/dashboard-format"
 import { moodSplit } from "@/lib/feedback-digest"
 import { venueMood } from "@/lib/venue-nights"
@@ -19,15 +19,15 @@ function* everyNight(): Generator<Moods> {
       for (let negative = 0; negative <= MAX; negative++) yield { positive, neutral, negative }
 }
 
-const partsOf = (c: { positive: FewCount; neutral: FewCount; negative: FewCount }) => [c.positive, c.neutral, c.negative]
+const partsOf = (c: { positive: FewCount; neutral: FewCount; negative: FewCount | CountRange }) => [c.positive, c.neutral, c.negative]
 
 /**
  * Every hidden part a reader could pin down from what is shown. Nights that
  * print the same thing are grouped; within a group, each part shown as a few
  * must still be any of 1–4. One value left over is a part given back.
  */
-function recoverable(disclose: (c: Moods) => { parts: FewCount[]; total: number | HeldTotal }): string[] {
-  const groups = new Map<string, { parts: FewCount[]; seen: Set<number>[] }>()
+function recoverable(disclose: (c: Moods) => { parts: (FewCount | CountRange)[]; total: number | HeldTotal | CountRange }): string[] {
+  const groups = new Map<string, { parts: (FewCount | CountRange)[]; seen: Set<number>[] }>()
   for (const c of everyNight()) {
     const shown = disclose(c)
     const key = JSON.stringify(shown)

@@ -168,7 +168,8 @@ export default async function FeedbackPage({
                 <b className="font-bold tabular-nums text-foreground">{countLabel(neutral)}</b> neutral
               </span>
               <span>
-                <b className="font-bold tabular-nums text-destructive">{countLabel(negative)}</b>{" "}
+                {/* A band ("23–27", D-012) never breaks at its dash. */}
+                <b className="whitespace-nowrap font-bold tabular-nums text-destructive">{countLabel(negative)}</b>{" "}
                 negative
               </span>
             </div>
@@ -193,7 +194,7 @@ export default async function FeedbackPage({
               ) : topIssue ? (
                 <>
                   The negatives are the takeaway, and{" "}
-                  <b className="font-medium text-foreground">
+                  <b className="whitespace-nowrap font-medium text-foreground">
                     {topIssue.count} of {countLabel(negative)}
                   </b>{" "}
                   are about{" "}
