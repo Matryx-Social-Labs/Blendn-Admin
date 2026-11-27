@@ -74,7 +74,8 @@ export function compactCount(n: number): string {
 export function hereRange(inside: number, unconfirmed: number): { label: string; spoken: string } {
   const seen = inside - unconfirmed
   const label = compactCount(seen) === compactCount(inside) ? compactCount(inside) : `${compactCount(seen)}–${compactCount(inside)}`
-  const spoken = seen === inside ? `${formatNumber(inside)} people here` : `${formatNumber(seen)} to ${formatNumber(inside)} people here`
+  const people = inside === 1 ? "person" : "people"
+  const spoken = seen === inside ? `${formatNumber(inside)} ${people} here` : `${formatNumber(seen)} to ${formatNumber(inside)} ${people} here`
   return { label, spoken }
 }
 

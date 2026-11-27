@@ -1,6 +1,7 @@
 import { formatNumber, hereRange } from "@/lib/dashboard-format"
 import { liveCountLabel, type LiveCountBucket } from "@/lib/disclosure"
 import type { Occupancy } from "@/lib/occupancy"
+import { CONFIRMED_WINDOW_MINUTES } from "@/lib/presence"
 import { cn } from "@/lib/utils"
 
 /**
@@ -77,7 +78,7 @@ export function OccupancyHero({
   // The bar's domain stretches past capacity when the room is over it, so the
   // dashed capacity marker lands inside the track rather than at its very end.
   const guests = exact?.guestsInside ?? 0
-  // Seen guests, at most: `unconfirmed` counts staff too, so the solid part never claims more guests than there are.
+  // An upper bound on seen guests: `unconfirmed` has no guest/staff split, so seen staff count here too; capped at the guests.
   const seen = exact ? Math.min(guests, Math.max(0, exact.inside - exact.unconfirmed)) : 0
   const domain = capacity === null ? Math.max(guests, 1) : Math.max(capacity, guests)
   const guestPct = Math.min((guests / domain) * 100, 100)
@@ -120,9 +121,11 @@ export function OccupancyHero({
             <span className="text-base text-muted-foreground">in the room</span>
           </>
         )}
+        {/* Announced once, on crossing: always on the page, and its words do not move with the count (the pill's do, every tick). */}
+        <span role="status" className="sr-only">{over ? "Over stated capacity" : ""}</span>
         {over ? (
           /* Ink on orange, never white — white on #F05423 is 3.4:1 and fails AA. */
-          <span className="rounded-full bg-primary px-2.5 py-0.5 text-[0.8125rem] font-bold tabular-nums text-primary-foreground">
+          <span aria-hidden="true" className="rounded-full bg-primary px-2.5 py-0.5 text-[0.8125rem] font-bold tabular-nums text-primary-foreground">
             {exact ? `${formatNumber(overBy)} over stated capacity` : "over stated capacity"}
           </span>
         ) : null}
@@ -161,6 +164,7 @@ export function OccupancyHero({
             aria-valuenow={exact.fillPct ?? 0}
             aria-valuemin={0}
             aria-valuemax={100}
+            aria-valuetext={`${exact.fillPct ?? 0}%: ${formatNumber(guests)} guests, up to ${formatNumber(seen)} of them seen in the last ${CONFIRMED_WINDOW_MINUTES} minutes`}
             aria-label={`Fill: ${formatNumber(guests)} guests of capacity ${formatNumber(capacity)}`}
             className="relative h-2 rounded-full bg-surface-raised"
           >

@@ -194,13 +194,26 @@ describe("the venue's copy stays the rounded high end", () => {
 })
 
 describe("a screen reader is not told the range every five seconds", () => {
-  it("keeps the hero out of every live region; the stale line's region is the only one", () => {
+  it("keeps the range out of every live region: the stale line's and the capacity crossing's are the only ones, empty while nothing happened", () => {
     const html = render(host())
-    expect(html.match(/role="status"|aria-live/g)).toEqual(['role="status"'])
-    // ...and that region is empty while the figures are live, whatever the range does.
-    expect(html).toMatch(/<div role="status"[^>]*><\/div>/)
-    expect(render(host({ unconfirmed: 20 }))).toMatch(/<div role="status"[^>]*><\/div>/)
-    expect(hero(html)).not.toMatch(/aria-live|role="status"|role="alert"/)
+    expect(html.match(/role="status"|aria-live|role="alert"/g)).toEqual(['role="status"', 'role="status"'])
+    // ...both empty while the figures are live and under capacity, whatever the range does.
+    for (const h of [html, render(host({ unconfirmed: 20 })), render(host({ inside: 60, guestsInside: 60 }))]) {
+      expect(h).toMatch(/<div role="status"[^>]*><\/div>/)
+      expect(h).toMatch(/<span role="status" class="sr-only"><\/span>/)
+    }
+  })
+
+  it("says the capacity crossing once, in words that do not change with the count", () => {
+    const at = (inside: number) => hero(render(host({ inside, guestsInside: inside, capacity: 50, fillPct: inside * 2, overCapacity: true })))
+    expect(at(52)).toContain('<span role="status" class="sr-only">Over stated capacity</span>')
+    expect(at(53)).toContain('<span role="status" class="sr-only">Over stated capacity</span>')
+    // The pill's number moves every tick; it is for the eye.
+    expect(at(53)).toMatch(/aria-hidden="true"[^>]*>3 over stated capacity</)
+  })
+
+  it("gives the bar the low end too", () => {
+    expect(hero(render(host()))).toContain('aria-valuetext="65%: 52 guests, up to 38 of them seen in the last 30 minutes"')
   })
 
   it("reads the range once, as words, and hides the glyphs from it", () => {

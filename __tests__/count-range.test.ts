@@ -38,6 +38,8 @@ describe("hereRange", () => {
   it("is one number when everybody was seen", () => {
     expect(hereRange(52, 0)).toEqual({ label: "52", spoken: "52 people here" })
     expect(hereRange(0, 0)).toEqual({ label: "0", spoken: "0 people here" })
+    expect(hereRange(1, 0)).toEqual({ label: "1", spoken: "1 person here" })
+    expect(hereRange(1, 1)).toEqual({ label: "0–1", spoken: "0 to 1 person here" })
   })
 
   it("starts at 0 when nobody was seen", () => {
