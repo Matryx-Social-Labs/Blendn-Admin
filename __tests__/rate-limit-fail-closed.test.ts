@@ -167,7 +167,12 @@ describe("a refused key's log line (SCRUM-1512)", () => {
       // A key with no identifier in it is logged as it is.
       await expect(hit("entry-wrong", 60_000, { failClosed: true })).rejects.toBeInstanceOf(StoreUnavailable)
       expect(warn.mock.calls[6][1]).toMatchObject({ key: "entry-wrong" })
+      // No client that can answer at all: refused before any command, the same line shape.
+      fake.isReady = false
+      await expect(hit(keys[0], 60_000, { failClosed: true })).rejects.toBeInstanceOf(StoreUnavailable)
+      expect(warn.mock.calls[7]).toEqual(["Fail-closed limiter refused: rate limit store unavailable", { key: logged[0] }])
     } finally {
+      fake.isReady = true
       warn.mockRestore()
     }
   })
