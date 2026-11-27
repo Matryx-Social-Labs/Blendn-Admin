@@ -12,7 +12,13 @@ export {} // a module, so its names stay out of the global scope the sibling tes
 
 const mockFindMany = jest.fn()
 jest.mock("@/lib/db", () => ({ db: { user: { findMany: (...args: unknown[]) => mockFindMany(...args) } } }))
-jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), error: jest.fn() } }))
+const mockWarn = jest.fn()
+jest.mock("@/lib/logger", () => ({ logger: { warn: (...args: unknown[]) => mockWarn(...args), error: jest.fn() } }))
+/** The server's `io`, as lib/socket-server.ts leaves it on `globalThis`: each `in(user:<id>).disconnectSockets` is an eviction. */
+const mockEvict = jest.fn()
+globalThis.__blendnSocketIo = {
+  in: (room: string) => ({ disconnectSockets: () => mockEvict(room.replace(/^user:/, "")) }),
+} as unknown as typeof globalThis.__blendnSocketIo
 
 type Blocklist = typeof import("@/lib/account-blocklist")
 
@@ -26,7 +32,9 @@ function freshCopy(): Blocklist {
 
 const shared = globalThis as typeof globalThis & { __blendnBlocklist?: unknown }
 const NOW = new Date("2026-10-18T12:00:00.000Z")
-const blockedRow = (id: string) => ({ id, deletedAt: null, suspended_at: new Date(NOW.getTime() - 1000), mobile_sessions_revoked_at: null })
+const blockedRow = (id: string) => ({ id, deletedAt: null, suspended_at: new Date(NOW.getTime() - 1000), mobile_sessions_revoked_at: null, profile: null })
+/** Stamped as known to be under 18 (scripts/under-18-accounts.ts), in another process: only the database says so. */
+const stampedRow = (id: string) => ({ id, deletedAt: null, suspended_at: null, mobile_sessions_revoked_at: null, profile: { under_18_since: new Date(NOW.getTime() - 1000) } })
 const issued = () => Math.floor(NOW.getTime() / 1000) - 5
 
 /** A database read the test settles by hand. */
@@ -42,6 +50,8 @@ beforeEach(() => {
   jest.useFakeTimers({ now: NOW, doNotFake: ["setImmediate", "nextTick"] })
   delete shared.__blendnBlocklist
   mockFindMany.mockReset().mockResolvedValue([])
+  mockEvict.mockReset()
+  mockWarn.mockReset()
 })
 afterEach(() => jest.useRealTimers())
 
@@ -153,5 +163,51 @@ describe("recentlyBlocked refresh", () => {
     }
     expect(await answeredWhileReadPends(59_000)).toBe(true)
     expect(await answeredWhileReadPends(61_000)).toBe(false)
+  })
+})
+
+describe("an account locked or erased in another process", () => {
+  it("refuses a token of an account stamped under 18 in the lookback", async () => {
+    mockFindMany.mockResolvedValue([stampedRow("minor")])
+    const { recentlyBlocked } = freshCopy()
+    expect(await recentlyBlocked("minor", issued())).toBe(true)
+    expect(await recentlyBlocked("adult", issued())).toBe(false)
+  })
+
+  it("lets the account back in at the next refresh once a correction clears the stamp", async () => {
+    mockFindMany.mockResolvedValueOnce([stampedRow("minor")])
+    const { recentlyBlocked } = freshCopy()
+    expect(await recentlyBlocked("minor", issued())).toBe(true)
+
+    jest.advanceTimersByTime(61_000)
+    mockFindMany.mockResolvedValueOnce([])
+    expect(await recentlyBlocked("minor", issued())).toBe(false)
+  })
+
+  it("closes the sockets of each newly blocked account once, not at every refresh it stays blocked", async () => {
+    mockFindMany.mockResolvedValueOnce([blockedRow("held")])
+    const { recentlyBlocked } = freshCopy()
+    await recentlyBlocked("x", issued())
+    expect(mockEvict.mock.calls).toEqual([["held"]])
+
+    jest.advanceTimersByTime(61_000)
+    mockFindMany.mockResolvedValueOnce([blockedRow("held"), stampedRow("minor"), { ...blockedRow("gone"), suspended_at: null, deletedAt: new Date(NOW.getTime() - 1000) }])
+    await recentlyBlocked("x", issued())
+    expect(mockEvict.mock.calls).toEqual([["held"], ["minor"], ["gone"]])
+
+    jest.advanceTimersByTime(61_000)
+    mockFindMany.mockResolvedValueOnce([blockedRow("held"), stampedRow("minor")])
+    await recentlyBlocked("x", issued())
+    expect(mockEvict).toHaveBeenCalledTimes(3)
+  })
+
+  it("keeps the new set when closing a socket throws, and says so", async () => {
+    mockFindMany.mockResolvedValueOnce([stampedRow("minor")])
+    mockEvict.mockImplementationOnce(() => {
+      throw new Error("adapter down")
+    })
+    const { recentlyBlocked } = freshCopy()
+    expect(await recentlyBlocked("minor", issued())).toBe(true)
+    expect(mockWarn).toHaveBeenCalledWith("Could not close a blocked account's sockets", { error: "adapter down" })
   })
 })

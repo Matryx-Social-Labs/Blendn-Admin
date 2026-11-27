@@ -98,7 +98,7 @@ describe("apply", () => {
     // The feed's and search's base filter (app/api/mobile/events/route.ts).
     expect(await db.events.count({ where: { id: eventId, ...realEventsWhere, status: "published", deleted_at: null } })).toBe(0)
     // Mobile sign-in, Google and Apple all ask this; "staff" is refused with "sign in at the dashboard".
-    expect(accountBlockReason(await db.user.findUniqueOrThrow({ where: { id: userId } }))).toBe("staff")
+    expect(accountBlockReason(await db.user.findUniqueOrThrow({ where: { id: userId }, include: { profile: { select: { under_18_since: true } } } }))).toBe("staff")
   })
 
   it("marks the organisation for the server's publish, venue and invite refusals, and no other", async () => {
