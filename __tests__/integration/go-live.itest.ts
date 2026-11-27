@@ -525,6 +525,9 @@ describe("the venue’s room is for the people live in it (F6, F7, D-5)", () => 
     expect(row?.event.title).not.toBe(place.name)
     // An exact count of a venue's room is the differencing the bucket exists to stop (D-19).
     expect(typeof row?.memberCount).not.toBe("number")
+    // Nor how much of it was seen (SCRUM-1232): null with the count, never a number to difference.
+    expect((row as unknown as { hereCount: unknown; hereConfirmed: unknown }).hereCount).toBeNull()
+    expect((row as unknown as { hereCount: unknown; hereConfirmed: unknown }).hereConfirmed).toBeNull()
 
     // /checkins/active names the venue too, so the app can extend or go again from anywhere.
     const active = (await (await routes.activeCheckins.GET(req("/api/mobile/checkins/active", me.token))).json()).data.checkIns as Array<{

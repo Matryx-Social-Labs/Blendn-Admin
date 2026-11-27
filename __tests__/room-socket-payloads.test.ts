@@ -151,6 +151,13 @@ describe("hereCount", () => {
     expect(watcher["event:checkin"]).toEqual([expect.objectContaining({ userId: handle("arriver-2") })])
     expect(watcher["event:checkin"]![0]).not.toHaveProperty("hereCount")
     expect(watcher["event:checkin"]![0]).not.toHaveProperty("hereConfirmed")
+
+    // A departure too: both numbers absent together, never one without the other.
+    emitEventCheckOut(EVENT, "leaver-2")
+    await settle()
+    expect(watcher["event:checkout"]).toEqual([expect.objectContaining({ userId: handle("leaver-2") })])
+    expect(watcher["event:checkout"]![0]).not.toHaveProperty("hereCount")
+    expect(watcher["event:checkout"]![0]).not.toHaveProperty("hereConfirmed")
   })
 })
 

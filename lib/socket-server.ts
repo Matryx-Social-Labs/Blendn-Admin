@@ -1470,14 +1470,14 @@ async function toChatRoom<E extends keyof ServerToClientEvents>(
  * Never throws and never rejects. An emitter is called after the write has
  * committed; a failed count must not become a 500 on a check-in that
  * happened, nor an unhandled rejection that takes the process down. If the
- * count fails the event still goes out, WITHOUT `hereCount` — the fact that
+ * count fails the event still goes out, WITHOUT `hereCount` and `hereConfirmed` — the fact that
  * somebody arrived or left matters more than the number, and a client that
  * keeps its last number is right, where one handed a made-up 0 is not.
  */
 function sendWithHereCount(eventId: string, send: (here: HereNow | undefined) => void | Promise<void>): Promise<void> {
   return hereNowCoalesced(eventId)
     .catch((error: unknown) => {
-      logger.warn("hereCount lookup failed; emitting without it", {
+      logger.warn("hereCount lookup failed; emitting without hereCount and hereConfirmed", {
         eventId,
         error: error instanceof Error ? error.message : String(error),
       })

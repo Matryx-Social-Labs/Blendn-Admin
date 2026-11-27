@@ -35,8 +35,9 @@ export const PING_INTERVAL_MINUTES = 5
  * Inside AND seen, or checked in, this recently: "confirmed here" (SCRUM-1232).
  * Pings are foreground only, so silence is a pocketed phone as often as a
  * departure: nobody leaves the count for it. This only says how much of the
- * count was observed: `hereConfirmed` on the phone, `unconfirmed` (its host-side
- * complement) on the host's live tab. Db-free, so the live tab can print it.
+ * count was observed: `hereConfirmed` on the phone, and its host-side
+ * counterpart `unconfirmed` on the live tab (presence sessions, staff
+ * included). Db-free, so the live tab can print it.
  */
 export const CONFIRMED_WINDOW_MINUTES = 30
 

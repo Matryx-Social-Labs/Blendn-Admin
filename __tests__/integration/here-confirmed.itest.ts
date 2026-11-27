@@ -24,6 +24,7 @@ import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, putIn
 type Ctx = { params: Promise<Record<string, string>> }
 type Handler = (req: NextRequest, ctx: Ctx) => Promise<Response>
 const groups = require("@/app/api/mobile/chat/groups/route") as { GET: (req: NextRequest) => Promise<Response> }
+const eventsList = require("@/app/api/mobile/events/route") as { GET: (req: NextRequest) => Promise<Response> }
 const preview = require("@/app/api/mobile/events/[eventId]/room-preview/route") as { GET: Handler }
 const detail = require("@/app/api/mobile/events/[eventId]/route") as { GET: Handler }
 /* eslint-enable @typescript-eslint/no-require-imports */
@@ -69,6 +70,9 @@ async function room(label: string) {
   users.push(host)
   const eventId = await makeEvent(host)
   events.push(eventId)
+  // A city of its own, so the events list (one city at a time) shows this card.
+  const city = `Qahc${testId("c").replace(/[^a-z0-9]/gi, "").slice(-8)}`
+  await db.events.update({ where: { id: eventId }, data: { city, curated_at: new Date() } })
   const occurrenceId = await occurrenceOf(eventId)
   const chat = await db.chat_groups.create({ data: { event_id: eventId, name: "room", status: "active" } })
   /** In the room and the chat; `at` is the check-in, `lastSeen` the last ping that was written. */
@@ -76,17 +80,20 @@ async function room(label: string) {
     await putInRoom({ eventId, occurrenceId, userId: who, at, lastSeen, kind })
     await db.chat_group_members.create({ data: { chat_group_id: chat.id, user_id: who, anonymous_name: testId("Otter"), status: "active" } })
   }
-  return { eventId, roomId: chat.id, seat }
+  return { eventId, roomId: chat.id, city, seat }
 }
 
 /** Both numbers on every surface a phone reads them from, and the Prisma predicate `hereCount` always was. */
-async function everyCount(eventId: string, roomId: string, viewer: string) {
+async function everyCount(eventId: string, roomId: string, viewer: string, city: string) {
   const token = signAccessToken(viewer, `${viewer}@itest.invalid`)
   const params = { params: Promise.resolve({ eventId }) }
   const list = await (await groups.GET(new NextRequest("http://localhost/api/mobile/chat/groups", auth(token)))).json()
   const row = (list.data.groups as { id: string; hereCount: number; hereConfirmed: number }[]).find((g) => g.id === roomId)
   const p = (await (await preview.GET(new NextRequest(`http://localhost/api/mobile/events/${eventId}/room-preview`, auth(token)), params)).json()).data
   const d = (await (await detail.GET(new NextRequest(`http://localhost/api/mobile/events/${eventId}`, auth(token)), params)).json()).data.stats
+  const cards = (await (await eventsList.GET(new NextRequest(`http://localhost/api/mobile/events?limit=11&city=${encodeURIComponent(city)}`, auth(token)))).json()).data
+    .events as { id: string; hereCount: number; hereConfirmed: number }[]
+  const card = cards.find((e) => e.id === eventId)
   return {
     prismaHereCount: await db.event_check_ins.count({ where: { event_id: eventId, ...HERE_NOW, ...inRoomWhere() } }),
     helper: await hereNowFor(eventId),
@@ -94,6 +101,7 @@ async function everyCount(eventId: string, roomId: string, viewer: string) {
     row: { hereCount: row?.hereCount, hereConfirmed: row?.hereConfirmed },
     preview: { hereCount: p.hereCount, hereConfirmed: p.hereConfirmed },
     detail: { hereCount: d.hereCount, hereConfirmed: d.hereConfirmed },
+    card: { hereCount: card?.hereCount, hereConfirmed: card?.hereConfirmed },
   }
 }
 
@@ -104,6 +112,7 @@ const both = (hereCount: number, hereConfirmed: number) => ({
   row: { hereCount, hereConfirmed },
   preview: { hereCount, hereConfirmed },
   detail: { hereCount, hereConfirmed },
+  card: { hereCount, hereConfirmed },
 })
 
 describe("hereConfirmed: the part of hereCount seen or checked in within the window", () => {
@@ -133,7 +142,7 @@ describe("hereConfirmed: the part of hereCount seen or checked in within the win
   })
 
   it("A, B, C here; A and B confirmed; D (suspended) in neither", async () => {
-    expect(await everyCount(w.eventId, w.roomId, viewer)).toEqual(both(3, 2))
+    expect(await everyCount(w.eventId, w.roomId, viewer, w.city)).toEqual(both(3, 2))
   })
 
   it("is one statement, the read that already counted hereCount", async () => {
@@ -151,7 +160,7 @@ describe("hereConfirmed: the part of hereCount seen or checked in within the win
   it("C pings: confirmed again, and hereCount does not move", async () => {
     // What the presence route writes on a ping it persists (lib/presence.ts shouldPersistPing).
     await db.event_check_ins.updateMany({ where: { event_id: w.eventId, user_id: c }, data: { last_seen_at: new Date() } })
-    expect(await everyCount(w.eventId, w.roomId, viewer)).toEqual(both(3, 3))
+    expect(await everyCount(w.eventId, w.roomId, viewer, w.city)).toEqual(both(3, 3))
   })
 })
 
@@ -178,9 +187,31 @@ describe("hereConfirmed treats people exactly as hereCount does", () => {
     })
 
     // viewer, hidden, blocked inside and recent; silent inside, unconfirmed.
-    const counts = await everyCount(w.eventId, w.roomId, viewer)
+    const counts = await everyCount(w.eventId, w.roomId, viewer, w.city)
     expect(counts).toEqual(both(4, 3))
     expect(counts.helper.hereConfirmed).toBeLessThanOrEqual(counts.helper.hereCount)
+  })
+
+  it("the window is strict at 30 minutes: seen 29 minutes ago is confirmed, 31 is not", async () => {
+    const w = await room("hb")
+    await w.seat(await person("hb_29"), minutesAgo(120), minutesAgo(29))
+    await w.seat(await person("hb_31"), minutesAgo(120), minutesAgo(31))
+    await w.seat(await person("hb_in29"), minutesAgo(29), minutesAgo(90))
+    await w.seat(await person("hb_in31"), minutesAgo(31), minutesAgo(90))
+    expect(await hereNowFor(w.eventId)).toEqual({ hereCount: 4, hereConfirmed: 2 })
+  })
+
+  it("a page of events is one read, each event its own numbers, an empty room absent", async () => {
+    const [one, two, none] = [await room("hp1"), await room("hp2"), await room("hp0")]
+    await one.seat(await person("hp1_a"), minutesAgo(5), minutesAgo(5))
+    await one.seat(await person("hp1_b"), minutesAgo(90), minutesAgo(60))
+    for (const label of ["hp2_a", "hp2_b", "hp2_c"]) await two.seat(await person(label), minutesAgo(5), minutesAgo(5))
+    const { result, statements } = await statementsDuring(() => hereNow([one.eventId, two.eventId, none.eventId]))
+    expect(statements).toHaveLength(1)
+    expect(result.get(one.eventId)).toEqual({ hereCount: 2, hereConfirmed: 1 })
+    expect(result.get(two.eventId)).toEqual({ hereCount: 3, hereConfirmed: 3 })
+    expect(result.has(none.eventId)).toBe(false)
+    expect(await hereNowFor(none.eventId)).toEqual({ hereCount: 0, hereConfirmed: 0 })
   })
 
   it("a room nobody is in is 0 and 0, and an empty list is an empty map", async () => {

@@ -101,7 +101,7 @@ export interface HereNow {
   hereConfirmed: number
 }
 
-const NOBODY_HERE: HereNow = { hereCount: 0, hereConfirmed: 0 }
+const NOBODY_HERE: Readonly<HereNow> = Object.freeze({ hereCount: 0, hereConfirmed: 0 })
 
 /**
  * `hereNow` for one event: the socket emitters, `room-preview`, the event
@@ -148,8 +148,9 @@ export async function hereNowFor(eventId: string): Promise<HereNow> {
  * a multi-day run's other days are closed rows. Served by
  * `event_check_ins(event_id, status)`.
  */
-export async function hereNow(eventIds: readonly string[], now: Date = new Date()): Promise<Map<string, HereNow>> {
+export async function hereNow(eventIds: readonly string[]): Promise<Map<string, HereNow>> {
   if (eventIds.length === 0) return new Map()
+  const now = new Date()
   const since = new Date(now.getTime() - CONFIRMED_WINDOW_MINUTES * 60_000)
   // any-kind: a venue day's room counts too, while its window is open (inRoomWhere); a real event always.
   const rows = await db.$queryRaw<{ event_id: string; here: number; confirmed: number }[]>`
