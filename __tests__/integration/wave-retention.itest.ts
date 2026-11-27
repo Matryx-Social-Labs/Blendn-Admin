@@ -5,9 +5,8 @@
  * A run whose latest night is inside the window keeps everything.
  */
 import { GESTURE_DAYS, purgeEventGestures } from "@/lib/lobby-retention"
-import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, putInRoom, testId } from "./helpers"
+import { addPastNight, cleanup, closeDb, db, endedEvent, makeUser, occurrenceOf, putInRoom, testId } from "./helpers"
 
-const DAY = 86_400_000
 const users: string[] = []
 const events: string[] = []
 
@@ -18,17 +17,6 @@ afterAll(async () => {
   await cleanup(users, events)
   await closeDb()
 })
-
-/** An event whose only occurrence ended `daysAgo` days ago. */
-async function endedEvent(daysAgo: number, host: string) {
-  const id = await makeEvent(host)
-  events.push(id)
-  const end = new Date(Date.now() - daysAgo * DAY)
-  const start = new Date(end.getTime() - 3 * 3_600_000)
-  await db.events.update({ where: { id }, data: { start_time: start, end_time: end } })
-  await db.event_occurrences.updateMany({ where: { event_id: id }, data: { start_time: start, end_time: end } })
-  return id
-}
 
 const gestures = async (event_id: string) => ({
   waves: await db.event_waves.count({ where: { event_id } }),
@@ -48,13 +36,12 @@ beforeAll(async () => {
   ben = await makeUser(testId("wr-ben"))
   cat = await makeUser(testId("wr-cat"))
   users.push(host, ana, ben, cat)
-  old = await endedEvent(GESTURE_DAYS + 1, host)
-  recent = await endedEvent(GESTURE_DAYS - 1, host)
+  old = await endedEvent(host, GESTURE_DAYS + 1)
+  recent = await endedEvent(host, GESTURE_DAYS - 1)
   // A run whose first night is long gone but whose latest night ended yesterday.
-  liveSeries = await endedEvent(GESTURE_DAYS + 10, host)
-  await db.event_occurrences.create({
-    data: { event_id: liveSeries, occurs_on: new Date(Date.now() - DAY), start_time: new Date(Date.now() - DAY - 3_600_000), end_time: new Date(Date.now() - DAY) },
-  })
+  liveSeries = await endedEvent(host, GESTURE_DAYS + 10)
+  events.push(old, recent, liveSeries)
+  await addPastNight(liveSeries, 1)
   for (const event_id of [old, recent, liveSeries]) {
     const occurrenceId = await occurrenceOf(event_id)
     for (const userId of [ana, ben, cat]) await putInRoom({ eventId: event_id, occurrenceId, userId })
@@ -89,7 +76,8 @@ it("keeps an event inside the window, and a run whose latest night is (the negat
 
 it("waits for the counts: an event whose tally is missing keeps its rows", async () => {
   const host = users[0]
-  const unfrozen = await endedEvent(GESTURE_DAYS + 2, host)
+  const unfrozen = await endedEvent(host, GESTURE_DAYS + 2)
+  events.push(unfrozen)
   await db.event_waves.create({ data: { event_id: unfrozen, from_id: ana, to_id: cat } })
   // As if its freeze had failed: the purge's own freeze does nothing, so no tally is written.
   let purge = purgeEventGestures
