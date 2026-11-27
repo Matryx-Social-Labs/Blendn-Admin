@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { ACCOUNT_MAX_AGE } from "@/lib/age"
 import { registry } from "@/lib/openapi/registry"
-import { FriendOfferSchema, PagedPaginationSchema, RoomLensSchema, RoomPersonFactsFields, UserRefParamSchema } from "./common"
+import { FriendOfferSchema, PagedPaginationSchema, RoomLensSchema, RoomPersonFactsFields, UserRefParamSchema, StoredLocationSchema } from "./common"
 
 /**
  * These mirror `lib/validations/profile.ts`, and a test holds them to it.
@@ -39,7 +39,10 @@ export const UpdateProfileRequestSchema = z
       .optional()
       .openapi({ example: "1998-04-17", description: "YYYY-MM-DD. Write-only." }),
 
-    location: z.string().max(200).optional().nullable(),
+    location: z.string().max(200).optional().nullable().openapi({
+      description:
+        "A city, or `lat,lon`, which is turned into the city on save (one lookup). If that lookup fails the stored location is kept and the rest of the update is saved. `null` or empty clears it.",
+    }),
     homeCitySlug: z.string().min(1).max(64).optional().nullable().openapi({
       description:
         "Where the person goes out normally: a `slug` from GET /events/cities. A preview city is accepted; an unknown or hidden one is 400. `null` clears it. Your own, never shown to anybody else; read it back as `profile.homeCitySlug` on GET and PUT of your own profile.",
@@ -231,7 +234,7 @@ export const ProfileResponseSchema = z
       phone: z.string().nullable(),
       name: z.string().nullable(),
       age: z.number().nullable().describe("Null for somebody you may not see who this is (a room card, or a raw id that does not name them; D-030). The key stays."),
-      location: z.string().nullable().describe("Null for somebody you may not see who this is (D-030). The key stays."),
+      location: StoredLocationSchema.openapi({ description: "Null for somebody you may not see who this is (D-030). The key stays. Otherwise the city as stored: null while it is still coordinates, and a read never looks it up (SCRUM-1229)." }),
       ageBand: RoomPersonFactsFields.ageBand.optional().describe("Only for somebody you may not see who this is: a room card's band (`GET /users/{userId}` has the rule), null for a raw id."),
       tenure: RoomPersonFactsFields.tenure.optional().describe("Only for somebody you may not see who this is: new / regular on a room card, null for a raw id."),
       bio: z.string().nullable(),
@@ -369,7 +372,7 @@ export const UserPublicProfileSchema = z
     image: z.string().nullable().optional(),
     photos: z.array(z.string()).optional(),
     age: z.number().nullable().describe("Null when `identityVisible` is false (D-030). The key stays for installed builds."),
-    location: z.string().nullable().describe("Null when `identityVisible` is false (D-030). The key stays."),
+    location: StoredLocationSchema.openapi({ description: "Null when `identityVisible` is false (D-030). The key stays. Otherwise the city as stored: null while it is still coordinates, and a read never looks it up (SCRUM-1229)." }),
     ageBand: RoomPersonFactsFields.ageBand.optional().describe("Only when `identityVisible` is false. " + (RoomPersonFactsFields.ageBand.description ?? "")),
     tenure: RoomPersonFactsFields.tenure.optional().describe("Only when `identityVisible` is false. " + (RoomPersonFactsFields.tenure.description ?? "")),
     bio: z.string().nullable().optional(),

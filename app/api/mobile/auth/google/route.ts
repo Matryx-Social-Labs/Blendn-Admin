@@ -21,7 +21,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { rateLimit, createAuthRateLimit } from "@/lib/rate-limit"
-import { normalizeLocationToCity } from "@/lib/location"
+import { storedCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
 import { deviceInfoSchema } from "@/lib/validations/auth"
 
@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
 
     await storeRefreshToken(userId, refreshToken, deviceInfo)
 
-    const normalizedLocation = await normalizeLocationToCity(user.profile?.location)
+    const normalizedLocation = storedCity(user.profile?.location)
 
     return successResponse(
       {

@@ -377,10 +377,17 @@ see *Matches*). Blocks are honoured in both directions everywhere, and are repor
 "not found" rather than "blocked" — confirming an account exists tells a blocked
 person they were blocked.
 
-**A roster row's `location` can be null.** A profile location stored as
-coordinates is turned into a city name, at most three such lookups per page
-(the geocoder's budget, cached afterwards); a row past the budget says `null`
-until a later page or request has resolved it. Raw coordinates are never returned.
+**A `location` or event `city` can be null, and is never coordinates.** No read
+looks a city up (SCRUM-1229): sign-in, session, a profile, a friend, the roster,
+event detail, the feed and favourites return the stored value wherever they show a
+city at all (D-030 decides that: beside a pseudonym there is none), never coordinates,
+and so does the `PUT /profiles/:userId` response. A profile location still stored as
+coordinates (from old builds) reads as `null` until the person sets a city.
+`PUT /profiles/:userId` with `location` as `lat,lon` stores the city at those
+coordinates (one lookup); if that lookup fails it keeps the stored location and
+saves the rest. An event with no city reads `city: null`
+rather than looking up its pin; a city is set when the event is created or its
+pin moves.
 
 **The roster is everyone checked in.** It used to be filtered on `onboarded`, a
 non-null name and a non-empty `photos` array — three fields the endpoint does not

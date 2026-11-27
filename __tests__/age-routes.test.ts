@@ -35,10 +35,6 @@ jest.mock("@/lib/rate-limit", () => ({
   userLimit: jest.fn().mockReturnValue({ windowMs: 1, maxRequests: 99 }),
 }))
 
-jest.mock("@/lib/location", () => ({
-  normalizeLocationToCity: jest.fn().mockImplementation(async (l: string | null) => l),
-}))
-
 // The friend offer is covered in friend-after-reveal.itest.ts; this file is about ages.
 jest.mock("@/lib/friend-offer", () => ({ friendOfferFor: jest.fn().mockResolvedValue({ state: "none", canAdd: false }) }))
 jest.mock("@/lib/conversations", () => ({ blockedEitherWay: jest.fn().mockResolvedValue(false) }))

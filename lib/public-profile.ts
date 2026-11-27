@@ -4,7 +4,7 @@ import { ageFrom } from "@/lib/age"
 import { homeStateLabel, languageLabels, signLabel } from "@/lib/about-you"
 import { distinctEventsAttended } from "@/lib/attendee-counts"
 import { firstName } from "@/lib/conversation-identity"
-import { normalizeLocationToCity } from "@/lib/location"
+import { storedCity } from "@/lib/location"
 import { profileBadges } from "@/lib/profile-badges"
 import type { RoomPersonFacts } from "@/lib/room-person-facts"
 import { savedCount } from "@/lib/saved-events"
@@ -130,7 +130,7 @@ export async function personCardBody(
      * id has no room to count a band over, and answering it would make this a lookup on any id. Keys kept, null.
      */
     ...(identified
-      ? { age: ageFrom(p), location: await normalizeLocationToCity(p?.location) }
+      ? { age: ageFrom(p), location: storedCity(p?.location) }
       : { age: null, location: null, ageBand: null, tenure: null }),
     // The whole list only to somebody who may see who this is; the key stays, empty, for clients that read it (SCRUM-827).
     interests: identified ? user.user_interests.map((ui) => ui.category) : [],

@@ -35,6 +35,12 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "no-geocoding-on-reads.test.ts": {
+      "guards": "SCRUM-1229: no read geocodes or returns coordinates. storedCity gives the stored text or null for coordinates with no request; locationToStore geocodes coordinates once, returns undefined (column left alone) when Nominatim fails, and remembers no failure; resolveEventCity keeps a typed city, is null on failure and falls back to the pin. Structural: walking app/ and lib/, exactly the four writers (events POST, events [id] PATCH, profile PUT, dashboard users actions) name a geocoder; lib/location exports nothing the guard does not know; in each of those files the read (GET / getUsers) names none and the write calls it.",
+      "mutation": "(RED) the suite on origin/dev 339403a1: 23 failing. After the review pass (tree walk replaced the hand list): (M1) event detail GET back to `await resolveEventCity(event.city, event.latitude, event.longitude)`. (M2) profile GET through `await locationToStore(...)`. (M3) the dashboard user list through `await locationToStore(...)`. (M4) locationToStore without `?? undefined`, so a failed geocode writes null. (M5) a new export `cityAtPin = reverseGeocodeCity` in lib/location.ts.",
+      "observed": "RED 23 failing / 2 passing. M1 to M5 each 1 failing / 17 passing; reverted from a copy, 18 passing.",
+      "date": "2026-11-27"
+    },
     "entry-code.test.ts": {
       "guards": "Gate 13 (SCRUM-1316, design/02a SPEC §1-§2): the event's door code is HKDF 'blendn door-code v1' over event:occurrence:step; steps 0/-1/-2 match, -3 answers 'changed', -4 and +1 are wrong; another event's or occurrence's code fails; 8/B 5/S 2/Z fold both ways; the code exists from doors to the end on a published, non-venue-day, uncancelled, unpaused occurrence; a pause holds 10 minutes and never from before this occurrence's doors; the auto-pause trips only at wrong >= 30 and wrong > correct.",
       "mutation": "RED on dev 5da8952a: module lib/entry-code missing. M2271 GRACE_STEPS 2 -> 1; M2272 the doors floor dropped from entryPauseInForce; M2273 the trip without `wrong > correct`; M2274 foldConfusables returns its input.",
