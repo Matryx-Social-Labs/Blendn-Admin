@@ -16,8 +16,8 @@ import { MAP_CREDIT } from "../lib/map-credit"
  * The editor also draws venue outlines from Overture buildings (ODbL, OSM
  * inside; scripts/backfill-venue-fences.ts), and nothing records which fence
  * came from there, so every editor map carries Overture's line too, linked to
- * the page with each source's own credit (SCRUM-1317). It keeps one line on a
- * 340 px map by dropping Leaflet's own prefix.
+ * the page with each source's own credit (SCRUM-1317). Dropping Leaflet's own
+ * prefix keeps it one line down to a 412 px map; the e2e holds the legend clear.
  */
 const ROOT = join(__dirname, "..")
 
@@ -68,7 +68,7 @@ describe("map tiles and their credits", () => {
     }
   })
 
-  it("the editor draws that credit, without Leaflet's prefix, so it stays one line beside the legend", () => {
+  it("the editor draws that credit, without Leaflet's prefix, so it stays one line beside the legend at 768", () => {
     const editor = read("components/geofence-editor.tsx")
     expect(editor).toMatch(/attribution: MAP_CREDIT\b/)
     expect(editor).toMatch(/attributionControl\.setPrefix\(false\)/)

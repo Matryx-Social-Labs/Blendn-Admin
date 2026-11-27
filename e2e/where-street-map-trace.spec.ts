@@ -16,8 +16,8 @@ import { PrismaPg } from "@prisma/adapter-pg"
  * toggle's corner and the longer credit beside the legend are looked at.
  *
  * The credit also names Overture Maps Foundation, whose buildings may be the
- * outline drawn (SCRUM-1317), with no Leaflet prefix, so the line stays one
- * line clear of the legend down to a phone (390).
+ * outline drawn (SCRUM-1317), with no Leaflet prefix: one line at 1280 and
+ * 768, and on a phone (390) two lines with the legend raised clear of them.
  */
 test.use({ storageState: "e2e/.auth/organizer.json" })
 test.skip(!process.env.GEOCODE_UPSTREAM, "needs the OSM stub (GEOCODE_UPSTREAM) — never the real Nominatim")
@@ -40,15 +40,18 @@ const CORNERS = [
   [0.5, 0.52],
 ] as const
 
-/** The legend and the credit share the map's bottom edge; on a narrow map they touched (768, first CI run). */
-async function expectLegendClearOfCredit(page: Page) {
+/**
+ * The legend and the credit share the map's bottom edge; on a narrow map they touched (768, first CI run).
+ * One line down to 768; on a phone's 314 px map the credit wraps to two and the legend rises clear of it.
+ */
+async function expectLegendClearOfCredit(page: Page, { oneLine = true } = {}) {
   const legend = await page.getByText(/^GPS allowance/).locator("xpath=ancestor::div[1]").boundingBox()
   const credit = await page.locator(".leaflet-control-attribution").boundingBox()
   const map = await page.locator(".leaflet-container").boundingBox()
   console.log(`[credit] map ${Math.round(map!.width)} px wide, credit ${Math.round(credit!.width)}x${Math.round(credit!.height)}`)
   expect(legend!.y + legend!.height <= credit!.y || legend!.x + legend!.width <= credit!.x).toBe(true)
-  // One line (12 px at 1.4): a wrapped credit grows upward into the legend's row.
-  expect(credit!.height).toBeLessThan(12 * 1.4 * 2)
+  // One line (12 px at 1.4); a wrapped credit grows upward, toward the legend's row.
+  if (oneLine) expect(credit!.height).toBeLessThan(12 * 1.4 * 2)
 }
 
 async function shoot(page: Page, name: string) {
@@ -120,7 +123,7 @@ test("an outline traced by hand on the street map is saved; no Esri tile loads; 
   // A phone: the narrowest map the staging proof is owed at.
   await page.setViewportSize({ width: 390, height: 844 })
   await expect.soft(credit.locator('a[href="https://docs.overturemaps.org/attribution/"]')).toBeVisible()
-  await expectLegendClearOfCredit(page)
+  await expectLegendClearOfCredit(page, { oneLine: false })
   await shoot(page, "trace-390-closed")
   await page.setViewportSize({ width: 1280, height: 900 })
 
