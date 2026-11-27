@@ -36,7 +36,7 @@ import {
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { answerRoomRetry, findRoomSend, replayRoomRetry } from "@/lib/room-retry"
 import { claimAnonymousName } from "@/lib/anonymous-names"
-import { moderateMessage, checkSpam, preSaveCheck, inlineFlags } from "@/lib/moderation"
+import { moderateMessage, checkSpam, preSaveCheck, inlineFlags, recordHide } from "@/lib/moderation"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { idForViewer } from "@/lib/room-handle"
 import { roomMuteState } from "@/lib/room-mute"
@@ -809,9 +809,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }
       // The flag before the count, still off the response path: the count reads
       // flags, and run side by side it missed this message's own (SCRUM-483).
-      void flagForReview(message.id, chatGroup.id, authUser.userId, preSave.result).then(() =>
-        preSave.autoMute ? checkAndAutoMute(authUser.userId, chatGroup.id) : undefined
-      )
+      void recordHide(message.id, chatGroup.id, authUser.userId, content, preSave)
       return successResponse({
         message: {
           id: message.id,
