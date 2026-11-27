@@ -4,7 +4,8 @@ import { PrismaPg } from "@prisma/adapter-pg"
 import { encode } from "next-auth/jwt"
 import { randomUUID } from "node:crypto"
 
-import { buildLiveSnapshot } from "../lib/live-snapshot"
+import { buildLiveSnapshot, readLiveSnapshot } from "../lib/live-snapshot"
+import { forVenue } from "../lib/live-metrics"
 
 /**
  * SCRUM-1285 driven: a complaint category one person wrote most of is held
@@ -23,6 +24,8 @@ const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.
 // No "dominance" in the tag: it is in the title and slug, and the page is searched for that word.
 const tag = `e2e-t08-${randomUUID().slice(0, 8)}`
 const WIDTHS = [1280, 768] as const
+// SCRUM-1500: the venue's drive, at a desktop and a phone.
+const VENUE_WIDTHS = [1280, 390] as const
 const HOUR = 60 * 60 * 1000
 
 const users: string[] = []
@@ -33,9 +36,13 @@ let roomId = ""
 // SCRUM-1441: a second night with exactly one category held beside a shown one.
 let rangeEventId = ""
 let rangeRoomId = ""
+// SCRUM-1500: the building the second night is in, and its owner (another organisation than the host's).
+let venueOwner = ""
+let venueOrgId = ""
+let venueId = ""
 let browser: Browser
 
-async function person(label: string, role: "attendee" | "organizer" = "attendee") {
+async function person(label: string, role: "attendee" | "organizer" | "venue_owner" = "attendee") {
   const u = await db.user.create({ data: { email: `${tag}-${label}@e2e.invalid`, name: `${tag} ${label}`, role } })
   users.push(u.id)
   return u.id
@@ -77,9 +84,9 @@ async function night(title: string) {
   return { event, room, members }
 }
 
-async function sessionFor(baseURL: string) {
+async function sessionFor(baseURL: string, as: { sub: string; role: string } = { sub: owner, role: "organizer" }) {
   const { hostname, protocol } = new URL(baseURL)
-  const token = await encode({ token: { sub: owner, role: "organizer" }, secret: process.env.NEXTAUTH_SECRET!, maxAge: 3600 })
+  const token = await encode({ token: as, secret: process.env.NEXTAUTH_SECRET!, maxAge: 3600 })
   return {
     cookies: [
       {
@@ -131,6 +138,17 @@ test.beforeAll(async () => {
   await wrote(r.members.slice(10, 13), "other", [3, 3, 3], "neutral", at)
   await wrote(r.members.slice(0, 5), "entry_queue", [16, 1, 1, 1, 1], "negative", at)
   await wrote(r.members.slice(5, 10), "crowding", [2, 2, 1, 1, 1], "negative", at)
+
+  // SCRUM-1500: the night is in a venue another organisation owns and claimed long before it.
+  venueOwner = await person("venue-owner", "venue_owner")
+  venueOrgId = (await db.organisations.create({ data: { kind: "company", display_name: `${tag} venue org`, status: "verified" } })).id
+  await db.organisation_members.create({ data: { org_id: venueOrgId, user_id: venueOwner, role: "owner" } })
+  venueId = (
+    await db.venues.create({
+      data: { name: `${tag} venue`, city: "Bengaluru", latitude: 12.97, longitude: 77.64, timezone: "Asia/Kolkata", owner_org_id: venueOrgId, claimed_at: new Date(Date.now() - 100 * 24 * HOUR) },
+    })
+  ).id
+  await db.events.update({ where: { id: rangeEventId }, data: { venue_id: venueId, venue_name: `${tag} venue`, city: "Bengaluru" } })
 })
 
 test.afterAll(async () => {
@@ -143,6 +161,9 @@ test.afterAll(async () => {
   await db.chat_groups.deleteMany({ where: { id: { in: rooms } } })
   await db.event_occurrences.deleteMany({ where: { event_id: { in: events } } })
   await db.events.deleteMany({ where: { id: { in: events } } })
+  if (venueId) await db.venues.deleteMany({ where: { id: venueId } })
+  await db.organisation_members.deleteMany({ where: { org_id: venueOrgId } })
+  await db.organisations.deleteMany({ where: { id: venueOrgId } })
   await db.organisation_members.deleteMany({ where: { org_id: orgId } })
   await db.organisations.deleteMany({ where: { id: orgId } })
   await db.user.deleteMany({ where: { id: { in: users } } })
@@ -244,5 +265,66 @@ test("one held category: the negatives and the total are a band, and nothing giv
     WHERE f.event_id = ${rangeEventId}::uuid AND f.sentiment = 'negative' GROUP BY 1 ORDER BY 1`
   const counts = Object.fromEntries(rows.map((r) => [r.category, Number(r.count)]))
   console.log(`READBACK negatives ${JSON.stringify({ event: rangeEventId, counts, shown: { negative: "23–27", total: "57–61" } })}`)
+  expect(counts).toEqual({ crowding: 7, entry_queue: 20 })
+})
+
+/**
+ * SCRUM-1500 driven (the venue half of D-012): the venue's owner reads the same night. It reads the negatives exactly
+ * (27, on the Feedback split and its "Nights here" row alike), so any category's count beside them, or "<5", gives
+ * the held entry_queue's 20 back. At 1280 and 390 the Feedback tab names the categories with no count, the Nights row
+ * shows the night, and neither page carries 20 or crowding's 7; the live copy a venue's socket is sent names them too,
+ * with no bucket per category. The read-back is printed beside what both pages showed.
+ */
+test("a venue: the categories are named with no count, and nothing gives the held count back", async ({ baseURL }) => {
+  const alone = (n: number) => new RegExp(`(?<![\\d–,])${n}(?![\\d–,])`)
+  // The fixture's random tag (in the title and the host's name) and a night's date can hold a bare 7 or 20.
+  const figuresOf = (text: string) => text.replaceAll(tag, "").replace(/\b[A-Z][a-z]{2},? \d{1,2} [A-Z][a-z]{2}\b/g, "")
+  const shown: Record<string, string> = {}
+  for (const width of VENUE_WIDTHS) {
+    const ctx = await browser.newContext({ baseURL, viewport: { width, height: 900 }, storageState: await sessionFor(baseURL!, { sub: venueOwner, role: "venue_owner" }) })
+    const page = await ctx.newPage()
+
+    await page.goto(`/dashboard/events/${rangeEventId}/feedback`)
+    const split = page.locator("p", { hasText: "negatives are the takeaway" }).filter({ visible: true }).first().locator("..")
+    await expect(split).toContainText("27 negative")
+    await expect(split).toContainText("What they were about is listed")
+    await expect(split).not.toContainText(" of ")
+    const listed = page.getByRole("list").filter({ hasText: "entry queue" }).filter({ visible: true }).first()
+    await expect(listed.getByRole("listitem")).toHaveText(["entry queue", "crowding"])
+    const panel = listed.locator("xpath=ancestor::section[1]")
+    await expect(panel).toContainText("What went wrong")
+    expect(await panel.innerText(), `a count in the venue's list at ${width}`).not.toMatch(/\d|<5/)
+    // The split and the list together: what a venue would subtract between.
+    const feedbackText = figuresOf(`${await split.innerText()} ${await panel.innerText()}`)
+    for (const n of [20, 7]) expect(feedbackText, `${n} on the venue's Feedback tab at ${width}`).not.toMatch(alone(n))
+    expect(await overflow(page), `venue Feedback overflow at ${width}`).toBeLessThanOrEqual(0)
+    await page.screenshot({ path: `test-results/screens/venue-held-count-feedback-${width}.png`, fullPage: true })
+    shown[`feedback@${width}`] = `${await split.locator("div").first().innerText()} | ${await listed.innerText()}`.replace(/\s+/g, " ")
+
+    await page.goto(`/dashboard/venues/${venueId}`)
+    // The venue's one night (its host's name is a wider screen's column).
+    const night = page.locator("tbody tr").filter({ visible: true }).first()
+    await expect(night).toBeVisible()
+    const nightText = figuresOf(await night.innerText())
+    for (const n of [20, 7]) expect(nightText, `${n} on the Nights row at ${width}`).not.toMatch(alone(n))
+    expect(await overflow(page), `venue page overflow at ${width}`).toBeLessThanOrEqual(0)
+    await page.screenshot({ path: `test-results/screens/venue-held-count-nights-${width}.png`, fullPage: true })
+    shown[`nights@${width}`] = nightText.replace(/\s+/g, " ")
+    await ctx.close()
+  }
+
+  // The live copy a venue's socket is sent for the same night: names, no bucket per category.
+  const read = (await readLiveSnapshot(rangeEventId))!
+  const venue = forVenue(read.snapshot, read.negatives)
+  expect(venue.raised).toEqual(["entry_queue", "crowding"])
+  expect(venue).not.toHaveProperty("categories")
+  expect(venue.sentiment.negative).toBe("20+")
+
+  // The read-back: what the pages hide, beside what they showed.
+  const rows = await db.$queryRaw<{ category: string; count: bigint }[]>`
+    SELECT f.category::text AS category, count(*) FROM event_feedback f
+    WHERE f.event_id = ${rangeEventId}::uuid AND f.sentiment = 'negative' GROUP BY 1 ORDER BY 1`
+  const counts = Object.fromEntries(rows.map((r) => [r.category, Number(r.count)]))
+  console.log(`READBACK venue ${JSON.stringify({ event: rangeEventId, counts, shown, live: { raised: venue.raised, negative: venue.sentiment.negative } })}`)
   expect(counts).toEqual({ crowding: 7, entry_queue: 20 })
 })

@@ -3,7 +3,7 @@ const mockDb: Record<string, Record<string, jest.Mock>> = {}
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/rating-batches", () => ({ publishedRatingGroups: async () => [] }))
 
-import { discloseCategories, discloseNegatives, midpoint } from "@/lib/disclosure"
+import { discloseCategories, discloseNegatives } from "@/lib/disclosure"
 import { buildFeedbackDigest, tallyFeedback, type TallyRow } from "@/lib/feedback-digest"
 import { forVenue, type LiveSnapshot } from "@/lib/live-metrics"
 import { venueMood } from "@/lib/venue-nights"
@@ -74,13 +74,15 @@ function hostSnapshot(feedback: TallyRow[]): LiveSnapshot {
 
 /** Every venue surface for one night: the Feedback tab, the Nights here row, the Live tab and Room tonight's word. */
 async function venueSurfaces(feedback: TallyRow[]) {
-  const live = forVenue(hostSnapshot(feedback))
   const t = tallyFeedback(feedback)
+  // `readLiveSnapshot` hands the venue's copy the window's exact negatives, never the host's band.
+  const live = forVenue(hostSnapshot(feedback), t.counts.negative)
   return {
     feedbackTab: await venueDigest(feedback),
     nightsHere: venueMood(t.counts),
     live: { sentiment: live.sentiment, raised: live.raised },
-    tonight: venueMood({ ...hostSnapshot(feedback).sentiment, negative: midpoint(hostSnapshot(feedback).sentiment.negative) })?.word ?? "quiet",
+    // Room tonight on another host's night: the word from the same exact negatives (`venue-room-tonight.ts`).
+    tonight: venueMood(t.counts)?.word ?? "quiet",
   }
 }
 
@@ -102,7 +104,7 @@ describe("the night in the ticket, as a venue (negative 27, crowding 7 shown, en
     expect(s.feedbackTab.categories).toEqual([])
     expect(s.feedbackTab.raised).toEqual(["entry_queue", "crowding"])
     expect(s.live.raised).toEqual(["entry_queue", "crowding"])
-    expect(forVenue(hostSnapshot(ticketNight))).not.toHaveProperty("categories")
+    expect(forVenue(hostSnapshot(ticketNight), 27)).not.toHaveProperty("categories")
   })
 
   it("keeps the split as Nights here prints it: the categories' sum, nothing to subtract from it", async () => {
@@ -122,6 +124,35 @@ describe("the night in the ticket, as a venue (negative 27, crowding 7 shown, en
     const s = await venueSurfaces(night)
     expect(s.feedbackTab.raised).toEqual(["safety_conduct", "crowding", "facilities"])
     expect(s.live.raised).toEqual(["safety_conduct", "crowding", "facilities"])
+  })
+})
+
+describe("when the names alone would pin a held count", () => {
+  it("names nothing when the held category is the only one raised: 12 negatives, all entry_queue, held", async () => {
+    const s = await venueSurfaces(rows("entry_queue", [12]))
+    expect(s.feedbackTab.counts.negative).toBe(12)
+    expect(s.feedbackTab.raised).toEqual([])
+    expect(s.live.raised).toEqual([])
+  })
+
+  it("names nothing when the others leave a held one under five values: 5 negatives over two held categories", async () => {
+    // Each named category is at least one, so either would be 1–4 of 5. (A shown category has five or more, so beside
+    // one the rest always keep five values.)
+    const night = [...rows("entry_queue", [4]), ...rows("facilities", [1])]
+    const s = await venueSurfaces(night)
+    expect(s.feedbackTab.raised).toEqual([])
+    expect(s.live.raised).toEqual([])
+  })
+
+  it("still names a lone category that is shown: its count clears the floor, and the host reads it exactly", async () => {
+    const s = await venueSurfaces(rows("crowding", [2, 2, 2, 1, 1]))
+    expect(s.feedbackTab.raised).toEqual(["crowding"])
+  })
+
+  it("still names them under five negatives: the venue reads only \"a few\", nothing to subtract from", async () => {
+    const s = await venueSurfaces(rows("entry_queue", [3]))
+    expect(s.feedbackTab.counts.negative).toBe("few")
+    expect(s.feedbackTab.raised).toEqual(["entry_queue"])
   })
 })
 
@@ -152,19 +183,21 @@ describe("over every night (positive, neutral 0/3/6; crowding 0–14; held entry
   ]
 
   /*
-   * Accepted, and recorded under D-012 (advisor, 2026-11-27): a listed category is at least one message, so on a night
-   * with fewer than five negatives beyond the other listed categories' one each, the held count is "one up to what is
-   * left". That is the whole range a listing allows, never a narrower one; the alternative is hiding a raised category,
-   * which loses "a safety concern was raised".
+   * Under five negatives the venue reads "a few" and the held count is one to four: the floor's own statement, all
+   * a listing allows. A group that names no category says nothing about entry_queue's count beyond "not named" (the
+   * accepted residual, `raisedCategories`), so only groups that name it must leave it five values.
    */
-  it("never narrows the held count below five values, beyond each listed category being at least one", async () => {
+  it("never narrows a named held count below five values", async () => {
     const groups = new Map<string, Set<number>>()
     for (const n of nights()) {
       const key = JSON.stringify(await venueSurfaces(feedbackOf(n)))
       groups.set(key, (groups.get(key) ?? new Set<number>()).add(n.held))
     }
     const onlyAtLeastOne = (held: Set<number>) => Math.min(...held) === 1 && Math.max(...held) === held.size
-    const narrowed = [...groups].filter(([, held]) => held.size < 5 && !onlyAtLeastOne(held) && Math.min(...held) <= MAX_HELD - 4)
+    const named = (key: string) => key.includes("entry_queue")
+    const narrowed = [...groups].filter(([key, held]) => named(key) && held.size < 5 && !onlyAtLeastOne(held) && Math.min(...held) <= MAX_HELD - 4)
+    // And the withheld state is reached, so the filter above is not vacuous.
+    expect([...groups.keys()].some((key) => !named(key))).toBe(true)
     expect(narrowed.map(([key, held]) => ({ key, held: [...held] }))).toEqual([])
   })
 })

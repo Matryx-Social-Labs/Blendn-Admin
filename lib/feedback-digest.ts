@@ -3,7 +3,7 @@ import type { feedback_sentiment, feedback_topic, issue_category } from "@prisma
 
 import { chatClosesAt } from "./chat-window"
 import { db } from "./db"
-import { discloseCategories, discloseGroup, discloseHeadcount, discloseStars, discloseTopics, publishedRaters, spreadsByEventId, discloseNegatives, plus, type CountRange, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type StarSpread } from "./disclosure"
+import { discloseCategories, discloseGroup, discloseHeadcount, discloseStars, discloseTopics, publishedRaters, spreadsByEventId, discloseNegatives, plus, raisedCategories, type CountRange, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type StarSpread } from "./disclosure"
 import { publishedRatingGroups } from "./rating-batches"
 import { escalates } from "./sentiment/taxonomy"
 
@@ -53,7 +53,10 @@ export interface FeedbackDigest {
   counts: { positive: FewCount; neutral: FewCount; negative: FewCount | CountRange }
   /** Messages classified; a band with the negatives' (D-012); for a venue, a floor once any mood is a few. */
   total: number | HeldTotal | CountRange
+  /** A host's, with their counts. None for a venue, which reads `raised` (SCRUM-1500). */
   categories: DisclosedCategory[]
+  /** A venue's: the categories raised, named without a count, in a fixed order (`raisedCategories`). None for a host. */
+  raised: string[]
   /** What the room liked, by people (`discloseTopics`). None for a venue, whose screens do not carry it. */
   topics: DisclosedTopic[]
   /** All zero, and the average null, until `MIN_CELL` people have rated. */
@@ -132,6 +135,7 @@ export async function buildFeedbackDigest(
 
   const venue = view === "venue"
   const stars = discloseStars(ratings)
+  const split = moodSplit(counts, view, discloseNegatives(counts.negative, categories, tally.negatives))
 
   return {
     view,
@@ -141,7 +145,7 @@ export async function buildFeedbackDigest(
     windowClosesAt: closesAt.toISOString(),
     windowOpen: Date.now() < closesAt.getTime(),
     ended: Date.now() >= event.end_time.getTime(),
-    ...moodSplit(counts, view, discloseNegatives(counts.negative, categories, tally.negatives)),
+    ...split,
     /*
      * Counts, suppressed below the disclosure floor.
      *
@@ -149,7 +153,8 @@ export async function buildFeedbackDigest(
      * a safety concern was raised -- but the number is null, because "1
      * safety_conduct" in a room of six is a sentence with an author.
      */
-    categories,
+    categories: venue ? [] : categories,
+    raised: venue && typeof split.counts.negative !== "object" ? raisedCategories(categories, split.counts.negative) : [],
     topics: venue ? [] : discloseTopics(topicPeople, population),
     // The stars too: under five raters they are individual scores (SCRUM-437).
     ...stars,

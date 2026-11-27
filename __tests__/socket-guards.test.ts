@@ -20,7 +20,7 @@ jest.mock("@/lib/socket-ops-auth", () => ({
   ...jest.requireActual("@/lib/socket-ops-auth"),
   eventOpsView: (...args: unknown[]) => mockEventOpsView(...args),
 }))
-jest.mock("@/lib/live-snapshot", () => ({ buildLiveSnapshot: jest.fn().mockResolvedValue(null) }))
+jest.mock("@/lib/live-snapshot", () => ({ readLiveSnapshot: jest.fn().mockResolvedValue(null) }))
 
 import { startSponsoredScheduler, stopSponsoredScheduler } from "@/lib/sponsored-scheduler"
 import {

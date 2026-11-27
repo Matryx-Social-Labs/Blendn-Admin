@@ -234,6 +234,25 @@ describe("the Feedback tab's page", () => {
     expect(html).not.toContain("held back</b>")
   })
 
+  it("names a venue's complaint categories without a count, safety first, and no \"N of M\" (SCRUM-1500)", async () => {
+    mockSession.user.role = "venue_owner"
+    mockEvent = { status: "published", kind: "event", ...over, organizer_org_id: "org-b" }
+    jest.requireMock("@/lib/feedback-digest").buildFeedbackDigest.mockResolvedValue({
+      ...emptyDigest(),
+      view: "venue",
+      counts: { positive: 25, neutral: 9, negative: 27 },
+      total: 61,
+      raised: ["safety_conduct", "entry_queue", "crowding"],
+    })
+    const html = renderToStaticMarkup(await feedback())
+    const panel = html.slice(html.indexOf("What went wrong"))
+    expect(panel).toMatch(/safety conduct → mod[\s\S]*entry queue[\s\S]*crowding/)
+    // No count, no "<5" and no bar beside a name: any of them minus the exact 27 gives a held one back.
+    expect(panel.replace(/<[^>]*>/g, " ")).not.toMatch(/\d|&lt;5/)
+    expect(html).not.toContain("of 27")
+    expect(html).toContain("What they were about is listed; read them where they were said, in the Room chat you moderate.")
+  })
+
   it("shows no stars panel when nobody rated and nothing was classified", async () => {
     mockEvent = { status: "published", kind: "event", ...over, organizer_org_id: "org-a" }
     jest.requireMock("@/lib/feedback-digest").buildFeedbackDigest.mockResolvedValue(emptyDigest())
@@ -294,6 +313,7 @@ function emptyDigest() {
     counts: { positive: 0, neutral: 0, negative: 0 },
     total: 0,
     categories: [],
+    raised: [],
     ratings: [0, 0, 0, 0, 0],
     averageRating: null,
     ratingCount: 0,

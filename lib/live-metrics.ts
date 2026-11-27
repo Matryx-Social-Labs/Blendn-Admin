@@ -8,7 +8,7 @@
  * server-only.
  */
 
-import { countText, liveCountBucket, midpoint, plus, type CountRange, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type LiveCountBucket } from "./disclosure"
+import { countText, liveCountBucket, midpoint, plus, raisedCategories, type CountRange, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type LiveCountBucket } from "./disclosure"
 
 export type { FewCount, HeldTotal }
 
@@ -148,7 +148,11 @@ export interface VenueLiveSnapshot {
   activeChatters30m: LiveCountBucket
   openFlags: number
   sentiment: { positive: LiveCountBucket; neutral: LiveCountBucket; negative: LiveCountBucket }
-  categories: Array<{ category: string; count: LiveCountBucket }>
+  /**
+   * The complaint categories of the last 30 minutes, named without a count (`raisedCategories`, SCRUM-1500): a bucket
+   * beside the negatives' narrowed a held one at its edges (negative 7, crowding "5-9": entry_queue 1 or 2).
+   */
+  raised: string[]
   alerts: LiveAlert[]
 }
 
@@ -382,7 +386,11 @@ export function alertsForVenue<T extends { kind: string; body: string }>(alerts:
  * Field by field rather than a spread, so a figure added to `LiveFigures` later
  * reaches a venue only when somebody writes it in here.
  */
-export function forVenue(s: LiveSnapshot): VenueLiveSnapshot {
+export function forVenue(
+  s: LiveSnapshot,
+  /** The window's exact negatives (`readLiveSnapshot`), never the host's band: see `negatives` there. */
+  negatives: number
+): VenueLiveSnapshot {
   return {
     view: "venue",
     eventId: s.eventId,
@@ -403,9 +411,9 @@ export function forVenue(s: LiveSnapshot): VenueLiveSnapshot {
     sentiment: {
       positive: liveCountBucket(s.sentiment.positive),
       neutral: liveCountBucket(s.sentiment.neutral),
-      negative: liveCountBucket(midpoint(s.sentiment.negative)),
+      negative: liveCountBucket(negatives),
     },
-    categories: s.categories.map((c) => ({ category: c.category, count: liveCountBucket(c.count ?? 0) })),
+    raised: raisedCategories(s.categories, negatives),
     alerts: alertsForVenue(s.alerts),
   }
 }

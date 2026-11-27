@@ -81,7 +81,7 @@ function numericKeys(value: unknown, at = ""): string[] {
 }
 
 describe("forVenue", () => {
-  const venue = forVenue(hostSnapshot())
+  const venue = forVenue(hostSnapshot(), 1)
 
   it("rounds every count of people to a range", () => {
     expect(venue).toMatchObject({
@@ -95,7 +95,8 @@ describe("forVenue", () => {
       checkInRate10m: "5-9",
       activeChatters30m: "5-9",
       sentiment: { positive: "5-9", neutral: "quiet", negative: "quiet" },
-      categories: [{ category: "entry_queue", count: "quiet" }],
+      // The window's one category is held and is all its negatives: named, it would be their count (SCRUM-1500).
+      raised: [],
     })
   })
 
@@ -112,10 +113,10 @@ describe("forVenue", () => {
 
   it("keeps the flags decided on the exact figures", () => {
     expect(venue.overCapacity).toBe(true)
-    expect(forVenue(hostSnapshot({ overCapacity: false })).overCapacity).toBe(false)
+    expect(forVenue(hostSnapshot({ overCapacity: false }), 1).overCapacity).toBe(false)
     // 3 of 12 unseen is under half; 7 of 12 is over it.
     expect(venue.mostlyInferred).toBe(false)
-    expect(forVenue(hostSnapshot({ unconfirmed: 7 })).mostlyInferred).toBe(true)
+    expect(forVenue(hostSnapshot({ unconfirmed: 7 }), 1).mostlyInferred).toBe(true)
   })
 
   it("sends the alert without the counts in its body", () => {
@@ -132,7 +133,7 @@ describe("forVenue", () => {
 
   it("lets through only the fields it names, so a figure added later does not reach a venue", () => {
     const widened = { ...hostSnapshot(), uniqueAttendance: 14 } as LiveSnapshot
-    expect(forVenue(widened)).not.toHaveProperty("uniqueAttendance")
+    expect(forVenue(widened, 1)).not.toHaveProperty("uniqueAttendance")
   })
 })
 

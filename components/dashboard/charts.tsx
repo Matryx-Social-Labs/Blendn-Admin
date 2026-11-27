@@ -567,6 +567,27 @@ export function CategoryBars({
   )
 }
 
+/**
+ * The complaint categories a venue is shown for another host's night: named, never counted (SCRUM-1500). No bar
+ * and no "<5": beside the venue's exact negatives either gives a held count back. Safety in red, as in `CategoryBars`.
+ */
+export function RaisedList({ categories }: { categories: readonly string[] }) {
+  return (
+    <ul className="flex flex-col gap-1.5 text-[0.8125rem] text-muted-foreground">
+      {categories.map((category) => {
+        const safety = category === "safety_conduct"
+        return (
+          <li key={category} className={cn("flex items-baseline gap-2 [overflow-wrap:anywhere]", safety && "font-medium text-destructive")}>
+            <span aria-hidden="true" className={cn("size-1.5 shrink-0 -translate-y-px rounded-full", safety ? "bg-destructive" : "bg-border-strong")} />
+            {category.replace(/_/g, " ")}
+            {safety ? " → mod" : null}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 /* -------------------------------------------------------------------------- */
 
 export type AttendanceDay = {

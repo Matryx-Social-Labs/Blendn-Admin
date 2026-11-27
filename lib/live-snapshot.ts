@@ -145,7 +145,7 @@ export async function readLiveSnapshot(
   eventId: string,
   held?: Held,
   { social: withSocial = false }: { social?: boolean } = {}
-): Promise<{ snapshot: LiveSnapshot; figures: LiveFigures; event: { start_time: Date; end_time: Date }; occurrenceId: string | null } | null> {
+): Promise<{ snapshot: LiveSnapshot; figures: LiveFigures; negatives: number; event: { start_time: Date; end_time: Date }; occurrenceId: string | null } | null> {
   const now = new Date()
   const read = await eventAndSlots(eventId, now, held)
   if (!read) return null
@@ -398,6 +398,12 @@ export async function readLiveSnapshot(
     },
     // The exact counts behind `snapshot.categories`, for the alerts the issue sweep records. Never sent.
     figures,
+    /*
+     * The window's exact negatives, for the venue's copy (`forVenue`). Never sent to a host: beside the band they are
+     * its held count. A venue reads the night's exactly anyway (its split, "Nights here"); anything it is given from
+     * the band instead moves with where the held count sits in it (SCRUM-1500).
+     */
+    negatives: sentiment.negative,
     event: { start_time: event.start_time, end_time: event.end_time },
     occurrenceId: slot.occurrence?.id ?? null,
   }
