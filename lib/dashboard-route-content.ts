@@ -55,7 +55,7 @@ export const routeContent: Record<string, RouteContent> = {
   "/dashboard/claims/brands": CLAIMS,
   "/dashboard/moderation/reports": {
     title: "Reports",
-    description: "What people reported about each other, oldest first. Age is the SLA — 24 hours.",
+    description: "What people reported about each other, most severe first, then oldest. Age is the SLA — 24 hours.",
   },
   "/dashboard/venues/new": {
     title: "Add a venue",

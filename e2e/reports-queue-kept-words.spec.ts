@@ -91,6 +91,7 @@ test("a deleted message's card keeps the reported words, and the threat comes fi
   await page.goto("/dashboard/moderation/reports")
   const main = page.getByRole("main")
   await expect(main.getByText("Showing the 100 most severe of each kind", { exact: true })).toBeVisible()
+  await expect(page.getByText("What people reported about each other, most severe first, then oldest. Age is the SLA — 24 hours.")).toBeVisible()
   const footer = main.getByText(/^\d+ pending · most severe first, then oldest · decisions write to the audit log$/)
   await expect(footer).toBeVisible()
   const quotes = main.locator("blockquote")
