@@ -182,6 +182,24 @@ that made no Blend go 12 hours after their night (`purgeLapsedCrewLikes`), and
 crew invite links once their 7-day week is over, used, revoked or lapsed
 (`purgeLapsedCrewLinks`).
 
+**Where a check-in was goes at three days** (D-029, SCRUM-1230): every
+check-in, at an event's door or a Go Live at a venue, keeps the exact point it
+was made from (`event_check_ins.latitude`, `longitude`) for three days after the
+night (the check-out, else the end of the Go Live window, else the end of that
+night), and then the point is set NULL. In the same pass the phone's details
+(`device_info`) are cut to GPS accuracy, the platform (iOS or Android) and our
+own test-data markers (`source`, `qaScale`, written only by the seed scripts);
+the phone model and the app version are removed. The check-in row stays: who
+came on which night, and when, is the attendance record. The presence sweeper
+does it every five minutes, up to 1,000 check-ins and 1,000 sessions a pass
+(`forgetCheckInPoints`, `KEPT_DEVICE_INFO_KEYS` in `lib/presence-sweeper.ts`).
+Check-ins whose point an earlier sweep had already removed (Go Live) had their
+phone details cut once by a migration.
+A presence session (`presence_sessions`) stores no point at all; nothing read
+one, and the ones written before SCRUM-1230 are nulled by the same pass,
+whatever their age. Nothing reads a point after the night. A fence refusal
+(`check_in_refusals`) never stored one, only how far outside and how accurate.
+
 **Stored media is `no-cache`.** Every profile photo and chat image is the
 server's sealed copy (`sealUpload`), stored with `Cache-Control: no-cache`, so
 deleting it (account deletion, a removed photo, a moderation takedown) stops it

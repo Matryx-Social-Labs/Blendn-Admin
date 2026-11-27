@@ -3144,6 +3144,12 @@
       "observed": "A3: 1 of 8 failing (the venue owner). A5: 2 of 8. Restored each; 8 of 8 on blendn_growth09a.",
       "date": "2026-11-26"
     },
+    "check-in-points-forgotten.itest.ts": {
+      "guards": "SCRUM-1230 / D-029 through forgetCheckInPoints on a db:migrate database: every check-in, door or Go Live, loses latitude/longitude three days after the night (check-out first, else the window's end, else the occurrence's end; pinned a minute either side of the line), reaching a 90-day backlog, in bounded batches, and through the venue-day pass the loop runs; device_info keeps exactly the KEPT_DEVICE_INFO_KEYS it had (none invented, NULL when none or not an object); rows whose point was already gone are cut once by migration 20261127050200; the presence session's point goes; the row and the dashboard overview are unchanged; the door writes no point into presence_sessions.",
+      "mutation": "(RED) forgetGoLiveCoordinates on origin/dev 028f391d aliased in. (M1) `AND c.expires_at IS NOT NULL` added to the sweep (Go Live only, as before). (M2) `device_info = c.device_info` (left whole). (M3) `qaScale` dropped from KEPT_DEVICE_INFO_KEYS. (M4) the call in sweepVenueDays replaced by a no-op.",
+      "observed": "RED (first 12 cases): 10 of 12 failing (door rows kept the point and every key; the 90-day row unreached; the session written with the door's point). On the 16-case suite: M1 11 of 16, M2 5 of 16, M3 1 of 16 (the scale-seed tag), M4 1 of 16 (the venue-day pass). Restored each; 16 of 16 on blendn_serving_10.",
+      "date": "2026-11-27"
+    },
     "paged-lists-tie-break.itest.ts": {
       "guards": "SCRUM-1356 on a db:migrate database: every offset-paged mobile list ends its order with a unique key, and so does the bell's cursor, so 25 rows that tie on the route's sort, paged by 5, come back each exactly once: GET /events (date page and the distance pre-read), /events/search (raw SQL), /chat/groups (25 rooms with no message, NULL last_message_at), /chat/groups/:id/participants, /events/:id/checkins, /events/:id/chat, /message-requests and /notifications (Prisma cursor).",
       "mutation": "(RED) the suite against origin/dev 028f391d's app/api/mobile, every tie-break absent. First at PAGE 10, also with ALTER DATABASE SET enable_indexscan, enable_indexonlyscan and enable_bitmapscan off; then at PAGE 5, which puts page 2 through Postgres's bounded top-N heapsort (more than 2 x (OFFSET + LIMIT) rows to sort), the one that hands tied rows back rotated.",
