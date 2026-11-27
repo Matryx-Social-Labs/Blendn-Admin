@@ -1,11 +1,12 @@
 /**
  * The seeded world's accounts, by role.
  *
- * `outsider` is the one most likely to be mistaken for a bug: it holds a
- * dashboard role and belongs to no organisation, so `eventPermissions` denies
- * it everywhere. Empty screens on that account are the correct answer — and
- * without it, "an organiser can edit" passes without anyone checking that *a
- * different* organiser cannot.
+ * `outsider` is the one most likely to be mistaken for a bug: it owns an
+ * organisation of its own with nothing in it, so `eventPermissions` denies it
+ * every other organisation's event. Empty screens on that account are the
+ * correct answer — and without it, "an organiser can edit" passes without
+ * anyone checking that *a different* organiser cannot. (An org of its own, not
+ * none: since SCRUM-1247 a dashboard is a membership.)
  */
 export const ROLE_ACCOUNTS = {
   admin: { email: "admin@blendn.app", role: "app_admin" },

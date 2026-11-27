@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, MODERATION_UNAVAILABLE_NOTE, moderationUnavailableError, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, MODERATION_UNAVAILABLE_NOTE, moderationUnavailableError, PARTICIPATION_GATE, RoomPersonFactsFields, standardErrors, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
 import {
   EventQuerySchema,
   CheckinRequestSchema,
@@ -332,7 +332,8 @@ const NightPersonSchema = z
     userId: z.string().describe("Their handle in this room (`rh_…`), never an account id. `POST /matches/likes` and message requests take it."),
     displayName: z.string().describe("The room's pseudonym, or their name where they revealed here."),
     photo: z.string().nullable().describe("Only beside a name; null beside a pseudonym."),
-    age: z.number().int().nullable(),
+    age: z.number().int().nullable().describe("Only beside a name; null beside a pseudonym (D-030)."),
+    ...RoomPersonFactsFields,
     insideNow: z.boolean().describe("Still checked in. False reads \"Was here\"."),
     youLiked: z.boolean(),
     overlap: z.string().nullable().describe("One sentence of what you share, or null. Always null on a night under 8 people."),

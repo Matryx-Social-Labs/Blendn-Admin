@@ -18,6 +18,7 @@ const mockAuditCreate = jest.fn()
 jest.mock("@auth/prisma-adapter", () => ({ PrismaAdapter: () => ({}) }))
 jest.mock("@/lib/db", () => ({
   db: {
+    $queryRaw: () => mockSessionRows(mockFindUnique()),
     user: { findUnique: (...a: unknown[]) => mockFindUnique(...a) },
     organisation_invites: { findFirst: async () => null },
     audit_logs: { create: (...a: unknown[]) => mockAuditCreate(...a) },
@@ -29,6 +30,7 @@ import { authOptions } from "@/lib/auth"
 import { logger } from "@/lib/logger"
 import { APP_ONLY_SIGNIN } from "@/lib/rbac"
 import { SessionEnded } from "@/lib/session-revocation"
+import { mockSessionRows } from "./support/session-account"
 
 type Authorize = (c: Record<string, string>, req?: { headers: Record<string, string> }) => Promise<unknown>
 const rawAuthorize = (

@@ -349,7 +349,9 @@ Crossing from one column to the other is the message request, and it is the only
 crossing: `GET /events/:eventId/checkins` returns pseudonyms, never real names or
 photos — except for someone who turned on "Show who I am" in that room
 (`event_match_preferences.revealed`), who is listed by name with `image`, the
-same rule the Grid card already applied. Blocks are honoured in both directions everywhere, and are reported as
+same rule the Grid card already applied. Beside a pseudonym `age` and
+`location` are null and the row carries `ageBand` and `tenure` instead (D-030,
+see *Matches*). Blocks are honoured in both directions everywhere, and are reported as
 "not found" rather than "blocked" — confirming an account exists tells a blocked
 person they were blocked.
 
@@ -421,10 +423,11 @@ an opaque, url-safe string. Field names and shapes did not change.
   on `friends_see_me_in_rooms`. A reveal at another event, a mutual like or an
   open conversation does not name them through this room's handle — a raw id
   still answers as before. For somebody the room keeps anonymous,
-  `GET /users/:userId` returns only `{ id, name, pseudonym, age, location,
-  isOwnProfile, identityVisible: false }` with `name` their pseudonym in that room;
-  `GET /profiles/:userId` returns only `{ id, name, pseudonym, profile: { id, age,
-  onboarded, location } }`; and `GET /profiles/:userId/interests` returns an
+  `GET /users/:userId` returns only `{ id, name, pseudonym, age: null, location:
+  null, ageBand, tenure, isOwnProfile, identityVisible: false }` with `name` their
+  pseudonym in that room and `ageBand`/`tenure` the roster's (see *Matches*:
+  D-030); `GET /profiles/:userId` returns only `{ id, name, pseudonym, profile: {
+  id, age: null, onboarded, location: null, ageBand, tenure } }`; and `GET /profiles/:userId/interests` returns an
   empty list. `pseudonym` (SCRUM-1046, 2026-11-20) is that same name as a
   contract: present exactly when `name` IS a room pseudonym, so it is never a
   real name, never on a raw id's answer or a named card, and absent (with
@@ -432,7 +435,10 @@ an opaque, url-safe string. Field names and shapes did not change.
   `POST /message-requests` and whether `POST /friends/requests` is refused.
   Otherwise `GET /users/:userId` also sends `work_field`, and, when
   `identityVisible` is false, `blurPhoto` (the stored derivative) in place of
-  `image` and `photos` (SCRUM-458).
+  `image` and `photos` (SCRUM-458), with `age`, `location`, `ageBand` and
+  `tenure` all null and no `memberSince` or `stats`; `GET /profiles/:userId`
+  then sends `profile.age`/`location`/`ageBand`/`tenure` null and no
+  `createdAt` (D-030). A raw id has no room to count a band over.
 - **A raw id of a friend is named** (SCRUM-863): with a friendship row, no block
   either way and no open pseudonymous conversation between you, `GET /users/:userId`
   and `GET /profiles/:userId` answer as for somebody you may see
@@ -442,9 +448,10 @@ an opaque, url-safe string. Field names and shapes did not change.
   `friends_see_me_in_rooms` on.
 - **A crew's, Mix's or Lobby post's handle is a room card** (SCRUM-864), for a
   caller that room admits now and a person it admits now; otherwise 404 as before.
-  `GET /users/:userId` returns `{ id, name, age, location, isOwnProfile: false,
-  identityVisible: false }` and `GET /profiles/:userId` the `{ id, name,
-  profile: { id, age, onboarded, location } }` subset, with `name` the room's own
+  `GET /users/:userId` returns `{ id, name, age: null, location: null, ageBand:
+  null, tenure, isOwnProfile: false, identityVisible: false }` and `GET
+  /profiles/:userId` the `{ id, name, profile: { id, age: null, onboarded,
+  location: null, ageBand: null, tenure } }` subset (no event, so no band), with `name` the room's own
   name for them: a crew's first name only, a Mix's or a Lobby post's pseudonym.
   `pseudonym` repeats the name for a Mix's or a Lobby post's card, never for a
   crew's (a first name). No photos, bio or interests. A block either way is a 404.
@@ -481,13 +488,15 @@ withholds. No id in the path: it is only ever yours.
 
 ```json
 { "pseudonym": "Velvet Otter",
-  "anonymous": { "id": "<you>", "name": "Velvet Otter", "pseudonym": "Velvet Otter", "age": 27, "location": "Toronto", "isOwnProfile": false, "identityVisible": false },
+  "anonymous": { "id": "<you>", "name": "Velvet Otter", "pseudonym": "Velvet Otter", "age": null, "location": null, "ageBand": "25-34", "tenure": "regular", "isOwnProfile": false, "identityVisible": false },
   "named": { "id": "<you>", "name": "Priya", "work_field": null, "image": "…", "photos": ["…"], "bio": "…", "occupation": null, "education": null,
              "languages": [], "homeState": null, "sign": null, "age": 27, "location": "Toronto", "interests": [], "memberSince": "…",
              "stats": { "eventsAttended": 3, "eventsFavorited": 1, "eventsOrganized": 0 }, "isOwnProfile": false, "identityVisible": true, "badges": [] } }
 ```
 
-- `anonymous` — before you reveal: your pseudonym, age and city, nothing else.
+- `anonymous` — before you reveal: your pseudonym, and the `ageBand` and
+  `tenure` that room shows beside it (D-030; the band from the room `pseudonym`
+  comes from), with `age` and `location` null. Nothing else.
 - `named` — to somebody who may see who you are in a room: first name, photos and
   the rest; `badges` only while "Show my badges" is on.
 - `pseudonym` is the one you carry in the event room you joined last; `null`
@@ -1156,9 +1165,29 @@ Each card names what the two of you share rather than who the other person is:
 
 ```json
 { "userId": "...", "displayName": "Cosmic Panda", "revealed": false, "photo": null,
+  "age": null, "ageBand": "25-34", "tenure": "regular",
   "sharedInterests": ["Techno", "Board games"],
   "sharedIntents": ["networking"], "insideNow": true, "youLiked": false }
 ```
+
+**Before a reveal: a band and a chip, never the age** (D-030, SCRUM-1384,
+2026-11-27). A row the room keeps anonymous carries `age: null` (the key stays
+for installed builds), and in its place:
+
+- `ageBand` — `"18-24"`, `"25-34"`, `"35-44"`, `"45+"` or `null`. Shown only
+  when **3 or more people who ever checked in at this event as attendees**
+  share it; null below that, and when the age is unknown. That population is
+  the same for every viewer and every route (this deck, `/people`,
+  `/checkins`, the room card on `/users/:id` and `/profiles/:id`), and only
+  grows, so comparing two of them shows nothing. Ages are taken at the event's
+  start. A revealed row carries its band too, beside the exact `age`.
+- `tenure` — `"regular"` once they came to 2 or more distinct events (a
+  multi-day event is one), else `"new"`. Two values, never a count.
+- **Somebody who runs or hosts the event** (the organizing organisation, the
+  venue's, an admin) gets `age`, `ageBand` and `tenure` all `null`: hosts see
+  totals only.
+- No city, join date or counts on any of these rows. `sharedEvents`,
+  `sharedPlans` and `badges` are unchanged (the client decides what it draws).
 
 `displayName` is the room pseudonym and `photo` is null unless that person chose
 to be revealed at this event. `revealed` says which (SCRUM-1067): true exactly when
@@ -1389,15 +1418,17 @@ GET /events/:eventId/people?limit=30&cursor=rh_…
 { "success": true, "data": {
   "open": true, "total": 5120, "nextCursor": "rh_…",
   "people": [
-    { "userId": "rh_…", "displayName": "Cosmic Panda", "photo": null, "age": 27,
-      "insideNow": false, "youLiked": false, "overlap": "You both picked chai over filter coffee" }
+    { "userId": "rh_…", "displayName": "Cosmic Panda", "photo": null, "age": null,
+      "ageBand": "25-34", "tenure": "new", "insideNow": false, "youLiked": false, "overlap": "You both picked chai over filter coffee" }
   ]
 } }
 ```
 
 - **As the room shows them.** `userId` is the person's handle in this room,
   never an account id; `displayName` is their pseudonym, or their name (with a
-  `photo`) only where they revealed here — the roster's rule.
+  `photo`) only where they revealed here — the roster's rule. `age` only beside
+  a name; beside a pseudonym `age: null` with `ageBand` and `tenure`, as on the
+  deck (*Matches*, D-030).
 - **Never listed:** you; staff; anyone in a block with you, either way; anyone
   you closed a conversation with; **your friends**, whatever their "friends can
   see me in rooms" setting — friends never meet as stranger cards (owner,
@@ -4132,9 +4163,9 @@ can tell "no specialisms here" from "this field is unknown to me".
 
 **Suppressed in small rooms.** A match card omits `workField` when the room has
 fewer than 8 other attendees. The roster already gives an unrevealed person an
-age and a city; adding a field of work makes four attributes, and "29,
-Bengaluru, works in fintech, into techno and board games" is one specific person
-in a room of eight. Ranking still uses it there — the score never leaves the
+age band and a new / regular chip (D-030); adding a field of work makes four
+attributes, and "25-34, a regular, works in fintech, into techno and board
+games" is one specific person in a room of eight. Ranking still uses it there — the score never leaves the
 server, so suppressing the *attribute* costs nothing in ordering.
 
 **`sharedWorkField` is suppressed by the same floor, and must be.** The card also
@@ -4390,7 +4421,7 @@ Chat is unaffected: posting a message is its own choice to be seen.
 | POST | `/users/:userId/block` | Block/unblock user (`DELETE` to unblock) |
 | GET | `/users/blocked` | The people you blocked. `blocked_id` is an **opaque ref to the block** (`bk_…`), not their account id — somebody blocked by their Lobby post or room handle was never shown one, and this list must not be where it arrives. Send it back to `DELETE /users/:userId/block` to unblock; only a block you made is removed. A raw id still unblocks, for older clients, on your own block only. Name and photo appear only where the identity rules allow. Each row also carries `seen_as` (the pseudonym you were shown for them when you blocked — a room's, the Lobby's or a match's, never a real name; null when none was shown or the block predates 2026-11-20 outside a match), `seen_in` (where you blocked from: the event's title, a venue day's venue, or a crew's, Mix's or post's room name — a message request sent from a Lobby room keeps that room's name; null when not recorded) and `account_deleted`. `?q=` (1–100 characters, trimmed; longer is 400) searches on the server, case-insensitively, over `seen_as`, `seen_in`, a match's pseudonym and a real name **only where this list would show it** — a hidden name finds nobody — with `pagination.totalCount` the number of matches. 60 a minute |
 | GET | `/users/:userId/favorites` | Get your saved events, each with `visibility` — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176); also `changedAt`/`changedFields`, as on `GET /me/rsvps`, and `organizer` as `GET /events/:eventId` sends it (the org, never the creating user) |
-| GET | `/profiles/:userId` | Get a profile. Your own carries `email` and the whole `profile` row except `date_of_birth` (`age` derived) — `name`, `gender`, `interested_in`, `intent_default`, `reveal_by_default`, `blur_photo`, `interests`, `created_at`, `updated_at` included, and `expertise` as slugs. Anybody else's `profile` is `id, age, onboarded, location, interests, work_field, expertise` (labels), plus `bio, occupation, education, photos` if you can see who they are, else `blurPhoto`; no `email`, and `image` only if you can see who they are |
+| GET | `/profiles/:userId` | Get a profile. Your own carries `email` and the whole `profile` row except `date_of_birth` (`age` derived) — `name`, `gender`, `interested_in`, `intent_default`, `reveal_by_default`, `blur_photo`, `interests`, `created_at`, `updated_at` included, and `expertise` as slugs. Anybody else's `profile` is `id, age, onboarded, location, interests, work_field, expertise` (labels), plus `bio, occupation, education, photos` if you can see who they are, else `blurPhoto` with `age`/`location`/`ageBand`/`tenure` null and no `createdAt` (D-030); no `email`, and `image` only if you can see who they are |
 | PUT | `/profiles/:userId` | Update profile |
 | GET | `/profiles/:userId/interests` | Get category interests — 404 when either of you has blocked the other, as the profile answers (SCRUM-299); empty through a room handle for somebody that room keeps anonymous |
 | PUT | `/profiles/:userId/interests` | Update interests |
@@ -4576,8 +4607,7 @@ safety, reports and legal requests, and hard-deleted 180 days after the close by
 the chat sweeper (`lib/lobby-retention.ts`): room messages, posts with their asks
 and photos, the posts' rooms, the host's note. Removed or reported content is
 held 180 days from its removal, and anything with a pending report until it is
-decided. Alert switches go at the close. The purge is a dry run that logs what it
-would delete until `LOBBY_PURGE=delete` is set. See `docs/RETENTION.md`.
+decided. Alert switches go at the close. See `docs/RETENTION.md`.
 
 #### Types, spots and the list
 

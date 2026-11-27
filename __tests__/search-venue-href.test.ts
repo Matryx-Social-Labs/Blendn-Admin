@@ -16,6 +16,7 @@ jest.mock("@/lib/db", () => ({
     organisation_members: { findMany: () => Promise.resolve([{ org_id: "o1" }]) },
     events: { findMany: () => Promise.resolve([]) },
     // currentUser reads the caller's row (step 18, L5).
+    $queryRaw: () => mockSessionRows({ id: "u1", role: "venue_owner" }),
     user: { findMany: () => Promise.resolve([]), findUnique: () => Promise.resolve({ role: "venue_owner", suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null }) },
     organisations: { findMany: () => Promise.resolve([]) },
     venues: {
@@ -27,6 +28,7 @@ jest.mock("@/lib/db", () => ({
 import { NextRequest } from "next/server"
 
 import { GET } from "@/app/api/search/route"
+import { mockSessionRows } from "./support/session-account"
 
 it("links a venue hit to the venue's own page", async () => {
   const res = await GET(new NextRequest("http://localhost/api/search?q=humming"))

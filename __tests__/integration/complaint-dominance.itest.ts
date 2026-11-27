@@ -102,7 +102,7 @@ describe("through the 180-day purge", () => {
     const before = (await buildFeedbackDigest(await eventRow(), "host")).categories
     await db.events.update({ where: { id: eventId }, data: { start_time: ago(182.2), end_time: ago(182) } })
     await db.chat_messages.updateMany({ where: { chat_group_id: roomId }, data: { created_at: ago(182.1) } })
-    await purgeClosedLobbies(new Date(), "delete")
+    await purgeClosedLobbies()
 
     expect(await db.chat_messages.count({ where: { chat_group_id: roomId } })).toBe(0)
     const tally = await db.event_feedback_tallies.findUniqueOrThrow({ where: { event_id: eventId } })

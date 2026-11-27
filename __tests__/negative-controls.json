@@ -35,6 +35,18 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "wave-retention.itest.ts": {
+      "guards": "SCRUM-1382: the shared fixture endedEvent (__tests__/integration/helpers.ts) moves its occurrence's occurs_on with its times, and addPastNight dates a run's later night on the UTC day it started, so a run's first night (long ago) and its latest (yesterday) never share a UTC date under event_occurrences_event_id_occurs_on_key, whatever the hour. The suite's liveSeries run, two occurrences of one event, is created in beforeAll at any hour.",
+      "mutation": "(RED) the suite on origin/dev 028f391d with the clock pinned at 2026-11-27T00:30Z (makeEvent dates occurs_on from now - 1 h, a second occurrence was dated now - 24 h). (M1) the fix's two halves undone: occurs_on dropped from endedEvent's updateMany and pastNight dated from end_time. (M2) only the first half undone. (M3) only the second. Both suites run with Date alone pinned by a scratch setupFilesAfterEnv (jest.useFakeTimers({ now: PIN_CLOCK, doNotFake: every timer, nextTick, setImmediate, hrtime, performance, queueMicrotask })), on a db:migrate database.",
+      "observed": "RED and M1 at 00:30Z: failing, every test of both suites (7 of 7) on `Unique constraint failed on the constraint: event_occurrences_event_id_occurs_on_key` from beforeAll. origin/dev at 12:00Z: 7 passed. The fix at 00:30Z, 23:30Z and 12:00Z: 7 passed each. M2 and M3 at 00:30Z: 7 passed, as expected: either half alone keeps the dates apart (26 h, or 40+ days), so the control is M1.",
+      "date": "2026-11-27"
+    },
+    "tonight-answer-retention.itest.ts": {
+      "guards": "SCRUM-1382: the shared fixture endedEvent (__tests__/integration/helpers.ts) moves its occurrence's occurs_on with its times, and addPastNight dates a run's later night on the UTC day it started, so a run's first night (long ago) and its latest (yesterday) never share a UTC date under event_occurrences_event_id_occurs_on_key, whatever the hour. The suite's liveSeries run, two occurrences of one event, is created in beforeAll at any hour.",
+      "mutation": "(RED) the suite on origin/dev 028f391d with the clock pinned at 2026-11-27T00:30Z (makeEvent dates occurs_on from now - 1 h, a second occurrence was dated now - 24 h). (M1) the fix's two halves undone: occurs_on dropped from endedEvent's updateMany and pastNight dated from end_time. (M2) only the first half undone. (M3) only the second. Both suites run with Date alone pinned by a scratch setupFilesAfterEnv (jest.useFakeTimers({ now: PIN_CLOCK, doNotFake: every timer, nextTick, setImmediate, hrtime, performance, queueMicrotask })), on a db:migrate database.",
+      "observed": "RED and M1 at 00:30Z: failing, every test of both suites (7 of 7) on `Unique constraint failed on the constraint: event_occurrences_event_id_occurs_on_key` from beforeAll. origin/dev at 12:00Z: 7 passed. The fix at 00:30Z, 23:30Z and 12:00Z: 7 passed each. M2 and M3 at 00:30Z: 7 passed, as expected: either half alone keeps the dates apart (26 h, or 40+ days), so the control is M1.",
+      "date": "2026-11-27"
+    },
     "staff-alert.itest.ts": {
       "guards": "SCRUM-1473 on a db:migrate database: a pending flag whose only category key is `profanity` (the keyword list's swear-word hide, 0.9 or 0.95) is not a severe flag and alone sends no staff alert; profanity beside another key on one flag, a `slur` hide at 0.9 and a model flag at 0.95 and the sentiment sweeper's array-shaped flag at 0.95 are each one severe flag, and the array never makes the sweep raise; a report with no flag alerts; beside a violence flag or a report the profanity flag is not counted (\"1 severe flag\", and \"1 new report\" with no severe count).",
       "mutation": "(RED) the suite on origin/dev 339403a1. (M1) the profanity-only clause removed from severeFlags. (M2) it widened to every flag with a profanity key. (M3) the confidence arm replaced by false. (M4) the alert condition reads severe flags only, not reports. (M5) the profanity-only clause written as an unguarded jsonb_object_keys read.",
@@ -280,6 +292,12 @@
       "mutation": "A: lib/live-snapshot.ts eventAndSlots ignores the held event (`if (false)`). B: the chat query's COUNT(DISTINCT user_id) made COUNT(user_id).",
       "observed": "A: fails ('read the event and its days once a minute': the second tick costs as many statements as the first). B: fails (activeChatters30m 4, not 3) and the held-tick comparison. Reverted; green.",
       "date": "2026-10-25"
+    },
+    "app-db-role.itest.ts": {
+      "guards": "SCRUM-1358: the app role blendn_app (migration 20261126190000_blendn_app_role) reads and writes every public table and nothing else: refused CREATE TABLE/TEMP/SCHEMA/FUNCTION/EXTENSION, DROP, ALTER, DISABLE TRIGGER, TRUNCATE, CREATE INDEX, COPY TO PROGRAM, pg_read_file and _prisma_migrations; no superuser/createrole/createdb/replication/bypassrls, no role memberships; default privileges reach a later table and its sequence; the migration re-runs where the role already exists. The superuser the migrations run as passes every refused statement (control). readFileSync reads the migration to re-run it.",
+      "mutation": "migration.sql: M1 the CREATE ROLE's `EXCEPTION WHEN duplicate_object` handler removed; M2 the REVOKE TEMPORARY replaced by NULL; M2b the same with the closing end-state check's RAISE EXCEPTION made a NOTICE; M3 both ALTER DEFAULT PRIVILEGES lines removed.",
+      "observed": "Before the migration: every case failed (role \"blendn_app\" does not exist). M1 13 of 31 failing (the re-run raises 42710). M2 `prisma migrate deploy` itself refused by the end-state check (the deploy applies nothing). M2b 1 failing (CREATE TEMP TABLE). M3 1 failing (the later table). Restored from a copy; 31/31 on a db:migrate database (Postgres 17).",
+      "date": "2026-11-26"
     },
     "dashboard-chat-poll.itest.ts": {
       "guards": "perf/loops-dashboard: the organiser feed's ?light=1 poll carries only the restricted members, the shown messages' authors and the active count (not the whole roster) with the same messages and flag count as the full read, and filters the roster in the database.",
@@ -641,6 +659,18 @@
       "observed": "2 failing of 3 (the blocked person, and the blocker reading the blocked person's list) — both received 200 with the interest. A one-directional blockedEitherWay (only blocker_id: a, blocked_id: b) is caught by the first test alone, where the caller is the blocked party.",
       "date": "2026-09-25"
     },
+    "age-readers-ratchet.test.ts": {
+      "guards": "D-030 (SCRUM-1384): the files that call ageFrom( under app/ and lib/ are a fixed list, so a new surface that reads a person's age decides whether it is a gate on the caller's own age or a room row that must send roomPersonFacts' ageBand instead.",
+      "mutation": "Add an untracked lib/zz-nc.ts calling ageFrom(null), run, delete it. The first attempt passed vacuously: git grep skips untracked files, so the guard now passes --untracked.",
+      "observed": "1 of 1 failing, naming lib/zz-nc.ts; 1 of 1 after deleting it.",
+      "date": "2026-11-27"
+    },
+    "room-person-facts.itest.ts": {
+      "guards": "D-030 (SCRUM-1384) through the real routes on a db:migrate database: before a reveal matches, people, checkins, users/:id, profiles/:id and me/preview send age and location null, the age band only once 3 attendees of the event share it, the new/regular chip, and no memberSince, stats or createdAt; a host gets age, band and chip null; a revealed person keeps the exact age. Reads tenure back against COUNT(DISTINCT event_id) in event_check_ins.",
+      "mutation": "(a) lib/matches.ts sends `age: m.age` again; (b) roomPersonFacts skips the operatesEvent check; (c) AGE_BAND_FLOOR 3 -> 2 (age-band.test.ts).",
+      "observed": "(a)+(b) together: 5 of 15 failing: the floor pair, the unrevealed matches row, and the host's rows and card. (c): 2 of 12 in age-band.test.ts. Restored from copies; 15 of 15 and 12 of 12 on blendn_security_20.",
+      "date": "2026-11-27"
+    },
     "poll-read-room-gate.itest.ts": {
       "guards": "GET /events/:eventId/polls/:pollId applies the room's read rule (roomReadDenial): 403 to somebody never in the room and to a banned member (the ban sentence), 404 when the URL names another event, when the poll's message is deleted, or the event is a draft; active, muted and left members still read; POST …/vote through another event's URL is 404 and writes no vote (SCRUM-298)",
       "mutation": "In lib/polls.ts (moved out of the \"use server\" poll-actions.ts) — M1: drop the not_member and banned throws after roomReadDenial in getPollResults. M2: drop `room?.event_id !== reader.eventId` from the read's not-found check. M3: drop `poll.message.chat_group.event_id !== eventId` from castVote. M4: drop `poll.message.deleted_at` from the read's not-found check. M5: drop only the `denial === \"hidden\"` throw.",
@@ -857,9 +887,9 @@
       "source": "run-at-integration-merge"
     },
     "suspension-blast-radius.test.ts": {
-      "guards": "see the test's own docblock; the mutation below proves it is not vacuous Since step 18 (M6): the jwt callback consults suspension through the one rule, isRevoked(token, account) in lib/session-revocation.ts, and that rule must itself read suspended_at.",
-      "mutation": "Replace lib/auth.ts with an empty stub (`export {}`), run this suite, revert M1186 (step 18): the jwt callback's `isRevoked(token, account)` replaced with `account.deletedAt`. M1187: lib/session-revocation.ts stops reading suspended_at.",
-      "observed": "3 failing M1186: 1 failing (the jwt callback re-reads suspension). M1187: 1 failing (same test, the rule's half). Each reverted, 16 of 16 (2026-10-11).",
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous Since step 18 (M6): the jwt callback consults suspension through the one rule, isRevoked(token, account) in lib/session-revocation.ts, and that rule must itself read suspended_at. Since SCRUM-1247 the jwt callback, currentUser and the dashboard socket read the account through sessionAccount (lib/org-membership.ts): the gate is that the file calls sessionAccount/signinAccount and isRevoked, and ACCOUNT_COLUMNS selects u.suspended_at and u.\"deletedAt\".",
+      "mutation": "Replace lib/auth.ts with an empty stub (`export {}`), run this suite, revert M1186 (step 18): the jwt callback's `isRevoked(token, account)` replaced with `account.deletedAt`. M1187: lib/session-revocation.ts stops reading suspended_at. SCRUM-1247: (S1) ACCOUNT_COLUMNS selects NULL AS suspended_at. (S2) lib/socket-ops-auth.ts drops isRevoked(token, user).",
+      "observed": "3 failing M1186: 1 failing (the jwt callback re-reads suspension). M1187: 1 failing (same test, the rule's half). Each reverted, 16 of 16 (2026-10-11). S1: 1 failing (the session read selects suspension). S2: 1 failing (lib/socket-ops-auth.ts checks suspension). Each reverted, 17 of 17 (2026-11-26).",
       "date": "2026-08-25",
       "source": "run-at-integration-merge"
     },
@@ -2047,8 +2077,8 @@
     "csp-report.test.ts": {
       "guards": "Step 16 (MN-E04, G12): the policy's exact token sets (script-src, frame-src, connect-src, frame-ancestors, default-src, form-action) and that next.config.ts sends exactly contentSecurityPolicy(sentryCspReportUri(...)).",
       "mutation": "M834 `https:` added to script-src. M835 next.config.ts sending its own variant of the policy.",
-      "observed": "M834: 1 failing (the exact token sets). M835: 1 failing (is the header next.config.ts sends). Reverted green.",
-      "date": "2026-10-09"
+      "observed": "M834: 1 failing (the exact token sets). M835: 1 failing (is the header next.config.ts sends). Reverted green. SCRUM-1243 (2026-11-26), the enforcing CSP on /dashboard, /pay and /login: M1 `evalSource` always ' 'unsafe-eval'': 6 failing (the policy test and the five enforced paths). M2 next.config passing `true` for allowEval: 5 failing (the enforced paths). M3 the report-only source reset to `/:path*`: 5 failing (report-only sent beside the enforcing header). M4 media-src removed: 1 failing (the exact token sets). M5 the lookahead without its `(?:/|$)` boundaries: 3 failing (/dashboards, /payments, /login-help lose their report-only header). After review: M6 the enforcing header built with a null report-uri: 8 failing (every enforced path). M7 the /pay block moved above `/:path*`: 1 failing (the pay page's no-referrer). M8 /invite dropped from the enforced list only: 1 failing. Reverted; 26 green.",
+      "date": "2026-11-26"
     },
     "razorpay-signature.test.ts": {
       "guards": "Step 16 MN-U02 after review: HMAC over the raw bytes (a multi-byte body), the same signature in upper case or with spaces accepted, a re-serialised body, one changed byte, missing, wrong secret, short, long and non-hex refused without throwing; planMatches on key + price + period.",
@@ -2783,10 +2813,10 @@
       "date": "2026-11-06"
     },
     "lobby-retention.itest.ts": {
-      "guards": "SCRUM-1026: the 180-day purge deletes closed content past its time and holds removed or reported content 180 days from removal (a pending report until decided); a dry run deletes nothing.",
-      "mutation": "(a) the post select's COALESCE removed; (b) the post's pending-report hold inverted (NOT EXISTS -> EXISTS).",
-      "observed": "(a) 3 of 10 failing: no post was ever purged, because NOT NULL drops every unmoderated row (the bug this test's first run found); (b) 4 of 10. Restored; 10/10.",
-      "date": "2026-11-06"
+      "guards": "SCRUM-1026: the 180-day purge deletes closed content past its time and holds removed or reported content 180 days from removal (a pending report until decided). SCRUM-1227: the pass as the sweeper calls it (no mode, nothing in the environment) deletes; a closed room of five messages with one under an open report keeps that one and the room; review round: a pending or recently rejected moderation flag holds its message (an approved one does not), a post whose room holds a reported message keeps post, room and message, and a recently hidden post is held.",
+      "mutation": "(a) the post select's COALESCE removed; (b) the post's pending-report hold inverted (NOT EXISTS -> EXISTS); (c, SCRUM-1227) the message select's message_reports NOT EXISTS removed; (d) the moderation_flags NOT EXISTS removed; (e) the post select's room-has-messages NOT EXISTS removed; (f) 'hidden' dropped from the post's removed/hidden hold. RED (SCRUM-1227) was the unchanged origin/dev cb562bf6, whose default pass is a dry run.",
+      "observed": "(a) 3 of 10 failing: no post was ever purged, because NOT NULL drops every unmoderated row (the bug this test's first run found); (b) 4 of 10. Restored; 10/10. SCRUM-1227: RED 6 of 11 on origin/dev (nothing deleted by default); (c) 2 of 11 (the pending-report hold and the five-message room), and after the review round 3 of 13 (plus the held post's room); (d) 1 of 13 (the flag hold); (e) 1 of 13 (the held post's room); (f) 1 of 13 (the post-hold test). Restored, 13/13.",
+      "date": "2026-11-27"
     },
     "feedback-retention.itest.ts": {
       "guards": "SCRUM-1026 (owner, 2026-11-06), with lobby-retention.itest.ts: the purge keeps chat_group_members rows and blanks anonymous_name once the person has no message left in a room past its time (a held message keeps its author's name; a room inside the window keeps every name); 'came back' and a person's rooms are unchanged; a dismissed report's description goes with its excerpt 180 days after the dismissal, and a recent dismissal, an upheld and a pending report keep both.",
