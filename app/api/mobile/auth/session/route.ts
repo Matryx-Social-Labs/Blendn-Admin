@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     // user has not yet been told about surfaces as something other than a
     // screen that silently fails to load.
     const blocked = accountBlockReason(user)
-    if (blocked === "suspended" || blocked === "staff") return accountRefusal(blocked, user)
+    if (blocked && blocked !== "deleted") return accountRefusal(blocked, user)
     // `!user` is already covered by `blocked === "deleted"`; naming it again is
     // what narrows the type for everything below.
     if (blocked || !user) return errorResponse("User not found", 404, ErrorCode.NOT_FOUND, ErrorCode.ACCOUNT_DELETED)

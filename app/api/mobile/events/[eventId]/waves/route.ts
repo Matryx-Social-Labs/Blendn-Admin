@@ -20,7 +20,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { emitRoomWave } from "@/lib/socket-server"
 import { roomMemberFromRef } from "@/lib/room-handle"
-import { hiddenInRooms, knownToEachOther, LISTED_IN_ROSTER } from "@/lib/room-people"
+import { hiddenInRooms, knownToEachOther, LISTED_IN_ROSTER, REACHABLE } from "@/lib/room-people"
 import { openIfMutual } from "@/lib/matches"
 import { announceRoomMatch } from "@/lib/room-match"
 import { operatesEvent } from "@/lib/tonight"
@@ -44,8 +44,8 @@ const waveSchema = z.object({
   asCrewId: z.string().uuid().optional(),
 })
 
-/** The roster's visibility rule for the person waved at: listed, not suspended, a guest and not staff (SCRUM-891). */
-const waveable = { kind: "attendee" as const, user: { suspended_at: null, ...LISTED_IN_ROSTER } }
+/** The roster's visibility rule for the person waved at: listed, reachable, a guest and not staff (SCRUM-891). */
+const waveable = { kind: "attendee" as const, user: { ...REACHABLE, ...LISTED_IN_ROSTER } }
 
 /**
  * Wave at somebody in the room. Recorded (SCRUM-1042, owner ruling 2026-11-12:

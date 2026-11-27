@@ -10,6 +10,7 @@ import { db } from "@/lib/db"
 import { idInConversation } from "@/lib/conversation-ref"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { userIdFromRefIfIdentified } from "@/lib/identity"
+import { REACHABLE } from "@/lib/room-people"
 import { userIdFromDmRef } from "@/lib/conversation-ref"
 import { messagingRefusalResponse, participationRefusal } from "@/lib/event-access"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -260,8 +261,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if other user exists
-    const otherUser = await db.user.findUnique({
-      where: { id: otherUserId },
+    const otherUser = await db.user.findFirst({
+      where: { id: otherUserId, ...REACHABLE },
       select: { id: true, name: true, image: true },
     })
 

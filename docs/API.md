@@ -204,6 +204,7 @@ the new code in `errorCode` as well, and `reasonCode` repeats it.
 |---|---|---|---|---|
 | `signin`, `google`, `apple`, `refresh`, `session` | 403 | `FORBIDDEN` | `ACCOUNT_SUSPENDED` | "This account has been suspended. Reason: <category>. To appeal, write to grievance@blendn.app." (starts as before) |
 | the same five | 403 | `FORBIDDEN` | `ACCOUNT_STAFF` | "This app is for attendees. Organizers, venue owners and sponsors sign in at the dashboard." |
+| the same five, an account stamped as known to be under 18 | 403 | `FORBIDDEN` | `AGE_RESTRICTED` | "Blend’n is for people 18 and over. If your date of birth is wrong, write to grievance@blendn.app." |
 | `google`, `apple` | 401 | `ACCOUNT_DELETED` | `ACCOUNT_DELETED` | "Account not found" |
 | `session` | 404 | `NOT_FOUND` | `ACCOUNT_DELETED` | "User not found" |
 | `refresh`, a signed unexpired token of a deleted account | 401 | `ACCOUNT_DELETED` | `ACCOUNT_DELETED` | "Invalid or expired refresh token" |
@@ -248,7 +249,7 @@ created at or before the account's `mobile_sessions_revoked_at`. A replay after 
 sign-out-everywhere or a password reset is therefore a 401 with the reason and
 mints no session; a token issued after the sign-out refreshes normally.
 
-An account suspended, deleted or signed out in the last twenty minutes is turned
+An account suspended, deleted, stamped under 18 or signed out in the last twenty minutes is turned
 away at `GET /auth/session` earlier still, as a bare 401 "Invalid or expired
 token" (`lib/account-blocklist.ts`); the refresh that follows says why.
 
@@ -262,8 +263,12 @@ And `appleLinked` (boolean, additive): Sign in with Apple is linked, whatever
 
 **Socket handshake.** `io` refuses a mobile token whose account is not live with
 `Error("Authentication required")` and `error.data.code` of `ACCOUNT_SUSPENDED`,
-`ACCOUNT_STAFF` or `ACCOUNT_DELETED`. A phone signed out everywhere is refused with the
-same message and no code.
+`ACCOUNT_STAFF`, `ACCOUNT_DELETED` or `AGE_RESTRICTED` (stamped as known to be under 18).
+A phone signed out everywhere is refused with the same message and no code. A socket
+already open when its account is deleted, suspended or stamped is closed by the
+server: at once when a route in the server made the change, and at the server's next
+read of its blocked-accounts set when another process did
+(`scripts/under-18-accounts.ts`).
 
 **Update required.** The app sends `X-App-Version` (native only). When
 `MOBILE_MIN_APP_VERSION` is set and the header is a plain dotted version
@@ -4376,9 +4381,25 @@ Five consequences worth knowing about:
   a derived age under 18, or `profiles.under_18_since` set, onboarded or not.
   The same routes, and accepting a message request, answer **403** with `errorCode` and `reasonCode` both
   `AGE_RESTRICTED` and “Blend’n is for people 18 and over. If your date of birth is wrong, write to grievance@blendn.app.” The
-  stamp is set by `scripts/under-18-accounts.ts --apply`, which erases a
-  stamped account 14 days on through the same erasure as `DELETE /account`;
-  staff clear it with `--correct` on a corrected birth date. Viewing events is unchanged.
+  stamp is set by `scripts/under-18-accounts.ts --apply --limit <n>` (never on
+  an account with a staff role or an organisation membership), which ends the
+  stamped accounts' open check-ins and erases a stamped account 14 days on
+  through the same erasure as `DELETE /account`; staff clear it with
+  `--correct` on a corrected birth date. **A stamp locks the account**: sign-in,
+  Google, Apple, refresh and session answer 403 `FORBIDDEN`, `reasonCode`
+  `AGE_RESTRICTED`, with the sentence above, once the account is proven (after
+  the password or provider token, or with its own token); an access token
+  issued before the stamp is a bare 401 on every route; the socket is closed
+  and its handshake refused. A correction lets the account straight back in.
+  Without a stamp, a derived age under 18 is refused at each of the routes
+  above, as here.
+- **Nobody starts contact with an account that cannot take part**: deleted,
+  suspended, or stamped as known to be under 18 (`REACHABLE`,
+  `lib/room-people.ts`). `POST /conversations`, `POST /message-requests`,
+  accepting a message request or a Lobby ask from one, a friend request (by
+  match or invite link), opening a friend's DM, a wave, a like, a crew invite,
+  a crew's like of a person and asking a Lobby post's author each answer such
+  an account exactly as they answer an id nobody has, and write nothing.
 - **Check-in filters rather than refuses.** A profile written before this rule
   can still carry `dating`; copying it onto a check-in row drops it silently,
   because nobody should be kept out of a room over a stale profile field.

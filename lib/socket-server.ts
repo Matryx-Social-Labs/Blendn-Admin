@@ -29,6 +29,7 @@ const SOCKET_REFUSAL_CODE = {
   deleted: "ACCOUNT_DELETED",
   suspended: "ACCOUNT_SUSPENDED",
   staff: "ACCOUNT_STAFF",
+  under_18: "AGE_RESTRICTED",
 } as const
 
 /*
@@ -1092,7 +1093,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
          */
         const account = await db.user.findUnique({
           where: { id: decoded.userId },
-          select: { deletedAt: true, suspended_at: true, role: true, mobile_sessions_revoked_at: true },
+          select: { deletedAt: true, suspended_at: true, role: true, mobile_sessions_revoked_at: true, profile: { select: { under_18_since: true } } },
         })
         const blocked = accountBlockReason(account)
         if (blocked) {

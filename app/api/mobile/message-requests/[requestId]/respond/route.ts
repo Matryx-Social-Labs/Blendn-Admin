@@ -23,6 +23,7 @@ import { blockPairIn } from "@/lib/block-pair"
 import { requestSeen } from "@/lib/block-seen"
 import { notifyFriendshipChanged } from "@/lib/room-friends"
 import { closeConversationRoom } from "@/lib/socket-server"
+import { REACHABLE } from "@/lib/room-people"
 
 interface RouteParams {
   params: Promise<{ requestId: string }>
@@ -63,8 +64,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // Get the message request
-    const messageRequest = await db.message_requests.findUnique({
-      where: { id: requestId },
+    // Accepting opens a conversation: from somebody who cannot be reached (`REACHABLE`), there is no request to accept.
+    const messageRequest = await db.message_requests.findFirst({
+      where: { id: requestId, ...(action === "accept" && { sender: REACHABLE }) },
       include: {
         sender: {
           select: {
