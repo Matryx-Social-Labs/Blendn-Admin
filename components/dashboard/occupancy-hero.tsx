@@ -82,7 +82,7 @@ export function OccupancyHero({
   const seen = exact ? Math.min(guests, Math.max(0, exact.inside - exact.unconfirmed)) : 0
   const domain = capacity === null ? Math.max(guests, 1) : Math.max(capacity, guests)
   const guestPct = Math.min((guests / domain) * 100, 100)
-  const seenPct = Math.min((seen / domain) * 100, guestPct)
+  const seenPct = (seen / domain) * 100
   const capacityPct = capacity === null ? null : (capacity / domain) * 100
 
   return (

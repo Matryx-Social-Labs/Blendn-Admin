@@ -226,10 +226,11 @@ describe("a screen reader is not told the range every five seconds", () => {
 
 describe("the bar's two ends at the edges", () => {
   it("never draws more seen guests than there are guests, when the seen are staff", () => {
-    // 40 guests all quiet, 12 staff seen: inside 52, unconfirmed 40, seen 12 — of whom no guest. The solid part is an upper bound, capped at the guests.
-    const h = hero(render(host({ inside: 52, guestsInside: 40, staffInside: 12, unconfirmed: 52, capacity: 80, fillPct: 50 })))
-    expect(h).toMatch(/left:0;width:0%/)
-    expect(h).toMatch(/left:0%;width:50%/)
+    // 5 guests and 10 crew, everyone seen: 15 seen, but only 5 of them can be guests. The solid part is an upper bound, capped at the guests.
+    const h = hero(render(host({ inside: 15, guestsInside: 5, staffInside: 10, unconfirmed: 0, capacity: 80, fillPct: 6 })))
+    expect(h).toMatch(/left:0;width:6\.25%/)
+    expect(h).toMatch(/left:6\.25%;width:0%/)
+    expect(h).toContain("5 guests, up to 5 of them seen")
   })
 
   it("keeps the hatch when over capacity, the solid part in the over colour", () => {

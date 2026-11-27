@@ -65,11 +65,18 @@ async function readBack(label: string) {
   console.log(
     `READBACK ${label}: SELECT user_id, last_seen_at FROM event_check_ins WHERE event_id = '${eventId}' AND status = 'checked_in' -> ${JSON.stringify(rows)}`
   )
-  return rows
+  // What the host's figure is counted from: the open sessions' last sighting.
+  const sessions = await db.presence_sessions.findMany({
+    where: { event_id: eventId, departed_at: null },
+    select: { user_id: true, last_seen_at: true },
+    orderBy: { user_id: "asc" },
+  })
+  console.log(`READBACK ${label}: SELECT user_id, last_seen_at FROM presence_sessions WHERE event_id = '${eventId}' AND departed_at IS NULL -> ${JSON.stringify(sessions)}`)
+  return { rows, sessions }
 }
 
-// The innermost section with the eyebrow: its ancestors come first in document order.
-const hero = (page: Page) => page.locator("section", { hasText: "In the room" }).last()
+// The hero: the nearest section around its eyebrow ("In the room · 22:41 · live").
+const hero = (page: Page) => page.getByText(/^In the room · /).locator("xpath=ancestor::section[1]")
 
 test("three in, one quiet for 40 minutes: the host reads 2–3 here; once it pings, one number", async ({ page, baseURL }) => {
   test.setTimeout(180_000)
@@ -121,8 +128,10 @@ test("three in, one quiet for 40 minutes: the host reads 2–3 here; once it pin
   await db.event_check_ins.updateMany({ where: { event_id: event.id, user_id: quiet }, data: { check_in_time: then, last_seen_at: then } })
   await db.presence_sessions.updateMany({ where: { event_id: event.id, user_id: quiet, departed_at: null }, data: { arrived_at: then, last_seen_at: then } })
   const before = await readBack("one quiet for 40 min")
-  expect(before).toHaveLength(3)
-  expect(before.filter((r) => r.last_seen_at && r.last_seen_at.getTime() < Date.now() - 30 * 60_000)).toHaveLength(1)
+  const stale = (t: Date | null) => !t || t.getTime() < Date.now() - 30 * 60_000
+  expect(before.rows).toHaveLength(3)
+  expect(before.rows.filter((r) => stale(r.last_seen_at))).toHaveLength(1)
+  expect(before.sessions.filter((r) => stale(r.last_seen_at))).toHaveLength(1)
 
   // The Live tab: the range, said in full to a screen reader, and the low end in one sentence.
   for (const width of [1280, 768, 390]) {
@@ -135,12 +144,9 @@ test("three in, one quiet for 40 minutes: the host reads 2–3 here; once it pin
     await expect(h).toContainText("2 were seen in the last 30 minutes; the other one is still checked in, but their phone has gone quiet, as phones in pockets do.")
     await expect(h).not.toContainText("count unreliable")
     await expect(h).not.toContainText("not seen in the last")
-    const layout = await page.evaluate(() => ({
-      sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      clipped: [...document.querySelectorAll("section *")].some((el) => el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflow === "hidden" && el.textContent?.includes("–")),
-    }))
-    console.log(`LAYOUT live @${width}: ${JSON.stringify(layout)}`)
-    expect(layout.sideways).toBe(0)
+    const sideways = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    console.log(`LAYOUT live @${width}: sideways ${sideways}px`)
+    expect(sideways).toBe(0)
     await shot(page, `live-range-${width}`)
   }
 
@@ -157,7 +163,8 @@ test("three in, one quiet for 40 minutes: the host reads 2–3 here; once it pin
   const ping = await phones[2].post(`/api/mobile/events/${event.id}/presence`, { data: { latitude: LAT, longitude: LNG, accuracy: 12 } })
   expect(ping.status(), await ping.text()).toBe(200)
   const after = await readBack("after the ping")
-  expect(after.every((r) => r.last_seen_at && r.last_seen_at.getTime() > Date.now() - 30 * 60_000)).toBe(true)
+  expect(after.rows.some((r) => stale(r.last_seen_at))).toBe(false)
+  expect(after.sessions.some((r) => stale(r.last_seen_at))).toBe(false)
 
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 })
