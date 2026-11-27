@@ -114,10 +114,16 @@ export async function connectionCounts(eventId: string): Promise<ConnectionCount
         SELECT from_id, to_id, created_at FROM event_waves WHERE event_id = ${eventId}::uuid
       ) g GROUP BY a, b
     ),
-    -- Each way a pair met, and when: mutual from the later of the two gestures.
+    -- Each way a pair met, and when: mutual from the later of the two gestures. Not a pair whose
+    -- conversation had already closed by then: an unmatch is permanent, and its gestures are only
+    -- stored so the routes answer it as a stranger (SCRUM-1476).
     ways AS (
       SELECT g.a AS lo, g.b AS hi, 'wave' AS way, GREATEST(g.at, r.at) AS at
         FROM gestures g JOIN gestures r ON r.a = g.b AND r.b = g.a WHERE g.a < g.b
+         AND NOT EXISTS (
+           SELECT 1 FROM private_conversations c
+            WHERE ((c.user1_id = g.a AND c.user2_id = g.b) OR (c.user1_id = g.b AND c.user2_id = g.a))
+              AND c.closed_at < GREATEST(g.at, r.at))
       UNION ALL
       SELECT LEAST(from_user_id, to_user_id), GREATEST(from_user_id, to_user_id), 'lobby', COALESCE(decided_at, created_at)
         FROM board_requests WHERE event_id = ${eventId}::uuid AND status = 'accepted'

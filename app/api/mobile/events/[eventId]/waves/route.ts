@@ -12,7 +12,7 @@ import {
   unauthorizedResponse,
   validationErrorResponse,
 } from "@/lib/api-response"
-import { blockedEitherWay, pairIsClosed } from "@/lib/conversations"
+import { blockedEitherWay } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { inRoomWhere } from "@/lib/event-kind"
 import { logger } from "@/lib/logger"
@@ -20,7 +20,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { emitRoomWave } from "@/lib/socket-server"
 import { roomMemberFromRef } from "@/lib/room-handle"
-import { knownToEachOther, LISTED_IN_ROSTER, REACHABLE } from "@/lib/room-people"
+import { hiddenInRooms, knownToEachOther, LISTED_IN_ROSTER, REACHABLE } from "@/lib/room-people"
 import { openIfMutual } from "@/lib/matches"
 import { announceRoomMatch } from "@/lib/room-match"
 import { operatesEvent } from "@/lib/tonight"
@@ -64,10 +64,13 @@ const waveable = { kind: "attendee" as const, user: { ...REACHABLE, ...LISTED_IN
  * - **The sender caps** (W3-W6) are read BEFORE anything about the recipient
  *   (W8), so a 429 says nothing about who they are, whether they are here or
  *   whether they blocked you.
- * - **Not here, blocked either way, banned, unmatched, a friend, a host** all
- *   read the same 403 `RECIPIENT_NOT_HERE`, and so does a sender with show
- *   online off, who waves at nobody (SCRUM-1056): a distinct answer is a way to
- *   learn who blocked you, and one for a closed pair is a rejection notice.
+ * - **Not here, blocked either way, banned, a friend, a host** all read the
+ *   same 403 `RECIPIENT_NOT_HERE`, and so does a sender with show online off,
+ *   who waves at nobody (SCRUM-1056): a distinct answer is a way to learn who
+ *   blocked you.
+ * - **Unmatched** (a closed pair) is a stranger: stored, capped and answered as
+ *   any wave, never a match (`openIfMutual`: linked), and the ping held. A
+ *   refusal on one handle named the person from another room (SCRUM-1476).
  *   For a sender who has left, all of those AND "nobody waved at you" read as
  *   the one 403 `NOT_CHECKED_IN`.
  *
@@ -176,7 +179,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Banned from the room is not in it: the same answer, never which.
     if (await eventRoomBan(eventId, toUserId)) return notHere()
     if (await blockedEitherWay(fromUserId, toUserId)) return notHere()
-    if (await pairIsClosed(fromUserId, toUserId)) return notHere()
+    // A closed pair (an unmatch) is NOT refused: their handle answers as a stranger's, stored and capped
+    // alike, or the one refused handle names the person from another room (SCRUM-1476). The ping is held below.
     // A friend is never a stranger to wave at (lib/room-people.ts).
     if (await knownToEachOther(fromUserId, toUserId)) return notHere()
     // Nobody waves at a host either.
@@ -185,6 +189,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Already waved here: the same answer as the first time, and nothing else (W1).
     if (await hasWaved(eventId, fromUserId, toUserId)) return successResponse({ sent: true, mutual: false })
 
+    /*
+     * Whether their own lists hide the sender (`hiddenInRooms`: they unmatched
+     * each other, or they reported the sender): the ping below is held, never
+     * the answer. Read for every wave, so a held ping takes as long as a sent
+     * one, and before the store, so a failed read stores nothing (SCRUM-1476).
+     */
+    const hidden = await hiddenInRooms(toUserId)
     // Stored under the sender's lock, which re-checks the caps.
     const stored = await recordWave(eventId, fromUserId, toUserId)
     if (!stored.recorded) {
@@ -197,7 +208,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       // `room:match` to both, in place of the ping: the moment is "You both waved". Never rejects.
       await announceRoomMatch(eventId, outcome.conversationId)
     } else {
-      emitRoomWave(toUserId, { eventId, fromUserId, fromName: await roomNameOf(eventId, fromUserId, toUserId) })
+      // Named for every wave (the same reads), pinged only to somebody whose lists show the sender.
+      const fromName = await roomNameOf(eventId, fromUserId, toUserId)
+      if (!hidden.has(fromUserId)) emitRoomWave(toUserId, { eventId, fromUserId, fromName })
     }
 
     return successResponse({ sent: true, ...outcome })

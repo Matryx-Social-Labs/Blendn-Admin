@@ -7,7 +7,7 @@ process.env.NEXTAUTH_SECRET = "room-waves-test-secret-at-least-32-chars"
  * The route's order and answers: the sender first (in the room, not staff, not
  * a host, the room open), then the sender's stored caps (W3-W6) BEFORE
  * anything about the recipient (W8), then the recipient (not here, blocked,
- * banned, unmatched, a friend, a host: one answer), one wave per pair per room
+ * banned, a friend, a host: one answer; an unmatch is a stranger with no ping), one wave per pair per room
  * (W1) and nothing on the pair across rooms (SCRUM-1385), and a mutual through
  * the like-match path. `lib/waves.ts` is mocked here with an in-memory store;
  * the stored caps and the real tables are `integration/recorded-waves.itest.ts`.
@@ -39,10 +39,14 @@ jest.mock("@/lib/rate-limit", () => ({
 }))
 
 const mockBlocked = jest.fn()
-const mockClosed = jest.fn()
 jest.mock("@/lib/conversations", () => ({
   blockedEitherWay: (...a: unknown[]) => mockBlocked(...a),
-  pairIsClosed: (...a: unknown[]) => mockClosed(...a),
+}))
+/** Who the recipient's own lists hide (`hiddenInRooms`): a closed pair, a report. Empty unless a case sets it. */
+const mockHidden = jest.fn()
+jest.mock("@/lib/room-people", () => ({
+  ...jest.requireActual("@/lib/room-people"),
+  hiddenInRooms: (...a: unknown[]) => mockHidden(...a),
 }))
 
 const mockEmitWave = jest.fn()
@@ -130,7 +134,7 @@ beforeEach(() => {
   mockAuth.mockResolvedValue({ userId: ME, email: "me@b.com" })
   inside(ME, THEM)
   mockBlocked.mockResolvedValue(false)
-  mockClosed.mockResolvedValue(false)
+  mockHidden.mockResolvedValue(new Set())
   // The sender's pseudonym; and `eventRoomBan` (a `status: "banned"` read) finds no ban.
   mockDb.chat_group_members.findFirst.mockImplementation(async (args: { where?: { status?: string } }) =>
     args?.where?.status === "banned" ? null : { anonymous_name: "Cosmic Panda" }
@@ -223,11 +227,8 @@ it("hides a recipient the roster hides (show_online off) and one nobody may reac
   })
 })
 
-it.each([
-  ["a block either way", () => mockBlocked.mockResolvedValue(true)],
-  ["an unmatched pair", () => mockClosed.mockResolvedValue(true)],
-])("answers %s exactly like 'not here'", async (_label, arrange) => {
-  arrange()
+it("answers a block either way exactly like 'not here'", async () => {
+  mockBlocked.mockResolvedValue(true)
   const res = await wave()
   expect(res.status).toBe(403)
   expect(await res.json()).toEqual({
@@ -235,6 +236,21 @@ it.each([
     error: "They’re not in the room right now",
     errorCode: "RECIPIENT_NOT_HERE",
   })
+  expect(mockEmitWave).not.toHaveBeenCalled()
+})
+
+it("answers somebody whose lists hide the sender (an unmatch, a report) as a stranger, stored, and pings nobody (SCRUM-1476)", async () => {
+  const stranger = await wave()
+  expect(mockEmitWave).toHaveBeenCalledTimes(1)
+  // Read for the stranger too, so a held ping does the same work as a sent one.
+  expect(mockHidden).toHaveBeenCalledWith(THEM)
+  mockEmitWave.mockClear()
+  inside(ME, THEM, "x")
+  mockHidden.mockImplementation(async (viewer: string) => new Set(viewer === "x" ? [ME] : []))
+  const hidden = await wave(inRoom("x"))
+  expect({ status: hidden.status, body: await hidden.json() }).toEqual({ status: stranger.status, body: await stranger.json() })
+  expect(waves.has(`${EVENT}|${ME}|x`)).toBe(true)
+  expect(mockHidden).toHaveBeenCalledWith("x")
   expect(mockEmitWave).not.toHaveBeenCalled()
 })
 
@@ -345,7 +361,7 @@ describe("W8: a capped sender learns nothing about the person they waved at", ()
   const recipientRead = () =>
     mockDb.event_check_ins.findFirst.mock.calls.some(([a]) => a.where.user_id === THEM) ||
     mockBlocked.mock.calls.length > 0 ||
-    mockClosed.mock.calls.length > 0
+    mockHidden.mock.calls.length > 0
 
   beforeEach(() => mockCap.mockResolvedValue(capped))
 
