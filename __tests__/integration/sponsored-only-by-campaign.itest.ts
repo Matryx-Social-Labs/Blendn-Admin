@@ -73,6 +73,11 @@ beforeAll(async () => {
 })
 
 beforeEach(() => emitChatMessage.mockClear())
+// Each case starts from an empty room, so one refusal that failed cannot fail the next case's count.
+afterEach(async () => {
+  await db.chat_messages.deleteMany({ where: { chat_group_id: groupId } })
+  await db.event_announcements.deleteMany({ where: { event_id: eventId } })
+})
 
 const inRoom = () => db.chat_messages.count({ where: { chat_group_id: groupId } })
 const announcements = () => db.event_announcements.count({ where: { event_id: eventId } })
@@ -117,8 +122,6 @@ describe("POST /api/mobile/events/:id/announce", () => {
     const rows = await db.chat_messages.findMany({ where: { chat_group_id: groupId }, select: { type: true, content: true } })
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ type: "announcement", content: expect.stringContaining("Doors close at eleven") })
-    await db.chat_messages.deleteMany({ where: { chat_group_id: groupId } })
-    await db.event_announcements.deleteMany({ where: { event_id: eventId } })
   })
 })
 

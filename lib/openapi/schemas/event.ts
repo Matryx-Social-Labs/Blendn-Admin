@@ -117,18 +117,17 @@ export const AnnounceRequestSchema = z
   .object({
     content: z.string().max(1000),
     /**
-     * Which of the three non-user message kinds this is.
-     *
-     * The route has always read `kind` and gated it through `canBroadcast`
-     * (`announce/route.ts`), and the spec documented only `content` — so a
-     * generated client could send an announcement and nothing else, and had no
-     * way to discover that `sponsored` and `system` existed or that they are
-     * gated differently.
-     *
+     * `announcement` (the host, `canEdit`) or `system` (an `app_admin`).
      * Defaults to `announcement`, matching the route's own fallback for an
-     * unrecognised value.
+     * unrecognised value; `sponsored` is refused with a 400 (SCRUM-1070).
      */
-    kind: z.enum(["announcement", "sponsored", "system"]).default("announcement"),
+    kind: z
+      .enum(["announcement", "system"])
+      .default("announcement")
+      .describe(
+        "`announcement` (the organising org, `canEdit`) or `system` (an app_admin). `sponsored` is refused: 400 " +
+          "`Sponsored messages go out through a campaign`, nothing written. Sponsored content reaches a room only through a campaign."
+      ),
   })
   .openapi("AnnounceRequest")
 
