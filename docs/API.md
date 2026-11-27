@@ -3979,13 +3979,20 @@ and only the second is worth blocking.
 
 ### Broadcasting into an event's room
 
-`POST /events/:eventId/announce` takes a `kind`, defaulting to `announcement`:
+`POST /events/:eventId/announce` takes a `kind`, defaulting to `announcement`
+(any other value is a 400 `kind is announcement or system`):
 
 | kind | who | media |
 |---|---|---|
-| `announcement` | `canEdit` — the organising org, or an `app_admin`. **Not** the venue owner | no |
-| `sponsored` | one organisation holding `may_sponsor` **and** an approved placement at this event, or an `app_admin` | not yet: refused with 400 (nothing stores it) |
-| `system` | `app_admin` only — it speaks as Blend'n | no |
+| `announcement` | `canEdit` — the organising org, or an `app_admin`. **Not** the venue owner | no: 400 `Announcements carry text only` |
+| `system` | `app_admin` only — it speaks as Blend'n | no: 400, as above |
+| `sponsored` | nobody: **400** `Sponsored content goes out through a campaign`, nothing written | — |
+
+**Sponsored content reaches a room only through a campaign** (SCRUM-1070,
+D-050): `/api/events/:id/sponsored-messages` on the dashboard, sent by
+`lib/sponsored-scheduler.ts`, where a person reviews the creative, a room has
+at most one sponsored post every 20 minutes and every send is counted. The
+gate below (`may_sponsor` and an approved placement) is that path's.
 
 **This route used to compare two user ids.** `event.organizer_id !== caller.id`,
 which is exactly the mistake `lib/rbac.ts` exists to end: an `app_admin` could
@@ -4017,16 +4024,15 @@ in.
 send one could issue a safety notice, or a "verified by Blend'n" claim, in the
 platform's voice.
 
-**Media rides on `sponsored` alone, and that is a safety rule.** The event room
+**This route carries words only, and that is a safety rule.** The event room
 is pseudonymous, and a photograph is an identity — of whoever is *in* it, who is
 not always the person posting. Attendee media is not built at all. An
 announcement is a host addressing that same room, so it inherits the rule.
-Sponsored artwork depicts nobody in the room, which is what makes it the
-exception.
+Media in a room is a campaign's creative alone (`broadcastMayCarryMedia`):
+artwork that depicts nobody in the room, reviewed before it runs.
 
-**One refusal message for all three.** "Your organisation is not approved for
-sponsored messages" tells an attacker probing the API which flag to go after, and
-tells an organizer about a capability they cannot self-serve anyway.
+**One refusal message for both kinds.** Which rule refused is not the caller's
+to probe: `403 You cannot broadcast to this event`.
 
 **The role is read from the database, not the token.** The mobile JWT carries
 `{ userId, email }` and no role, which is the right call: with a 30-day refresh
@@ -4073,10 +4079,10 @@ member gets `403` with the room's ban sentence, and `muted` and `left` members
 still read. A vote additionally needs an `active` or `muted` membership and an
 open room (`409`). Before SCRUM-298 the read loaded the poll by id alone.
 
-Who may post one is the same table as above: an `announcement` poll needs
-`canEdit`, a `sponsored` poll needs the same grant a sponsored message needs.
-A poll from a brand carries that brand's name into the room and takes the same
-attention, so it does not get a weaker gate because the payload is a question.
+Who may post one is the same table as above: a poll is an `announcement` and
+needs `canEdit`. `createPoll` refuses `kind: "sponsored"` with `Sponsored
+content goes out through a campaign` and writes nothing: a poll from a brand
+would carry its name into the room outside the campaign's review, gap and count.
 
 **Every count is disclosed before it leaves the server.** `null` means WITHHELD.
 It never means zero, and rendering it as zero turns "we are not telling you" into
