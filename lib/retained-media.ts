@@ -2,7 +2,7 @@
 // reachable from server.ts, which plain tsc compiles without the alias.
 import { db } from "./db"
 import { logger } from "./logger"
-import { deleteFile, deletePrefix, isConfigured, ownedObjectKey, ownedPhotoKey, sealedChatKey } from "./tigris"
+import { chatMediaKey, deleteFile, deletePrefix, isConfigured, ownedPhotoKey, sealedChatKey } from "./tigris"
 
 /**
  * A person's chat images that must outlive their account (SCRUM-428).
@@ -51,15 +51,8 @@ export async function retainedChatMediaKeys(userId: string): Promise<Set<string>
   return new Set(rows.map((r) => chatKeyOf(r.url, userId)).filter((k): k is string => k !== null))
 }
 
-/**
- * The storage key of a chat image the person sent: a sealed copy (whose key no
- * longer names anyone, SCRUM-448), or an older object under `chat/<id>/`. The
- * rows are already the person's own, so the sealed key needs no owner in it.
- */
-function chatKeyOf(url: string | null, userId: string): string | null {
-  if (!url) return null
-  return sealedChatKey(url) ?? ownedObjectKey(url, userId, "chat")
-}
+/** The storage key of a chat image the person sent (`chatMediaKey`); the rows are already the person's own. */
+const chatKeyOf = (url: string | null, userId: string): string | null => (url ? chatMediaKey(url, userId) : null)
 
 /**
  * How long past the 180-day purge a pending report can hold its image: the fifteen days IT Rules 2021 r.3(2)(a)(i) gives a

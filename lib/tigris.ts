@@ -623,6 +623,32 @@ export function sealedChatKey(url: string): string | null {
 }
 
 /**
+ * The object a chat image URL stored on `ownerId`'s row names, if it is theirs
+ * to have deleted: a sealed copy (SCRUM-448), or anything under their own
+ * `chat/<id>/` (raw uploads and copies sealed before SCRUM-448). Null for any
+ * other URL. The one reader of a stored chat media URL: erasure
+ * (`lib/retained-media.ts`) and the room purge (`lib/lobby-retention.ts`).
+ */
+export function chatMediaKey(url: string, ownerId: string): string | null {
+  return sealedChatKey(url) ?? ownedObjectKey(url, ownerId, "chat")
+}
+
+export type ChatMediaRefusal = "other host" | "our bucket, not as we write it" | "traversal" | "empty" | "not the author’s prefix" | "another prefix"
+
+/** Why `chatMediaKey` named nothing, for a log line that must not carry the URL. A label only: the decision is `chatMediaKey`'s. */
+export function chatMediaRefusal(url: string, ownerId: string): ChatMediaRefusal {
+  const key = ourObjectKey(url)
+  if (key === null) {
+    if (/(^|\/)(\.|%2e){2}(\/|%2f|$)/i.test(url.split(/[?#]/)[0])) return "traversal"
+    // http, a port, credentials, an upper-case host, a bad escape: possibly an object of ours, left in place.
+    return URL.canParse(url) && ALLOWED_PHOTO_HOSTS.has(new URL(url).hostname) ? "our bucket, not as we write it" : "other host"
+  }
+  if (key === `chat/${ownerId}/` || key === `chat/${ownerId}`) return "empty"
+  if (key.startsWith(SEALED_CHAT_PREFIX)) return "our bucket, not as we write it"
+  return key.startsWith("chat/") ? "not the author’s prefix" : "another prefix"
+}
+
+/**
  * The same binding for any folder the person may own an object in. `folder`
  * is an allow-list value, never something read out of the URL: the delete
  * route used to accept whatever `extractKeyFromUrl` produced -- the function
