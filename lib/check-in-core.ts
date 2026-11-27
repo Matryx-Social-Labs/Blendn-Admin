@@ -4,7 +4,8 @@ import { outOfRangeMessage } from "@/lib/checkin-messages"
 import { logger } from "@/lib/logger"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
-import { ADULTS_ONLY, ageFrom, FINISH_ONBOARDING, isAdult, mayParticipate, minAgeRefusal, stripDating } from "@/lib/age"
+import { ADULTS_ONLY, ageFrom, isAdult, minAgeRefusal, participationDenial, participationSelect, stripDating } from "@/lib/age"
+import { eventAccessResponse } from "@/lib/event-access"
 import { closeSession, openSession, type ArrivalInput } from "@/lib/presence-sessions"
 import { emitEventCheckIn } from "@/lib/socket-server"
 import { notifyFriendsHere } from "@/lib/room-friends"
@@ -50,9 +51,7 @@ export function vagueFixRefusal(gpsAccuracy: number | undefined, code: string = 
 }
 
 const doorProfileSelect = {
-  onboarded: true,
-  age: true,
-  date_of_birth: true,
+  ...participationSelect,
   intent_default: true,
   reveal_by_default: true,
 } as const
@@ -87,15 +86,16 @@ export async function personAtTheDoor(
   // signed up at 17 would otherwise be refused an 18+ event a year later.
   const profileAge = ageFrom(profile)
 
-  // Not onboarded and no adult age on file: held here as at every door (SCRUM-331).
-  if (!mayParticipate(profile)) return { refusal: errorResponse(FINISH_ONBOARDING, 403, ErrorCode.FORBIDDEN, ErrorCode.PROFILE_INCOMPLETE) }
+  // Known to be under 18, or not onboarded with no adult age on file: held here as at every door (SCRUM-331, SCRUM-1169).
+  const denial = participationDenial(profile)
+  if (denial) return { refusal: eventAccessResponse(denial) }
 
   /*
    * A venue's live room is an adult room with no event to carry an age rule,
    * so the account rule is its rule — and an unknown age is refused, not
-   * waved through. `mayParticipate` lets an onboarded account with no age, or
-   * an under-18 one from before the 18+ ruling, keep using what it used; it
-   * must not let either into a room of strangers at a bar (step 4 review).
+   * waved through. `participationDenial` lets an onboarded account with no age
+   * keep using what it used; it must not let one into a room of strangers at a
+   * bar (step 4 review).
    */
   if (!room && !isAdult(profileAge)) {
     // Only an age that is not on file is the person's to fix; a known age under 18 is a no.

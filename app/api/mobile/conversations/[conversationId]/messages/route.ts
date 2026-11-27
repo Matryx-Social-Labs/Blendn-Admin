@@ -5,7 +5,7 @@ import { db } from "@/lib/db"
 import type { Prisma } from "@prisma/client"
 import { openThread, quoteOf, replyToSelect } from "@/lib/dm-thread"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { participationRefusal } from "@/lib/event-access"
+import { messagingRefusalResponse, participationRefusal } from "@/lib/event-access"
 import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -209,7 +209,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * return, and each is marked handled here because a refusal returns without
      * reading the ones after it.
      */
-    // Not onboarded and no adult age on file: may not take part yet (SCRUM-331).
+    // Known to be under 18, or not onboarded with no adult age on file: may not take part (SCRUM-331, SCRUM-1169).
     const unfinishedPending = participationRefusal(authUser.userId)
     const conversationPending = db.private_conversations.findUnique({
       where: { id: conversationId },
@@ -233,7 +233,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     retryPending?.catch(() => undefined)
 
     const unfinished = await unfinishedPending
-    if (unfinished) return forbiddenResponse(unfinished)
+    if (unfinished) return messagingRefusalResponse(unfinished)
 
     // A DM is words only (SCRUM-1165): a send carrying any media is refused whole, with a sentence the app shows as it is.
     if ((body as { mediaUrl?: unknown } | null)?.mediaUrl != null) return forbiddenResponse(DM_PHOTOS_OFF)
