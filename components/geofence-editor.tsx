@@ -16,6 +16,7 @@ import {
   ringSelfIntersects,
   type Geofence,
 } from "@/lib/geofence"
+import { MAP_CREDIT } from "@/lib/map-credit"
 
 /**
  * Drawing a check-in area.
@@ -209,14 +210,12 @@ export function GeofenceEditor({
       map.setView(centre, wide ? 16 : 18)
 
       // The one base map. The Satellite layer was Esri World Imagery with no
-      // key, outside Esri's terms, and went with SCRUM-1147. OSM's tile policy
-      // asks for a credit that links to the copyright page; a new tab, because
-      // the map sits inside an unsaved form.
-      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution:
-          '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" aria-label="OpenStreetMap copyright (opens in a new tab)">OpenStreetMap</a> contributors',
-      }).addTo(map)
+      // key, outside Esri's terms, and went with SCRUM-1147. The credit names
+      // the tiles' maker and the outlines' (lib/map-credit.ts). Leaflet's own
+      // prefix is no licence's ask, and without it the line stays one line
+      // down to a 412 px map (768 window); narrower, the legend rises (SCRUM-1317).
+      map.attributionControl.setPrefix(false)
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: MAP_CREDIT }).addTo(map)
       layerRef.current = L.layerGroup().addTo(map)
 
       map.on("click", (e) => {
@@ -519,7 +518,7 @@ export function GeofenceEditor({
         zoom buttons covered the venue suggestions and scrolled over the sticky
         header (SCRUM-420).
       */}
-      <div className="relative isolate overflow-hidden rounded-xl border border-border-strong">
+      <div className="@container relative isolate overflow-hidden rounded-xl border border-border-strong">
         {/*
           OpenStreetMap's own unloaded-tile colour, deliberately not a brand
           token: this is what the map looks like before tiles arrive, and
@@ -545,8 +544,10 @@ export function GeofenceEditor({
         ) : null}
 
         {/* Above the credit's row, not beside it: on a narrow map the linked
-            credit ran under the legend's corner (SCRUM-1147, at 768). */}
-        <div className="pointer-events-none absolute bottom-7 left-2.5 z-[800] flex flex-col gap-1.5 rounded-lg border border-border-strong bg-background/90 px-3 py-2 text-[0.71875rem] backdrop-blur">
+            credit ran under the legend's corner (SCRUM-1147, at 768). A map
+            narrower than the credit's one line (about 320 px, a phone) wraps it
+            to two, so the legend rises clear of both (SCRUM-1317). */}
+        <div className="pointer-events-none absolute bottom-7 @max-[21rem]:bottom-10 left-2.5 z-[800] flex flex-col gap-1.5 rounded-lg border border-border-strong bg-background/90 px-3 py-2 text-[0.71875rem] backdrop-blur">
           <Legend token="--chart-1" dash="solid" label={legend?.extent ?? "Extent — the venue itself"} />
           <Legend token="--chart-2" dash="dashed" label={legend?.buffer ?? `Buffer — your tolerance (${fence.buffer} m)`} />
           <Legend
