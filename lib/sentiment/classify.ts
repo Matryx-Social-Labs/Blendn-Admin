@@ -27,8 +27,9 @@ export const BATCH_SIZE = 20
 const MAX_IN_FLIGHT = 4
 /**
  * Calls a pass: a safety cue is a call of its own and a batch holds one room, so a pass can need more calls than its
- * messages fill. With every call timing out (20 s + 2 s + 20 s), 20 calls in rounds of 4 is 5 × 42 s = 3.5 min,
- * well inside the sweeper's 9-minute stall line. What is not sent waits for the next pass, cued lines first.
+ * messages fill. With every call timing out (20 s + 2 s + 20 s) the first round stops the pass (42 s); with one call a
+ * round answering and the rest timing out, 20 calls in rounds of 4 is 5 × 42 s = 3.5 min, well inside the sweeper's
+ * 9-minute stall line. What is not sent waits for the next pass, cued lines first.
  */
 const MAX_CALLS = 20
 
@@ -69,9 +70,9 @@ function getApiKey(): string | undefined {
 const isTransient = (status: number) => status === 429 || status >= 500
 
 /**
- * One retry, after a backoff, of a 429, a 5xx or a request that threw (a timeout, a dropped connection): a message
- * the model never labels is written with the lexicon's guess for good, so a blip must not decide it. Any other 4xx
- * is returned at once: a bad request or a retired model is the same on the second try.
+ * One retry, after a backoff, of a 429, a 5xx or a request that threw (a timeout, a dropped connection): a blip must
+ * not cost a message a pass. Any other 4xx is returned at once: a bad request or a retired model is the same on the
+ * second try.
  */
 async function postWithOneRetry(body: string, apiKey: string): Promise<Response> {
   for (let attempt = 1; ; attempt++) {
@@ -94,7 +95,11 @@ async function postWithOneRetry(body: string, apiKey: string): Promise<Response>
 }
 
 /**
- * Tier 3. Classifies a batch in one call and returns only what it could parse.
+ * Tier 3. Classifies a batch in one call and returns only what it could parse; `null` when the call failed the way an
+ * outage does (a 429 or a 5xx after the retry, a timeout, a dropped connection, a body that never arrived), so the
+ * caller can tell an outage from an answer. Any other 4xx (a bad request, a bad key, a retired model) is the same next
+ * pass, and a 200 the model answered, however empty or unparseable, is an answer: neither may defer a batch, so no line
+ * can talk its batch into waiting and a misconfiguration falls back at once, as it always has.
  *
  * Anything missing from the response is left to the caller to fall back on,
  * rather than being defaulted to neutral here — a silent "neutral" for a
@@ -103,12 +108,13 @@ async function postWithOneRetry(body: string, apiKey: string): Promise<Response>
  */
 async function classifyBatchWithLlm(
   messages: MessageToClassify[]
-): Promise<Map<string, Classification>> {
+): Promise<Map<string, Classification> | null> {
   const out = new Map<string, Classification>()
   const apiKey = getApiKey()
   if (!apiKey || messages.length === 0) return out
   const model = sentimentModel()
 
+  let read = false
   try {
     const res = await postWithOneRetry(
       JSON.stringify({
@@ -134,12 +140,13 @@ async function classifyBatchWithLlm(
     // logger.error is the Sentry report (lib/logger.ts): one issue for this message, the status and model with it.
     if (!res.ok) {
       logger.error("Sentiment classification failed", { status: res.status, model })
-      return out
+      return isTransient(res.status) ? null : out
     }
 
     const body = (await res.json()) as {
       choices?: Array<{ message?: { content?: string } }>
     }
+    read = true
     const content = body.choices?.[0]?.message?.content
     // No content (a refusal, a length cut) is no labels: the check after the loop reports it.
     const parsed = (content ? JSON.parse(content) : {}) as {
@@ -189,6 +196,9 @@ async function classifyBatchWithLlm(
       error: error instanceof SyntaxError ? "the model's output is not JSON" : error instanceof Error ? error.message : String(error),
       model,
     })
+    // Nothing read (a timeout, a dropped connection, a body that stalled or was not JSON): the caller defers. Content
+    // that would not parse was the model's answer.
+    if (!read) return null
   }
 
   return out
@@ -204,28 +214,27 @@ async function classifyBatchWithLlm(
  * **A client-sent label is never an input:** a patched client could suppress a
  * negative or fake a safety alert.
  *
- * If tier 3 is unavailable — no API key, an outage, a timeout — messages it
- * would have handled come back with the lexicon's best guess at low confidence
- * and `source: "lexicon"`, never a confident wrong label.
- *
- * That sentence used to be false: the branch wrote a hardcoded
- * `neutral / other` and the lexicon was never consulted, so a recognised safety
- * report degraded into neutral chatter and the safety alert became unfireable.
- * `lexiconFallback` is what makes it true.
- *
- * Low confidence is still not presented differently anywhere — no UI reads the
- * field. That remains open, and is why the fallback keeps the CATEGORY rather
- * than relying on a caller to notice the confidence.
- *
  * A message with a safety cue goes to the model first and alone: no other message can talk the model out of a
  * report, and the model's answer is final ("grabbing a table" is cleared, "he keeps grabbing" flagged). Only when that
- * call fails does the cue stand on its own, through `lexiconFallback`: an outage must not lose a possible report.
+ * call fails, or is never made, does the cue stand on its own, through `lexiconFallback`: an outage must not lose a
+ * possible report.
  *
- * At most `MAX_CALLS` calls: a message escalated past them gets no row here, and the next pass finds it.
+ * A message with no cue whose call failed as an outage does (a 429 or a 5xx after the retry, a timeout, a dropped
+ * connection) gets no result at all and is counted in `deferred`: the sweeper reads it again on its next pass, and gives it the word list's
+ * guess only when it is about to leave its window (SCRUM-1481). It used to be settled with that guess for good on the
+ * first failure, so during an outage a Hindi help request (the word list cannot read it) was neutral chatter for ever.
+ * A 200 is an answer, however empty, and so is any other 4xx: what the model leaves out keeps the guess, so no line
+ * can talk its batch into being deferred. No API key, a bad one or a retired model is configuration, not an outage:
+ * everything escalated gets the guess at once, as always.
+ *
+ * A round of calls in which every call failed ends the pass's calls: what is left is deferred, or flagged from its cue,
+ * without being sent. An outage costs one round a pass, not `MAX_CALLS`.
+ *
+ * At most `MAX_CALLS` calls: a message escalated past them gets no result here, and the next pass finds it.
  */
 export async function classifyMessages(
   messages: MessageToClassify[]
-): Promise<ClassifiedMessage[]> {
+): Promise<ClassifiedMessage[] & { deferred: number }> {
   const settled: ClassifiedMessage[] = []
   const escalate: MessageToClassify[] = []
 
@@ -235,44 +244,44 @@ export async function classifyMessages(
     else escalate.push(message)
   }
 
+  let deferred = 0
+  let down = false
   const cued = new Set(escalate.filter((m) => hasSafetyCue(m.text)))
   const batches = batchesOf(escalate, cued).slice(0, MAX_CALLS)
   for (let i = 0; i < batches.length; i += MAX_IN_FLIGHT) {
     const round = batches.slice(i, i + MAX_IN_FLIGHT)
-    const labelled = await Promise.all(round.map((batch) => classifyBatchWithLlm(batch)))
+    const labelled: Array<Map<string, Classification> | null> = down
+      ? round.map(() => null)
+      : await Promise.all(round.map((batch) => classifyBatchWithLlm(batch)))
+    down ||= labelled.every((l) => l === null)
 
     round.forEach((batch, b) => {
-      if ([...labelled[b].keys()].some((id) => !batch.some((m) => m.id === id))) {
+      if ([...(labelled[b]?.keys() ?? [])].some((id) => !batch.some((m) => m.id === id))) {
         logger.warn("Sentiment model answered for a message it was not sent", { sent: batch.map((m) => m.id) })
       }
       for (const message of batch) {
-        const result = labelled[b].get(message.id)
+        const result = labelled[b]?.get(message.id)
         if (result) {
           settled.push({ id: message.id, ...result })
           continue
         }
         if (cued.has(message)) logger.warn("Sentiment safety cue kept: the model did not read the line", { messageId: message.id })
+        else if (labelled[b] === null) {
+          deferred += 1
+          continue
+        }
         /*
-         * Degraded path. The lexicon's best guess, which is what the docstring
-         * above has always promised and what this branch did not do.
-         *
-         * It wrote a hardcoded `neutral / other / 0.2`, so a message the lexicon
-         * had already recognised as a safety report came out as neutral chatter.
-         * `classifyWithLexicon` returns null for `safety_conduct` deliberately —
-         * to force a real read — and this branch is where that deliberate null
-         * became a discarded detection.
-         *
-         * The consequence is not cosmetic: `deriveAlerts` fires the safety alert
-         * on `category === "safety_conduct"`, so without OPENAI_API_KEY the
-         * safety alert was wired to a value nothing ever produced. `lib/env.ts`
-         * marks that key optional and `DEPLOYMENT.md` lists it as not required.
+         * Degraded path: a cued line the model did not read, a line it left out of a batch it answered, or no API key.
+         * The word list's best guess, never a hardcoded `neutral / other`: `classifyWithLexicon` returns null for
+         * `safety_conduct` on purpose, to force a real read, and `lexiconFallback` is what keeps a recognised report a
+         * report here (`deriveAlerts` fires the safety alert on that category).
          */
         settled.push({ id: message.id, ...lexiconFallback(message.text) })
       }
     })
   }
 
-  return settled
+  return Object.assign(settled, { deferred })
 }
 
 /**

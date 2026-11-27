@@ -1,4 +1,5 @@
-import { MAX_MESSAGES_PER_SWEEP, SCAN_WINDOW_MS, sweepSentiment } from "@/lib/sentiment-sweeper"
+import { LAST_PASS_MS, MAX_MESSAGES_PER_SWEEP, MAX_SETTLED_PER_PASS, SCAN_WINDOW_MS, sweepSentiment } from "@/lib/sentiment-sweeper"
+import { logger } from "@/lib/logger"
 import { readLiveSnapshot } from "@/lib/live-snapshot"
 
 import { classifyMessages } from "@/lib/sentiment/classify"
@@ -28,7 +29,7 @@ jest.mock("@/lib/sentiment/classify", () => {
   return {
     ...actual,
     classifyMessages: jest.fn(async (messages: Array<{ id: string; text: string }>) =>
-      messages.map((m) => ({
+      Object.assign(messages.map((m) => ({
         id: m.id,
         // Deterministic stand-in keyed on the fixture text, so a test can say
         // "this message is a queue complaint" without invoking a model.
@@ -41,7 +42,7 @@ jest.mock("@/lib/sentiment/classify", () => {
         topic: m.text.includes("MUSIC") ? "music" : null,
         confidence: 0.9,
         source: "llm" as const,
-      }))
+      })), { deferred: 0 })
     ),
   }
 })
@@ -353,7 +354,7 @@ describe("a pass is a few statements, however many messages it classifies", () =
     let seen: Array<{ id: string; room?: string }> = []
     jest.mocked(classifyMessages).mockImplementationOnce(async (messages) => {
       seen = messages
-      return []
+      return Object.assign([], { deferred: 0 })
     })
     const result = await sweepSentiment()
     const mine = await db.chat_messages.findMany({ where: { chat_group_id: groupId }, select: { id: true } })
@@ -378,10 +379,146 @@ describe("one busy room does not starve the rest (G7)", () => {
     const pass = await sweepSentiment()
 
     expect(await db.event_feedback.count({ where: { event_id: quiet } })).toBe(3)
-    // The control: the busy room still gets the rest of the pass, oldest first, and says more is waiting.
+    // The control: the busy room still gets the rest of the pass, newest first (SCRUM-1481: oldest first, a backlog
+    // the model could not read would fill every pass), and says more is waiting.
     expect(pass.hasMore).toBe(true)
     expect(await db.event_feedback.count({ where: { event_id: busyEvent } })).toBeGreaterThan(MAX_MESSAGES_PER_SWEEP / 2)
     const busyRows = await db.event_feedback.findMany({ where: { event_id: busyEvent }, select: { message: { select: { content: true } } } })
-    expect(busyRows.map((r) => r.message?.content)).toContain("GOOD busy 0")
+    const busyContents = busyRows.map((r) => r.message?.content)
+    expect(busyContents).toContain(`GOOD busy ${MAX_MESSAGES_PER_SWEEP + 49}`)
+    expect(busyContents).not.toContain("GOOD busy 0")
+  })
+})
+
+describe("a model outage defers an un-cued line instead of settling it for good (SCRUM-1481)", () => {
+  const real = () => jest.requireActual("@/lib/sentiment/classify").classifyMessages
+  const savedKey = process.env.OPENAI_API_KEY
+  afterEach(() => {
+    jest.restoreAllMocks()
+    if (savedKey === undefined) delete process.env.OPENAI_API_KEY
+    else process.env.OPENAI_API_KEY = savedKey
+  })
+
+  it("a line the model has not read yet is no mood at all, never a neutral one", async () => {
+    // Negative control: the failed call wrote both lines neutral / other, and the live view counted two neutrals.
+    process.env.OPENAI_API_KEY = "test-key"
+    jest.spyOn(global, "fetch").mockImplementation(async () => new Response("", { status: 503 }))
+    jest.spyOn(logger, "error").mockImplementation()
+    jest.spyOn(logger, "warn").mockImplementation()
+    const { eventId } = await roomWith(["where is the bar", "मुझे मदद चाहिए, बाहर एक आदमी मेरा पीछा कर रहा है"])
+    jest.mocked(classifyMessages).mockImplementationOnce(real())
+
+    const result = await sweepSentiment()
+
+    expect(result.hasMore).toBe(false)
+    expect(await db.event_feedback.count({ where: { event_id: eventId } })).toBe(0)
+    const snapshot = await readLiveSnapshot(eventId, undefined, { social: true }).then((r) => r?.snapshot ?? null)
+    expect(snapshot!.sentiment).toMatchObject({ positive: 0, neutral: 0 })
+  })
+
+  it("reads a room's lines about to leave the window first, then its newest", async () => {
+    const { groupId, author } = await roomWith([])
+    const now = Date.now()
+    await db.chat_messages.createMany({
+      data: [
+        ...Array.from({ length: MAX_MESSAGES_PER_SWEEP + 50 }, (_, i) => ({
+          chat_group_id: groupId, user_id: author, content: `GOOD fresh ${i}`, type: "text" as const, created_at: new Date(now - 3 * 3_600_000 + i * 1_000),
+        })),
+        ...Array.from({ length: 3 }, (_, i) => ({
+          chat_group_id: groupId, user_id: author, content: `GOOD band ${i}`, type: "text" as const, created_at: new Date(now - SCAN_WINDOW_MS + LAST_PASS_MS / 2 + i),
+        })),
+      ],
+    })
+    let seen: string[] = []
+    jest.mocked(classifyMessages).mockImplementationOnce(async (messages) => {
+      seen = messages.map((m) => m.text)
+      return Object.assign([], { deferred: 0 })
+    })
+
+    await sweepSentiment()
+
+    const mine = seen.filter((t) => t.startsWith("GOOD fresh") || t.startsWith("GOOD band"))
+    expect(mine.slice(0, 3).sort()).toEqual(["GOOD band 0", "GOOD band 1", "GOOD band 2"])
+    expect(mine[3]).toBe(`GOOD fresh ${MAX_MESSAGES_PER_SWEEP + 49}`)
+    expect(mine).not.toContain("GOOD fresh 0")
+  })
+
+  it("on a failed pass writes the word list's guess for every line about to leave the window, past a pass's worth, with one error", async () => {
+    const { eventId, groupId, author } = await roomWith([])
+    const now = Date.now()
+    const inBand = (i = 0) => new Date(now - SCAN_WINDOW_MS + LAST_PASS_MS / 2 + i)
+    const band = MAX_MESSAGES_PER_SWEEP + 10
+    await db.chat_messages.createMany({
+      data: [
+        ...Array.from({ length: band }, (_, i) => ({
+          chat_group_id: groupId, user_id: author, content: `where is the bar ${i}`, type: "text" as const, created_at: inBand(i),
+        })),
+        { chat_group_id: groupId, user_id: author, content: "some guy keeps grabbing my friend", type: "text" as const, created_at: inBand(band) },
+        { chat_group_id: groupId, user_id: author, content: "where is the cloakroom", type: "text" as const, created_at: new Date(now - 60_000) },
+        { chat_group_id: groupId, user_id: author, content: "where is the exit", type: "text" as const, created_at: new Date(now - SCAN_WINDOW_MS - 60_000) },
+      ],
+    })
+    // The settle's own room filters: a board post's room (no event to write against) and an archived event room.
+    const post = await db.board_posts.create({ data: { event_id: eventId, author_id: author, kind: "chat", body: "board" } })
+    const boardRoom = await db.chat_groups.create({ data: { kind: "board_post", board_post_id: post.id, name: "board", status: "active" } })
+    const { groupId: archived } = await roomWith([], { archived: true })
+    await db.chat_messages.createMany({
+      data: [boardRoom.id, archived].map((room) => ({ chat_group_id: room, user_id: author, content: "where is the bar", type: "text" as const, created_at: inBand() })),
+    })
+    const error = jest.spyOn(logger, "error").mockImplementation()
+    // The model is down: every line the pass sent comes back unread.
+    jest.mocked(classifyMessages).mockImplementationOnce(async (messages) => Object.assign([], { deferred: messages.length }))
+
+    const result = await sweepSentiment()
+
+    const rows = await db.event_feedback.findMany({
+      where: { event_id: eventId },
+      select: { source: true, category: true, created_at: true, message: { select: { content: true, created_at: true } } },
+    })
+    expect(rows).toHaveLength(band + 1)
+    expect(rows.every((r) => r.source === "lexicon")).toBe(true)
+    // A row carries its message's time: a line read hours late is not the last 30 minutes' mood.
+    expect(rows.every((r) => r.created_at.getTime() === r.message?.created_at.getTime())).toBe(true)
+    const contents = rows.map((r) => r.message?.content)
+    expect(contents).not.toContain("where is the cloakroom")
+    expect(contents).not.toContain("where is the exit")
+    expect(await db.event_feedback.count({ where: { message: { chat_group_id: { in: [boardRoom.id, archived] } } } })).toBe(0)
+    // The cued line reached the moderation queue from the settle, with its author and room.
+    expect(rows.find((r) => r.message?.content === "some guy keeps grabbing my friend")?.category).toBe("safety_conduct")
+    const flag = await db.moderation_flags.findFirstOrThrow({ where: { chat_group_id: groupId } })
+    expect(flag).toMatchObject({ user_id: author, source: "auto_text", status: "pending" })
+    // Other tests' rooms share this database: their band lines are settled by the same pass, so at least `band + 1`.
+    expect(result.hasMore).toBe(false)
+    expect(result.classified).toBeGreaterThanOrEqual(band + 1)
+    const counted = error.mock.calls.filter(([message]) => /left the window/.test(String(message)))
+    expect(counted).toHaveLength(1)
+    expect(counted[0][1]).toMatchObject({ unsettled: 0 })
+    expect((counted[0][1] as { settled: number }).settled).toBeGreaterThanOrEqual(band + 1)
+  })
+
+  it("settles the oldest band lines first, and counts the ones past its cap in the same error", async () => {
+    const { groupId, author } = await roomWith([])
+    const now = Date.now()
+    await db.chat_messages.createMany({
+      data: Array.from({ length: MAX_SETTLED_PER_PASS + 2 }, (_, i) => ({
+        chat_group_id: groupId, user_id: author, content: `where is the bar ${i}`, type: "text" as const,
+        created_at: new Date(now - SCAN_WINDOW_MS + LAST_PASS_MS / 2 + i),
+      })),
+    })
+    const error = jest.spyOn(logger, "error").mockImplementation()
+    jest.mocked(classifyMessages).mockImplementationOnce(async (messages) => Object.assign([], { deferred: messages.length }))
+
+    await sweepSentiment()
+
+    const counted = error.mock.calls.filter(([message]) => /left the window/.test(String(message)))
+    expect(counted).toHaveLength(1)
+    expect(counted[0][1]).toMatchObject({ settled: MAX_SETTLED_PER_PASS })
+    expect((counted[0][1] as { unsettled: number }).unsettled).toBeGreaterThanOrEqual(2)
+    const ends = await db.chat_messages.findMany({
+      where: { chat_group_id: groupId, content: { in: ["where is the bar 0", `where is the bar ${MAX_SETTLED_PER_PASS + 1}`] } },
+      select: { content: true, feedback: { select: { id: true } } },
+    })
+    expect(ends.find((m) => m.content === "where is the bar 0")?.feedback).not.toBeNull()
+    expect(ends.find((m) => m.content === `where is the bar ${MAX_SETTLED_PER_PASS + 1}`)?.feedback).toBeNull()
   })
 })

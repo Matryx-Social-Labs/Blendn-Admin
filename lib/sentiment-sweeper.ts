@@ -1,9 +1,12 @@
 // Relative, not "@/lib/*" — reachable from server.ts, and `build:server`
 // compiles with plain tsc. Enforced by __tests__/server-import-boundary.test.ts.
+import { Prisma } from "@prisma/client"
+
 import { db } from "./db"
 import { beat } from "./heartbeat"
 import { logger } from "./logger"
 import { BATCH_SIZE, classifyMessages } from "./sentiment/classify"
+import { classifyWithLexicon, lexiconFallback } from "./sentiment/lexicon"
 
 /**
  * Classify chatroom messages into `event_feedback`.
@@ -28,10 +31,14 @@ import { BATCH_SIZE, classifyMessages } from "./sentiment/classify"
  *     call to both of them is two more things to keep in sync.
  *   - **A failed write is retried by construction.** The write is one statement,
  *     so when it fails no message got a row and the next pass finds them all again.
- *     A failed *classification* is not: `classifyMessages` falls back to the
- *     lexicon's guess, written with `source: "lexicon"` and never revisited. The
- *     model call retries a 429, a 5xx or a timeout once (lib/sentiment/classify.ts),
- *     and a failure that stays is a Sentry issue.
+ *     A failed *call* is too (SCRUM-1481): a line with no safety cue whose call
+ *     failed gets no row, and the next pass reads it again. Only in the last
+ *     `LAST_PASS_MS` of the window, on a pass the model failed, does it get the
+ *     word list's guess (`source: "lexicon"`, never revisited), every such line at
+ *     once, with one error that counts them. A cued line gets that guess on its
+ *     first failed call, so a possible report is flagged whatever the model does.
+ *     The call retries a 429, a 5xx or a timeout once (lib/sentiment/classify.ts),
+ *     and each failure that stays is a Sentry issue.
  *
  * The `feedback event_feedback?` back-relation plus the unique `message_id`
  * make "not yet classified" a single indexed predicate.
@@ -47,9 +54,9 @@ import { BATCH_SIZE, classifyMessages } from "./sentiment/classify"
 export const SWEEP_INTERVAL_MS = 60 * 1000
 /**
  * The heartbeat's interval (lib/heartbeat.ts reports a loop after 3 of them), not the sweep's. With the model timing
- * out, one pass is up to 20 calls, 4 at a time (lib/sentiment/classify.ts), × (20 s + 2 s + 20 s) ≈ 3.5 min and still
- * finishes on the word list: 3 × 3 min clears that plus the minute between passes, so a slow OpenAI is not reported as
- * a stalled loop.
+ * out, a pass stops after its first round of 4 calls (42 s); with one call a round still answering it is up to 20
+ * calls, 4 at a time (lib/sentiment/classify.ts), × (20 s + 2 s + 20 s) ≈ 3.5 min. 3 × 3 min clears that plus the
+ * minute between passes, so a slow OpenAI is not reported as a stalled loop.
  */
 const BEAT_INTERVAL_MS = 3 * 60 * 1000
 
@@ -97,38 +104,49 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
    * open to end + 24 h, but its mood is a live figure.
    */
   /*
-   * A fair share per room (G7). Each open event room offers its oldest
-   * waiting messages (a pass's worth at most, through its own
+   * A fair share per room (G7). Each open event room offers its waiting
+   * messages (a pass's worth at most, through its own
    * (chat_group_id, created_at) index), and the pass takes them in turns:
-   * every room's oldest, then every room's second, and so on. Oldest-first
+   * every room's first, then every room's second, and so on. Oldest-first
    * across rooms let one concert room's backlog take every slot, so every
    * other room's mood was a pass late for as long as the backlog lasted. A
    * room alone still gets the whole pass. Which messages are classified, and
    * how, is unchanged; only the order the pass reaches them in.
    */
+  /*
+   * SCRUM-1481: a room's lines in the last `LAST_PASS_MS` of the window first, then its newest. Oldest first, a
+   * backlog the model could not read during an outage filled every pass, and a fresh line, a new safety report
+   * included, was never selected until the outage ended. Newest first alone, the oldest lines left the window unread
+   * and uncounted.
+   *
+   * ponytail: a middle line can wait. During an outage a pass runs every SWEEP_INTERVAL_MS plus the pass (a round of
+   * calls, under 45 s), and a fresh line is read only while it is among its room's newest MAX_MESSAGES_PER_SWEEP (200)
+   * less the room's band. A room writing more than that between two passes can leave a line, a cued one included,
+   * unread until it reaches the band, where it is read first, or flagged from its cue if the model is still down; or
+   * until the model answers again, when a backlog drains at 1 s re-passes. A per-room fresh quota is the upgrade.
+   */
+  const now = Date.now()
+  const windowStart = new Date(now - SCAN_WINDOW_MS)
+  const lastPassBefore = new Date(now - SCAN_WINDOW_MS + LAST_PASS_MS)
   const messages = await db.$queryRaw<ToClassify[]>`
     SELECT id, content, user_id, chat_group_id, event_id
       FROM (
-        SELECT m.id, m.content, m.user_id, m.chat_group_id, g.event_id, m.created_at,
-               row_number() OVER (PARTITION BY m.chat_group_id ORDER BY m.created_at) AS turn
+        SELECT m.id, m.content, m.user_id, m.chat_group_id, g.event_id, m.created_at, m.last_pass,
+               row_number() OVER (PARTITION BY m.chat_group_id ORDER BY m.last_pass DESC, m.created_at DESC) AS turn
           FROM chat_groups g
           CROSS JOIN LATERAL (
-            SELECT m.id, m.content, m.user_id, m.chat_group_id, m.created_at
+            SELECT m.id, m.content, m.user_id, m.chat_group_id, m.created_at, m.created_at <= ${lastPassBefore} AS last_pass
               FROM chat_messages m
              WHERE m.chat_group_id = g.id
-               AND m.type = 'text'
-               AND m.created_at > ${new Date(Date.now() - SCAN_WINDOW_MS)}
-               AND m.deleted_at IS NULL
-               AND (m.moderation_status IS NULL OR m.moderation_status <> 'hidden')
-               AND m.metadata ->> 'sponsored_message_id' IS NULL
-               AND NOT EXISTS (SELECT 1 FROM event_feedback f WHERE f.message_id = m.id)
-             ORDER BY m.created_at ASC
+               AND m.created_at > ${windowStart}
+               AND ${UNCLASSIFIED}
+             ORDER BY last_pass DESC, m.created_at DESC
              LIMIT ${MAX_MESSAGES_PER_SWEEP + 1}
           ) m
          WHERE g.status = 'active'
            AND g.kind = 'event'
       ) q
-     ORDER BY turn, created_at
+     ORDER BY turn, last_pass DESC, created_at DESC
      LIMIT ${MAX_MESSAGES_PER_SWEEP + 1}
   `
 
@@ -145,23 +163,94 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
   } catch (error) {
     // No feedback row was written, so the next pass finds the same messages again.
     logger.error("Sentiment write failed", { error: error instanceof Error ? error.message : String(error) })
-    return { classified: 0, hasMore }
+    // Not straight back when the model is down too: each pass would spend a failed round of calls.
+    return { classified: 0, hasMore: hasMore && results.deferred === 0 }
   }
+  await routeSafety(written, results, rowOf)
 
+  // A message the classifier did not reach this pass (its call cap) has no row yet: the next pass comes at once.
+  if (results.deferred === 0) return { classified: written.length, hasMore: hasMore || results.length < batch.length }
+
+  // The model failed this pass. The next pass waits the interval (coming straight back would only fail again), and the
+  // lines about to leave the window are settled now, whether this pass read them or not.
+  let settled = 0
+  try {
+    settled = await settleLastPass(windowStart, lastPassBefore)
+  } catch (error) {
+    // The pass still ends and beats; the band is settled by the next failed pass, which counts what it missed.
+    logger.error("Sentiment settle failed", { error: error instanceof Error ? error.message : String(error) })
+  }
+  return { classified: written.length + settled, hasMore: false }
+}
+
+/**
+ * Every unclassified line of an open event room: text, not deleted or hidden, not an advertiser's copy (the
+ * paid-message exclusion above), and with no feedback row.
+ */
+const UNCLASSIFIED = Prisma.sql`m.type = 'text'
+               AND m.deleted_at IS NULL
+               AND (m.moderation_status IS NULL OR m.moderation_status <> 'hidden')
+               AND m.metadata ->> 'sponsored_message_id' IS NULL
+               AND NOT EXISTS (SELECT 1 FROM event_feedback f WHERE f.message_id = m.id)`
+
+/** The last minutes of the scan window: a line still unread there is read first, and settled on a failed pass. */
+export const LAST_PASS_MS = 10 * 60_000
+/**
+ * The lines a failed pass settles on the word list: no model call, so not the call batch's 200, but one statement's
+ * worth. Past it a line leaves the window unrowed, and the pass's error counts it.
+ */
+export const MAX_SETTLED_PER_PASS = 5_000
+
+/**
+ * On a pass the model failed, every line in the last `LAST_PASS_MS` of the window still with no row gets the word
+ * list's guess: the model will not be asked again before the line leaves the window. One error a pass with the
+ * counts, never a text or an id: an outage that outlives the window must be seen, and the per-call errors stop at the
+ * window. Returns the rows written.
+ */
+async function settleLastPass(windowStart: Date, lastPassBefore: Date): Promise<number> {
+  const band = await db.$queryRaw<Array<ToClassify & { waiting: bigint }>>`
+    SELECT m.id, m.content, m.user_id, m.chat_group_id, g.event_id, count(*) OVER () AS waiting
+      FROM chat_groups g
+      JOIN chat_messages m ON m.chat_group_id = g.id
+     WHERE g.status = 'active'
+       AND g.kind = 'event'
+       AND m.created_at > ${windowStart}
+       AND m.created_at <= ${lastPassBefore}
+       AND ${UNCLASSIFIED}
+     ORDER BY m.created_at
+     LIMIT ${MAX_SETTLED_PER_PASS}
+  `
+  if (band.length === 0) return 0
+  const rowOf = new Map(band.map((m) => [m.id, m]))
+  const results = band.map((m) => ({ id: m.id, ...(classifyWithLexicon(m.content) ?? lexiconFallback(m.content)) }))
+  const written = await writeFeedback(results.map((r) => ({ ...r, eventId: rowOf.get(r.id)!.event_id })))
+  await routeSafety(written, results, rowOf)
+  logger.error("Sentiment lines left the window unread by the model", {
+    settled: written.length,
+    unsettled: Number(band[0].waiting) - band.length,
+  })
+  return written.length
+}
+
+/**
+ * "Routed to moderation regardless of sentiment" -- the live tab's Safety
+ * alert has said this since it was written, and nothing did it. Driven
+ * 2026-09-13: "some guy keeps following me around the bar and grabbed
+ * my arm" was classified safety_conduct, opened a critical issue, and
+ * never reached the moderation queue -- no flag row, no "flags waiting",
+ * no human unless somebody happened to open the live tab.
+ *
+ * A flag, never a hide: this is a person asking for help, and hiding it
+ * is the one action that makes things worse. `flagged` on the message
+ * only when nothing stronger is already there.
+ */
+async function routeSafety(
+  written: ReadonlyArray<{ message_id: string }>,
+  results: ReadonlyArray<{ id: string; category: string; confidence: number }>,
+  rowOf: ReadonlyMap<string, ToClassify>
+): Promise<void> {
   const resultOf = new Map(results.map((r) => [r.id, r]))
   for (const { message_id } of written) {
-    /*
-     * "Routed to moderation regardless of sentiment" -- the live tab's Safety
-     * alert has said this since it was written, and nothing did it. Driven
-     * 2026-09-13: "some guy keeps following me around the bar and grabbed
-     * my arm" was classified safety_conduct, opened a critical issue, and
-     * never reached the moderation queue -- no flag row, no "flags waiting",
-     * no human unless somebody happened to open the live tab.
-     *
-     * A flag, never a hide: this is a person asking for help, and hiding it
-     * is the one action that makes things worse. `flagged` on the message
-     * only when nothing stronger is already there.
-     */
     const result = resultOf.get(message_id)
     const row = rowOf.get(message_id)
     if (result?.category !== "safety_conduct" || !row) continue
@@ -171,9 +260,6 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
       logger.error("Safety routing failed", { messageId: message_id, error: error instanceof Error ? error.message : String(error) })
     }
   }
-
-  // A message the classifier did not reach this pass (its call cap) has no row yet: the next pass comes at once.
-  return { classified: written.length, hasMore: hasMore || results.length < batch.length }
 }
 
 /** How far back the pass looks for messages to classify. */
@@ -197,6 +283,10 @@ interface ToClassify {
  * that -- the `WHERE` skips it, and it is not returned. A message deleted while
  * the model was reading it is simply not joined, where a row per message made
  * that one failed write among the rest.
+ *
+ * A row carries its message's time, not the write's (SCRUM-1481): the live
+ * view counts the last 30 minutes' rows, and a line read hours late, after an
+ * outage, must not count as the last 30 minutes' mood.
  */
 async function writeFeedback(
   results: ReadonlyArray<Awaited<ReturnType<typeof classifyMessages>>[number] & { eventId: string }>
@@ -205,8 +295,8 @@ async function writeFeedback(
   const last = new Map(results.map((r) => [r.id, r]))
   const rows = [...last.values()]
   return db.$queryRaw<{ message_id: string }[]>`
-    INSERT INTO event_feedback (id, event_id, message_id, sentiment, category, topic, confidence, source)
-    SELECT gen_random_uuid(), v.event_id, v.message_id, v.sentiment::feedback_sentiment, v.category::issue_category, v.topic::feedback_topic, v.confidence, v.source::feedback_source
+    INSERT INTO event_feedback (id, event_id, message_id, sentiment, category, topic, confidence, source, created_at)
+    SELECT gen_random_uuid(), v.event_id, v.message_id, v.sentiment::feedback_sentiment, v.category::issue_category, v.topic::feedback_topic, v.confidence, v.source::feedback_source, m.created_at
       FROM unnest(
         ${rows.map((r) => r.eventId)}::uuid[], ${rows.map((r) => r.id)}::uuid[], ${rows.map((r) => r.sentiment)}::text[],
         ${rows.map((r) => r.category)}::text[], ${rows.map((r) => r.topic)}::text[], ${rows.map((r) => r.confidence)}::float8[], ${rows.map((r) => r.source)}::text[]
