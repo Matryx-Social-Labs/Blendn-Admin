@@ -147,7 +147,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               message_id: report.messageId,
               message_type: "private",
               reason: report.reason,
-              excerpt,
+              excerpt: excerpt,
               // Optional, and the sheet sends `{ reason: "other" }` alone — so
               // "Block and report" and "Unmatch and report" both 500'd and the
               // whole transaction rolled back: no block, no report, thread
@@ -161,7 +161,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               reporter_id: authUser.userId,
               reported_id: otherId,
               reason: report.reason,
-              excerpt,
+              excerpt: excerpt,
               ...(report.description !== undefined && { description: report.description }),
             },
           })
