@@ -1,6 +1,6 @@
 import { ageFrom } from "@/lib/age"
 import { westernSignFor } from "@/lib/about-you"
-import { normalizeLocationToCity } from "@/lib/location"
+import { storedCity } from "@/lib/location"
 
 /**
  * The profile as an auth response should carry it.
@@ -59,7 +59,7 @@ export async function selfProfileEnvelope<
     ...user,
     profile: {
       ...profileForSelfResponse(user.profile),
-      location: await normalizeLocationToCity(user.profile.location),
+      location: storedCity(user.profile.location),
     },
   }
 }

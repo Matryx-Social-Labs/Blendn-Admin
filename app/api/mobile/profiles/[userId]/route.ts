@@ -40,7 +40,7 @@ import {
 } from "@/lib/api-response"
 import { signPairRefusal, updateProfileSchema } from "@/lib/validations/profile"
 import { homeStateLabel, isHomeStateIn, languageLabels, listCountry, profileListsFor, signLabel, westernSignFor } from "@/lib/about-you"
-import { normalizeLocationToCity } from "@/lib/location"
+import { locationToStore, storedCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
 import { acquisitionSource } from "@/lib/product-events"
 import { notifyFriendsHere } from "@/lib/room-friends"
@@ -88,7 +88,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return notFoundResponse("User not found")
     }
 
-    const normalizedLocation = await normalizeLocationToCity(user.profile?.location)
+    const normalizedLocation = storedCity(user.profile?.location)
     const isSelf = authUser.userId === userId
 
     /*
@@ -382,7 +382,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const pulled = await pulledPhotos([...(sentPhotos ?? []), ...(typeof sentBlur === "string" ? [sentBlur] : [])], userId)
     const photos = sentPhotos?.filter((u: string) => !pulled.has(u))
     const blur_photo = typeof sentBlur === "string" && pulled.has(sentBlur) ? undefined : sentBlur
-    const normalizedLocation = await normalizeLocationToCity(location)
+    const normalizedLocation = await locationToStore(location)
 
     /*
      * One name for the labels, whichever key the request used.
@@ -820,7 +820,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         // refreshes the number beside it, so the two never disagree on the day
         // they are set.
         ...(parsedDob && { date_of_birth: parsedDob, age: effectiveAge }),
-        ...(location !== undefined && { location: normalizedLocation }),
+        ...(normalizedLocation !== undefined && { location: normalizedLocation }),
         ...(bio !== undefined && { bio }),
         ...(occupation !== undefined && { occupation }),
         ...(education !== undefined && { education }),
@@ -923,7 +923,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
        *
        * It was caught by making a real PUT to staging and reading the body.
        */
-      profile: { ...profileForSelfResponse(user!.profile), homeCitySlug: citySlugFor(catalogue, user!.profile?.home_city_id) },
+      // `location` as every read gives it: never coordinates, even ones this save kept because the lookup failed (SCRUM-1229).
+      profile: { ...profileForSelfResponse(user!.profile), location: storedCity(user!.profile?.location), homeCitySlug: citySlugFor(catalogue, user!.profile?.home_city_id) },
       interests: user!.user_interests.map((ui) => ({
         id: ui.category.id,
         name: ui.category.name,

@@ -20,7 +20,6 @@ afterAll(async () => {
   await cleanupCrewWorld()
 })
 
-// Distinct per world: a resolved coordinate is cached for the life of the process.
 const coordinatesFor = (n: number, base: number) => Array.from({ length: n }, (_, i) => `${base + i}.5,${70 + i}.25`)
 
 async function world(coordinates: string[]) {
@@ -54,7 +53,7 @@ async function world(coordinates: string[]) {
 }
 
 describe("the room roster", () => {
-  it("is what the snapshot says, names a page, and budgets its geocoding", async () => {
+  it("is what the snapshot says, names a page, and geocodes nothing", async () => {
     const { viewer, eventId, label } = await world(coordinatesFor(3, 10))
     // `ageFrom` is clock-relative only through the birth date; these have a fixed age.
     const fetchSpy = jest.spyOn(global, "fetch").mockImplementation(async () => new Response(JSON.stringify({ address: { city: "Testville" } })))
@@ -71,7 +70,7 @@ describe("the room roster", () => {
       expect(res.body.data.pagination.totalCount).toBe(8) // not the viewer's friend or blocked, not "offline"
       expect(label.size).toBe(10)
 
-      expect(fetchSpy.mock.calls.length).toBe(3) // within the budget: all resolved, as before
+      expect(fetchSpy).not.toHaveBeenCalled() // three within a budget once; no read geocodes now (SCRUM-1229)
 
       // Before: every member of the room; after: the page's ids.
       const pseudonymRead = sql.find((q) => /FROM "public"\."chat_group_members"/.test(q) && /"anonymous_name"/.test(q))!
@@ -81,14 +80,18 @@ describe("the room roster", () => {
     }
   })
 
-  it("reverse-geocodes at most a budget's worth of coordinates per request", async () => {
+  it("reverse-geocodes nothing: coordinates read as no city (SCRUM-1229)", async () => {
     const { viewer, eventId } = await world(coordinatesFor(6, 40))
     const fetchSpy = jest.spyOn(global, "fetch").mockImplementation(async () => new Response(JSON.stringify({ address: { city: "Testville" } })))
     try {
       const res = await api.checkins(viewer, eventId)
       expect(res.status).toBe(200)
-      // Before: six parallel Nominatim calls on a user-facing read (a 1 req/s courtesy limit).
-      expect(fetchSpy.mock.calls.length).toBeLessThanOrEqual(3)
+      // Six parallel Nominatim calls on a user-facing read once (a 1 req/s courtesy limit), then three; now none.
+      expect(fetchSpy).not.toHaveBeenCalled()
+      // The six coordinate rows (and the viewer, who has none) read as no city, never as the coordinates.
+      const locations = res.body.data.attendees.map((a: { location: string | null }) => a.location)
+      expect(locations.filter((l: string | null) => l === null).length).toBeGreaterThanOrEqual(6)
+      expect(JSON.stringify(res.body)).not.toMatch(/\d+\.5,\d+\.25/)
     } finally {
       fetchSpy.mockRestore()
     }
