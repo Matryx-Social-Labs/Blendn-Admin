@@ -22,9 +22,9 @@ import { closeDb, db as appDb } from "../lib/db"
  * 14 days are for a birth date entered wrong (D-026). The dry run lists them.
  *
  * In this process `eraseAccount`'s in-memory steps (the token blocklist and
- * socket eviction) reach only this process; the server refuses the account
- * from its `deletedAt`. The Apple revoke has no code from the app here, so it
- * logs and audits "not revoked", as the route does without one.
+ * socket eviction) reach only this process. The server's blocklist refresh and
+ * its socket handshake read `deletedAt`. The Apple revoke has no code from the
+ * app here, so it logs and audits "not revoked", as the route does without one.
  *
  * `--correct` is the answer to a person who writes to the grievance address
  * that their birth date is wrong: it sets the birth date (18 or over, a real
@@ -133,7 +133,7 @@ export async function dueForDeletion(db: PrismaClient, now: Date): Promise<strin
 /**
  * Erase every account due, oldest stamp first, one at a time, each one's
  * deferred work awaited before the next. Stops at the first failure, naming
- * the id; the ones before it stay erased and the failed one is due again.
+ * the id; the ones before it stay erased, and a run after takes up the rest.
  * `erase` is `eraseAccount`; a test passes its own.
  */
 export async function deleteDue(db: PrismaClient, now: Date, erase: typeof eraseAccount = eraseAccount): Promise<string[]> {

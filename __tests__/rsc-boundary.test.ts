@@ -89,7 +89,7 @@ describe("server/client boundary", () => {
  * and do not count.
  */
 const SERVER_MODULES = ["lib/revenuecat-api.ts", "lib/account-erasure.ts"]
-const IMPORT = /(?:^|\n)\s*(?:import|export)\s+(?!type\b)(?:[^'";]*?\sfrom\s+)?["']([^"']+)["']/g
+const IMPORT = /(?:^|\n)\s*(?:import|export)\s+(?!type\b)(?:[^'";]*?\sfrom\s+)?["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/g
 
 function resolveImport(spec: string, from: string): string | null {
   const base = spec.startsWith("@/") ? join(ROOT, spec.slice(2)) : spec.startsWith(".") ? join(from, "..", spec) : null
@@ -108,7 +108,7 @@ function clientReaches(clientFiles: string[], targets: string[]): string[] {
     const file = queue.shift()!
     const src = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
     for (const m of src.matchAll(IMPORT)) {
-      const next = resolveImport(m[1], file)
+      const next = resolveImport(m[1] ?? m[2], file)
       if (next && !via.has(next)) {
         via.set(next, via.get(file)!)
         queue.push(next)
