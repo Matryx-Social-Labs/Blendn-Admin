@@ -151,7 +151,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           },
         },
       },
-      orderBy: [{ role: "asc" }, { joined_at: "asc" }],
+      orderBy: [{ role: "asc" }, { joined_at: "asc" }, { id: "asc" }],
       skip: offset,
       take: limit,
     })

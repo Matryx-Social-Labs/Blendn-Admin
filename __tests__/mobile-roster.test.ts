@@ -45,11 +45,6 @@ jest.mock("@/lib/room-person-facts", () => ({
   roomPersonFacts: jest.fn(async (_v: string, _e: string, ids: string[]) => new Map(ids.map((id) => [id, { ageBand: "25-34", tenure: "new" }]))),
 }))
 
-jest.mock("@/lib/location", () => ({
-  normalizeLocationToCity: jest.fn().mockImplementation(async (l: string | null) => l),
-  geocodeBudget: jest.fn(() => ({ take: () => true })),
-}))
-
 import { NextRequest } from "next/server"
 import { GET } from "@/app/api/mobile/events/[eventId]/checkins/route"
 import { resolveUserRef } from "@/lib/room-handle"

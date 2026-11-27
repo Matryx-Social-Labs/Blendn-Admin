@@ -1,7 +1,3 @@
-jest.mock("@/lib/location", () => ({
-  normalizeLocationToCity: jest.fn(async (l: string | null) => l),
-}))
-
 import { profileForSelfResponse, selfProfileEnvelope } from "@/lib/self-profile"
 
 /*

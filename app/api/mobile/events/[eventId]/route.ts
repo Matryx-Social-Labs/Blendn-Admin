@@ -23,7 +23,7 @@ import { leavesDraft, statusMoveRefusalFor } from "@/lib/event-status-move"
 import { reviewOrgRefusal } from "@/lib/review-demo-org"
 import { phoneCheckInRadius } from "@/lib/geofence"
 import { haversineDistance } from "@/lib/geo"
-import { resolveEventCity } from "@/lib/location"
+import { storedCity } from "@/lib/location"
 import { eventArea } from "@/lib/venue-visibility"
 import { getInsideCount } from "@/lib/occupancy"
 import { dayOccurrencesSelect, eventDays, eventSession } from "@/lib/occurrences"
@@ -235,11 +235,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    const resolvedCity = await resolveEventCity(
-      event.city,
-      event.latitude,
-      event.longitude
-    )
+    // The stored city, or none: a read never geocodes (SCRUM-1229).
+    const resolvedCity = storedCity(event.city)
 
     return successResponse({
       id: event.id,

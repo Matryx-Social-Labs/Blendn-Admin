@@ -11,7 +11,7 @@ import { inRoomWhere } from "@/lib/event-kind"
 import { roomPersonFacts } from "@/lib/room-person-facts"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { geocodeBudget, normalizeLocationToCity } from "@/lib/location"
+import { storedCity } from "@/lib/location"
 import { idForViewer } from "@/lib/room-handle"
 import { visibleInRoom } from "@/lib/identity"
 import { hiddenInRooms } from "@/lib/room-people"
@@ -198,7 +198,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             },
           },
         },
-        orderBy: { check_in_time: "desc" },
+        orderBy: [{ check_in_time: "desc" }, { id: "desc" }],
         skip: paginationSkip(page, limit),
         take: limit,
       }),
@@ -221,30 +221,26 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       roomPersonFacts(authUser.userId, eventId, checkIns.map((c) => c.user.id)),
     ])
 
-    // One budget for the page: an uncached coordinate is a Nominatim call (1 req/s courtesy).
-    const geocoding = geocodeBudget()
     return successResponse({
-      attendees: await Promise.all(
-        checkIns.map(async (c) => {
-          const shown = visible.has(c.user.id) && c.user.name
-          return {
-            // A message request, a block and a report all need to name a
-            // person; this names them only inside this room (SCRUM-371).
-            userId: idForViewer(authUser.userId, eventId, c.user.id),
-            name: shown ? firstName(shown) : pseudonyms.get(c.user.id) ?? "Attendee",
-            // Present only for somebody the viewer may recognise here; the
-            // header explains why it is otherwise absent.
-            ...(shown && { image: c.user.profile?.photos?.[0] ?? null }),
-            // Derived — see `ageFrom` in lib/age.ts. The room shows who is here
-            // now, so the age it shows should be the one they are now. Only
-            // for somebody the room names to you; the keys stay, null.
-            age: shown ? ageFrom(c.user.profile) : null,
-            location: shown ? await normalizeLocationToCity(c.user.profile?.location, geocoding) : null,
-            ...facts.get(c.user.id)!,
-            checkInTime: c.check_in_time,
-          }
-        })
-      ),
+      attendees: checkIns.map((c) => {
+        const shown = visible.has(c.user.id) && c.user.name
+        return {
+          // A message request, a block and a report all need to name a
+          // person; this names them only inside this room (SCRUM-371).
+          userId: idForViewer(authUser.userId, eventId, c.user.id),
+          name: shown ? firstName(shown) : pseudonyms.get(c.user.id) ?? "Attendee",
+          // Present only for somebody the viewer may recognise here; the
+          // header explains why it is otherwise absent.
+          ...(shown && { image: c.user.profile?.photos?.[0] ?? null }),
+          // Derived — see `ageFrom` in lib/age.ts. The room shows who is here
+          // now, so the age it shows should be the one they are now. Only
+          // for somebody the room names to you; the keys stay, null.
+          age: shown ? ageFrom(c.user.profile) : null,
+          location: shown ? storedCity(c.user.profile?.location) : null,
+          ...facts.get(c.user.id)!,
+          checkInTime: c.check_in_time,
+        }
+      }),
       pagination: paginationMeta(page, limit, totalCount),
     })
   } catch (error) {
