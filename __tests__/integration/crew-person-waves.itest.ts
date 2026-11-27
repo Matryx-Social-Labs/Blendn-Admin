@@ -104,8 +104,9 @@ describe("Wave at a person for your crew", () => {
     await api.prefs(blocker, w.eventId, { openToCrews: true })
     await api.block(blocker, w.nebula.people[1].id)
 
-    // Not opted in, blocked one of the crew, a handle from nobody here: one answer.
-    for (const handle of [roomHandle(w.eventId, shy.id), roomHandle(w.eventId, blocker.id)]) {
+    // Not opted in, blocked one of the crew, your own crewmate's room handle (SCRUM-1476: a 404 said
+    // "this handle is in my crew"): one answer.
+    for (const handle of [roomHandle(w.eventId, shy.id), roomHandle(w.eventId, blocker.id), roomHandle(w.eventId, w.nebula.people[1].id)]) {
       expect(await api.wave(w.nebula.people[0], w.eventId, handle, w.nebula.crewId)).toEqual(STOOD)
     }
     expect(await db.crew_likes.count({ where: { from_crew_id: w.nebula.crewId } })).toBe(0)

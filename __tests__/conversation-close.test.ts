@@ -38,7 +38,6 @@ import {
   closedPairKeys,
   conversationPair,
   openConversation,
-  pairIsClosed,
 } from "@/lib/conversations"
 import { maySeeIdentity } from "@/lib/identity"
 
@@ -167,23 +166,6 @@ describe("closeConversation", () => {
     expect(
       mockDb.private_conversations.updateMany.mock.calls[0][0].data.closed_reason
     ).toBe("block")
-  })
-})
-
-describe("pairIsClosed", () => {
-  it("is direction-independent", async () => {
-    mockDb.private_conversations.findUnique.mockResolvedValue({ closed_at: new Date() })
-
-    expect(await pairIsClosed(A, B)).toBe(true)
-    expect(await pairIsClosed(B, A)).toBe(true)
-  })
-
-  it("is false for a live pair and for strangers", async () => {
-    mockDb.private_conversations.findUnique.mockResolvedValueOnce({ closed_at: null })
-    expect(await pairIsClosed(A, B)).toBe(false)
-
-    mockDb.private_conversations.findUnique.mockResolvedValueOnce(null)
-    expect(await pairIsClosed(A, "never-met")).toBe(false)
   })
 })
 
