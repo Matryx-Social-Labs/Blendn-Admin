@@ -25,12 +25,13 @@ import { renderToStaticMarkup } from "react-dom/server"
 
 import { resetMemoryStore } from "@/lib/rate-limit-store"
 
-import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
+import { cleanup, closeDb, db, makeEvent, makeUser, pinOf, testId } from "./helpers"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const actions = require("@/lib/billing-actions") as typeof import("@/lib/billing-actions")
 const market = require("@/lib/plan-market") as typeof import("@/lib/plan-market")
 const billing = require("@/lib/billing") as typeof import("@/lib/billing")
+const access = require("@/lib/analytics-access") as typeof import("@/lib/analytics-access")
 const page = require("@/app/dashboard/plan/page") as typeof import("@/app/dashboard/plan/page")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -82,7 +83,12 @@ async function orgWithOwner(label: string, role: "organizer" | "venue_owner" = "
 }
 
 /** An event of the organisation's in `city`, ended `endedDaysAgo` days ago. */
-async function eventIn(orgId: string, owner: string, city: string | null, opts: { deleted?: boolean; status?: "cancelled" | "draft" | "completed"; endedDaysAgo?: number } = {}) {
+async function eventIn(
+  orgId: string,
+  owner: string,
+  city: string | null,
+  opts: { deleted?: boolean; status?: "cancelled" | "draft" | "completed"; endedDaysAgo?: number; pinIn?: string | null } = {}
+) {
   const id = await makeEvent(owner)
   events.push(id)
   const end = new Date(Date.now() - (opts.endedDaysAgo ?? 30) * DAY)
@@ -91,6 +97,7 @@ async function eventIn(orgId: string, owner: string, city: string | null, opts: 
     data: {
       organizer_org_id: orgId,
       city,
+      ...pinOf(opts.pinIn === undefined ? city : opts.pinIn),
       start_time: new Date(end.getTime() - 3 * 60 * 60 * 1000),
       end_time: end,
       deleted_at: opts.deleted ? new Date() : null,
@@ -100,13 +107,12 @@ async function eventIn(orgId: string, owner: string, city: string | null, opts: 
   return id
 }
 
-async function venueIn(orgId: string, city: string, opts: { deleted?: boolean } = {}) {
+async function venueIn(orgId: string, city: string, opts: { deleted?: boolean; pinIn?: string | null } = {}) {
   const v = await db.venues.create({
     data: {
       name: testId("pm-venue"),
       city,
-      latitude: 43.65,
-      longitude: -79.38,
+      ...pinOf(opts.pinIn === undefined ? city : opts.pinIn),
       timezone: "UTC",
       owner_org_id: orgId,
       claimed_at: new Date(Date.now() - 200 * DAY),
@@ -210,6 +216,40 @@ describe("mayBuyHere: the organisation's events and venues, by the catalogue's c
     const { owner, orgId } = await orgWithOwner("pm-org-field")
     await eventIn(orgId, owner, "Toronto")
     expect(await billing.billingOrgFor({ id: owner, role: "organizer" })).toMatchObject({ orgId, mayBuyHere: false })
+  })
+})
+
+describe("SCRUM-1447: a label its pin is not inside says nothing", () => {
+  it("an Indian organisation with a published-then-cancelled event labelled Toronto on a Bengaluru pin may still buy, and gets no market access", async () => {
+    const { owner, orgId } = await orgWithOwner("pm-1447-event")
+    await eventIn(orgId, owner, "Bengaluru")
+    await eventIn(orgId, owner, "Toronto", { status: "cancelled", pinIn: "Bengaluru" })
+    const org = await billing.billingOrgFor({ id: owner, role: "organizer" })
+    expect(org).toMatchObject({ orgId, mayBuyHere: true })
+    expect((await access.analyticsAccess(org!)).reason).not.toBe("market")
+  })
+
+  it("an owned venue relabelled Toronto on its Bengaluru pin: may still buy, and Venue Pro is not refused as not sold", async () => {
+    const { owner, orgId } = await orgWithOwner("pm-1447-venue", "venue_owner")
+    const v = await venueIn(orgId, "Bengaluru")
+    await db.venues.update({ where: { id: v }, data: { city: "Toronto" } })
+    expect(await market.mayBuyHere(orgId)).toBe(true)
+    as(owner, "venue_owner")
+    // Refused for its own reason (no venue-day data yet), never as not sold here.
+    await expect(actions.startVenueProCheckout(v, "monthly")).rejects.toThrow("three months after people first go live")
+  })
+
+  it("a Toronto label with no pin says nothing, for an event and for a venue", async () => {
+    const { owner, orgId } = await orgWithOwner("pm-1447-nopin", "venue_owner")
+    await eventIn(orgId, owner, "Toronto", { pinIn: null })
+    await venueIn(orgId, "Toronto", { pinIn: null })
+    expect(await market.mayBuyHere(orgId)).toBe(true)
+  })
+
+  it("a real Toronto pin is still not sold here", async () => {
+    const { owner, orgId } = await orgWithOwner("pm-1447-real")
+    await eventIn(orgId, owner, "Toronto", { status: "cancelled" })
+    expect(await market.mayBuyHere(orgId)).toBe(false)
   })
 })
 

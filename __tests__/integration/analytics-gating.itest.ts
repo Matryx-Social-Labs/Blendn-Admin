@@ -29,7 +29,7 @@ import { grantEntitlement } from "@/lib/entitlements"
 import { analyticsPage, eventAnalytics, orgAnalytics } from "@/lib/org-analytics"
 import { db as appDb } from "@/lib/db"
 
-import { cleanup, closeDb, db, makeUser, testId } from "./helpers"
+import { cleanup, closeDb, db, makeUser, pinOf, testId } from "./helpers"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const page = require("@/app/dashboard/analytics/page") as typeof import("@/app/dashboard/analytics/page")
@@ -334,12 +334,12 @@ describe("where plans are not sold, Analytics stays open (SCRUM-1277)", () => {
   const orgOf = async (user: string) => (await billingOrgFor({ id: user, role: "organizer" }))!
 
   afterAll(async () => {
-    await db.events.updateMany({ where: { id: canaryEventId }, data: { city: null } })
+    await db.events.updateMany({ where: { id: canaryEventId }, data: { city: null, latitude: null, longitude: null } })
     mockGetAuth.mockResolvedValue({ user: { id: owner, role: "organizer" } })
   })
 
   it("a Toronto organisation past its window sees its own figures and the launch line; the read writes nothing", async () => {
-    await db.events.update({ where: { id: canaryEventId }, data: { city: "Toronto" } })
+    await db.events.update({ where: { id: canaryEventId }, data: { city: "Toronto", ...pinOf("Toronto") } })
     const before = await windowOf(orgId)
     expect(before[0].analytics_free_until!.getTime()).toBeLessThan(now.getTime())
     const org = await orgOf(owner)
@@ -363,7 +363,7 @@ describe("where plans are not sold, Analytics stays open (SCRUM-1277)", () => {
   })
 
   it("moved to Bengaluru, the same organisation is locked at once from its stored date, and the read writes nothing", async () => {
-    await db.events.update({ where: { id: canaryEventId }, data: { city: "Bengaluru" } })
+    await db.events.update({ where: { id: canaryEventId }, data: { city: "Bengaluru", ...pinOf("Bengaluru") } })
     const before = await windowOf(orgId)
     const org = await orgOf(owner)
     expect(org.mayBuyHere).toBe(true)
@@ -378,13 +378,13 @@ describe("where plans are not sold, Analytics stays open (SCRUM-1277)", () => {
   })
 
   it("an Indian organisation that adds a draft Toronto night is still locked: a draft is no market", async () => {
-    await db.events.update({ where: { id: canaryEventId }, data: { city: "Toronto", status: "draft" } })
+    await db.events.update({ where: { id: canaryEventId }, data: { city: "Toronto", ...pinOf("Toronto"), status: "draft" } })
     try {
       const org = await orgOf(owner)
       expect(org.mayBuyHere).toBe(true)
       expect(await analyticsAccess(org, now)).toMatchObject({ org: false, reason: "free" })
     } finally {
-      await db.events.update({ where: { id: canaryEventId }, data: { city: null, status: "published" } })
+      await db.events.update({ where: { id: canaryEventId }, data: { city: null, latitude: null, longitude: null, status: "published" } })
     }
   })
 
@@ -405,6 +405,7 @@ describe("where plans are not sold, Analytics stays open (SCRUM-1277)", () => {
         timezone: "America/Toronto",
         status: "published",
         city: "Toronto",
+        ...pinOf("Toronto"),
         organizer_id: caOwner,
         organizer_org_id: caOrg,
       },
@@ -426,7 +427,7 @@ describe("where plans are not sold, Analytics stays open (SCRUM-1277)", () => {
     expect(await renderedTree()).toContain(MARKET)
     expect(await windowOf(caOrg)).toEqual([{ analytics_free_until: null, first_free_event_id: null }])
 
-    await db.events.update({ where: { id: night.id }, data: { city: "Bengaluru" } })
+    await db.events.update({ where: { id: night.id }, data: { city: "Bengaluru", ...pinOf("Bengaluru") } })
     const india = await orgOf(caOwner)
     expect(await analyticsAccess(india, now)).toMatchObject({ org: false, reason: "free", firstFreeEventId: night.id })
     const [written] = await windowOf(caOrg)

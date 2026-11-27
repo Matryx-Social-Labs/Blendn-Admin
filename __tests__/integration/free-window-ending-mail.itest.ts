@@ -15,7 +15,7 @@ import { sendFreeWindowEndingMail } from "@/lib/free-window-mail"
 import { db as appDb } from "@/lib/db"
 import { logger } from "@/lib/logger"
 
-import { cleanup, closeDb, db, makeUser, testId } from "./helpers"
+import { cleanup, closeDb, db, makeUser, pinOf, testId } from "./helpers"
 
 const DAY = 24 * 60 * 60 * 1000
 const now = new Date()
@@ -59,6 +59,7 @@ async function orgEndingIn(endsInMs: number, nights: Night[], label: string, sta
         end_time: new Date(start.getTime() + 3 * 60 * 60 * 1000),
         timezone: "Asia/Kolkata",
         city: night.city,
+        ...pinOf(night.city),
         status: night.status ?? "completed",
         deleted_at: night.deleted ? now : null,
         organizer_id: owner,
