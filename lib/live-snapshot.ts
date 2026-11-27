@@ -5,7 +5,7 @@
 // paths.
 import { db } from "./db"
 import { logger } from "./logger"
-import { discloseCategories, discloseTopics } from "./disclosure"
+import { discloseCategories, discloseNegatives, discloseTopics } from "./disclosure"
 import { occupancyFrom } from "./occupancy"
 import { headcount } from "./presence-sessions"
 import { tallyFeedback } from "./feedback-digest"
@@ -341,10 +341,13 @@ export async function readLiveSnapshot(
   const {
     counts: sentiment,
     categoryCounts,
+    negatives,
     contributors: categoryContributors,
     topMessages,
     topics,
   } = tallyFeedback(feedback.map((row) => ({ sentiment: row.sentiment, category: row.category, topic: row.topic, userId: row.message?.user_id ?? null })))
+
+  const categories = discloseCategories(categoryCounts, categoryContributors, roomSize, topMessages)
 
   const figures: LiveFigures = {
     eventId,
@@ -372,7 +375,8 @@ export async function readLiveSnapshot(
     messagesPerMinute: Math.round((Number(chat.recent) / 10) * 10) / 10,
     activeChatters30m: Number(chat.chatters),
     openFlags,
-    sentiment,
+    // Not the exact negatives beside one held-back category (D-012): the alerts read this too, and they are stored.
+    sentiment: { ...sentiment, negative: discloseNegatives(sentiment.negative, categories, negatives) },
     categories: Array.from(categoryCounts.entries())
       .map(([category, count]) => ({ category, count }))
       .sort((a, b) => b.count - a.count),
@@ -386,7 +390,7 @@ export async function readLiveSnapshot(
   return {
     snapshot: {
       ...figures,
-      categories: discloseCategories(categoryCounts, categoryContributors, roomSize, topMessages),
+      categories,
       topics: discloseTopics(topics, roomSize),
       view: "host",
       social,
