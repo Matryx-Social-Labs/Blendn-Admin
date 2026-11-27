@@ -118,6 +118,6 @@ test("a deleted message's card keeps the reported words, and the threat comes fi
 async function screens(page: Page, width: number) {
   await page.evaluate(() => window.scrollTo(0, 0))
   await page.screenshot({ path: `test-results/screens/reports-queue-${width}-top.png` })
-  await page.getByRole("main").getByText(/most severe first, then oldest/).scrollIntoViewIfNeeded()
+  await page.getByRole("main").getByText(/pending · most severe first, then oldest · decisions/).scrollIntoViewIfNeeded()
   await page.screenshot({ path: `test-results/screens/reports-queue-${width}-footer.png` })
 }
