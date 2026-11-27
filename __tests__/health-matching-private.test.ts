@@ -70,7 +70,7 @@ describe("the gauges are for the monitor: a bearer token, never a refusal", () =
   const TOKEN = "t".repeat(40)
   const withAuth = (value?: string) =>
     new Request("http://localhost/api/health", value ? { headers: { authorization: value } } : undefined)
-  const gauges = ["eventLoopDelayMs", "pool", "sockets"]
+  const gauges = ["eventLoopDelayMs", "pool", "sockets", "loops"]
 
   it("production with no token configured: plain payload, 200, no gauges (fail closed)", async () => {
     process.env.RAILWAY_ENVIRONMENT_NAME = "production"
@@ -93,6 +93,29 @@ describe("the gauges are for the monitor: a bearer token, never a refusal", () =
       for (const key of gauges) expect(body).not.toHaveProperty(key)
     }
   })
+})
+
+/*
+ * SCRUM-1228: a loop quiet for three of its intervals is named in the gauges, and only there. A stale loop never turns
+ * the status: Railway's healthcheck would restart a process whose fix is a redeploy, and the 200 is what it reads.
+ */
+it("names the stale loops in the gauges, and the status and the 200 stay unchanged", async () => {
+  globalThis.__blendnHeartbeats = {
+    loops: new Map([
+      ["presence", { at: Date.now() - 16 * 60_000, intervalMs: 5 * 60_000 }],
+      ["sentiment", { at: Date.now(), intervalMs: 60_000 }],
+    ]),
+    reported: new Map(),
+  }
+  try {
+    const res = await health()
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.status).toBe("ok")
+    expect(body.loops).toEqual({ stale: ["presence"] })
+  } finally {
+    globalThis.__blendnHeartbeats = undefined
+  }
 })
 
 it("says null, not zero, for a pool not built yet or a process without Socket.io", async () => {

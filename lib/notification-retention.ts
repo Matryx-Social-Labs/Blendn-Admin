@@ -2,6 +2,7 @@
 // compiled by plain `tsc` in `build:server` and cannot resolve the alias.
 // `__tests__/server-import-boundary.test.ts` fails the build otherwise — it
 // caught exactly this when the file was first added.
+import { beat } from "./heartbeat"
 import { logger } from "./logger"
 import { db } from "./db"
 import { purgeDeletedAccountRecords } from "./deleted-account-records"
@@ -99,7 +100,7 @@ export async function pruneProductEvents(now: Date = new Date()): Promise<number
 }
 
 /**
- * Batches until one comes back short, or a bound, then one log line; never throws.
+ * Batches until one comes back short, or a bound, then one log line; never throws. False when a batch threw.
  *
  * - Drained: info with the count.
  * - Bounded at 20 batches or a minute: an error, so Sentry sees it. Rows are left for the next pass, which means the
@@ -107,7 +108,7 @@ export async function pruneProductEvents(now: Date = new Date()): Promise<number
  * - Stopped (shutdown): info, nothing is wrong.
  * - A batch threw (the pool's statement timeout, a lock, a lost connection): an error that still says how many went.
  */
-async function drain(table: string, prune: (now: Date) => Promise<number>): Promise<void> {
+async function drain(table: string, prune: (now: Date) => Promise<number>): Promise<boolean> {
   const now = new Date()
   const started = Date.now()
   let deleted = 0
@@ -120,20 +121,23 @@ async function drain(table: string, prune: (now: Date) => Promise<number>): Prom
       if (count < BATCH_LIMIT) break
       if (batches >= MAX_BATCHES || Date.now() - started >= MAX_DRAIN_MS) {
         logger.error(`Pruning ${table} could not keep up`, { deleted, batches, reason: batches >= MAX_BATCHES ? "batches" : "time" })
-        return
+        return true
       }
       await new Promise((resolve) => setTimeout(resolve, BATCH_PAUSE_MS))
     }
     if (deleted > 0) logger.info(`Pruned ${table}`, { deleted, batches, ...(stopped && { reason: "stopped" }) })
+    return true
   } catch (error) {
     logger.error(`Pruning ${table} failed`, { deleted, batches, error: String(error) })
+    return false
   }
 }
 
 export async function runSweep(): Promise<void> {
   // One drain at a time and each catches its own failure, so one table's failure does not skip the other's sweep.
-  await drain("notifications", pruneNotifications)
-  await drain("product events", pruneProductEvents)
+  const notifications = await drain("notifications", pruneNotifications)
+  const productEvents = await drain("product events", pruneProductEvents)
+  if (notifications && productEvents) beat("notification-retention", SWEEP_INTERVAL_MS)
 
   /*
    * Registration records of deleted accounts, past their 180 days (IT Rules
@@ -182,6 +186,7 @@ export async function runSweep(): Promise<void> {
 export function startNotificationRetentionSweeper(): void {
   if (sweepTimer) return
   stopped = false
+  beat("notification-retention", SWEEP_INTERVAL_MS)
 
   const schedule = () => {
     if (stopped) return

@@ -2,6 +2,7 @@
 // requires, and `build:server` compiles with plain tsc — which emits the `@/`
 // alias verbatim into the require() and fails at boot.
 import { db } from "./db"
+import { beat } from "./heartbeat"
 import { logger } from "./logger"
 import { readLiveSnapshot } from "./live-snapshot"
 import { deriveAlerts, type LiveAlert } from "./live-metrics"
@@ -168,12 +169,14 @@ async function pass(): Promise<void> {
   const now = new Date()
   const ids = await liveEventIds(now)
   let opened = 0
+  let failed = 0
   for (const id of ids) {
     try {
       const r = await recordIssuesFor(id, now)
       opened += r.opened
     } catch (error) {
       // One event's snapshot failing must not stop the rest of the pass.
+      failed++
       logger.warn("Issue sweep failed for event", {
         eventId: id,
         error: error instanceof Error ? error.message : String(error),
@@ -181,6 +184,8 @@ async function pass(): Promise<void> {
     }
   }
   if (opened > 0) logger.info("Live issues opened", { count: opened, events: ids.length })
+  // Every live event failing is the sweep failing, not one bad event: an error, and no heartbeat (SCRUM-1228).
+  if (failed > 0 && failed === ids.length) throw new Error(`every live event failed (${failed})`)
 }
 
 /**
@@ -198,6 +203,7 @@ export function startIssueSweeper(): void {
     running = true
     try {
       await pass()
+      beat("issues", SWEEP_MS)
     } catch (error) {
       logger.error("Issue sweep failed", {
         error: error instanceof Error ? error.message : String(error),
@@ -208,6 +214,7 @@ export function startIssueSweeper(): void {
     }
   }
   timer = setTimeout(tick, SWEEP_MS).unref()
+  beat("issues", SWEEP_MS)
 }
 
 export function stopIssueSweeper(): void {

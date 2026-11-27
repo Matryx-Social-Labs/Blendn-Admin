@@ -2,6 +2,7 @@
 // `build:server` compiles with plain tsc -- the `@/` alias would be emitted verbatim.
 import { db } from "./db"
 import { dashboardUrl } from "./email"
+import { beat } from "./heartbeat"
 import { logger } from "./logger"
 import { SEVERE_CATEGORY_PREFIXES, UNJUDGED_KEY } from "./moderation/config"
 import { MODERATION_TIMEOUT_MS } from "./moderation/openai-moderation"
@@ -189,6 +190,7 @@ export async function runStaffAlertSweep(now: Date = new Date()): Promise<void> 
     if (unjudged > 0) unjudgedSaidUntil = settled
     memoryMark = until
     await writeMark(MARK_KEY, until.toISOString())
+    beat("staff-alert", STAFF_ALERT_INTERVAL_MS)
   } catch (error) {
     logger.error("Staff alert sweep failed", {
       error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
@@ -212,6 +214,7 @@ export function startStaffAlertSweeper(): void {
     }, STAFF_ALERT_INTERVAL_MS)
     timer.unref?.()
   }
+  beat("staff-alert", STAFF_ALERT_INTERVAL_MS)
   // Boot is when a restart's gap gets announced.
   void runStaffAlertSweep().finally(schedule)
 }
