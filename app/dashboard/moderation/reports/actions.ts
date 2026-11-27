@@ -160,7 +160,7 @@ export async function getReportQueue(status: report_status = "pending") {
   const [userReports, messageReports, eventReports, userCounts, messageCounts, eventCounts] =
     await Promise.all([
     db.user_reports.findMany({
-      where: { id: { in: userPage } },
+      where: { id: { in: userPage }, status },
       select: {
         id: true,
         created_at: true,
@@ -172,7 +172,7 @@ export async function getReportQueue(status: report_status = "pending") {
       },
     }),
     db.message_reports.findMany({
-      where: { id: { in: messagePage } },
+      where: { id: { in: messagePage }, status },
       select: {
         id: true,
         created_at: true,
@@ -194,7 +194,7 @@ export async function getReportQueue(status: report_status = "pending") {
      * report nobody sees is the same defect one step later.
      */
     db.event_reports.findMany({
-      where: { id: { in: eventPage } },
+      where: { id: { in: eventPage }, status },
       select: {
         id: true,
         created_at: true,
