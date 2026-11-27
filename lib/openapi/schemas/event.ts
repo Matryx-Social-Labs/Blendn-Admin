@@ -116,12 +116,11 @@ export const RsvpRequestSchema = z
 export const AnnounceRequestSchema = z
   .object({
     content: z.string().max(1000),
-    // Defaults like the route, which reads an unrecognised value as an announcement (SCRUM-1070).
     kind: z
       .enum(["announcement", "system"])
       .default("announcement")
       .describe(
-        "`announcement` (the organising org, `canEdit`) or `system` (an app_admin). `sponsored` is refused: 400 " +
+        "`announcement` (the organising org, `canEdit`) or `system` (an app_admin); any other value is a 400. `sponsored` is refused: 400 " +
           "`Sponsored content goes out through a campaign`, nothing written. Sponsored content reaches a room only through a campaign."
       ),
   })

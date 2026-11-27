@@ -64,18 +64,18 @@ export async function POST(
     /*
      * Sponsored content goes out only through a campaign
      * (`lib/sponsored-scheduler.ts`): a person reviews the creative, the room
-     * keeps its gap between sponsored posts, and the send is counted. Refused
-     * here by name, before the fallback below, so it is never posted as an
-     * announcement either (SCRUM-1070).
+     * keeps its gap between sponsored posts, and the send is counted
+     * (SCRUM-1070). Any other value that is not one of the two kinds is
+     * refused too, never posted as an announcement the caller did not ask for.
      */
     if (rawKind === "sponsored") {
       return errorResponse("Sponsored content goes out through a campaign", 400)
     }
-
     const KINDS: readonly BroadcastKind[] = ["announcement", "system"]
-    const kind: BroadcastKind = KINDS.includes(rawKind as BroadcastKind)
-      ? (rawKind as BroadcastKind)
-      : "announcement"
+    if (rawKind != null && !KINDS.includes(rawKind as BroadcastKind)) {
+      return errorResponse("kind is announcement or system", 400)
+    }
+    const kind = (rawKind as BroadcastKind | undefined) ?? "announcement"
 
     /*
      * The resolver, not a comparison of two user ids.

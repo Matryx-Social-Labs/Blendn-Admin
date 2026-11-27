@@ -3948,7 +3948,7 @@ and only the second is worth blocking.
 ### Broadcasting into an event's room
 
 `POST /events/:eventId/announce` takes a `kind`, defaulting to `announcement`
-(an unknown value is an announcement):
+(any other value is a 400 `kind is announcement or system`):
 
 | kind | who | media |
 |---|---|---|

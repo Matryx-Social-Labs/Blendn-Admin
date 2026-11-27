@@ -120,10 +120,14 @@ describe("POST /api/mobile/events/:id/announce", () => {
     expect(await inRoom()).toBe(0)
   })
 
-  it("reads a mixed-case Sponsored as an unknown kind: an announcement, which the brand may not send", async () => {
-    const res = await post(brandMember, { kind: "Sponsored", content: "Two for one at the bar" })
-
-    expect(res.status).toBe(403)
+  it("refuses any other kind, a mixed-case Sponsored included, instead of posting it as an announcement", async () => {
+    // An app_admin may send either kind, so only the kind can refuse this.
+    const prober = await makeUser(testId("soc-prober"), "app_admin")
+    users.push(prober)
+    for (const kind of ["Sponsored", " sponsored", 5]) {
+      const res = await post(prober, { kind, content: "Two for one at the bar" })
+      expect(res.status).toBe(400)
+    }
     expect(await announcements()).toBe(0)
     expect(await inRoom()).toBe(0)
   })
