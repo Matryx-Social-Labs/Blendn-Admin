@@ -8,6 +8,7 @@ import { discloseGuests, discloseVenueCounts, MIN_CELL } from "./disclosure"
 import { stillArriving } from "./occurrences"
 import { hostNotSuspended } from "./event-access"
 import { realEventsWhere } from "./event-kind"
+import { displayCategories } from "./moderation/config"
 import { claimedVenueEventsWhere, reachedThroughBuilding } from "./event-visibility"
 import { activeMembership } from "./org-membership"
 
@@ -652,7 +653,10 @@ export async function buildReport(
             // `categories` is a JSON column, so it is an array only by
             // convention. Anything else is stringified rather than throwing
             // mid-export and failing the whole download.
-            value: (r) => (Array.isArray(r.categories) ? r.categories.join(" ") : r.categories),
+            value: (r) => {
+              const shown = displayCategories(r.categories)
+              return Array.isArray(shown) ? shown.join(" ") : shown
+            },
           },
           { key: "confidence", label: "Confidence" },
           { key: "auto_action", label: "Auto action" },
