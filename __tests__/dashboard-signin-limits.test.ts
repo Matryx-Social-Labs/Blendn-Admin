@@ -16,7 +16,7 @@ jest.mock("next/headers", () => ({ cookies: async () => ({ set: (...a: unknown[]
 
 jest.mock("@auth/prisma-adapter", () => ({ PrismaAdapter: () => ({}) }))
 const mockFindUnique = jest.fn()
-jest.mock("@/lib/db", () => ({ db: { user: { findUnique: (...a: unknown[]) => mockFindUnique(...a) } } }))
+jest.mock("@/lib/db", () => ({ db: { $queryRaw: () => mockSessionRows(mockFindUnique()), user: { findUnique: (...a: unknown[]) => mockFindUnique(...a) } } }))
 const mockCompare = jest.fn(async (given: string, stored: string) => given === stored)
 jest.mock("bcryptjs", () => ({ compare: (...a: [string, string]) => mockCompare(...a) }))
 
@@ -24,6 +24,7 @@ import { authOptions } from "@/lib/auth"
 import { clearSigninCounters } from "@/lib/dashboard-signin-limits"
 import { knownDeviceCookie } from "@/lib/known-device"
 import { SIGNIN_ACCOUNT_LOCKED, SIGNIN_RATE_LIMITED } from "@/lib/rbac"
+import { mockSessionRows } from "./support/session-account"
 
 type Req = { headers: Record<string, string> }
 const withCookie = (r: Req, c: { name: string; value: string }): Req => ({ headers: { ...r.headers, cookie: `${c.name}=${c.value}` } })

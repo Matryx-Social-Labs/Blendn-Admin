@@ -71,7 +71,8 @@ describe("the room roster", () => {
       expect(res.body.data.pagination.totalCount).toBe(8) // not the viewer's friend or blocked, not "offline"
       expect(label.size).toBe(10)
 
-      expect(fetchSpy.mock.calls.length).toBe(3) // within the budget: all resolved, as before
+      // Beside a pseudonym no city is sent (D-030), so none is looked up; the revealed row's is a name, not coordinates.
+      expect(fetchSpy.mock.calls.length).toBe(0)
 
       // Before: every member of the room; after: the page's ids.
       const pseudonymRead = sql.find((q) => /FROM "public"\."chat_group_members"/.test(q) && /"anonymous_name"/.test(q))!

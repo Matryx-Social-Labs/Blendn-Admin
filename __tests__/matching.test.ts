@@ -599,8 +599,8 @@ describe("shared history is the signal nobody can fake", () => {
     /*
      * It looks harmless — the viewer already knows which events they attended.
      * It is not: in a small room it narrows a card to the few people who were
-     * at those specific nights, and with the age and city the roster already
-     * gives, that is a name.
+     * at those specific nights, and with the age band and chip the roster gives
+     * (D-030), that is a name.
      */
     const small = rankMatches(viewer, [candidate({ userId: "x", sharedEvents: 3 })], {
       interestHolders: HOLDERS,

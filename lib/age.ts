@@ -318,3 +318,28 @@ function calendarDate(input: unknown): Date | null {
 
   return date
 }
+
+/* -------------------------------------------------------------------------- */
+/* The band a room shows before a reveal (D-030, SCRUM-1384)                   */
+/* -------------------------------------------------------------------------- */
+
+export type AgeBand = "18-24" | "25-34" | "35-44" | "45+"
+
+/** How many people who checked in at an event must share a band before any row there shows it. */
+export const AGE_BAND_FLOOR = 3
+
+/** Wide on purpose: a band says roughly how old, never who. Null under 18 and when unknown. */
+export function ageBand(age: number | null): AgeBand | null {
+  if (age === null || age < ACCOUNT_MIN_AGE) return null
+  return age <= 24 ? "18-24" : age <= 34 ? "25-34" : age <= 44 ? "35-44" : "45+"
+}
+
+/** The bands at least `AGE_BAND_FLOOR` people share, from an event's age histogram. */
+export function bandsShown(histogram: { age: number; people: number }[]): Set<AgeBand> {
+  const counts = new Map<AgeBand, number>()
+  for (const { age, people } of histogram) {
+    const band = ageBand(age)
+    if (band) counts.set(band, (counts.get(band) ?? 0) + people)
+  }
+  return new Set([...counts].filter(([, n]) => n >= AGE_BAND_FLOOR).map(([band]) => band))
+}
