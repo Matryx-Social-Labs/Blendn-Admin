@@ -79,20 +79,22 @@ export async function getLinkedEventsForOwner(): Promise<{
   if (!session?.user) throw new Refusal("Unauthorized")
 
   const actor = await actorFor(session.user)
-  if (actor.role !== "venue_owner" && actor.role !== "app_admin") return { rows: [], total: 0 }
 
   /*
    * From the claim on (SCRUM-355, SCRUM-500). A claim gives no view of the
    * venue's past — not its chat, not its attendee list, and not a list of what
-   * was held there and by whom either. An empty `OR` matches nothing, which is
-   * the answer for an owner whose venues have no claim date.
+   * was held there and by whom either. Any member of the venue's org, whatever
+   * their User.role (SCRUM-1246); no claimed venue is an empty list, asked
+   * nothing further. An admin sees every linked event.
    */
+  const arms = actor.role === "app_admin" ? null : await claimedVenueEventsWhere(actor.orgIds)
+  if (arms?.length === 0) return { rows: [], total: 0 }
   const where = {
     deleted_at: null,
     // Events a host linked to the building. A venue day is the building's own.
     ...realEventsWhere,
     venue_id: { not: null },
-    ...(actor.role === "app_admin" ? {} : { OR: await claimedVenueEventsWhere(actor.orgIds) }),
+    ...(arms ? { OR: arms } : {}),
   }
 
   /*

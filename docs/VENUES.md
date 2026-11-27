@@ -234,6 +234,28 @@ admin sets it on the venue page's record; the organisation that only added an
 unclaimed venue corrects the place but not its floors (`updateVenue`). It rides
 on `GET /venues` and `GET /venues/:id` (docs/API.md).
 
+## Opening hours (SCRUM-1154)
+
+`venues.hours` is the week the app shows on the venue page and the Places card
+(`[{ day: 0-6 (Sun-Sat), open: "HH:MM", close: "HH:MM" }]` on the venue's own
+clock, `lib/venue-hours.ts`; null is "not given", and the readers cannot tell an
+empty list from it, so an empty week is stored as NULL). The venue page's
+Opening hours panel writes it through `setVenueHours`: an admin, or any active
+member of the owning organisation (as for amenities); the organisation that
+only added an unclaimed venue does not. Each save is one `venue.hours_updated`
+audit row with the week before and after, in the same transaction; the row is
+locked while "before" is read, so two saves at once record each other.
+
+The readers answer "tonight" with the rows of the venue's current day (it
+starts at `day_reset_hour`) and a split day with its later opening, in the
+server (`tonightHours`) and in the app (`tonightOpening`). So `hoursProblems`
+refuses what they would show wrong: a second opening on a day
+(`MAX_OPENINGS_PER_DAY` = 1), an opening before the reset hour, a close past
+the next reset, and a close equal to the open. With every opening inside one
+venue day, two days' openings can never overlap. Example, reset 06:00:
+`[{ "day": 5, "open": "18:00", "close": "01:30" }]` is Friday 18:00 to
+Saturday 01:30, and the app reads it as Friday's night until 06:00 Saturday.
+
 ## Venue days — every venue is live (plan v2 §3, step 3)
 
 Every active venue has a live room from day one, claimed or not (owner decision
@@ -338,7 +360,7 @@ venue day count as having shared an event for message requests
 | `lib/event-kind.ts` | `realEventsWhere` / `venueDaysWhere`, the fragments every events reader uses; `inRoomWhere`, "in this room" for a check-in lookup |
 | `lib/venue-visibility.ts` | `venueTakeoverWhere`: when a real event takes its venue over (Go Live refused, sessions closed at its start, the venue left out of Places by `venuesTakenOver`); `eventVenue`: the venue an event card names; `openOnBlendnWhere`: which venues Places may list (D-13) |
 | `lib/venue-types.ts` | The 35-type vocabulary, labels, default extents, OSM mapping |
-| `lib/venue-actions.ts` | `venuesNear`, `createVenue`, `updateVenue`, `assignVenueOwner`, `searchVenues`, `venueById` — all `"use server"` |
+| `lib/venue-actions.ts` | `venuesNear`, `createVenue`, `updateVenue`, `setVenueHours`, `assignVenueOwner`, `searchVenues`, `venueById` — all `"use server"` |
 | `lib/venue-claim-actions.ts` | `fileVenueClaim`, `getVenueClaimQueue`, `decideVenueClaim` |
 | `lib/venue-link.ts` | `resolveVenueLink` — route-internal, deliberately not a server action |
 | `lib/geofence.ts` | Extent / buffer / accuracy, and the check-in rule |

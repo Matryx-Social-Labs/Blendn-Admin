@@ -70,7 +70,7 @@ const VenueListItemSchema = z
         closesAt: z.string().regex(/^\d\d:\d\d$/),
       })
       .nullable()
-      .describe("Tonight's opening from `venues.hours`: wall-clock `HH:MM` in the venue's own timezone, for the weekday of its current day (a day resets at its `dayResetHour`, not midnight). A close at or before the open runs past midnight. With two openings in a day, the later one. Null when no hours are given for that day (all of them, today: nothing writes `hours` yet)."),
+      .describe("Tonight's opening from `venues.hours`: wall-clock `HH:MM` in the venue's own timezone, for the weekday of its current day (a day resets at its `dayResetHour`, not midnight). A close at or before the open runs past midnight. With two openings in a day, the later one. Null when no hours are given for that day. The venue's owner sets the week on the dashboard: one opening a day, opening at or after `dayResetHour` and closing by the next one (SCRUM-1154)."),
     floors: z.number().int().min(1).max(200).nullable()
       .describe(
         "How many floors the venue's building has, set by its owner or an admin: the 3D map draws it " +
@@ -250,7 +250,7 @@ const VenueDetailSchema = z
       hours: z
         .array(z.object({ day: z.number().int().min(0).max(6), open: z.string(), close: z.string() }))
         .nullable()
-        .describe("Opening hours: `day` 0 (Sunday) to 6, wall-clock `HH:MM` in the venue's own timezone; a close at or before the open runs past midnight. Null until given."),
+        .describe("Opening hours: `day` 0 (Sunday) to 6, wall-clock `HH:MM` in the venue's own timezone; a close at or before the open runs past midnight. Null until given. Set by the venue's owner on the dashboard: one opening a day, opening at or after `dayResetHour` and closing by the next `dayResetHour`, so a night always belongs to the day it starts on (SCRUM-1154)."),
       description: z.string().nullable(),
       amenities: z.array(z.string()).describe("Names from the shared amenity vocabulary (`venue_amenities`), in display order. `[]` until given."),
       upcoming: z

@@ -64,7 +64,7 @@ import { sweepExpiredGrants } from "./upload-grants"
  *
  * Deliberately NOT re-checked: `organisations.may_sponsor`.
  * `lib/onboarding-actions.ts` states the rule — revoking the grant stops new
- * campaigns being created, and does not silently kill placements an organiser
+ * campaigns being created, and does not silently kill placements a sponsor
  * has already paid for. Cancelling the placement is the switch that stops sends,
  * and that one *is* re-checked here.
  */

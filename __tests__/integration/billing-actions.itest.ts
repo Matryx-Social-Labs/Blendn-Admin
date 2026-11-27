@@ -121,7 +121,7 @@ async function newNight(endedDaysAgo: number, people: Attendance[]) {
   return id
 }
 const listed = async () =>
-  (await billing.planPageData({ orgId, orgName: "x", memberRole: "owner", mayBuy: true })).events.map((e) => e.id)
+  (await billing.planPageData({ orgId, orgName: "x", memberRole: "owner", mayBuy: true, mayBuyHere: true })).events.map((e) => e.id)
 
 const as = (id: string, role: "organizer" | "app_admin" | "venue_owner") => mockGetAuth.mockResolvedValue({ user: { id, role } })
 const newOrg = async (label: string, status: "verified" | "suspended" = "verified") => {

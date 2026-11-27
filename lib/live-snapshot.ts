@@ -342,6 +342,7 @@ export async function readLiveSnapshot(
     counts: sentiment,
     categoryCounts,
     contributors: categoryContributors,
+    topMessages,
     topics,
   } = tallyFeedback(feedback.map((row) => ({ sentiment: row.sentiment, category: row.category, topic: row.topic, userId: row.message?.user_id ?? null })))
 
@@ -385,7 +386,7 @@ export async function readLiveSnapshot(
   return {
     snapshot: {
       ...figures,
-      categories: discloseCategories(categoryCounts, categoryContributors, roomSize),
+      categories: discloseCategories(categoryCounts, categoryContributors, roomSize, topMessages),
       topics: discloseTopics(topics, roomSize),
       view: "host",
       social,
