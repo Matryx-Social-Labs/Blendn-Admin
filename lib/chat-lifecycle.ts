@@ -187,7 +187,7 @@ async function runSweep(): Promise<void> {
   /* Direct messages, 180 days after their conversation closed (lib/dm-retention.ts). Its own catch. */
   try {
     const dms = await purgeClosedConversations()
-    if (dms.messages > 0 || dms.kept > 0) logger.info("DM purge", { ...dms })
+    if (dms.messages + dms.photos + dms.kept + dms.openers > 0) logger.info("DM purge", { ...dms })
   } catch (error) {
     logger.error("DM purge failed", { error: error instanceof Error ? error.message : String(error) })
   }

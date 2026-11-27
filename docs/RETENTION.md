@@ -182,11 +182,15 @@ pass) hard-deletes the conversation's messages, both people's, and the photo eac
 carries, by the Lobby purge's rule: the sender's own sealed copy or
 `chat/<id>/` object, never one another row still shows; a URL that names
 anything else deletes nothing in storage and its message still goes, with one
-warning per pass by row id and reason ("DM purge"). An open conversation is never
-touched, however old.
+warning per pass by row id and reason ("DM purge"). The words of the message
+request that opened the conversation (`message_requests.message`) go in the same
+pass; the request row stays. An open conversation is never touched, however old.
 
 **Held:** a message under a report still `pending` (until it is decided), or
-upheld (`resolved`) within 180 days of the decision. A dismissed report's words
+upheld (`resolved`) within 180 days of the decision; and the whole conversation,
+both sides, while one of its two people has such a report on the other (a person
+report, which "unmatch and report" files when no message is named). A sender's
+report of their own message holds nothing. A dismissed report's words
 go 180 days after the dismissal, as above. A direct message is removed by
 moderation only when it is sent (stored hidden), before its conversation
 closed, so its 180 days from removal are always over by then. A storage delete
@@ -195,8 +199,8 @@ that fails keeps its message for the next pass.
 **Kept:** the conversation row, empty: who the two people were, when it opened
 and closed, and why. A closed pair stays apart on every surface, and those rules
 read it. The host's "kept talking" count is frozen with the event's insight
-counts 30 days after it (`event_insight_tallies`), long before any of its
-conversations' messages can go; the admin funnel's "conversed" counts people
+counts (`event_insight_tallies`), and the purge waits for that row before it
+takes the messages of a conversation opened at the event; the admin funnel's "conversed" counts people
 with a message still stored, so a person whose only messages were purged leaves
 that stage.
 
