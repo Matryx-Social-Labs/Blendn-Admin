@@ -305,3 +305,26 @@ describe("the database holds the line when two requests race (lookalike names)",
     expect(violatedConstraint(err, "organisations_name_key_uniq")).toBe(true)
   })
 })
+
+/*
+ * A new brand is the home organisation's (SCRUM-1247): a brand now makes an organisation a sponsor's, for everyone in
+ * it, so a sponsor who is also staff somewhere else must not turn that other organisation into one by saving a brand.
+ */
+describe("a new brand's organisation", () => {
+  it("is the sponsor's home org, not whichever of their orgs sorts first", async () => {
+    const { user, org: home } = await sponsorOrg("bh")
+    await db.organisation_members.update({ where: { org_id_user_id: { org_id: home, user_id: user } }, data: { created_at: new Date("2026-01-01T00:00:00Z") } })
+    const first = await db.organisations.create({
+      data: { id: `00000000-0000-4000-8000-${Date.now().toString(16).padStart(12, "0").slice(-12)}`, display_name: testId("bh-events"), status: "verified", kind: "company" },
+    })
+    orgs.push(first.id)
+    await db.organisation_members.create({ data: { org_id: first.id, user_id: user, role: "staff", created_at: new Date("2026-02-01T00:00:00Z") } })
+    expect(first.id < home).toBe(true)
+    as(user)
+    const saved = await saveMyBrand({ name: unique() })
+    brands.push(saved.id)
+    expect(await db.sponsors.findUnique({ where: { id: saved.id }, select: { org_id: true } })).toEqual({ org_id: home })
+    expect(await db.sponsors.count({ where: { org_id: first.id } })).toBe(0)
+  })
+})
+

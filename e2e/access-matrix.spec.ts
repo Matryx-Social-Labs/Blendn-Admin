@@ -43,7 +43,7 @@ import { statePathFor } from "./global-setup"
  * called `redirect()` after the layout streamed). Either way: no rows.
  */
 
-/** The four dashboard roles that are not an admin. `outsider` is an organiser with no organisation. */
+/** The four dashboard roles that are not an admin. `outsider` is an organiser whose own organisation is empty. */
 const HOSTS = ["organizer", "venue", "sponsor", "outsider"] as const satisfies readonly RoleKey[]
 const DASHBOARD_ROLES = ["admin", ...HOSTS] as const
 
@@ -136,14 +136,14 @@ const SCOPED_OUT: Record<string, string[]> = {
 /**
  * What a role's own shell says on every page it opens: the organisation it
  * acts for. Not a leak for that role; asserted present below. An admin acts
- * for Blend'n, which no marker names, and the outsider acts for nobody.
+ * for Blend'n, which no marker names, and the outsider for its own empty organisation.
  */
 const SHELL_IDENTITY: Record<(typeof DASHBOARD_ROLES)[number], string[]> = {
   admin: [],
   organizer: ["Nightshift Collective"],
   venue: ["Indiranagar Hospitality Group"],
   sponsor: ["Blue Tokai Coffee Roasters"],
-  outsider: [],
+  outsider: ["Quiet Corner Collective"],
 }
 const ownIdentity = (role: (typeof DASHBOARD_ROLES)[number], marker: string) =>
   SHELL_IDENTITY[role].some((id) => id.includes(marker))
@@ -474,12 +474,13 @@ test.describe("the roles that must not be here", () => {
     await admin.dispose()
   })
 
-  test("an organiser with no organisation is denied other people's events", async ({ browser }) => {
+  test("an organiser of another, empty organisation is denied other people's events", async ({ browser }) => {
     const context = await browser.newContext({ storageState: statePathFor("outsider") })
     const page = await context.newPage()
     /*
-     * The negative control. A dashboard role with no org — `eventPermissions`
-     * denies it everywhere, so empty screens here are the correct answer.
+     * The negative control. An organiser whose own org has nothing in it —
+     * `eventPermissions` denies it every other org's event, so empty screens
+     * here are the correct answer.
      */
     await page.goto("/dashboard/events", { waitUntil: "domcontentloaded" })
     const body = (await page.textContent("body")) ?? ""
