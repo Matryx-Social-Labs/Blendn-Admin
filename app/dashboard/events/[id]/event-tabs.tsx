@@ -1,7 +1,8 @@
 import { PillTabs } from "@/components/dashboard/kit"
 import { livePhaseFor } from "@/lib/event-phase"
+import { stillArriving } from "@/lib/occurrences"
 
-export type EventTabKey = "overview" | "live" | "attendees" | "chat" | "announcements" | "tickets" | "feedback" | "share"
+export type EventTabKey = "overview" | "live" | "door" | "attendees" | "chat" | "announcements" | "tickets" | "feedback" | "share"
 
 /**
  * Event detail navigation, in the kit's order (step 15).
@@ -41,6 +42,10 @@ export function eventTabsFor(
   // tab list that offers something the server will deny is its own bug.
   if (opts.canOperate) {
     if (phase === "live") tabs.push({ key: "live", label: "Live" })
+    // The door code's screen (gate 13): from doors to the end, on a published event with a public door.
+    if (opts.kind !== "venue_day" && opts.status === "published" && stillArriving({ start_time: new Date(startAt), end_time: new Date(endAt) })) {
+      tabs.push({ key: "door", label: "Door" })
+    }
     // Not on a venue day for its venue's owner, who moderates the room and
     // never sees who was in it (F1).
     if (opts.canViewAttendees) tabs.push({ key: "attendees", label: "Attendees" })
@@ -69,12 +74,13 @@ export function sharesLink(opts: { canEdit: boolean; kind: string; status: strin
   return opts.canEdit && opts.kind !== "venue_day" && opts.status === "published"
 }
 
-/** Where a tab lives. Room chat, Tickets and Feedback are their own routes; the rest are `?tab=`. */
+/** Where a tab lives. Room chat, Door, Tickets and Feedback are their own routes; the rest are `?tab=`. */
 export function eventTabHref(eventId: string, key: EventTabKey): string {
   if (key === "overview") return `/dashboard/events/${eventId}`
   if (key === "chat") return `/dashboard/events/${eventId}/messaging`
   if (key === "feedback") return `/dashboard/events/${eventId}/feedback`
   if (key === "tickets") return `/dashboard/events/${eventId}/tickets`
+  if (key === "door") return `/dashboard/events/${eventId}/door`
   return `/dashboard/events/${eventId}?tab=${key}`
 }
 

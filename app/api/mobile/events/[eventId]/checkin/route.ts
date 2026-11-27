@@ -25,6 +25,8 @@ import { fenceRefusal, personAtTheDoor, seatAtTheDoor, vagueFixRefusal } from "@
 import { isReviewAccount, recordReviewBypass } from "@/lib/review-accounts"
 import { missingTicketAtCheckIn, NO_TICKET_SENTENCE } from "@/lib/ticket-views"
 import { tellCrewAtTheHold } from "@/lib/crews/presence"
+import { entryPauseInForce } from "@/lib/entry-code"
+import { entryCodeGate } from "@/lib/entry-code-gate"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -62,13 +64,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { latitude, longitude, deviceInfo } = parsed.data
+    const { latitude, longitude, deviceInfo, doorCode } = parsed.data
 
     // The door's rules about the person and the place live in
     // lib/check-in-core.ts, shared with Go Live (PL-G03).
     const gpsAccuracy = deviceInfo?.gpsAccuracy
-    const vague = vagueFixRefusal(gpsAccuracy)
-    if (vague) return vague
 
     // Fetch event
     const event = await db.events.findUnique({
@@ -178,25 +178,59 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * can reach the Room. No query unless the person is listed in REVIEW_ACCOUNT_IDS.
      */
     const reviewBypass = event.review_demo && (await isReviewAccount(authUser.userId))
-    if (reviewBypass) recordReviewBypass(authUser.userId, "geofence", { eventId, at: "checkin" })
-    const refused = reviewBypass ? null : fenceRefusal({
-      fence: resolveFence(event),
-      point: { lat: latitude, lng: longitude },
-      gpsAccuracy,
-      userId: authUser.userId,
-      record: { eventId, occurrenceId: occurrence.id },
-      noFenceMessage: "This event has no location set, so check-in is unavailable. Contact the organizer.",
-    })
-    if (refused) return refused
+    const point = { lat: latitude, lng: longitude }
+    /*
+     * The door code (gate 13, lib/entry-code-gate.ts) stands in for the fence
+     * and its 150 m accuracy ceiling. The review bypass runs first and ignores
+     * a code. Without one, a vague fix is recorded (`weak_fix`) where it used to
+     * be refused before the event was read, and a refusal the code can fix says
+     * so (`DOOR_CODE_OFFERED`) while the code is live.
+     */
+    const usesEntryCode = doorCode !== undefined && !reviewBypass
+    let method: "gps" | "door_code" | "review" = "gps"
+    if (usesEntryCode) {
+      const refusedCode = await entryCodeGate({
+        event,
+        occurrence,
+        userId: authUser.userId,
+        typed: doorCode,
+        fence: resolveFence(event),
+        point,
+        gpsAccuracy,
+        mocked: deviceInfo?.mocked === true,
+        now,
+      })
+      if (refusedCode) return refusedCode
+      method = "door_code"
+    } else {
+      const offerEntryCode = !entryPauseInForce(event.door_code_paused_at, occurrence, now)
+      const vague = vagueFixRefusal(gpsAccuracy, undefined, { eventId, userId: authUser.userId, occurrenceId: occurrence.id, offerEntryCode })
+      if (vague) return vague
+      if (reviewBypass) {
+        recordReviewBypass(authUser.userId, "geofence", { eventId, at: "checkin" })
+        method = "review"
+      }
+      const refused = reviewBypass ? null : fenceRefusal({
+        fence: resolveFence(event),
+        point,
+        gpsAccuracy,
+        userId: authUser.userId,
+        record: { eventId, occurrenceId: occurrence.id },
+        noFenceMessage: "This event has no location set, so check-in is unavailable. Contact the organizer.",
+        offerEntryCode,
+      })
+      if (refused) return refused
+    }
 
     const seat = await seatAtTheDoor({
       event,
       occurrenceId: occurrence.id,
       userId: authUser.userId,
       profile: person.profile,
-      point: { lat: latitude, lng: longitude },
+      point,
       deviceInfo,
       now,
+      method,
     })
     const { checkIn } = seat
     // "With {crew}": the hold is the crew check-in — theirs only, told after the seat is taken (S1).

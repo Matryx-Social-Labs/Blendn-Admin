@@ -231,6 +231,8 @@ describe("duplicatePrefill allow-list", () => {
       current_capacity: 54,
       venue_link_status: "confirmed",
       brand_new_column: "LEAK-SENTINEL",
+      // A real later column (the door code, SCRUM-1316): a host's pause on last week's night is not this week's.
+      door_code_paused_at: new Date("2031-01-02T03:04:05Z"),
     } as unknown as DuplicateSource
 
     const out = duplicatePrefill(row, new Date("2027-03-01T12:00:00Z"))
@@ -240,6 +242,7 @@ describe("duplicatePrefill allow-list", () => {
       "src-id", "thursday-supper-club", "creator", "org-a", "tickets.example",
       "native", "LEAK-SENTINEL", "brand_new_column", "review_demo", "curated_at",
       "is_featured", "is_recurring", "current_capacity", "venue_link_status",
+      "door_code_paused_at", "2031-01-02",
     ]) {
       expect(text).not.toContain(leaked)
     }
