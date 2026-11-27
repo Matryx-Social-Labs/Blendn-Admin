@@ -50,7 +50,7 @@ export const ErrorResponseSchema = z
       .describe(
         "Why, beside an `errorCode` that keeps the value installed builds match on: `ACCOUNT_SUSPENDED`, " +
           "`ACCOUNT_STAFF`, `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`, " +
-          "`PROFILE_INCOMPLETE`, and on events, friends and DMs: `AGE_RESTRICTED` (a known age below the line, or an account known to be under 18), " +
+          "`PROFILE_INCOMPLETE`, and on events, friends and DMs: `AGE_RESTRICTED` (a known age below the line, or an account known to be under 18; on the auth routes, an account locked by its under-18 stamp), " +
           "`ORGANISER_SUSPENDED` (an event hidden by its organisation's suspension, on every route that refuses it), `INVITE_UNAVAILABLE`, `PERSON_UNAVAILABLE`, " +
           "`REQUEST_UNAVAILABLE` (one reason for every way something is out of reach), `CANNOT_ADD_SELF`. " +
           "`RATE_LIMITED` (429 on the friend routes, with `retryAfter`). " +

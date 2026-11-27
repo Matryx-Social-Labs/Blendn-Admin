@@ -16,6 +16,7 @@ jest.mock("@/lib/tigris", () => ({
 import type { EraseAccountOptions } from "@/lib/account-erasure"
 import { deletePrefix } from "@/lib/tigris"
 import {
+  applyRun,
   correctBirthDate,
   DELETE_AFTER_DAYS,
   deleteDue,
@@ -23,10 +24,12 @@ import {
   knownMinorsUnstamped,
   stampKnownMinors,
 } from "@/scripts/under-18-accounts"
-import { cleanup, closeDb, db, makeUser } from "./helpers"
+import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, testId } from "./helpers"
 
 const DAY_MS = 86_400_000
 const users: string[] = []
+const events: string[] = []
+const orgs: string[] = []
 let ADMIN = ""
 let ADMIN_ID = ""
 beforeAll(async () => {
@@ -39,7 +42,8 @@ afterAll(async () => {
   await db.deleted_account_records.deleteMany({ where: { user_id: { in: users } } })
   await db.audit_logs.deleteMany({ where: { OR: [{ resource_id: { in: users } }, { user_id: { in: users } }] } })
   await db.profiles.deleteMany({ where: { id: { in: users } } })
-  await cleanup(users, [])
+  await cleanup(users, events)
+  await db.organisations.deleteMany({ where: { id: { in: orgs } } })
   await closeDb()
 })
 
@@ -89,6 +93,70 @@ describe("stamping", () => {
     expect(await stampOf(teen)).toEqual(first)
     expect(await stampOf(preStamped)).toEqual(earlier)
     expect(await knownMinorsUnstamped(db, new Date())).not.toContain(teen)
+  })
+})
+
+describe("--apply", () => {
+  const never = async () => {
+    throw new Error("nothing is due in this test")
+  }
+
+  it("ends the open check-ins of every stamped account through performCheckout, and nobody else's", async () => {
+    const host = await makeUser("u18-host", "organizer")
+    users.push(host)
+    const eventId = await makeEvent(host)
+    events.push(eventId)
+    const occurrence = await occurrenceOf(eventId)
+    const teen = await person("u18-here", { age: 16 })
+    const adult = await person("u18-here-adult", { age: 30 })
+    for (const user_id of [teen, adult]) {
+      await db.event_check_ins.create({ data: { user_id, event_id: eventId, occurrence_id: occurrence, check_in_time: new Date(), status: "checked_in" } })
+    }
+
+    const run = await applyRun(db, new Date(), 1000, never)
+    expect(run.stamped).toContain(teen)
+    expect(run.checkedOut).toContain(teen)
+    expect(run.checkedOut).not.toContain(adult)
+    const status = async (user_id: string) =>
+      (await db.event_check_ins.findFirstOrThrow({ where: { user_id, event_id: eventId }, select: { status: true } })).status
+    expect(await status(teen)).toBe("checked_out")
+    expect(await status(adult)).toBe("checked_in")
+    // performCheckout closes the presence session with the check-in: nobody is shown as here.
+    expect(await db.presence_sessions.count({ where: { user_id: teen, departed_at: null } })).toBe(0)
+  })
+
+  it("never stamps an account with a staff role or an organisation membership, and lists it apart", async () => {
+    const organizer = await person("u18-staff-role", { age: 16 })
+    await db.user.update({ where: { id: organizer }, data: { role: "organizer" } })
+    const member = await person("u18-staff-member", { age: 16 })
+    const org = await db.organisations.create({ data: { display_name: testId("u18 org") } })
+    orgs.push(org.id)
+    await db.organisation_members.create({ data: { org_id: org.id, user_id: member, role: "staff" } })
+    const teen = await person("u18-not-staff", { age: 16 })
+
+    expect(await knownMinorsUnstamped(db, new Date())).not.toEqual(expect.arrayContaining([organizer]))
+    const run = await applyRun(db, new Date(), 1000, never)
+    expect(run.stamped).toContain(teen)
+    expect(run.stamped).not.toContain(organizer)
+    expect(run.stamped).not.toContain(member)
+    expect(run.notStamped).toEqual(expect.arrayContaining([organizer, member]))
+    expect(await stampOf(organizer)).toBeNull()
+    expect(await stampOf(member)).toBeNull()
+  })
+
+  it("refuses, writing nothing, when it would stamp or erase more than --limit", async () => {
+    const now = new Date()
+    const teen = await person("u18-limit", { age: 16 })
+    await expect(applyRun(db, now, 0, never)).rejects.toThrow(/--limit 0/)
+    expect(await stampOf(teen)).toBeNull()
+
+    const due = await person("u18-limit-due", { age: 16, under_18_since: new Date(now.getTime() - 20 * DAY_MS) })
+    await db.profiles.update({ where: { id: teen }, data: { under_18_since: now } })
+    const erase = jest.fn(never)
+    await expect(applyRun(db, now, 0, erase)).rejects.toThrow(/--limit 0/)
+    expect(erase).not.toHaveBeenCalled()
+    expect((await db.user.findUniqueOrThrow({ where: { id: due }, select: { deletedAt: true } })).deletedAt).toBeNull()
+    await db.user.update({ where: { id: due }, data: { deletedAt: new Date() } })
   })
 })
 
