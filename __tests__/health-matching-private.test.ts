@@ -161,6 +161,42 @@ it("the event-loop delay is the last full minute, and a read never resets it (th
   }
 })
 
+/*
+ * SCRUM-1218: `version` says which commit is live, so the promotion check can compare it with the branch head. Railway
+ * sets RAILWAY_GIT_COMMIT_SHA on a GitHub-triggered deploy; anywhere else it is the package version, as before.
+ */
+describe("version is the deployed commit", () => {
+  const saved = { sha: process.env.RAILWAY_GIT_COMMIT_SHA, pkg: process.env.npm_package_version }
+  const restore = (key: string, value: string | undefined) => {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+  afterEach(() => {
+    restore("RAILWAY_GIT_COMMIT_SHA", saved.sha)
+    restore("npm_package_version", saved.pkg)
+  })
+
+  it("is the first 7 characters of RAILWAY_GIT_COMMIT_SHA", async () => {
+    process.env.RAILWAY_GIT_COMMIT_SHA = "abcdef1234567890abcdef1234567890abcdef12" // Railway sets all 40
+    expect((await (await health()).json()).version).toBe("abcdef1")
+  })
+
+  it.each([
+    ["unset", undefined],
+    ["empty", ""],
+  ])("falls back to the package version when RAILWAY_GIT_COMMIT_SHA is %s", async (_case, sha) => {
+    restore("RAILWAY_GIT_COMMIT_SHA", sha)
+    process.env.npm_package_version = "9.8.7"
+    expect((await (await health()).json()).version).toBe("9.8.7")
+  })
+
+  it("is 0.1.0 when neither is set, never missing from the body", async () => {
+    delete process.env.RAILWAY_GIT_COMMIT_SHA
+    delete process.env.npm_package_version
+    expect((await (await health()).json()).version).toBe("0.1.0")
+  })
+})
+
 it.each([
   ["nobody signed in", null],
   ["an organizer", { id: "o", role: "organizer" }],

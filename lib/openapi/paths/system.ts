@@ -2,6 +2,12 @@ import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
 import { standardErrors } from "@/lib/openapi/schemas/common"
 
+// SCRUM-1218: which commit is live, for the promotion check.
+const healthVersion = z.string().openapi({
+  description: "The first 7 characters of the deployed commit (RAILWAY_GIT_COMMIT_SHA), or the package version where Railway did not set it.",
+  example: "abcdef1",
+})
+
 // Process gauges (SCRUM-1221): only for `Authorization: Bearer HEALTH_METRICS_TOKEN`, or off Railway production while it is unset.
 const healthGauges = {
   pool: z.object({ total: z.number(), idle: z.number(), waiting: z.number() }).nullable().optional(),
@@ -25,7 +31,7 @@ registry.registerPath({
             status: z.enum(["ok", "degraded"]),
             timestamp: z.string().datetime(),
             service: z.literal("blendn-admin"),
-            version: z.string(),
+            version: healthVersion,
             database: z.enum(["connected", "disconnected", "unknown"]),
             ...healthGauges,
           }),
@@ -40,7 +46,7 @@ registry.registerPath({
             status: z.literal("degraded"),
             timestamp: z.string().datetime(),
             service: z.literal("blendn-admin"),
-            version: z.string(),
+            version: healthVersion,
             database: z.literal("disconnected"),
             ...healthGauges,
           }),
