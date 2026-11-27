@@ -265,8 +265,10 @@ describe("where a refusal lands", () => {
     expect(await hop("AccessDenied")).toBe("/login?error=AccessDenied")
   })
 
+  // A canary on next-auth's own routing (its sign-in page then sends to pages.signIn, /login): it breaks on an upgrade
+  // that changes the hop, which is when the page's error words need checking again. The origin is NEXTAUTH_URL's.
   it("the others go through the sign-in page to /login too", async () => {
-    expect(await hop("OAuthAccountNotLinked")).toBe("http://localhost:3104/api/auth/signin?error=OAuthAccountNotLinked")
+    expect(await hop("OAuthAccountNotLinked")).toMatch(/^https?:\/\/[^/]+\/api\/auth\/signin\?error=OAuthAccountNotLinked$/)
   })
 })
 
