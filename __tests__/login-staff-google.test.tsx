@@ -67,14 +67,19 @@ describe("with the client set", () => {
   it("says a refused Google account in fixed words, between the label and the button", async () => {
     withEnv(CLIENT)
     const html = await render({ error: "AccessDenied" })
-    expect(html).toMatch(/Platform staff · @matrixsociallabs.com<\/p><p[^>]*role="alert"[^>]*>That Google account isn&#x27;t a Blend&#x27;n staff account.<\/p><button/)
+    expect(html).toMatch(
+      /Platform staff · @matrixsociallabs.com<\/p><p id="staff-google-error"[^>]*role="alert"[^>]*>That Google account isn&#x27;t a Blend&#x27;n staff account. Use your @matrixsociallabs.com account.<\/p><button/
+    )
+    // The button carries the error in its description, so focus on either says why.
+    expect(html).toMatch(/<button[^>]*aria-describedby="staff-google-error staff-google-label"[^>]*>/)
     expect(html).not.toContain('id="signin-error"')
   })
 
   it.each([
-    ["OAuthAccountNotLinked", "This browser is signed in as someone else. Sign out, then try again."],
+    ["OAuthAccountNotLinked", "Another account is signed in in this browser. Open a private window and try again."],
     ["OAuthCallback", "Google sign-in didn&#x27;t finish. Try again."],
     ["OAuthSignin", "Google sign-in didn&#x27;t finish. Try again."],
+    ["OAuthCreateAccount", "Google sign-in didn&#x27;t finish. Try again."],
     ["Callback", "Google sign-in didn&#x27;t finish. Try again."],
   ])("says %s in its own words", async (code, words) => {
     withEnv(CLIENT)

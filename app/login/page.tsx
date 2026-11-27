@@ -1,5 +1,6 @@
 import { connection } from "next/server"
 
+import { COMPANY } from "@/lib/company"
 import { adminSsoRequired, dashboardGoogleClient } from "@/lib/env"
 
 import { SignInForm, type StaffGoogle } from "./sign-in-form"
@@ -9,10 +10,11 @@ import { SignInForm, type StaffGoogle } from "./sign-in-form"
  * fixed words. The parameter itself is never rendered, and a code not listed here says nothing.
  */
 const GOOGLE_ERRORS = new Map([
-  ["AccessDenied", "That Google account isn't a Blend'n staff account."],
-  ["OAuthAccountNotLinked", "This browser is signed in as someone else. Sign out, then try again."],
+  ["AccessDenied", `That Google account isn't a Blend'n staff account. Use your @${COMPANY.staffEmailDomain} account.`],
+  ["OAuthAccountNotLinked", "Another account is signed in in this browser. Open a private window and try again."],
   ["OAuthSignin", "Google sign-in didn't finish. Try again."],
   ["OAuthCallback", "Google sign-in didn't finish. Try again."],
+  ["OAuthCreateAccount", "Google sign-in didn't finish. Try again."],
   ["Callback", "Google sign-in didn't finish. Try again."],
 ])
 

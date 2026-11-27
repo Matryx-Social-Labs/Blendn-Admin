@@ -38,7 +38,7 @@ jest.mock("next/headers", () => ({
   cookies: async () => ({ get: () => undefined, set: () => undefined }),
 }))
 
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import type { NextAuthOptions } from "next-auth"
 import { AuthHandler } from "../../node_modules/next-auth/core"
 
@@ -92,18 +92,21 @@ async function callback(profile: Record<string, unknown>, sessionOf?: string) {
   const headers: Record<string, string> = { host: "localhost:3104", "x-real-ip": "198.51.100.44" }
   if (sessionOf) headers.cookie = `next-auth.session-token=${encodeURIComponent(JSON.stringify({ sub: sessionOf }))}`
   const res = await AuthHandler({ req: new Request("http://localhost:3104/api/auth/callback/google?code=c&state=s", { headers }), options })
-  const sessionSet = (res.cookies ?? []).some((c) => c.name.includes("session-token") && c.value)
-  return { redirect: String(res.redirect ?? ""), sessionSet }
+  const cookie = (res.cookies ?? []).find((c) => c.name.includes("session-token") && c.value)
+  const session = cookie ? (JSON.parse(cookie.value) as { sub?: string; role?: string }) : null
+  return { redirect: String(res.redirect ?? ""), sessionSet: Boolean(cookie), session }
 }
 
 /** Everything a sign-in could have written for these addresses and this Google subject. */
 async function written(sub: string, addresses: string[]) {
-  const [users, links, sessions] = await Promise.all([
+  const [users, links, sessions, signins] = await Promise.all([
     db.user.findMany({ where: { email: { in: addresses } }, select: { id: true } }),
     db.account.findMany({ where: { provider: "google", providerAccountId: sub } }),
+    // JWT sessions write no row; counted so a switch to database sessions cannot slip a refused one in.
     db.session.count({ where: { user: { email: { in: addresses } } } }),
+    db.audit_logs.count({ where: { action: "auth.dashboard_signin", user_id: { in: ids } } }),
   ])
-  return { users: users.length, links, sessions }
+  return { users: users.length, links, sessions, signins }
 }
 
 const settled = () => new Promise((r) => setTimeout(r, 100))
@@ -115,7 +118,7 @@ describe("the right person: a live admin on the staff domain, verified, on the W
 
     const first = await callback(google)
     expect(first.redirect).not.toContain("error=")
-    expect(first.sessionSet).toBe(true)
+    expect(first.session).toMatchObject({ sub: admin.id, role: "app_admin" })
 
     const links = await db.account.findMany({ where: { provider: "google", providerAccountId: google.sub } })
     expect(links).toEqual([
@@ -133,13 +136,47 @@ describe("the right person: a live admin on the staff domain, verified, on the W
   })
 })
 
+describe("the address is compared lowercased", () => {
+  it("lets an admin in whose Google address arrives in capitals", async () => {
+    const admin = await person("caps")
+    const google = claims(admin.email.toUpperCase())
+    const res = await callback(google)
+    expect(res.session).toMatchObject({ sub: admin.id })
+    expect(await db.account.findMany({ where: { provider: "google", providerAccountId: google.sub } })).toEqual([expect.objectContaining({ userId: admin.id })])
+  })
+})
+
+describe("a password sign-in through the same handler", () => {
+  it("still leaves exactly one sign-in row, marked credentials: the Google event records Google alone", async () => {
+    const { hash } = await import("bcryptjs")
+    const admin = await person("password", { password: await hash("Juniper-Harbour-Lantern-58", 4) })
+    const csrf = randomUUID().replace(/-/g, "")
+    const csrfHash = createHash("sha256").update(`${csrf}${options.secret}`).digest("hex")
+    const res = await AuthHandler({
+      req: new Request("http://localhost:3104/api/auth/callback/credentials", {
+        method: "POST",
+        headers: { host: "localhost:3104", "content-type": "application/json", "x-real-ip": "198.51.100.45", cookie: `next-auth.csrf-token=${csrf}%7C${csrfHash}` },
+        body: JSON.stringify({ csrfToken: csrf, email: admin.email, password: "Juniper-Harbour-Lantern-58", json: "true" }),
+      }),
+      options,
+    })
+    expect(String(res.redirect)).not.toContain("error=")
+    await settled()
+    const rows = await db.audit_logs.findMany({ where: { user_id: admin.id, action: "auth.dashboard_signin" } })
+    expect(rows).toEqual([expect.objectContaining({ details: { provider: "credentials" } })])
+  })
+})
+
 describe("every refusal answers AccessDenied and writes nothing", () => {
   const refused = async (profile: Record<string, unknown>, addresses: string[]) => {
+    const before = (await written(String(profile.sub), addresses)).signins
     const res = await callback(profile)
     expect(res.redirect).toMatch(/\/api\/auth\/error\?error=AccessDenied$/)
     expect(res.sessionSet).toBe(false)
     await settled()
-    return written(String(profile.sub), addresses)
+    const { signins, ...rest } = await written(String(profile.sub), addresses)
+    expect(signins).toBe(before)
+    return rest
   }
 
   it("a personal Gmail account: no hd, and no row is created for it", async () => {
@@ -164,6 +201,16 @@ describe("every refusal answers AccessDenied and writes nothing", () => {
   it("an admin's own address with the hd claim missing", async () => {
     const admin = await person("nohd")
     expect(await refused(claims(admin.email, { hd: undefined }), [admin.email])).toMatchObject({ users: 1, links: [], sessions: 0 })
+  })
+
+  it("an admin's own address from another Workspace (hd is not ours)", async () => {
+    const admin = await person("otherhd")
+    expect(await refused(claims(admin.email, { hd: "example.org" }), [admin.email])).toMatchObject({ users: 1, links: [], sessions: 0 })
+  })
+
+  it("an admin's own address with no email_verified claim at all", async () => {
+    const admin = await person("noverified")
+    expect(await refused(claims(admin.email, { email_verified: undefined }), [admin.email])).toMatchObject({ users: 1, links: [], sessions: 0 })
   })
 
   it("an admin's own address Google has not verified", async () => {

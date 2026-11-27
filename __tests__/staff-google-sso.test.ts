@@ -17,13 +17,17 @@ jest.mock("@/lib/db", () => ({
     user: { findUnique: (...a: unknown[]) => mockFindUnique(...a) },
     organisation_invites: { findFirst: async () => null },
     audit_logs: { create: (...a: unknown[]) => mockAuditCreate(...a) },
+    account: { findMany: (...a: unknown[]) => mockAccountFindMany(...a) },
   },
 }))
+const mockAccountFindMany = jest.fn()
 // Stubs that would succeed: the adapter lib/auth hands NextAuth must refuse both writes all the same.
 jest.mock("@auth/prisma-adapter", () => ({ PrismaAdapter: () => ({ createUser: async () => ({ id: "made" }), linkAccount: async () => undefined }) }))
-jest.mock("bcryptjs", () => ({ compare: async (given: string, stored: string) => given === stored }))
+const mockCompare = jest.fn(async (given: string, stored: string) => given === stored)
+jest.mock("bcryptjs", () => ({ compare: (given: string, stored: string) => mockCompare(given, stored) }))
 
 import { adminSsoRequired, dashboardGoogleClient, validateEnv } from "@/lib/env"
+import { logger } from "@/lib/logger"
 import { mockSessionRows } from "./support/session-account"
 
 const BASE = {
@@ -100,15 +104,23 @@ describe("validateEnv: boot refuses a configuration that would lock every admin 
   })
 
   it.each([
-    ["the flag with no Google client: admins refused a password and offered no button", { ADMIN_SSO_REQUIRED: "true" }],
-    ["the flag with half a client", { ADMIN_SSO_REQUIRED: "true", DASHBOARD_GOOGLE_CLIENT_ID: CLIENT.DASHBOARD_GOOGLE_CLIENT_ID }],
-    ["an id without its secret", { DASHBOARD_GOOGLE_CLIENT_ID: CLIENT.DASHBOARD_GOOGLE_CLIENT_ID }],
-    ["a secret without its id", { DASHBOARD_GOOGLE_CLIENT_SECRET: CLIENT.DASHBOARD_GOOGLE_CLIENT_SECRET }],
-    ["a flag spelled TRUE, which would otherwise read as off", { ...CLIENT, ADMIN_SSO_REQUIRED: "TRUE" }],
-    ["a flag spelled 1", { ...CLIENT, ADMIN_SSO_REQUIRED: "1" }],
-  ])("refuses %s", (_label, extra) => {
+    ["the flag with no Google client: admins refused a password and offered no button", { ADMIN_SSO_REQUIRED: "true" }, "ADMIN_SSO_REQUIRED"],
+    ["the flag with half a client", { ADMIN_SSO_REQUIRED: "true", DASHBOARD_GOOGLE_CLIENT_ID: CLIENT.DASHBOARD_GOOGLE_CLIENT_ID }, "ADMIN_SSO_REQUIRED"],
+    ["the flag with a client of blanks", { ADMIN_SSO_REQUIRED: "true", DASHBOARD_GOOGLE_CLIENT_ID: " ", DASHBOARD_GOOGLE_CLIENT_SECRET: " " }, "ADMIN_SSO_REQUIRED"],
+    ["an id without its secret", { DASHBOARD_GOOGLE_CLIENT_ID: CLIENT.DASHBOARD_GOOGLE_CLIENT_ID }, "DASHBOARD_GOOGLE_CLIENT_SECRET"],
+    ["a secret without its id", { DASHBOARD_GOOGLE_CLIENT_SECRET: CLIENT.DASHBOARD_GOOGLE_CLIENT_SECRET }, "DASHBOARD_GOOGLE_CLIENT_SECRET"],
+    ["a flag spelled TRUE, which would otherwise read as off", { ...CLIENT, ADMIN_SSO_REQUIRED: "TRUE" }, "ADMIN_SSO_REQUIRED"],
+    ["a flag spelled 1", { ...CLIENT, ADMIN_SSO_REQUIRED: "1" }, "ADMIN_SSO_REQUIRED"],
+  ])("refuses %s, naming the variable", (_label, extra, variable) => {
     withEnv(extra)
-    expect(() => validateEnv()).toThrow("Invalid environment variables")
+    const logged = jest.spyOn(logger, "error").mockImplementation(() => undefined)
+    try {
+      expect(() => validateEnv()).toThrow("Invalid environment variables")
+      const { fieldErrors } = logged.mock.calls[0][1] as { fieldErrors: Record<string, string[]> }
+      expect(Object.keys(fieldErrors)).toContain(variable)
+    } finally {
+      logged.mockRestore()
+    }
   })
 })
 
@@ -143,6 +155,15 @@ describe("the providers lib/auth registers", () => {
     ).rejects.toThrow()
   })
 
+  it("refuses, and does not throw, when the database fails mid-check: a thrown message would land in the redirect URL", async () => {
+    withEnv(CLIENT)
+    const signIn = loadAuth().callbacks!.signIn!
+    mockFindUnique.mockResolvedValue({ id: "u-a", email: "priya@matrixsociallabs.com", role: "app_admin", deletedAt: null, suspended_at: null })
+    mockAccountFindMany.mockRejectedValue(new Error('Invalid `prisma.account.findMany()` invocation: relation "Account" ...'))
+    const profile = { email: "priya@matrixsociallabs.com", email_verified: true, hd: "matrixsociallabs.com" }
+    await expect(signIn({ user: { id: "1" }, account: { provider: "google", type: "oauth", providerAccountId: "1" }, profile } as never)).resolves.toBe(false)
+  })
+
   it("lets Credentials through the signIn callback as before, and no provider it does not know", async () => {
     withEnv(CLIENT)
     const signIn = loadAuth().callbacks!.signIn!
@@ -166,6 +187,24 @@ describe("authorize under ADMIN_SSO_REQUIRED", () => {
   beforeEach(() => {
     mockFindUnique.mockReset()
     mockAuditCreate.mockReset().mockResolvedValue({})
+  })
+
+  it("refuses it after the password is compared, and leaves the limiter and the known-device cookie as a wrong one does", async () => {
+    withEnv({ ...CLIENT, ADMIN_SSO_REQUIRED: "true" })
+    let auth: NextAuthOptions | undefined
+    let settle: jest.SpyInstance | undefined
+    let deviceCookie: jest.SpyInstance | undefined
+    jest.isolateModules(() => {
+      settle = jest.spyOn(jest.requireActual<typeof import("@/lib/dashboard-signin-limits")>("@/lib/dashboard-signin-limits"), "settleSigninSuccess")
+      deviceCookie = jest.spyOn(jest.requireActual<typeof import("@/lib/known-device")>("@/lib/known-device"), "knownDeviceCookie")
+      auth = jest.requireActual<typeof import("@/lib/auth")>("@/lib/auth").authOptions
+    })
+    mockFindUnique.mockResolvedValue(account("app_admin"))
+    mockCompare.mockClear()
+    await expect(signInAs(auth!, "app_admin")).resolves.toBeNull()
+    expect(mockCompare).toHaveBeenCalledTimes(1)
+    expect(settle).not.toHaveBeenCalled()
+    expect(deviceCookie).not.toHaveBeenCalled()
   })
 
   it("refuses an admin's right password exactly as a wrong one: null, no row, no error to tell them apart", async () => {

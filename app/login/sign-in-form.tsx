@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { signIn, useSession } from "next-auth/react"
 
@@ -51,6 +51,14 @@ export function SignInForm({ staffGoogle, googleError }: { staffGoogle: StaffGoo
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<React.ReactNode>(null)
+  /*
+   * A refused Google sign-in comes back to this page with its error already drawn, and a live region present at load
+   * is not announced by every screen reader: focus goes to it instead (WCAG 4.1.3, a11y review of SCRUM-1241).
+   */
+  const googleErrorRef = useRef<HTMLParagraphElement>(null)
+  useEffect(() => {
+    if (googleError) googleErrorRef.current?.focus()
+  }, [googleError])
 
   /*
    * `/invite?token=…` sends people here and expects them back afterwards.
@@ -227,7 +235,13 @@ export function SignInForm({ staffGoogle, googleError }: { staffGoogle: StaffGoo
               {`Platform staff · @${COMPANY.staffEmailDomain}`}
             </p>
             {googleError ? (
-              <p role="alert" className="text-center text-[0.8125rem] text-destructive">
+              <p
+                id="staff-google-error"
+                ref={googleErrorRef}
+                tabIndex={-1}
+                role="alert"
+                className="text-center text-[0.8125rem] text-destructive outline-none"
+              >
                 {googleError}
               </p>
             ) : null}
@@ -235,9 +249,9 @@ export function SignInForm({ staffGoogle, googleError }: { staffGoogle: StaffGoo
               type="button"
               variant="outline"
               size="lg"
-              disabled={status === "loading"}
-              aria-describedby="staff-google-label"
-              onClick={() => signIn("google", { callbackUrl })}
+              aria-describedby={googleError ? "staff-google-error staff-google-label" : "staff-google-label"}
+              // Read at the click, not from state: a click before the mount effect has run keeps its invite link.
+              onClick={() => signIn("google", { callbackUrl: safeRedirect(new URLSearchParams(window.location.search).get("callbackUrl")) })}
               className="w-full whitespace-normal h-auto min-h-11 py-2"
             >
               <GoogleMark />

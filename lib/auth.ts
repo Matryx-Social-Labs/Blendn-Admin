@@ -91,9 +91,22 @@ type GoogleClaims = Profile & { email_verified?: boolean; hd?: string }
  * to a new person must not inherit the old one's admin row; an admin removes the old link first. No Google token is
  * kept: nothing here calls Google.
  *
- * Every refusal writes nothing and says only "not staff": which check failed is in the log, not on the page.
+ * Every refusal here writes nothing and says only "not staff": which check failed is in the log, not on the page. The
+ * one write it makes is the link, to the row just checked; if NextAuth then refuses the sign-in (another person's
+ * session in this browser: OAuthAccountNotLinked) that link stays, and is the right one.
+ *
+ * A database error refuses too. Thrown, NextAuth would put its message in the redirect URL.
  */
 async function admitStaffGoogle(sub: string, profile: Profile | undefined): Promise<boolean> {
+  try {
+    return await checkAndLinkStaffGoogle(sub, profile)
+  } catch (error) {
+    logger.error("Staff Google sign-in failed", { error: error instanceof Error ? error.message : String(error) })
+    return false
+  }
+}
+
+async function checkAndLinkStaffGoogle(sub: string, profile: Profile | undefined): Promise<boolean> {
   const claims = profile as GoogleClaims | undefined
   const email = claims?.email?.trim().toLowerCase()
   const refuse = (reason: string) => {
@@ -112,7 +125,7 @@ async function admitStaffGoogle(sub: string, profile: Profile | undefined): Prom
   })
   if (links.some((l) => l.userId !== row.id || l.providerAccountId !== sub)) return refuse("linked to another Google account or row")
   if (links.length === 0) {
-    // Two first sign-ins at once: one row wins, and both read back which.
+    // The same Google account's first sign-in twice at once: one insert wins, and both read back where it points.
     await db.account.createMany({ data: [{ userId: row.id, type: "oauth", provider: "google", providerAccountId: sub }], skipDuplicates: true })
     const link = await db.account.findUnique({
       where: { provider_providerAccountId: { provider: "google", providerAccountId: sub } },
