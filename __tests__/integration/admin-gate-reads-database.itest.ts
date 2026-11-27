@@ -128,9 +128,10 @@ describe("the reads whose admin branch is the whole platform", () => {
     expect((await getAuditLog()).scopedToOrg).toBe(false)
   })
 
+  // The demoted admin has no organisation, so since SCRUM-1247 no dashboard at all: never the platform's.
   it("answer the overview for the row's role, never the platform's for a demoted admin", async () => {
     as(demoted)
-    expect((await getDashboardOverview()).role).toBe("organizer")
+    await expect(getDashboardOverview()).rejects.toThrow("Not authorised")
     as(suspended)
     await expect(getDashboardOverview()).rejects.toThrow("Not authorised")
   })

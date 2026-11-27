@@ -6,6 +6,7 @@ import { distinctEventsAttended } from "@/lib/attendee-counts"
 import { firstName } from "@/lib/conversation-identity"
 import { normalizeLocationToCity } from "@/lib/location"
 import { profileBadges } from "@/lib/profile-badges"
+import type { RoomPersonFacts } from "@/lib/room-person-facts"
 import { savedCount } from "@/lib/saved-events"
 
 /**
@@ -47,26 +48,28 @@ export const publicUserSelect = {
 export type PublicUser = Prisma.UserGetPayload<{ select: typeof publicUserSelect }>
 
 /**
- * A room card, for somebody that room keeps anonymous: exactly what the roster already shows beside their pseudonym,
- * and nothing else.
+ * A room card, for somebody that room keeps anonymous: exactly what the roster shows beside their pseudonym
+ * (`roomPersonFacts`, lib/room-person-facts.ts), and nothing else.
  *
  * Their pseudonym in that room rather than "Attendee" — the card that opened this already shows it, so it discloses
- * nothing, and a second name for one person in one room is how surfaces start to disagree. Age and city stay, as they
- * do on the roster (owner decision, #485). Everything that is the same in every room goes: the interest list, the join
- * date and the attendance counts are a fingerprint, and a viewer who has seen this person named elsewhere could match
- * them to the pseudonym field by field.
+ * nothing, and a second name for one person in one room is how surfaces start to disagree. `age` and `location` stay
+ * as keys, null, for installed builds that read them. Everything that is the same in every room goes: the interest
+ * list, the join date and the attendance counts are a fingerprint, and a viewer who has seen this person named
+ * elsewhere could match them to the pseudonym field by field.
  *
  * `pseudonym` (SCRUM-1046) is the same name, sent only when it IS a room pseudonym, so the app reads a contract rather
  * than a field: absent for a crew's room (a first name) and for somebody with no pseudonym on record (`name` is then
  * the flat "Attendee").
  */
-export async function anonymousCard(user: PublicUser, id: string, room: { name: string; pseudonym: boolean }) {
+export function anonymousCard(id: string, room: { name: string; pseudonym: boolean }, facts: RoomPersonFacts) {
   return {
     id,
     name: room.name,
     ...(room.pseudonym && { pseudonym: room.name }),
-    age: ageFrom(user.profile),
-    location: await normalizeLocationToCity(user.profile?.location),
+    age: null,
+    location: null,
+    ageBand: facts.ageBand,
+    tenure: facts.tenure,
     isOwnProfile: false,
     identityVisible: false,
   }
@@ -121,20 +124,27 @@ export async function personCardBody(
           // The blurred photo for someone who may not see the real one: a stored derivative, never the real URL.
           blurPhoto: p?.blur_photo ?? null,
         }),
-    // Derived — see `ageFrom` in lib/age.ts. The date itself is never returned: this is an explicit field list.
-    age: ageFrom(p),
-    location: await normalizeLocationToCity(p?.location),
+    /*
+     * Derived — see `ageFrom` in lib/age.ts. The date itself is never returned: this is an explicit field list.
+     * Somebody a raw id does not name gets no age, city, join date or counts (D-030), and no band or chip either: a raw
+     * id has no room to count a band over, and answering it would make this a lookup on any id. Keys kept, null.
+     */
+    ...(identified
+      ? { age: ageFrom(p), location: await normalizeLocationToCity(p?.location) }
+      : { age: null, location: null, ageBand: null, tenure: null }),
     // The whole list only to somebody who may see who this is; the key stays, empty, for clients that read it (SCRUM-827).
     interests: identified ? user.user_interests.map((ui) => ui.category) : [],
-    memberSince: user.createdAt,
-    stats: {
-      // Your own count includes the places you went live at, as your list does; anybody else's counts events only.
-      eventsAttended: await distinctEventsAttended(user.id, { places: isOwnProfile }),
-      eventsFavorited: user._count.event_favorites,
-      eventsOrganized: user._count.organized_events,
-      // What your own saved list holds; yours alone.
-      ...(isOwnProfile && { savedCount: await savedCount(user.id) }),
-    },
+    ...(identified && {
+      memberSince: user.createdAt,
+      stats: {
+        // Your own count includes the places you went live at, as your list does; anybody else's counts events only.
+        eventsAttended: await distinctEventsAttended(user.id, { places: isOwnProfile }),
+        eventsFavorited: user._count.event_favorites,
+        eventsOrganized: user._count.organized_events,
+        // What your own saved list holds; yours alone.
+        ...(isOwnProfile && { savedCount: await savedCount(user.id) }),
+      },
+    }),
     isOwnProfile,
     identityVisible: identified,
     // Badges when the person shows them (`show_badges`, on unless turned off) and the viewer may see who they are.
@@ -142,12 +152,12 @@ export async function personCardBody(
   }
 }
 
-/** The pseudonym this person carries in the event room they joined last: what a room calls them. Null if none yet. */
-export async function latestRoomPseudonym(userId: string): Promise<string | null> {
+/** The event room this person joined last and the pseudonym they carry there: what a room calls them. Nulls if none yet. */
+export async function latestRoom(userId: string): Promise<{ pseudonym: string | null; eventId: string | null }> {
   const member = await db.chat_group_members.findFirst({
     where: { user_id: userId, anonymous_name: { not: null }, chat_group: { kind: "event" } },
     orderBy: { joined_at: "desc" },
-    select: { anonymous_name: true },
+    select: { anonymous_name: true, chat_group: { select: { event_id: true } } },
   })
-  return member?.anonymous_name ?? null
+  return { pseudonym: member?.anonymous_name ?? null, eventId: member?.chat_group.event_id ?? null }
 }

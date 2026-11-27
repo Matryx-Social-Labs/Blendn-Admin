@@ -7,6 +7,7 @@
  * as the author of every flag they ever raised.
  */
 const mockDb = {
+  $queryRaw: jest.fn((): Promise<Record<string, unknown>[]> => mockSessionRows(mockDb.user.findUnique())),
   moderation_flags: {
     findMany: jest.fn(),
     count: jest.fn().mockResolvedValue(1),
@@ -25,6 +26,7 @@ jest.mock("@/lib/trust", () => ({ trustSignalsFor: jest.fn().mockResolvedValue(n
 jest.mock("@/lib/socket-server", () => ({ emitChatMessageHidden: jest.fn() }))
 
 import { getModerationQueue } from "@/app/dashboard/moderation/actions"
+import { mockSessionRows } from "./support/session-account"
 
 function flag(user: { name: string | null; email: string; deletedAt: Date | null }) {
   return {

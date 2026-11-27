@@ -17,6 +17,7 @@ import { join } from "path"
  * as source text, because what matters is which branch a deleted row takes.
  */
 const mockDb = {
+  $queryRaw: jest.fn((): Promise<Record<string, unknown>[]> => mockSessionRows(mockDb.user.findUnique({ select: { sessions_revoked_at: true } }))),
   user: { findMany: jest.fn(), count: jest.fn(), update: jest.fn(), findUnique: jest.fn() },
   profiles: { count: jest.fn() },
   // The table's three tallies, grouped over the page's people.
@@ -35,6 +36,7 @@ jest.mock("@/lib/logger", () => ({ logger: { error: jest.fn(), warn: jest.fn(), 
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { getUsers, getUserStats, updateUser, updateUserRole } from "@/app/dashboard/users/actions"
+import { mockSessionRows } from "./support/session-account"
 
 const ROOT = join(__dirname, "..")
 const read = (rel: string) =>
@@ -51,7 +53,7 @@ beforeEach(() => {
   // The pre-write read the audit row is built from; `deletedAt: null` in
   // its where is what makes an erased row "not found" before any write.
   mockDb.user.findUnique.mockImplementation(async (args: { select?: { sessions_revoked_at?: true } }) =>
-    // requireAdmin's read of the caller's own row (lib/current-user.ts).
+    // requireAdmin's read of the caller's own row (lib/current-user.ts), through `$queryRaw` above.
     args.select?.sessions_revoked_at
       ? { role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null }
       : { name: "Old", email: "old@x", role: "attendee", profile: null }

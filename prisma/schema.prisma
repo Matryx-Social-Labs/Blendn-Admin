@@ -534,6 +534,14 @@ model events {
   /// first told. `changedFields` is derived from this and the row, never stored.
   changed_from          Json?
   visibility            visibility_type      @default(public)
+  /// When and by whom a moderator delisted it from a report (SCRUM-1394). While set,
+  /// only an admin may change `visibility` (`updateEventTracked`); an admin's move
+  /// back to public clears both. `delisted_by` is a User.id with no foreign key,
+  /// and `@ignore`d: no Prisma read returns it, so no response can tell an
+  /// organizer which moderator it was. Written and cleared in raw SQL; keep the
+  /// `@ignore` after a `prisma db pull`, and never `SELECT *` / `RETURNING *` it to a client.
+  delisted_at           DateTime?            @db.Timestamptz(6)
+  delisted_by           String?              @ignore
   max_capacity          Int?
   /// Minimum age to check in. Null — almost every event — means no restriction.
   ///
