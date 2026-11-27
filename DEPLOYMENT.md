@@ -498,7 +498,7 @@ Returns:
   "status": "ok",
   "timestamp": "2024-01-01T00:00:00.000Z",
   "service": "blendn-admin",
-  "version": "0.1.0",
+  "version": "abcdef1",
   "database": "connected",
   "pool": { "total": 6, "idle": 5, "waiting": 0 },
   "eventLoopDelayMs": { "p50": 10, "p99": 12, "max": 14 },
@@ -506,6 +506,8 @@ Returns:
   "loops": { "stale": [] }
 }
 ```
+
+`version` is the commit this environment runs: the first 7 characters of `RAILWAY_GIT_COMMIT_SHA`, which Railway sets on a deploy from GitHub (SCRUM-1218). To check which commit is live, compare it with the branch head: `curl -s https://staging-api.blendn.app/api/health | jq -r .version` against `git rev-parse --short=7 origin/staging` (production: `api.blendn.app` and `origin/prod`). A deploy that did not come from GitHub (`railway up`, a local run) has no such variable, and `version` is the package version instead.
 
 `pool`, `eventLoopDelayMs` and `sockets` are counts about this process (SCRUM-1221), present only with `Authorization: Bearer $HEALTH_METRICS_TOKEN` (or anywhere but Railway production while the token is unset); the monitor that alerts on them must send that header. `pool` is `null` before the first query; `sockets` is `null` where Socket.io is not attached. `eventLoopDelayMs` is the last full minute, rotated inside the process and never reset by a read (the endpoint is public), `null` for the first minute; the 10 ms resolution of `monitorEventLoopDelay` is its floor. A rising `eventLoopDelayMs.p99` is the one process saturating, and `pool.waiting` above 0 is requests queued for a connection; the alert thresholds are kept with the other monitor settings (see Monitoring under [Operating production](#operating-production)). `loops.stale` (SCRUM-1228) names the background loops that have not finished a pass in three of their intervals ([A background loop stalled](#a-background-loop-stalled)); it never changes `status` or the 200, so the Railway healthcheck never restarts the service for it.
 

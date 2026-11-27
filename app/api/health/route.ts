@@ -82,7 +82,8 @@ export async function GET(request?: Request) {
     status: "ok",
     timestamp: new Date().toISOString(),
     service: "blendn-admin",
-    version: process.env.npm_package_version || "0.1.0",
+    // The deployed commit, set by Railway on a GitHub-triggered deploy (SCRUM-1218); the package version anywhere else.
+    version: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) || process.env.npm_package_version || "0.1.0",
     database: "unknown",
   }
 
