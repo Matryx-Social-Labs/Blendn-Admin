@@ -67,7 +67,7 @@ const venue = (): VenueLiveSnapshot => ({
   activeChatters30m: "20-49",
   openFlags: 0,
   sentiment: { positive: "20-49", neutral: "10-19", negative: "quiet" },
-  categories: [],
+  raised: [],
   alerts: [],
 } as unknown as VenueLiveSnapshot)
 
