@@ -34,10 +34,11 @@ const config: Config = {
   },
   transform: {
     "^.+\\.tsx?$": ["ts-jest", { tsconfig: "tsconfig.json" }],
-    // expo-server-sdk is ESM-only from v6; see jest.config.ts.
-    "/node_modules/expo-server-sdk/.+\\.js$": ["ts-jest", { tsconfig: "tsconfig.json" }],
+    // expo-server-sdk is ESM-only from v6; see jest.config.ts. So is @auth/prisma-adapter, compiled the same way so
+    // the Google sign-in suite runs NextAuth's callback over the real adapter (staff-google-sso.itest.ts).
+    "/node_modules/(expo-server-sdk|@auth/prisma-adapter)/.+\\.js$": ["ts-jest", { tsconfig: "tsconfig.json" }],
   },
-  transformIgnorePatterns: ["/node_modules/(?!expo-server-sdk/)"],
+  transformIgnorePatterns: ["/node_modules/(?!expo-server-sdk/|@auth/prisma-adapter/)"],
   // Real DB work is slower than mocked unit tests, and they share one database,
   // so run serially to keep truncation between suites deterministic.
   maxWorkers: 1,
