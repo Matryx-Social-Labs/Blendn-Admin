@@ -5,6 +5,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import {
   accountBlockReason,
+  type AccountBlock,
   hashRefreshToken,
   refusedRefreshReason,
   signAccessToken,
@@ -36,7 +37,7 @@ async function refusedRefresh(token: string) {
 }
 
 /** `owner`: the account the verified token belongs to (`accountRefusal`). */
-function accountBlockedResponse(reason: "deleted" | "suspended" | "staff", owner?: { suspension_reason: string | null } | null) {
+function accountBlockedResponse(reason: AccountBlock, owner?: { suspension_reason: string | null } | null) {
   if (reason === "deleted") return errorResponse("User not found", 401, ErrorCode.ACCOUNT_DELETED, ErrorCode.ACCOUNT_DELETED)
   return accountRefusal(reason, owner)
 }
@@ -66,6 +67,7 @@ export async function POST(request: NextRequest) {
     // Check if user still exists
     const user = await db.user.findUnique({
       where: { id: decoded.userId },
+      include: { profile: { select: { under_18_since: true } } },
     })
 
     /*
@@ -109,7 +111,15 @@ export async function POST(request: NextRequest) {
       await tx.$queryRaw`SELECT 1 FROM "User" WHERE id = ${user.id} FOR SHARE`
       const current = await tx.user.findUnique({
         where: { id: user.id },
-        select: { id: true, deletedAt: true, suspended_at: true, suspension_reason: true, role: true, mobile_sessions_revoked_at: true },
+        select: {
+          id: true,
+          deletedAt: true,
+          suspended_at: true,
+          suspension_reason: true,
+          role: true,
+          mobile_sessions_revoked_at: true,
+          profile: { select: { under_18_since: true } },
+        },
       })
       const blockedNow = accountBlockReason(current)
       if (blockedNow) return { kind: "blocked", reason: blockedNow, owner: current } as const

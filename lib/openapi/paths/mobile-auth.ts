@@ -53,7 +53,7 @@ registry.registerPath({
   description:
     "Authenticate with credentials. Rate limited twice: 5 requests per 15 minutes per IP, and " +
     "10 per 15 minutes per email address — the second stops a distributed attempt walking one " +
-    "account's password from many addresses. 403 `FORBIDDEN` with `reasonCode` `ACCOUNT_SUSPENDED` or `ACCOUNT_STAFF` (and the sentence " +
+    "account's password from many addresses. 403 `FORBIDDEN` with `reasonCode` `ACCOUNT_SUSPENDED`, `ACCOUNT_STAFF` or `AGE_RESTRICTED` (stamped as known to be under 18; and the sentence " +
     "to show), checked after the password. A deleted account is the generic 401 `UNAUTHORIZED`: a password " +
     "sign-in never confirms an account existed.",
   request: {
@@ -81,7 +81,7 @@ registry.registerPath({
   summary: "Sign in or register with Google",
   description:
     "Authenticate using a Google ID token. Creates account if new. Rate limited: 10 requests per 15 minutes. " +
-    "403 `FORBIDDEN` + `reasonCode` `ACCOUNT_SUSPENDED` / `ACCOUNT_STAFF` (`ACCOUNT_SUSPENDED` also when a new " +
+    "403 `FORBIDDEN` + `reasonCode` `ACCOUNT_SUSPENDED` / `ACCOUNT_STAFF` / `AGE_RESTRICTED` (stamped as known to be under 18; `ACCOUNT_SUSPENDED` also when a new " +
     "account would be the same inbox as a suspended one); 401 `ACCOUNT_DELETED` (\"Account not found\"). The Apple route answers the same.",
   request: {
     body: {
@@ -117,7 +117,7 @@ registry.registerPath({
   description:
     "Exchange a refresh token for a new access/refresh token pair. Rate limited: 20 requests per 15 minutes. " +
     "403 `FORBIDDEN` with a sentence to show when the account is suspended (`reasonCode` `ACCOUNT_SUSPENDED`) or is a staff account " +
-    "(`ACCOUNT_STAFF`) — for a suspension, also for the token the suspension revoked (signed by us, unexpired). " +
+    "(`ACCOUNT_STAFF`) or stamped as known to be under 18 (`AGE_RESTRICTED`) — for a suspension, also for the token the suspension revoked (signed by us, unexpired). " +
     "Any other refused token is a 401 whose `errorCode` and `reasonCode` are the reason when we know it, always with the sentence " +
     "\"Invalid or expired refresh token\": `ACCOUNT_DELETED` (a signed, unexpired token of a deleted account), " +
     "`PASSWORD_RESET` (its session was ended by a password reset or change), `SESSION_REVOKED_ELSEWHERE` (ended by " +
@@ -147,8 +147,8 @@ registry.registerPath({
   summary: "Get current session",
   description:
     "Returns the authenticated user's profile and session info, and `signInMethod`. 403 `FORBIDDEN` + `reasonCode` `ACCOUNT_SUSPENDED` / " +
-    "`ACCOUNT_STAFF` with the sentence to show; 404 `NOT_FOUND` + `reasonCode` `ACCOUNT_DELETED` (\"User not found\"). An account " +
-    "suspended, deleted or signed out in the last twenty minutes is turned away earlier, as a bare 401 \"Invalid or " +
+    "`ACCOUNT_STAFF` / `AGE_RESTRICTED` with the sentence to show; 404 `NOT_FOUND` + `reasonCode` `ACCOUNT_DELETED` (\"User not found\"). An account " +
+    "suspended, deleted, stamped under 18 or signed out in the last twenty minutes is turned away earlier, as a bare 401 \"Invalid or " +
     "expired token\"; the refresh then says why.",
   security: [{ BearerAuth: [] }],
   responses: {

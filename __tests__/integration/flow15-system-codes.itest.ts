@@ -54,6 +54,7 @@ import {
 } from "@/lib/mobile-auth"
 import { changePassword, revokeMobileSessions } from "@/lib/account-actions"
 import { suspendedMessageFor } from "@/lib/account-refusal"
+import { UNDER_18_ACCOUNT } from "@/lib/age"
 import { issuePasswordResetLink } from "@/lib/password-reset"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
 import { cleanupExpiredTokens, REVOKED_REASON_CODE } from "@/lib/mobile-auth"
@@ -93,6 +94,7 @@ afterAll(async () => {
   await db.password_reset_tokens.deleteMany({ where: { user_id: { in: users } } })
   await db.mobile_refresh_tokens.deleteMany({ where: { user_id: { in: users } } })
   await db.push_tokens.deleteMany({ where: { user_id: { in: users } } })
+  await db.profiles.deleteMany({ where: { id: { in: users } } })
   await db.user.deleteMany({ where: { id: { in: users } } })
   await closeDb()
 })
@@ -127,7 +129,7 @@ async function waitForLockWait(fragment: string, timeoutMs = 8_000) {
   throw new Error(`no backend waited on a lock in a statement containing ${fragment}`)
 }
 
-type AccountState = "suspended" | "staff" | "deleted"
+type AccountState = "suspended" | "staff" | "deleted" | "under_18"
 
 /** An account in the given state, with a password, and an OAuth link for each provider. */
 async function account(label: string, state: AccountState | "ok" = "ok") {
@@ -153,6 +155,8 @@ async function account(label: string, state: AccountState | "ok" = "ok") {
     },
     select: { email: true },
   })
+  // Stamped as known to be under 18 (scripts/under-18-accounts.ts): the account is locked.
+  if (state === "under_18") await db.profiles.create({ data: { id, name: label, onboarded: true, age: 16, under_18_since: new Date() } })
   return { id, email: user.email, googleId, appleId }
 }
 
@@ -176,6 +180,7 @@ const THE_REFUSALS = [
   // Each case proves the account (password, provider token, its own refresh or access token), so it is told why (SCRUM-1174).
   ["suspended", 403, "ACCOUNT_SUSPENDED", suspendedMessageFor("harassment")],
   ["staff", 403, "ACCOUNT_STAFF", STAFF_MESSAGE],
+  ["under_18", 403, "AGE_RESTRICTED", UNDER_18_ACCOUNT],
 ] as const
 
 describe("account codes: errorCode and sentence stay, the reason is added beside them", () => {
@@ -306,6 +311,13 @@ describe("account codes: errorCode and sentence stay, the reason is added beside
       const res = await sessionRoute.GET(get("/api/mobile/auth/session", signAccessToken(a.id, a.email)))
       expect(res.status).toBe(404)
       expect(await res.json()).toEqual({ success: false, error: "User not found", errorCode: "NOT_FOUND", reasonCode: "ACCOUNT_DELETED" })
+    })
+
+    it("a locked under-18 account is named only to whoever proves it: a wrong password gets the plain 401", async () => {
+      const a = await account("sg-u18-wrong", "under_18")
+      const res = await signinRoute.POST(post("/api/mobile/auth/signin", { email: a.email, password: "not-the-password-1" }))
+      expect(res.status).toBe(401)
+      expect(await res.json()).toEqual({ success: false, error: "Invalid email or password", errorCode: "UNAUTHORIZED" })
     })
 
     it("sign-in with a password still never confirms the account existed", async () => {
@@ -860,6 +872,7 @@ describe("socket handshake codes", () => {
     ["suspended", "ACCOUNT_SUSPENDED"],
     ["staff", "ACCOUNT_STAFF"],
     ["deleted", "ACCOUNT_DELETED"],
+    ["under_18", "AGE_RESTRICTED"],
   ] as const)("a %s account is refused with data.code %s and the message it always had", async (state, code) => {
     const a = await account(`sk-${state}`, state)
     expect(await handshake(a.id, a.email)).toEqual({ message: "Authentication required", data: { code } })

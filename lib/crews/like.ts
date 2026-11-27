@@ -17,7 +17,7 @@ import { CREWS_OFF, isRefusal, NO_CREW, NO_EVENT, type CrewRefusal } from "./cre
 import { blocksExclude } from "./blocks"
 import { hidesCrew } from "./hides"
 import { hidersInRoom } from "./wave-lines"
-import { LISTED_IN_ROSTER, strangersApartBetween } from "../room-people"
+import { LISTED_IN_ROSTER, REACHABLE, strangersApartBetween } from "../room-people"
 import {
   crewEvent,
   crewMayMeetSolo,
@@ -254,7 +254,7 @@ export async function likePersonAsCrew(
   if (personId === likerId || mine.members.includes(personId)) return NO_PERSON
 
   const [theirCheckIn, them] = await Promise.all([
-    db.event_check_ins.findFirst({ where: { user_id: personId, ...hereNowAt(here.occurrenceId), user: LISTED_IN_ROSTER }, select: { id: true } }),
+    db.event_check_ins.findFirst({ where: { user_id: personId, ...hereNowAt(here.occurrenceId), user: { ...LISTED_IN_ROSTER, ...REACHABLE } }, select: { id: true } }),
     intentsAt(eventId, personId),
   ])
   if (!theirCheckIn || !them.openToCrews || !crewMayMeetSolo(mine, mine.members.length, them.intents)) return nothingTold

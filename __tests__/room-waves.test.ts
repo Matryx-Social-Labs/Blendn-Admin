@@ -211,12 +211,14 @@ it("refuses a recipient who is not here: 403 RECIPIENT_NOT_HERE", async () => {
   expect((await res.json()).errorCode).toBe("RECIPIENT_NOT_HERE")
 })
 
-it("hides a recipient the roster hides: show_online off or suspended", async () => {
+it("hides a recipient the roster hides (show_online off) and one nobody may reach (deleted, suspended, stamped under 18)", async () => {
   await wave()
   const theirs = mockDb.event_check_ins.findFirst.mock.calls.find(([a]) => a.where.user_id === THEM)![0]
   expect(theirs.where.kind).toBe("attendee")
   expect(theirs.where.user).toEqual({
+    deletedAt: null,
     suspended_at: null,
+    NOT: { profile: { is: { under_18_since: { not: null } } } },
     OR: [{ profile: { is: null } }, { profile: { show_online: true } }],
   })
 })

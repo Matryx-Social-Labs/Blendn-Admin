@@ -8,7 +8,7 @@ import { randomUUID } from "crypto"
 import { haveSharedAnEvent, pairIsClosed } from "@/lib/conversations"
 import { identityForRef } from "@/lib/identity"
 import { resolveUserRef, userIdFromRef } from "@/lib/room-handle"
-import { knownToEachOther, LISTED_IN_ROSTER } from "@/lib/room-people"
+import { knownToEachOther, LISTED_IN_ROSTER, REACHABLE } from "@/lib/room-people"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { messagingRefusalResponse, participationRefusal } from "@/lib/event-access"
@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
      * id (SCRUM-904, owner row A-2, decided by lean 2026-10-31; the likes route's rule, SCRUM-669).
      */
     const recipient = await db.user.findFirst({
-      where: { id: recipientId, ...LISTED_IN_ROSTER },
+      where: { id: recipientId, ...LISTED_IN_ROSTER, ...REACHABLE },
       select: { id: true, name: true },
     })
 

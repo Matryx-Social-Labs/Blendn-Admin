@@ -31,7 +31,7 @@ import { accountBlockReason } from "@/lib/mobile-auth"
 import { POST as signin } from "@/app/api/mobile/auth/signin/route"
 
 describe("accountBlockReason", () => {
-  const live = { deletedAt: null, suspended_at: null, role: "attendee" }
+  const live = { deletedAt: null, suspended_at: null, role: "attendee", profile: null }
 
   it("refuses the system user that owns every venue day, live and attendee though it is", () => {
     expect(accountBlockReason({ ...live, id: "blendn-system" })).toBe("deleted")
@@ -59,13 +59,25 @@ describe("accountBlockReason", () => {
   it("reports deletion ahead of suspension when both are set", () => {
     // A deleted account must never be told it is suspended: that confirms the
     // address exists to whoever is asking.
-    expect(accountBlockReason({ deletedAt: new Date(), suspended_at: new Date(), role: "attendee" })).toBe("deleted")
+    expect(accountBlockReason({ deletedAt: new Date(), suspended_at: new Date(), role: "attendee", profile: null })).toBe("deleted")
   })
 
   it("blocks every staff role — the app is for attendees (SCRUM-198)", () => {
     for (const role of ["organizer", "venue_owner", "sponsor", "app_admin"]) {
       expect(accountBlockReason({ ...live, role })).toBe("staff")
     }
+  })
+
+  it("locks an account stamped as known to be under 18, and only on the stamp", () => {
+    expect(accountBlockReason({ ...live, profile: { under_18_since: new Date() } })).toBe("under_18")
+    // No stamp: the per-entry refusals decide (`participationDenial`), the session stands.
+    expect(accountBlockReason({ ...live, profile: { under_18_since: null } })).toBeNull()
+  })
+
+  it("reports deletion and suspension ahead of the under-18 lock", () => {
+    const stamped = { ...live, profile: { under_18_since: new Date() } }
+    expect(accountBlockReason({ ...stamped, deletedAt: new Date() })).toBe("deleted")
+    expect(accountBlockReason({ ...stamped, suspended_at: new Date() })).toBe("suspended")
   })
 
   it("reports suspension ahead of staff", () => {

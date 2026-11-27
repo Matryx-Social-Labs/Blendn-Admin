@@ -4,8 +4,8 @@ import { db } from "./db"
 import { logger } from "./logger"
 
 /**
- * Accounts deleted or suspended recently enough that a signed access token
- * for them could still exist, and accounts whose phones were signed out
+ * Accounts deleted, suspended or locked as known to be under 18 recently
+ * enough that a signed access token for them could still exist, and accounts whose phones were signed out
  * (`mobile_sessions_revoked_at`: Settings, a password change or reset —
  * SCRUM-603), whose tokens from before that moment are refused. See
  * `accountBlockReason` in lib/mobile-auth.ts for why this is the one database
@@ -34,7 +34,7 @@ const BLOCKLIST_LOOKBACK_MS = 20 * 60 * 1000 // an access token's life, plus a m
  * so a refresh that started before the action committed cannot drop it.
  */
 interface BlocklistState {
-  /** From the database: deleted or suspended in the lookback. */
+  /** From the database: deleted, suspended or locked under 18 in the lookback. */
   blocked: Set<string>
   /** From the database: userId → when its phones were signed out, in ms. */
   phonesEndedAt: Map<string, number>
@@ -57,11 +57,49 @@ const state: BlocklistState = (shared.__blendnBlocklist ??= {
 async function refreshBlocklist(): Promise<void> {
   const since = new Date(Date.now() - BLOCKLIST_LOOKBACK_MS)
   const rows = await db.user.findMany({
-    where: { OR: [{ deletedAt: { gte: since } }, { suspended_at: { gte: since } }, { mobile_sessions_revoked_at: { gte: since } }] },
-    select: { id: true, deletedAt: true, suspended_at: true, mobile_sessions_revoked_at: true },
+    where: {
+      OR: [
+        { deletedAt: { gte: since } },
+        { suspended_at: { gte: since } },
+        { mobile_sessions_revoked_at: { gte: since } },
+        // Locked as known to be under 18 (`accountBlockReason`).
+        { profile: { is: { under_18_since: { gte: since } } } },
+      ],
+    },
+    select: {
+      id: true,
+      deletedAt: true,
+      suspended_at: true,
+      mobile_sessions_revoked_at: true,
+      profile: { select: { under_18_since: true } },
+    },
   })
-  const recent = (at: Date | null) => at !== null && at >= since
-  state.blocked = new Set(rows.filter((r) => recent(r.deletedAt) || recent(r.suspended_at)).map((r) => r.id))
+  const recent = (at: Date | null | undefined) => at != null && at >= since
+  const blocked = new Set(
+    rows.filter((r) => recent(r.deletedAt) || recent(r.suspended_at) || recent(r.profile?.under_18_since)).map((r) => r.id)
+  )
+  const newly = [...blocked].filter((id) => !state.blocked.has(id))
+  state.blocked = blocked
+  /*
+   * A socket opened before the account was blocked stays connected until it
+   * drops: the handshake refuses only the next one. A route in this process
+   * evicts at once; this closes the ones a decision made elsewhere left open
+   * (a script's stamp or erasure), once per account, the first time this
+   * process reads it. The server's `io` from `globalThis`, as
+   * `evictUserSockets` reads it: importing lib/socket-server.ts would load the
+   * whole socket stack under this module, which a dashboard action imports.
+   */
+  for (const id of newly) {
+    try {
+      globalThis.__blendnSocketIo?.in(`user:${id}`).disconnectSockets(true)
+    } catch (error) {
+      // Its tokens are still refused and its next handshake too; the socket already open is what this names.
+      logger.error("Could not close a blocked account's sockets", {
+        userId: id,
+        error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+      })
+    }
+  }
   state.phonesEndedAt = new Map(
     rows.filter((r) => recent(r.mobile_sessions_revoked_at)).map((r) => [r.id, r.mobile_sessions_revoked_at!.getTime()])
   )

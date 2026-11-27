@@ -9,6 +9,7 @@ import {
   ConversationClosedError,
 } from "@/lib/conversations"
 import { db } from "@/lib/db"
+import { REACHABLE } from "@/lib/room-people"
 import { lockPair, pairIsLinked } from "@/lib/friends"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { notifyBoardRequestAccepted } from "@/lib/push-notifications"
@@ -109,8 +110,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (!validation.success) return validationErrorResponse(validation.error)
     const { action, namesOnAccept } = validation.data
 
-    const boardRequest = await db.board_requests.findUnique({
-      where: { id: requestId },
+    // Accepting seats the asker with the author: from somebody who cannot be reached (`REACHABLE`), there is no ask.
+    const boardRequest = await db.board_requests.findFirst({
+      where: { id: requestId, ...(action === "accept" && { from: REACHABLE }) },
       select: {
         id: true,
         status: true,
