@@ -15,7 +15,7 @@ import { eraseChatMedia, retainedChatMediaKeys, retainedProfilePhotoKeys } from 
 import { promoteFromWaitlist } from "@/lib/waitlist"
 import { performCheckout } from "@/lib/checkout"
 import { revokeAppleAuthorization } from "@/lib/apple-revoke"
-import { auditLog } from "@/lib/audit-log"
+import { auditInTx } from "@/lib/audit-log"
 
 export interface EraseAccountOptions {
   /** The address recorded on the Apple revoke's audit row. */
@@ -725,5 +725,11 @@ async function revokeAppleAfterErasure(userId: string, linkedSubs: ReadonlySet<s
   const details = { ...result }
   if (result.outcome === "revoked") logger.info("Account deletion: Sign in with Apple grant revoked", { userId })
   else logger.warn("Account deletion: Sign in with Apple grant NOT revoked", { userId, ...details })
-  auditLog({ userId, action: "account.apple_revoke", resource: "user", resourceId: userId, details, ipAddress })
+  // Awaited, so the row is written by the time the deferred work resolves: a script awaits it, then closes the pool.
+  await auditInTx(db, { userId, action: "account.apple_revoke", resource: "user", resourceId: userId, details, ipAddress }).catch((error) =>
+    logger.error("Account deletion: Apple revoke audit row not written", {
+      userId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  )
 }

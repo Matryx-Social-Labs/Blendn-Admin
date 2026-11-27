@@ -171,29 +171,61 @@ describe("deleting the accounts due", () => {
     expect(await dueForDeletion(db, now)).not.toContain(due)
   })
 
-  it("awaits each erasure's deferred work, and stops at the first failure naming the id", async () => {
+  it("an Apple-linked account's revoke is recorded by the time the run returns (no code in a script: not revoked)", async () => {
     const now = new Date()
-    await person("u18-fail-a", { age: 16, under_18_since: new Date(now.getTime() - 20 * DAY_MS) })
-    await person("u18-fail-b", { age: 16, under_18_since: new Date(now.getTime() - 20 * DAY_MS) })
+    const id = await person("u18-apple", { age: 16, under_18_since: new Date(now.getTime() - 15 * DAY_MS) })
+    await db.user_oauth_accounts.create({ data: { user_id: id, provider: "apple", provider_id: `apple-${id}` } })
+
+    expect(await deleteDue(db, now)).toContain(id)
+    const audit = await db.audit_logs.findFirst({ where: { resource_id: id, action: "account.apple_revoke" } })
+    expect(audit?.details).toMatchObject({ outcome: "skipped", reason: "no_code" })
+  })
+
+  it("erases oldest stamp first, skips a deleted account, awaits each one's deferred work, and stops at the first failure with the count", async () => {
+    const now = new Date()
+    const older = await person("u18-order-old", { age: 16, under_18_since: new Date(now.getTime() - 30 * DAY_MS) })
+    const newer = await person("u18-order-new", { age: 16, under_18_since: new Date(now.getTime() - 20 * DAY_MS) })
+    const gone = await person("u18-order-gone", { age: 16, under_18_since: new Date(now.getTime() - 40 * DAY_MS) })
+    await db.user.update({ where: { id: gone }, data: { deletedAt: now } })
     const calls: string[] = []
     let deferredDone = false
+    let deferredDoneWhenNewerStarted: boolean | null = null
     const erase = async (id: string, { defer }: EraseAccountOptions) => {
       calls.push(id)
-      if (calls.length === 1) {
+      if (id === newer) {
+        deferredDoneWhenNewerStarted = deferredDone
+        throw new Error("database down")
+      }
+      if (id === older) {
         defer(async () => {
           await new Promise((resolve) => setTimeout(resolve, 10))
           deferredDone = true
         })
-        return
       }
-      throw new Error("database down")
     }
 
     const failure = deleteDue(db, now, erase)
     await expect(failure).rejects.toThrow("database down")
-    // The first erasure's deferred work finished before the next began; nothing after the failure ran.
-    expect(deferredDone).toBe(true)
-    expect(calls).toHaveLength(2)
-    await expect(failure).rejects.toThrow(calls[1])
+    expect(calls).not.toContain(gone)
+    expect(calls.indexOf(older)).toBeLessThan(calls.indexOf(newer))
+    expect(deferredDoneWhenNewerStarted).toBe(true)
+    // Nothing after the failure ran, and the message says how far the run got.
+    expect(calls[calls.length - 1]).toBe(newer)
+    await expect(failure).rejects.toThrow(`Erasing ${newer} failed (${calls.length - 1} erased before it)`)
+  })
+
+  it("stops when an erasure's deferred work fails, naming that id", async () => {
+    const now = new Date()
+    const id = await person("u18-defer-fails", { age: 16, under_18_since: new Date(now.getTime() - 50 * DAY_MS) })
+    const calls: string[] = []
+    const erase = async (each: string, { defer }: EraseAccountOptions) => {
+      calls.push(each)
+      defer(async () => {
+        throw new Error("revoke failed")
+      })
+    }
+
+    await expect(deleteDue(db, now, erase)).rejects.toThrow(`Erasing ${id} failed (0 erased before it): revoke failed`)
+    expect(calls).toEqual([id])
   })
 })
