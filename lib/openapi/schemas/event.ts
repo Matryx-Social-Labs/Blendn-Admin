@@ -116,11 +116,7 @@ export const RsvpRequestSchema = z
 export const AnnounceRequestSchema = z
   .object({
     content: z.string().max(1000),
-    /**
-     * `announcement` (the host, `canEdit`) or `system` (an `app_admin`).
-     * Defaults to `announcement`, matching the route's own fallback for an
-     * unrecognised value; `sponsored` is refused with a 400 (SCRUM-1070).
-     */
+    // Defaults like the route, which reads an unrecognised value as an announcement (SCRUM-1070).
     kind: z
       .enum(["announcement", "system"])
       .default("announcement")

@@ -224,7 +224,6 @@ export async function POST(
          * argument this route already makes about attendee media forty lines up.
          */
         userImage: undefined,
-        // No media: refused above, and nothing here could store it.
         createdAt: chatMsg.created_at.toISOString(),
       }, [], eventId)
     }
