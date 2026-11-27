@@ -16,6 +16,7 @@ import {
   ringSelfIntersects,
   type Geofence,
 } from "@/lib/geofence"
+import { MAP_CREDIT } from "@/lib/map-credit"
 
 /**
  * Drawing a check-in area.
@@ -209,14 +210,12 @@ export function GeofenceEditor({
       map.setView(centre, wide ? 16 : 18)
 
       // The one base map. The Satellite layer was Esri World Imagery with no
-      // key, outside Esri's terms, and went with SCRUM-1147. OSM's tile policy
-      // asks for a credit that links to the copyright page; a new tab, because
-      // the map sits inside an unsaved form.
-      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution:
-          '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" aria-label="OpenStreetMap copyright (opens in a new tab)">OpenStreetMap</a> contributors',
-      }).addTo(map)
+      // key, outside Esri's terms, and went with SCRUM-1147. The credit names
+      // the tiles' maker and the outlines' (lib/map-credit.ts). Leaflet's own
+      // prefix is no licence's ask, and without it the line stays one line
+      // beside the legend on a 340 px map (SCRUM-1317).
+      map.attributionControl.setPrefix(false)
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: MAP_CREDIT }).addTo(map)
       layerRef.current = L.layerGroup().addTo(map)
 
       map.on("click", (e) => {

@@ -1,6 +1,8 @@
 import { readFileSync, readdirSync } from "fs"
 import { join } from "path"
 
+import { MAP_CREDIT } from "../lib/map-credit"
+
 /**
  * Every map in the dashboard draws licensed tiles and credits them (SCRUM-1147).
  *
@@ -25,7 +27,6 @@ function sources(dir: string): string[] {
     .map((e) => join(e.parentPath, e.name))
 }
 
-// Read, not imported: lib/map-credit.ts missing is a failed expectation here, not a crashed suite.
 const read = (path: string) => readFileSync(join(ROOT, path), "utf8")
 
 const files = ["app", "components", "lib"].flatMap(sources).map((path) => ({
@@ -47,7 +48,6 @@ describe("map tiles and their credits", () => {
   })
 
   it("credits Overture Maps Foundation on the editor's map, linked to its attribution page, beside OpenStreetMap", () => {
-    const { MAP_CREDIT } = require("../lib/map-credit") as { MAP_CREDIT: string }
     expect(MAP_CREDIT.replace(/<[^>]+>/g, "")).toBe("© OpenStreetMap contributors, Overture Maps Foundation")
     const attr = (tag: string, name: string) => tag.match(new RegExp(`\\s${name}="([^"]*)"`))?.[1]
     const links = [...MAP_CREDIT.matchAll(/(<a\s[^>]*>)([^<]*)<\/a>/g)].map(([, tag, text]) => ({

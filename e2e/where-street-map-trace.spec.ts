@@ -14,6 +14,10 @@ import { PrismaPg } from "@prisma/adapter-pg"
  * the street map, the draft saved, and the row read back. The screenshots at
  * 1280 and 768 are kept as a CI artefact (test-results/screens), where the
  * toggle's corner and the longer credit beside the legend are looked at.
+ *
+ * The credit also names Overture Maps Foundation, whose buildings may be the
+ * outline drawn (SCRUM-1317), with no Leaflet prefix, so the line stays one
+ * line clear of the legend down to a phone (390).
  */
 test.use({ storageState: "e2e/.auth/organizer.json" })
 test.skip(!process.env.GEOCODE_UPSTREAM, "needs the OSM stub (GEOCODE_UPSTREAM) — never the real Nominatim")
@@ -41,6 +45,8 @@ async function expectLegendClearOfCredit(page: Page) {
   const legend = await page.getByText(/^GPS allowance/).locator("xpath=ancestor::div[1]").boundingBox()
   const credit = await page.locator(".leaflet-control-attribution").boundingBox()
   expect(legend!.y + legend!.height <= credit!.y || legend!.x + legend!.width <= credit!.x).toBe(true)
+  // One line (12 px at 1.4): a wrapped credit grows upward into the legend's row.
+  expect(credit!.height).toBeLessThan(12 * 1.4 * 2)
 }
 
 async function shoot(page: Page, name: string) {
@@ -74,8 +80,15 @@ test("an outline traced by hand on the street map is saved; no Esri tile loads; 
   await expect.soft(page.getByRole("button", { name: "Satellite" })).toHaveCount(0)
   await expect.soft(map.locator("..").locator("[aria-pressed]")).toHaveCount(0)
   const credit = page.locator(".leaflet-control-attribution")
-  await expect.soft(credit).toContainText("OpenStreetMap contributors")
+  await expect.soft(credit).toHaveText("© OpenStreetMap contributors, Overture Maps Foundation")
   await expect.soft(credit.locator('a[href="https://www.openstreetmap.org/copyright"]')).toHaveText("OpenStreetMap")
+  const overture = credit.locator('a[href="https://docs.overturemaps.org/attribution/"]')
+  await expect.soft(overture).toHaveText("Overture Maps Foundation")
+  await expect.soft(overture).toHaveAttribute("target", "_blank")
+  // Reachable by keyboard: focus lands on it and the ring is drawn (globals.css).
+  await overture.focus()
+  await expect.soft(overture).toBeFocused()
+  await overture.blur()
 
   // Trace by hand: four corners, then close on the first.
   await page.getByRole("button", { name: "Adjust area" }).click()
@@ -99,6 +112,15 @@ test("an outline traced by hand on the street map is saved; no Esri tile loads; 
   await expect.soft(credit.locator('a[href="https://www.openstreetmap.org/copyright"]')).toBeVisible()
   await expectLegendClearOfCredit(page)
   await shoot(page, "trace-768-closed")
+  await credit.locator('a[href="https://docs.overturemaps.org/attribution/"]').focus()
+  await shoot(page, "trace-768-credit-focus")
+
+  // A phone: the narrowest map the staging proof is owed at.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect.soft(credit.locator('a[href="https://docs.overturemaps.org/attribution/"]')).toBeVisible()
+  await expectLegendClearOfCredit(page)
+  await shoot(page, "trace-390-closed")
+  await page.setViewportSize({ width: 1280, height: 900 })
 
   await page.getByLabel("Title").fill(TITLE)
   await page.getByLabel("Description").fill("Saved by e2e/where-street-map-trace.spec.ts.")
