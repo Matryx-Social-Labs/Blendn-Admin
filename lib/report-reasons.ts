@@ -1,8 +1,9 @@
 /**
  * Every report reason, in one list (D-027, D-032).
  *
- * `severity` orders the staff queue (S1 first). `urgent` means a person should
- * see the report at once, day or night: the four reasons the register names.
+ * `severity` is the order a reviewer takes reports in (S1 first). `urgent`
+ * marks the four reasons D-032 names: an intimate image shared without consent,
+ * impersonation, somebody under 18, and child safety.
  *
  * The routes store a report's `reason` as the app sent it, so a free string from
  * an older app keeps its words; `reportReason` reads any stored value as one of

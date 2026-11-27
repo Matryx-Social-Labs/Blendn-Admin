@@ -4487,6 +4487,31 @@ Requires `OPENAI_API_KEY` env var: Railway production refuses to boot without it
 | POST | `/events/:eventId/board/:postId/report` | `message_reports` with `message_type: "board_post"` — shown as "Lobby · offer\|seeking\|chat" |
 | POST | `/board/requests/:requestId/report` | `message_reports` with `message_type: "board_request"` — shown as "Lobby ask" |
 
+**Reasons** (`reason`, at most 200 characters) are one list, `lib/report-reasons.ts`,
+each with a severity (S1 first) and an urgent flag. The OpenAPI spec prints it.
+Any other string is still accepted: it is stored as written and read as `other`,
+so an older app's free text keeps working and keeps its words.
+
+| Severity | Reasons |
+|---|---|
+| S1, urgent | `child_safety`, `intimate_image`, `under_18`, `impersonation` |
+| S1 | `threat`, `unsafe` |
+| S2 | `harassment`, `hate_speech`, `pile_on`, `inappropriate_content`, `inappropriate_messages`, `inappropriate_photos`, `offensive`, `fake_profile`, `host_conduct`, `organiser_conduct`, `unsafe_venue` |
+| S3 | `spam`, `contact_details`, `misleading`, `misleading_listing`, `not_real`, `other` |
+
+The crew, offer and Lobby report routes keep their own shorter enums, all from
+this list.
+
+**What a report keeps of the words**, copied when it is filed, in `excerpt`: a
+message report (room or DM, and Unmatch/Block and report with a `messageId`) the
+message itself; a person report the person's last 20 lines (500 characters
+each) in the room or conversation it came from: named by a room's or a
+conversation's handle, from a crew's or Blend's room, or from Unmatch/Block and
+report without a message. A raw id names no place and keeps none. Only from a
+room the reporter is in. The copy is for staff review: no mobile response and
+no data export carries it. A dismissed report loses it at 180 days
+(`docs/RETENTION.md`).
+
 ### The Lobby
 
 The routes keep their `/board` paths so installed builds keep working; the

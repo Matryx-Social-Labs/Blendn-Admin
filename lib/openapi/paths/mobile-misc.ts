@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, ListPaginationSchema, ListQuerySchema, PageOrCursorQuerySchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, ListPaginationSchema, ListQuerySchema, PageOrCursorQuerySchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth, ROOM_BAN_GATE, ReportReasonSchema } from "@/lib/openapi/schemas/common"
 import {
   UserPublicProfileSchema,
   UserFavoritesResponseSchema,
@@ -1237,7 +1237,7 @@ registry.registerPath({
         "application/json": {
           schema: z.object({
             messageType: z.enum(["group", "private"]),
-            reason: z.string().min(1).max(200),
+            reason: ReportReasonSchema,
             description: z.string().max(2000).optional(),
           }),
         },
@@ -1263,7 +1263,7 @@ registry.registerPath({
       content: {
         "application/json": {
           schema: z.object({
-            reason: z.string().min(1).max(200),
+            reason: ReportReasonSchema,
             description: z.string().max(2000).optional(),
           }),
         },
@@ -1292,7 +1292,7 @@ registry.registerPath({
       content: {
         "application/json": {
           schema: z.object({
-            reason: z.string().min(1).max(200),
+            reason: ReportReasonSchema,
             description: z.string().max(2000).optional(),
           }),
         },
