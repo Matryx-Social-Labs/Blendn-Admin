@@ -106,7 +106,9 @@ describe("every group-chat surface consults blocked_users", () => {
     // through `emitEventCheckIn`; the emitter reads who the arriver is hidden from (`viewersHiddenFromMany`:
     // blocks either way, closed pairs, reports, friends — SCRUM-1386) and the helper reads the blocks.
     expect(read("lib/check-in-core.ts")).toContain("emitEventCheckIn(")
-    expect(read("lib/socket-server.ts")).toMatch(/viewersHiddenFromMany\(\[userId\]\)/)
+    // Through `hiddenFromOrNull`, which fails closed when the set cannot be read.
+    expect(read("lib/socket-server.ts")).toMatch(/hiddenFromOrNull\(\[userId\], eventId\)/)
+    expect(read("lib/socket-server.ts")).toMatch(/return viewersHiddenFromMany\(userIds\)\.catch\(/)
     expect(read("lib/room-people.ts")).toMatch(/viewersHiddenFromMany[\s\S]*blockCounterpartiesMany\(ids\)/)
   })
 })
