@@ -10,6 +10,7 @@ import { emailDomain } from "@/lib/org-invites"
 import { canonicalEmail, sendEmail, passwordResetEmail, emailConfigured } from "@/lib/email"
 import { issuePasswordResetLink } from "@/lib/password-reset"
 import { readJson } from "@/lib/api-input"
+import { adminSsoRequired } from "@/lib/env"
 
 /**
  * Request a password reset.
@@ -109,6 +110,8 @@ export async function POST(req: NextRequest) {
      * revokes `mobile_refresh_tokens` when the password changes.
      */
     if (!user || user.deletedAt) return padded(started, ok)
+    // An admin signs in with Google once ADMIN_SSO_REQUIRED is on, so no reset mail is theirs; answered as above.
+    if (user.role === "app_admin" && adminSsoRequired()) return padded(started, ok)
 
     // Outstanding tokens for this user are spent. Otherwise requesting a second
     // link leaves the first one live, and the older mail is the one more likely

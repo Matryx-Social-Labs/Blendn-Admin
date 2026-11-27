@@ -33,7 +33,7 @@ describe("the policy pages are public", () => {
   })
 
   it("the sign-in page links every one", () => {
-    expect(readFileSync(path.join(root, "app/login/page.tsx"), "utf8")).toMatch(/POLICY_LINKS\.map/)
+    expect(readFileSync(path.join(root, "app/login/sign-in-form.tsx"), "utf8")).toMatch(/POLICY_LINKS\.map/)
   })
 })
 
