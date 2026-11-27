@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ListPaginationSchema, ListQuerySchema, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
+import { ListPaginationSchema, ListQuerySchema, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth, ReportReasonSchema } from "@/lib/openapi/schemas/common"
 import {
   CreateConversationRequestSchema,
   SendDMRequestSchema,
@@ -127,7 +127,7 @@ registry.registerPath({
             action: z.enum(["unmatch", "block"]).default("unmatch"),
             report: z
               .object({
-                reason: z.string().min(1).max(200),
+                reason: ReportReasonSchema,
                 description: z.string().max(2000).optional(),
                 messageId: z.string().uuid().optional(),
               })

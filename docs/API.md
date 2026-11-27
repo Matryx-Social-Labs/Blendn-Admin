@@ -88,6 +88,15 @@ the response is the lowercase form. A second signup in another case gets the
 same **409** as any taken address. `signin`, Google, Apple, the dashboard and
 password reset all lowercase what they are given too (SCRUM-328).
 
+**One inbox, one account, and a suspended person cannot sign up again**
+(SCRUM-1172). An address is compared as one inbox: lower case, without a
+`+tag`, and for Gmail without dots (`googlemail.com` is `gmail.com`), by the
+SQL function `identity_email`. One that any account already holds gets the
+same **409** `CONFLICT` "Email already registered" as the exact address, and no
+account is written, whoever holds it. Google and Apple, which prove the inbox,
+answer a new account for an inbox a suspended account holds with the suspended
+**403** below.
+
 **Password rules.** At least **12 characters**, and rejected if it is an obvious
 choice (`password1234` is twelve characters and fails) or built from the local
 part of the address. This is `checkPassword` in `lib/password.ts`, the same
@@ -148,7 +157,9 @@ failure: a silent refusal to sign in is indistinguishable from a bug.
 ```
 
 On `signin` it is checked **after** the password, so the response cannot be used
-to discover which addresses are suspended.
+to discover which addresses are suspended. `google` and `apple` also answer it
+when they would create an account for the same inbox as a suspended one (see
+`POST /auth/signup`).
 
 On `refresh` it is answered even for the token the suspension **revoked** — which
 is every live token, since suspending revokes them all. A token we signed, not
@@ -4552,6 +4563,31 @@ Requires `OPENAI_API_KEY` env var: Railway production refuses to boot without it
 | POST | `/chat/groups/:chatGroupId/report` | `event_reports` with `chat_group_id` — shown as "Room" |
 | POST | `/events/:eventId/board/:postId/report` | `message_reports` with `message_type: "board_post"` — shown as "Lobby · offer\|seeking\|chat" |
 | POST | `/board/requests/:requestId/report` | `message_reports` with `message_type: "board_request"` — shown as "Lobby ask" |
+
+**Reasons** (`reason`, at most 200 characters) are one list, `lib/report-reasons.ts`,
+each with a severity (S1 first) and an urgent flag. The OpenAPI spec prints it.
+Any other string is still accepted: it is stored as written and read as `other`,
+so an older app's free text keeps working and keeps its words.
+
+| Severity | Reasons |
+|---|---|
+| S1, urgent | `child_safety`, `intimate_image`, `under_18`, `impersonation` |
+| S1 | `threat`, `unsafe` |
+| S2 | `harassment`, `hate_speech`, `pile_on`, `inappropriate_content`, `inappropriate_messages`, `inappropriate_photos`, `offensive`, `fake_profile`, `host_conduct`, `organiser_conduct`, `unsafe_venue` |
+| S3 | `spam`, `contact_details`, `misleading`, `misleading_listing`, `not_real`, `other` |
+
+The crew, offer and Lobby report routes keep their own shorter enums, all from
+this list.
+
+**What a report keeps of the words**, copied when it is filed, in `excerpt`: a
+message report (room or DM, and Unmatch/Block and report with a `messageId`) the
+message itself; a person report the person's last 20 lines (500 characters
+each) in the room or conversation it came from: named by a room's or a
+conversation's handle, from a crew's or Blend's room, or from Unmatch/Block and
+report without a message. Copied only from a room or conversation the reporter
+is in. The copy is for staff review: no mobile response and
+no data export carries it. A dismissed report loses it at 180 days
+(`docs/RETENTION.md`).
 
 ### The Lobby
 

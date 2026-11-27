@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
+import { REPORT_REASONS } from "@/lib/report-reasons"
 
 // Standard success response wrapper
 export const SuccessResponseSchema = z
@@ -265,6 +266,17 @@ export const RoomLensSchema = z
     question: z.string().nullable().describe("Tonight's question, in plain English. Null: this lens asks nothing (a venue night)."),
   })
   .openapi("RoomLens")
+
+/** A report's `reason`: one of the list in `lib/report-reasons.ts`; any other string is filed as written and read as `other`. */
+export const ReportReasonSchema = z
+  .string()
+  .min(1)
+  .max(200)
+  .describe(
+    `One of: ${Object.entries(REPORT_REASONS)
+      .map(([value, r]) => `\`${value}\` (${r.severity}${r.urgent ? ", urgent" : ""})`)
+      .join(", ")}. Any other string is accepted, stored as written and read as \`other\`.`
+  )
 
 /**
  * What a room row says about somebody before a reveal (D-030, SCRUM-1384; `roomPersonFacts` in lib/room-person-facts.ts).
