@@ -5,6 +5,7 @@ import { eventAccessResponse, participationRefusal } from "@/lib/event-access"
 import { areFriends, holdingPair, matchSelect } from "@/lib/friends"
 import { userIdFromRefIfIdentified } from "@/lib/identity"
 import { db } from "@/lib/db"
+import { REACHABLE } from "@/lib/room-people"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -39,8 +40,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // As `GET /friends/:id`: a handle only for a friend you can recognise.
     const userId = await userIdFromRefIfIdentified(me, (await params).userId)
     // A block severs the friendship, so the second check is belt and braces
-    // for a request racing the block.
-    if (!(await areFriends(me, userId)) || (await blockedEitherWay(me, userId))) {
+    // for a request racing the block. A friend who cannot be reached is nobody.
+    const reachable = await db.user.findFirst({ where: { id: userId, ...REACHABLE }, select: { id: true } })
+    if (!reachable || !(await areFriends(me, userId)) || (await blockedEitherWay(me, userId))) {
       return notFoundResponse("Not found")
     }
 

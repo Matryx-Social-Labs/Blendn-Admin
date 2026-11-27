@@ -8,7 +8,7 @@ import { sendPushNotification } from "@/lib/push-notifications"
 import { UNNAMED, cameFromMatch, holdingPair, matchSelect } from "@/lib/conversation-identity"
 import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
 import { notifyFriendshipChanged } from "@/lib/room-friends"
-import { recordEndedFriendship } from "@/lib/room-people"
+import { REACHABLE, recordEndedFriendship } from "@/lib/room-people"
 
 // They live in lib/conversation-identity.ts now: the socket server reaches lib/identity.ts, which may not import this file.
 export { holdingPair, matchSelect }
@@ -228,7 +228,7 @@ type PairReader = Pick<Prisma.TransactionClient, "user" | "blocked_users" | "pri
 async function readPair(client: PairReader, askerId: string, otherId: string) {
   const [user1_id, user2_id] = conversationPair(askerId, otherId)
   const [other, blocked, conversation] = await Promise.all([
-    client.user.findUnique({ where: { id: otherId, deletedAt: null }, select: { id: true } }),
+    client.user.findFirst({ where: { id: otherId, ...REACHABLE }, select: { id: true } }),
     client.blocked_users.findFirst({
       where: {
         OR: [
@@ -271,7 +271,7 @@ export async function connectablePairs(client: PairReader, pairs: readonly (read
   if (pairs.length === 0) return new Set()
   const people = [...new Set(pairs.flat())]
   const [dead, blocks, conversations] = await Promise.all([
-    client.user.findMany({ where: { id: { in: people }, deletedAt: { not: null } }, select: { id: true } }),
+    client.user.findMany({ where: { id: { in: people }, NOT: REACHABLE }, select: { id: true } }),
     client.blocked_users.findMany({
       where: { OR: pairs.map(([a, b]) => ({ OR: [{ blocker_id: a, blocked_id: b }, { blocker_id: b, blocked_id: a }] })) },
       select: { blocker_id: true, blocked_id: true },

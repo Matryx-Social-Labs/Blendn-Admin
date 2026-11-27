@@ -5,7 +5,7 @@ import { z } from "zod"
 import { ALREADY_ASKED, boardRefusal, lobbyState, lobbyStateRefusal } from "@/lib/board"
 import { asTheAskerSees, boardWriteDenial, checkBoardText } from "@/lib/board-access"
 import { lockPair, pairIsLinked } from "@/lib/friends"
-import { knownToEachOther } from "@/lib/room-people"
+import { knownToEachOther, REACHABLE } from "@/lib/room-people"
 import { BOARD } from "@/lib/constants"
 import { hidesTickets } from "@/lib/lobby"
 import { blockCounterparties } from "@/lib/conversations"
@@ -94,7 +94,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     const post = await db.board_posts.findFirst({
-      where: { id: postId, event_id: eventId, deleted_at: null },
+      // An author who cannot be reached (`REACHABLE`) has no post to ask.
+      where: { id: postId, event_id: eventId, deleted_at: null, author: REACHABLE },
       select: { id: true, author_id: true, kind: true, sub_kind: true, spaces_left: true },
     })
     // A ticket post on a native-ticket event is not in anybody's Lobby (owner decision 5).

@@ -4358,6 +4358,13 @@ Five consequences worth knowing about:
   and its handshake refused. A correction lets the account straight back in.
   Without a stamp, a derived age under 18 is refused at each of the routes
   above, as here.
+- **Nobody starts contact with an account that cannot take part**: deleted,
+  suspended, or stamped as known to be under 18 (`REACHABLE`,
+  `lib/room-people.ts`). `POST /conversations`, `POST /message-requests`,
+  accepting a message request or a Lobby ask from one, a friend request (by
+  match or invite link), opening a friend's DM, a wave, a like, a crew invite,
+  a crew's like of a person and asking a Lobby post's author each answer such
+  an account exactly as they answer an id nobody has, and write nothing.
 - **Check-in filters rather than refuses.** A profile written before this rule
   can still carry `dating`; copying it onto a check-in row drops it silently,
   because nobody should be kept out of a room over a stale profile field.

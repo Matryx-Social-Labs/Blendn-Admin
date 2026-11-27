@@ -31,6 +31,19 @@ import { db } from "./db"
  */
 export const LISTED_IN_ROSTER = { OR: [{ profile: { is: null } }, { profile: { show_online: true } }] } satisfies Prisma.UserWhereInput
 
+/**
+ * Somebody another person may start contact with: not deleted, not suspended,
+ * and not locked as known to be under 18 (`accountBlockReason`). A `user`
+ * filter for the lookup of the other person in every route that starts
+ * contact, so each answers such an account exactly as it answers an id nobody
+ * has. `NOT … is`, so a missing profile row reads as no stamp.
+ */
+export const REACHABLE = {
+  deletedAt: null,
+  suspended_at: null,
+  NOT: { profile: { is: { under_18_since: { not: null } } } },
+} satisfies Prisma.UserWhereInput
+
 type FriendReader = Pick<Prisma.TransactionClient, "friendships" | "ended_friendships">
 
 /** How long an ended friendship keeps the pair apart: the longest a room stays open (D17). */
