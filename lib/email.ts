@@ -260,7 +260,7 @@ export async function sendEmail(opts: {
       }
       const detail = await res.text().catch(() => "")
       if (last || !retryable(res.status)) {
-        logger.error("Email send failed", { status: res.status, attempt, detail: detail.slice(0, 300).replace(/[^\s"'<>@]+@[^\s"'<>]+/g, "[address]") })
+        logger.error("Email send failed", { status: res.status, attempt, detail: detail.replace(/[^\s"'<>@]+@[^\s"'<>]+/g, "[address]").slice(0, 300) })
         return { sent: false, reason: "provider_error", detail: `HTTP ${res.status}` }
       }
     } catch (err) {

@@ -705,9 +705,10 @@ quote what a line says, never paste lines into a ticket, a chat or a reply.
 email address, a phone number or a limiter's network: a limiter key is logged
 as its leading words and a 12-character sha256 of the rest
 (`rl:auth:dashboard-signin:acct:3f9a0c…`), the same for the same key so lines
-still match. That is a pseudonym, not anonymity: anyone who has the address can
-compute it. A mail line names the recipient's domain only. What a line can
-still hold:
+still match; ids in a key are inside the hash too. That is a pseudonym, not
+anonymity: anyone who has the address can compute it, and a network (an IPv4
+address has 2^32 values) can be found by trying them all. A mail line names the
+recipient's domain only. What a line can still hold:
 
 - user, event, venue and other internal ids;
 - the IP of an `app_admin`'s dashboard sign-in ("Admin dashboard sign-in"),
@@ -717,7 +718,8 @@ still hold:
 - the moderation list words that matched a sign-in name ("Sign-in name
   refused" / "flagged for review"), kept: that line has no user id. A user-text
   line beside a user id says `matchedCount`; the words are in the audit row;
-- a profile photo's object key on a failed check, never its URL;
+- a profile photo's object key on a failed check, in place of its URL (the
+  error message beside it is the vendor's, and could quote the URL);
 - residual: a vendor's or Prisma's `error.message` as it comes (Resend's body
   has addresses replaced with `[address]`, others are not filtered), and the
   boot-time `console` errors in `server.ts`, which print a whole error and its
