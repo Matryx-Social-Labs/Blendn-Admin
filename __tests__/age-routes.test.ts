@@ -588,7 +588,7 @@ describe("GET /profiles/:userId — the date never leaves the server", () => {
     expect(body.data.profile.age).toBe(19)
   })
 
-  it("withholds it from a stranger too, and still derives the age", async () => {
+  it("withholds it from a stranger too, and the age with it (D-030)", async () => {
     mockAuth.mockResolvedValue({ userId: "99999999-9999-9999-9999-999999999999", email: "x@y.com" })
     mockDb.user.findUnique.mockResolvedValue({
       id: USER,
@@ -602,7 +602,9 @@ describe("GET /profiles/:userId — the date never leaves the server", () => {
     const res = await getProfile(profileGetReq(), { params: Promise.resolve({ userId: USER }) })
     const body = await res.json()
     expect(body.data.profile).not.toHaveProperty("date_of_birth")
-    expect(body.data.profile.age).toBe(19)
+    // Somebody this id does not name: no age, no band, no chip, no join date (a raw id has no room to count over).
+    expect(body.data.profile).toMatchObject({ age: null, location: null, ageBand: null, tenure: null })
+    expect(body.data).not.toHaveProperty("createdAt")
   })
 })
 

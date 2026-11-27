@@ -33,6 +33,23 @@ const events: string[] = []
 const orgs: string[] = []
 
 /**
+ * A host: a member of an organisation of their kind, which is what the dashboard is (SCRUM-1247). A venue owner's is
+ * one approved as such: these fixtures name their venues on the event rather than owning any.
+ */
+async function host(label: string, kind: "organizer" | "venue_owner" = "organizer") {
+  const id = await makeUser(label, "organizer")
+  const org = await db.organisations.create({ data: { display_name: testId(label), kind: "company", status: "verified" } })
+  orgs.push(org.id)
+  await db.organisation_members.create({ data: { org_id: org.id, user_id: id, role: "owner" } })
+  if (kind === "venue_owner") {
+    await db.organiser_onboarding_requests.create({
+      data: { org_id: org.id, display_name: testId(label), contact_name: "V", contact_email: `${testId(label)}@itest.invalid`, requested_role: "venue_owner", status: "approved" },
+    })
+  }
+  return id
+}
+
+/**
  * The organizer's home organisation, made once if they have none: an event is
  * its organisation's, and the overview reads organisations, never who created
  * the row (SCRUM-1250).
@@ -91,13 +108,15 @@ async function makeScheduledEvent(
 
 afterAll(async () => {
   await cleanup(users, events)
+  await db.organisation_members.deleteMany({ where: { org_id: { in: orgs } } })
+  await db.organiser_onboarding_requests.deleteMany({ where: { org_id: { in: orgs } } })
   await db.organisations.deleteMany({ where: { id: { in: orgs } } })
   await closeDb()
 })
 
 describe("organiser overview", () => {
   it("leads with the next event and its commitment against capacity", async () => {
-    const owner = await makeUser("ovw_owner", "organizer")
+    const owner = await host("ovw_owner")
     users.push(owner)
 
     const soon = await makeScheduledEvent(owner, { startsInDays: 4, capacity: 10 })
@@ -133,7 +152,7 @@ describe("organiser overview", () => {
   })
 
   it("leaves fill undefined rather than zero when no capacity is set", async () => {
-    const owner = await makeUser("ovw_nocap", "organizer")
+    const owner = await host("ovw_nocap")
     users.push(owner)
     const event = await makeScheduledEvent(owner, { startsInDays: 6, capacity: null })
     const attendee = await makeUser("ovw_nc1")
@@ -151,7 +170,7 @@ describe("organiser overview", () => {
   })
 
   it("builds a cumulative pacing curve that never decreases", async () => {
-    const owner = await makeUser("ovw_pace", "organizer")
+    const owner = await host("ovw_pace")
     users.push(owner)
     const event = await makeScheduledEvent(owner, { startsInDays: 10, capacity: 30 })
 
@@ -174,7 +193,7 @@ describe("organiser overview", () => {
   })
 
   it("floors the no-show rate at zero when walk-ins outnumber RSVPs", async () => {
-    const owner = await makeUser("ovw_walkin", "organizer")
+    const owner = await host("ovw_walkin")
     users.push(owner)
     const past = await makeScheduledEvent(owner, { startsInDays: -5, capacity: 50 })
 
@@ -208,7 +227,7 @@ describe("organiser overview", () => {
   })
 
   it("a walk-in does not cancel a no-show: one RSVP stayed home, one stranger came, 100% (SCRUM-467)", async () => {
-    const owner = await makeUser("ovw_ns_owner", "organizer")
+    const owner = await host("ovw_ns_owner")
     users.push(owner)
     const past = await makeScheduledEvent(owner, { startsInDays: -4, capacity: 50 })
     const [stayedHome, walkedIn] = await Promise.all([makeUser("ovw_ns_home"), makeUser("ovw_ns_walkin")])
@@ -225,7 +244,7 @@ describe("organiser overview", () => {
   })
 
   it("counts repeat attendees, not repeat check-ins", async () => {
-    const owner = await makeUser("ovw_repeat", "organizer")
+    const owner = await host("ovw_repeat")
     users.push(owner)
     const first = await makeScheduledEvent(owner, { startsInDays: -20 })
     const second = await makeScheduledEvent(owner, { startsInDays: -10 })
@@ -250,7 +269,7 @@ describe("organiser overview", () => {
   })
 
   it("breaks ratings down rather than only averaging them", async () => {
-    const owner = await makeUser("ovw_rating", "organizer")
+    const owner = await host("ovw_rating")
     users.push(owner)
     const event = await makeScheduledEvent(owner, { startsInDays: -2 })
 
@@ -270,7 +289,7 @@ describe("organiser overview", () => {
   })
 
   it("withholds the average and the spread under five raters: two ratings are each other’s (SCRUM-437)", async () => {
-    const owner = await makeUser("ovw_rating_few", "organizer")
+    const owner = await host("ovw_rating_few")
     users.push(owner)
     const event = await makeScheduledEvent(owner, { startsInDays: -2 })
     const raters = await Promise.all([makeUser("ovw_f1"), makeUser("ovw_f2")])
@@ -292,7 +311,7 @@ describe("organiser overview", () => {
   })
 
   it("puts the night running now in a banner, with its waiting flags, who is inside and who came (step 15)", async () => {
-    const owner = await makeUser("ovw_live", "organizer")
+    const owner = await host("ovw_live")
     users.push(owner)
     const tonight = await makeScheduledEvent(owner, { startsInDays: 0, capacity: 50 })
     await db.events.update({
@@ -372,7 +391,7 @@ describe("organiser overview", () => {
   })
 
   it("shows the latest event whose own ratings clear the floor, never a newer one under it (step 15)", async () => {
-    const owner = await makeUser("ovw_latest", "organizer")
+    const owner = await host("ovw_latest")
     users.push(owner)
     const [older, newer] = await Promise.all([
       makeScheduledEvent(owner, { startsInDays: -6 }),
@@ -394,7 +413,7 @@ describe("organiser overview", () => {
   })
 
   it("pools only events that pass alone: the org’s bars minus a visible event are never a withheld one’s (SCRUM-437)", async () => {
-    const owner = await makeUser("ovw_rating_pool", "organizer")
+    const owner = await host("ovw_rating_pool")
     users.push(owner)
     const [open, small] = await Promise.all([
       makeScheduledEvent(owner, { startsInDays: -2 }),
@@ -421,7 +440,7 @@ describe("organiser overview", () => {
 
 describe("venue owner overview", () => {
   it("splits the portfolio by venue instead of blending it", async () => {
-    const owner = await makeUser("ovw_venue", "organizer")
+    const owner = await host("ovw_venue", "venue_owner")
     users.push(owner)
     await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
 
@@ -438,7 +457,7 @@ describe("venue owner overview", () => {
   })
 
   it("withholds a venue’s rating under five raters, and says nothing about it skewing low (SCRUM-437)", async () => {
-    const owner = await makeUser("ovw_venue_rating", "organizer")
+    const owner = await host("ovw_venue_rating", "venue_owner")
     users.push(owner)
     await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
     const event = await makeScheduledEvent(owner, { startsInDays: -3, venue: "Snug" })
@@ -459,7 +478,7 @@ describe("venue owner overview", () => {
   })
 
   it("shows a venue’s rating from five raters, and flags it when it skews low (SCRUM-437)", async () => {
-    const owner = await makeUser("ovw_venue_low", "organizer")
+    const owner = await host("ovw_venue_low", "venue_owner")
     users.push(owner)
     await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
     const event = await makeScheduledEvent(owner, { startsInDays: -3, venue: "Cellar" })
@@ -479,7 +498,7 @@ describe("venue owner overview", () => {
   })
 
   it("fills the utilisation grid from event start times", async () => {
-    const owner = await makeUser("ovw_util", "organizer")
+    const owner = await host("ovw_util", "venue_owner")
     users.push(owner)
     await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
     await makeScheduledEvent(owner, { startsInDays: -4, venue: "Grid Room" })
@@ -611,7 +630,7 @@ describe("role gating", () => {
 
   it("gives an organiser the organiser overview, whatever they ask for", async () => {
     // The point of the fix: there is no argument left that can change this.
-    const owner = await makeUser("ovw_gate", "organizer")
+    const owner = await host("ovw_gate")
     users.push(owner)
     as("organizer", owner)
     const overview = await getDashboardOverview()

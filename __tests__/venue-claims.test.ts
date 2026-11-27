@@ -15,6 +15,7 @@ const mockDb = {
 const mockAuth = jest.fn()
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
+jest.mock("@/lib/org-membership", () => ({ ...jest.requireActual("@/lib/org-membership"), sessionAccount: () => mockSessionAccount(mockDb.user.findUnique()) }))
 jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth(); return s?.user ? { ...s, user: { signedInAt: Date.now(), ...s.user } } : s } }))
 jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn(), auditInTx: jest.fn() }))
 // What a transfer does to the previous owner's Venue Pro is the venue-plans itest's.
@@ -34,6 +35,7 @@ jest.mock("@/lib/email", () => {
 })
 
 import { fileVenueClaim, decideVenueClaim, getVenueClaimQueue } from "@/lib/venue-claim-actions"
+import { mockSessionAccount } from "./support/session-account"
 
 const VENUE = "venue_1"
 const MY_ORG = "org_mine"

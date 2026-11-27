@@ -137,8 +137,10 @@ export default async function globalSetup(config: FullConfig) {
         async () => (await (await fetch("/api/auth/session")).json()) as { user?: { role?: string } }
       )
       // An attendee's cookie is no session at all unless an invite is waiting for them (SCRUM-984): the
-      // dashboard ends it on read. The access matrix still drives it, to prove it opens nothing.
-      const accepted = expected === "attendee" ? session.user === undefined : session.user?.role === expected
+      // dashboard ends it on read. The access matrix still drives it, to prove it opens nothing. Nor is the cookie
+      // of somebody whose only organisation is suspended: the dashboard is a live membership (SCRUM-1247).
+      const noDashboard = expected === "attendee" || role === "onlySuspended"
+      const accepted = noDashboard ? session.user === undefined : session.user?.role === expected
       if (!accepted) {
         throw new Error(
           `Minted session for ${role} was not accepted. Expected role ${expected}, got ` +

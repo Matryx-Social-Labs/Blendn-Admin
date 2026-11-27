@@ -167,7 +167,7 @@ describe("eventDays", () => {
 })
 
 describe("updateEventTracked: the edit and its record are one unit", () => {
-  const stored = { start_time: T0, end_time: new Date(T0.getTime() + 3 * H), venue_name: "Old", address: null, status: "published", changed_from: null }
+  const stored = { start_time: T0, end_time: new Date(T0.getTime() + 3 * H), venue_name: "Old", address: null, status: "published", changed_from: null, visibility: "public", delisted_at: null }
 
   beforeEach(() => {
     for (const m of [tx.$queryRaw, tx.events.findUniqueOrThrow, tx.events.update, direct.events.update, direct.$transaction]) m.mockClear()

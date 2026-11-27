@@ -13,7 +13,12 @@ export default defineConfig({
     seed: "npx tsx prisma/seed.ts",
   },
   datasource: {
-    url: process.env.DATABASE_URL,
+    /*
+     * Migrations run as the owner role; the app connects as `blendn_app`, which
+     * cannot run DDL (SCRUM-1358). Where the two differ, `MIGRATE_DATABASE_URL`
+     * is the owner's; unset (local, CI), both are `DATABASE_URL`.
+     */
+    url: process.env.MIGRATE_DATABASE_URL || process.env.DATABASE_URL,
     /*
      * Needed by anything that has to *replay* the migration chain rather than
      * read the live database: `migrate dev`, and `migrate diff

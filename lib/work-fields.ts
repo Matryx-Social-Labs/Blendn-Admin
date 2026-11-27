@@ -78,10 +78,10 @@ export function workFieldLabel(slug: string | null | undefined): string | null {
 /**
  * Below this many people in the room, the field of work is not shown.
  *
- * The roster already returns an age and a city for an unrevealed person. Adding
- * field of work makes it four attributes, and "29, Bengaluru, works in fintech,
- * into techno and board games" is one specific person in a room of eight — the
- * pseudonym stops doing anything at all.
+ * The roster already returns an age band and a new / regular chip for an
+ * unrevealed person (D-030). Adding field of work makes it four attributes, and
+ * "25-34, a regular, works in fintech, into techno and board games" is one
+ * specific person in a room of eight — the pseudonym stops doing anything at all.
  *
  * Same number and same reasoning as `MIN_ATTENDEES` in
  * `lib/connection-metrics.ts`, which suppresses organiser metrics below this

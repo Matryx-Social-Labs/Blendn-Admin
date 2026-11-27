@@ -26,13 +26,16 @@ const ROLES = ["admin", "organizer", "venue", "sponsor"] as const satisfies read
 const WIDTHS = [375, 768, 1440]
 const TITLE_SUFFIX = " | Blend'n Admin"
 
-/** Seeded: the admin and the two hosts in live organisations may create; the sponsor and the stranded organiser may not. */
+/**
+ * Seeded: the admin and the hosts in live organisations may create; the sponsor may not. `onlySuspended` has no live
+ * organisation, so no dashboard at all (SCRUM-1247): it is refused at sign-in, below.
+ */
 const MAY_CREATE: Record<string, boolean> = {
   admin: true,
   organizer: true,
   venue: true,
   sponsor: false,
-  outsider: false,
+  outsider: true,
   multiOrg: true,
   partSuspended: true,
   onlySuspended: false,
@@ -45,7 +48,7 @@ const CARD: Record<string, { org: string; sub: RegExp }> = {
   organizer: { org: "Nightshift Collective", sub: /^Organizer$/i },
   venue: { org: "Indiranagar Hospitality Group", sub: /^Venue owner$/i },
   sponsor: { org: "Blue Tokai Coffee Roasters", sub: /^Sponsor$/i },
-  outsider: { org: "No organisation", sub: /^Organizer$/i },
+  outsider: { org: "Quiet Corner Collective", sub: /^Organizer$/i },
   multiOrg: { org: "Lantern Lane Events", sub: /^Organizer · \+1 more$/i },
   partSuspended: { org: "Sunday Supper Club", sub: /^Organizer$/i },
   onlySuspended: { org: "Retired Rooms Co", sub: /^Organizer$/i },
@@ -173,7 +176,15 @@ test.describe("the shell", () => {
     })
   }
 
-  for (const persona of ["multiOrg", "partSuspended", "onlySuspended", "secondVenueOwner"] as const) {
+  test("onlySuspended: a suspended organisation grants no dashboard, so the session is sent to sign in", async ({ baseURL }) => {
+    const { ctx, page } = await open("onlySuspended", 1440, baseURL)
+    await page.goto("/dashboard", { waitUntil: "networkidle" })
+    await expect(page).toHaveURL(/\/login/)
+    await expect(sidebar(page)).toHaveCount(0)
+    await ctx.close()
+  })
+
+  for (const persona of ["multiOrg", "partSuspended", "secondVenueOwner"] as const) {
     test(`${persona}: the card names the right organisation, and a suspension is said`, async ({ baseURL }) => {
       const { ctx, page } = await open(persona, 1440, baseURL)
       await page.goto("/dashboard", { waitUntil: "networkidle" })
@@ -182,7 +193,7 @@ test.describe("the shell", () => {
       await expect(card.locator("[data-slot='org-card-role']")).toHaveText(CARD[persona].sub)
       await expect(topbar(page).locator('a[href="/dashboard/events/new"]')).toHaveCount(MAY_CREATE[persona] ? 1 : 0)
       const notice = page.locator("main [role='status']").filter({ hasText: "is suspended" })
-      if (persona === "partSuspended" || persona === "onlySuspended") {
+      if (persona === "partSuspended") {
         await expect(notice).toContainText("Retired Rooms Co is suspended.")
       } else {
         await expect(notice).toHaveCount(0)
