@@ -85,7 +85,8 @@ describe("server/client boundary", () => {
 /**
  * Server modules a script process also loads, so they cannot carry
  * `import "server-only"` (plain `tsx` has no such package): no client module
- * may reach them through its imports, at any depth. Type-only imports are erased
+ * (under app/, components/, lib/ or hooks/, or instrumentation-client.ts) may
+ * reach them through its imports, at any depth. Type-only imports are erased
  * and do not count.
  */
 const SERVER_MODULES = ["lib/revenuecat-api.ts", "lib/account-erasure.ts"]
@@ -121,9 +122,11 @@ function clientReaches(clientFiles: string[], targets: string[]): string[] {
 }
 
 describe("server modules no client module reaches", () => {
-  const clientFiles = [join(ROOT, "app"), join(ROOT, "components")]
-    .flatMap((d) => walk(d, [], /\.tsx?$/))
+  // Every root a client module can live in, and the browser's own entry.
+  const clientFiles = ["app", "components", "lib", "hooks"]
+    .flatMap((d) => walk(join(ROOT, d), [], /\.tsx?$/))
     .filter(isClientModule)
+    .concat(join(ROOT, "instrumentation-client.ts"))
 
   it("finds client modules to check (guards against a broken walker)", () => {
     expect(clientFiles.length).toBeGreaterThan(20)

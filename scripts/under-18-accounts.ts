@@ -120,10 +120,15 @@ export async function stampKnownMinors(db: PrismaClient, now: Date): Promise<str
   return ids
 }
 
+const dueWhere = (now: Date) => ({
+  under_18_since: { lte: new Date(now.getTime() - DELETE_AFTER_DAYS * DAY_MS) },
+  user: { deletedAt: null },
+})
+
 /** Live accounts stamped `DELETE_AFTER_DAYS` or more days before `now`, oldest stamp first. */
 export async function dueForDeletion(db: PrismaClient, now: Date): Promise<string[]> {
   const rows = await db.profiles.findMany({
-    where: { under_18_since: { lte: new Date(now.getTime() - DELETE_AFTER_DAYS * DAY_MS) }, user: { deletedAt: null } },
+    where: dueWhere(now),
     select: { id: true },
     orderBy: [{ under_18_since: "asc" }, { id: "asc" }],
   })
@@ -134,11 +139,14 @@ export async function dueForDeletion(db: PrismaClient, now: Date): Promise<strin
  * Erase every account due, oldest stamp first, one at a time, each one's
  * deferred work awaited before the next. Stops at the first failure, naming
  * the id; the ones before it stay erased, and a run after takes up the rest.
- * `erase` is `eraseAccount`; a test passes its own.
+ * Each id is read again just before its erasure, so one a staff correction
+ * cleared since the list was read is skipped. `erase` is `eraseAccount`; a
+ * test passes its own.
  */
 export async function deleteDue(db: PrismaClient, now: Date, erase: typeof eraseAccount = eraseAccount): Promise<string[]> {
   const erased: string[] = []
   for (const id of await dueForDeletion(db, now)) {
+    if ((await db.profiles.count({ where: { id, ...dueWhere(now) } })) === 0) continue
     const deferred: Promise<void>[] = []
     try {
       await erase(id, { ipAddress: "script", defer: (task) => void deferred.push(task()) })

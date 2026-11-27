@@ -151,6 +151,11 @@ describe("a staff correction", () => {
 })
 
 describe("deleting the accounts due", () => {
+  // A fake `erase` erases nothing: what a test left due must not be due in the next one.
+  afterEach(async () => {
+    await db.user.updateMany({ where: { id: { in: users.filter((id) => id !== ADMIN_ID) }, deletedAt: null }, data: { deletedAt: new Date() } })
+  })
+
   it(`erases an account stamped ${DELETE_AFTER_DAYS} or more days ago, as the account deletion does, and not one stamped yesterday`, async () => {
     const now = new Date()
     const due = await person("u18-erase-due", { age: 16, under_18_since: new Date(now.getTime() - 15 * DAY_MS) })
@@ -212,6 +217,23 @@ describe("deleting the accounts due", () => {
     // Nothing after the failure ran, and the message says how far the run got.
     expect(calls[calls.length - 1]).toBe(newer)
     await expect(failure).rejects.toThrow(`Erasing ${newer} failed (${calls.length - 1} erased before it)`)
+  })
+
+  it("skips an account whose stamp a staff correction cleared after the run listed it", async () => {
+    const now = new Date()
+    const first = await person("u18-mid-first", { age: 16, under_18_since: new Date(now.getTime() - 60 * DAY_MS) })
+    const corrected = await person("u18-mid-corrected", { age: 16, under_18_since: new Date(now.getTime() - 59 * DAY_MS) })
+    const calls: string[] = []
+    const erase = async (id: string) => {
+      calls.push(id)
+      // While the first is erased, staff correct the second's birth date.
+      if (id === first) await correctBirthDate(db, { userId: corrected, dateOfBirth: "1995-06-15", by: ADMIN }, new Date())
+    }
+
+    const erased = await deleteDue(db, now, erase)
+    expect(calls).toContain(first)
+    expect(calls).not.toContain(corrected)
+    expect(erased).not.toContain(corrected)
   })
 
   it("stops when an erasure's deferred work fails, naming that id", async () => {
