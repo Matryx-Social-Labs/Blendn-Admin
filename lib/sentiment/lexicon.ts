@@ -23,28 +23,20 @@ import {
  * wrongly is a lie in the digest. Bias toward declining.
  */
 
-/**
- * A person, as the object of "grab" or "fight": a cue sticks (lib/sentiment/classify.ts), so "grabbing drinks" and
- * "fight club" must not match. Those still reach the model, which may say safety itself.
- */
-const PERSON = String.raw`(me|us|her|him|them|my|people|someone|somebody|everyone|(a|the|this|that) (girl|guy|woman|man|lady|kid|person)|girls|guys|women|men)`
-
 /** Category cues. Order matters only in that safety is checked first. */
 const CATEGORY_CUES: Array<{ category: IssueCategory; patterns: RegExp[] }> = [
   {
     category: "safety_conduct",
     patterns: [
-      /\b(harass(ed|ing|ment)?|groped?|assault|threat(en|ened)?|creep(y|ing)?|unsafe|punch|stalk(ing|ed)?)\b/i,
+      // By stem and broad on purpose: a cue only sends the line to the model first and alone (lib/sentiment/classify.ts),
+      // which clears "grabbing a table" and flags "he keeps grabbing".
+      /\b(harass|grop|grab|assault|threat|creep|unsafe|fight|punch|stalk)\w*/i,
       // Following is the pattern most often reported calmly and in the third
       // person — "a man has been following us" read as neutral chatter in an
       // earlier version of this list, which is the false negative this whole
       // category exists to prevent. Match the verb plus any object pronoun
       // rather than one fixed phrase.
       /\bfollow(ing|ed)\b[^.!?]{0,20}\b(me|us|her|him|them|my friend)\b/i,
-      // "grabbed my arm" (SCRUM-1439), "keeps grabbing people"; not "grabbing drinks".
-      new RegExp(String.raw`\bgrab(s|bed|bing)\s+((at|onto)\s+)?${PERSON}\b`, "i"),
-      // "a fight near the bar", "fighting with that guy"; not "fight club" or "food fight".
-      new RegExp(String.raw`\b(a|the) fight\b(?!\s+club)|\bfight broke out\b|\bfight(ing)? with\b|\bfighting\s+${PERSON}\b`, "i"),
       /\b(passed out|fainted|collaps(ed|ing)|ambulance|overdose|seizure|needs help|not ok(ay)?)\b/i,
     ],
   },
@@ -98,9 +90,6 @@ const AMBIGUITY_MARKERS = [
   /\bonly\b.*\b(hour|hours|min|mins|minutes)\b/i,
   /\bsure\b|\byeah right\b|\bapparently\b|\bsupposedly\b/i,
   /\bbut\b/i,
-  // A grab, fight or punch without a safety cue's shape ("he keeps grabbing", "they are fighting outside") is not a
-  // cue, so it neither goes first nor sticks, but the word list does not clear it either: the model reads it.
-  /\b(grab|fight|punch)\w*/i,
 ]
 
 /**
@@ -118,7 +107,7 @@ const ROMANISED_INDIC_WORD =
 const readsAsEnglish = (text: string) =>
   ASCII_TEXT.test(text) && ENGLISH_FUNCTION_WORD.test(text) && !ROMANISED_INDIC_WORD.test(text)
 
-/** A safety cue, for the classifier to order by and to keep: the lexicon never settles one (see below). */
+/** A safety cue: the classifier sends the line first, in a call of its own. The lexicon never settles one (see below). */
 export function hasSafetyCue(text: string): boolean {
   return detectCategory(text.trim()) === "safety_conduct"
 }

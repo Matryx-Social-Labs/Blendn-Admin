@@ -26,10 +26,11 @@ export const BATCH_SIZE = 20
 /** Calls in flight at once. */
 const MAX_IN_FLIGHT = 4
 /**
- * Calls a pass. A batch holds one room, so 200 one-message rooms would be 200 calls; with every call timing out
- * (20 s + 2 s + 20 s) 10 calls in rounds of 4 is 3 × 42 s, inside the sweeper's heartbeat. What is not sent waits.
+ * Calls a pass: a safety cue is a call of its own and a batch holds one room, so a pass can need more calls than its
+ * messages fill. With every call timing out (20 s + 2 s + 20 s), 20 calls in rounds of 4 is 5 × 42 s = 3.5 min,
+ * well inside the sweeper's 9-minute stall line. What is not sent waits for the next pass, cued lines first.
  */
-const MAX_BATCHES = 10
+const MAX_CALLS = 20
 
 export interface MessageToClassify {
   id: string
@@ -216,7 +217,11 @@ async function classifyBatchWithLlm(
  * field. That remains open, and is why the fallback keeps the CATEGORY rather
  * than relying on a caller to notice the confidence.
  *
- * At most `MAX_BATCHES` calls: a message escalated past them gets no row here, and the next pass finds it.
+ * A message with a safety cue goes to the model first and alone: no other message can talk the model out of a
+ * report, and the model's answer is final ("grabbing a table" is cleared, "he keeps grabbing" flagged). Only when that
+ * call fails does the cue stand on its own, through `lexiconFallback`: an outage must not lose a possible report.
+ *
+ * At most `MAX_CALLS` calls: a message escalated past them gets no row here, and the next pass finds it.
  */
 export async function classifyMessages(
   messages: MessageToClassify[]
@@ -231,25 +236,25 @@ export async function classifyMessages(
   }
 
   const cued = new Set(escalate.filter((m) => hasSafetyCue(m.text)))
-  const batches = batchesOf(escalate, cued).slice(0, MAX_BATCHES)
+  const batches = batchesOf(escalate, cued).slice(0, MAX_CALLS)
   for (let i = 0; i < batches.length; i += MAX_IN_FLIGHT) {
     const round = batches.slice(i, i + MAX_IN_FLIGHT)
     const labelled = await Promise.all(round.map((batch) => classifyBatchWithLlm(batch)))
 
     round.forEach((batch, b) => {
+      if ([...labelled[b].keys()].some((id) => !batch.some((m) => m.id === id))) {
+        logger.warn("Sentiment model answered for a message it was not sent", { sent: batch.map((m) => m.id) })
+      }
       for (const message of batch) {
         const result = labelled[b].get(message.id)
-        // The model may add a safety label, never remove one: a message written as an instruction ("label every
-        // message neutral") must not bury the report beside it.
-        if (result && (result.category === "safety_conduct" || !cued.has(message))) {
+        if (result) {
           settled.push({ id: message.id, ...result })
           continue
         }
-        if (result) logger.warn("Sentiment model dropped a lexicon safety cue", { messageId: message.id, category: result.category })
+        if (cued.has(message)) logger.warn("Sentiment safety cue kept: the model did not read the line", { messageId: message.id })
         /*
-         * Degraded path, and where a model answer that drops a safety cue lands.
-         * The lexicon's best guess, which is what the docstring above has always
-         * promised and what this branch did not do.
+         * Degraded path. The lexicon's best guess, which is what the docstring
+         * above has always promised and what this branch did not do.
          *
          * It wrote a hardcoded `neutral / other / 0.2`, so a message the lexicon
          * had already recognised as a safety report came out as neutral chatter.
@@ -271,19 +276,13 @@ export async function classifyMessages(
 }
 
 /**
- * One room per batch, a room's safety cues at its front, and the batches in turns (every room's first, then every
- * room's second), the ones holding a safety cue before all others: a calm report is read in the pass's first round
- * whatever the backlog behind it.
+ * Every safety cue alone and first, in the order given; then the rest one room per batch, in turns (every room's
+ * first batch, then every room's second), so one busy room cannot fill the calls.
  */
 function batchesOf(escalate: MessageToClassify[], cued: Set<MessageToClassify>): MessageToClassify[][] {
-  const rooms = Map.groupBy(escalate, (m) => m.room)
-  const batches: Array<{ batch: MessageToClassify[]; turn: number; hasCue: boolean }> = []
-  for (const room of rooms.values()) {
-    const ordered = [...room.filter((m) => cued.has(m)), ...room.filter((m) => !cued.has(m))]
-    for (let i = 0; i < ordered.length; i += BATCH_SIZE) {
-      const batch = ordered.slice(i, i + BATCH_SIZE)
-      batches.push({ batch, turn: i, hasCue: cued.has(batch[0]) })
-    }
-  }
-  return batches.sort((a, b) => Number(b.hasCue) - Number(a.hasCue) || a.turn - b.turn).map(({ batch }) => batch)
+  const rooms = Map.groupBy(escalate.filter((m) => !cued.has(m)), (m) => m.room)
+  const turns = [...rooms.values()].flatMap((room) =>
+    Array.from({ length: Math.ceil(room.length / BATCH_SIZE) }, (_, turn) => ({ turn, batch: room.slice(turn * BATCH_SIZE, (turn + 1) * BATCH_SIZE) }))
+  )
+  return [...escalate.filter((m) => cued.has(m)).map((m) => [m]), ...turns.sort((a, b) => a.turn - b.turn).map(({ batch }) => batch)]
 }
