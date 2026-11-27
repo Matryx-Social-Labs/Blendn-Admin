@@ -1,7 +1,7 @@
 import { db } from "@/lib/db"
 import { liveCountBucket, liveCountLabel, midpoint } from "@/lib/disclosure"
 import { claimedWindow, hostsEvent } from "@/lib/event-visibility"
-import { buildLiveSnapshot, type Held } from "@/lib/live-snapshot"
+import { readLiveSnapshot, type Held } from "@/lib/live-snapshot"
 import { redeemedByNight } from "@/lib/offers/venue"
 import { venueDayBounds } from "@/lib/venue-day"
 import { crewsCell, metRange, offersBand, venueMood, type MetRange, type MoodWord, type NightsVenue } from "@/lib/venue-nights"
@@ -30,7 +30,7 @@ export interface VenueTonight {
 
 /*
  * One snapshot read per room per minute, however many owners' tabs refresh it:
- * `buildLiveSnapshot` holds the event and the heavy social read in `Held`
+ * `readLiveSnapshot` holds the event and the heavy social read in `Held`
  * (HELD_SOCIAL_MS), and shares a read in flight.
  * ponytail: per process and per bundle layer; cleared whole past ROOMS_HELD.
  */
@@ -85,11 +85,12 @@ export async function venueTonight(
   if (!room) return null
   const own = ownOf(room)
 
-  const [snapshot, redeemed] = await Promise.all([
-    buildLiveSnapshot(room.id, heldFor(room.id), { social: own }),
+  const [read, redeemed] = await Promise.all([
+    readLiveSnapshot(room.id, heldFor(room.id), { social: own }),
     venue.owner_org_id ? redeemedTonight(venue.id, venue.owner_org_id, venueDayBounds(venue.timezone, venue.day_reset_hour, now).localDate) : null,
   ])
-  if (!snapshot) return null
+  if (!read) return null
+  const { snapshot } = read
   const social = own ? snapshot.social : null
   return {
     eventId: room.id,
@@ -97,7 +98,9 @@ export async function venueTonight(
     label: room.kind === "venue_day" ? "venue day" : (room.organizer_org?.display_name ?? room.organizer?.name ?? "another host"),
     inRoom: liveCountLabel(liveCountBucket(snapshot.guestsInside)),
     arriving: liveCountLabel(liveCountBucket(snapshot.checkInRate10m)),
-    mood: venueMood({ ...snapshot.sentiment, negative: midpoint(snapshot.sentiment.negative) })?.word ?? "quiet",
+    // Another host's night: the exact negatives, as the venue reads the night (`forVenue`); a word read off the band
+    // would move with where the held count sits in it (SCRUM-1500). Its own: the band's middle, as its host reads it.
+    mood: venueMood({ ...snapshot.sentiment, negative: own ? midpoint(snapshot.sentiment.negative) : read.negatives })?.word ?? "quiet",
     met: !own ? "hosts" : !social ? null : social.met.held ? "held" : metRange(social.met.connected, social.attendees),
     crews: !own ? "hosts" : social?.crews ? crewsCell(social.crews.here) : null,
     offers: redeemed === null ? null : offersBand(redeemed),

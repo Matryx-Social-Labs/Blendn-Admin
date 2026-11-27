@@ -12,7 +12,7 @@ import { keptApartIn } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom, mayUseConversation } from "./socket-auth"
 import { liveInVenueDay } from "./chat-window"
 import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from "./socket-ops-auth"
-import { buildLiveSnapshot, type Held } from "./live-snapshot"
+import { readLiveSnapshot, type Held } from "./live-snapshot"
 import { hereNowCoalesced, type HereNow } from "./attendee-counts"
 import { roomHandle, type RoomScope } from "./room-handle"
 import { ownerAdmits, roomOwnerDenial, roomScope, withOwnerDoor } from "./room-kind"
@@ -379,7 +379,7 @@ export function startOpsBroadcast(eventId: string): void {
    * schedule the next pass from the end of the current one, and both carry a
    * comment saying a slow pass must not overlap the next.
    *
-   * It matters more here than there. `buildLiveSnapshot` issues **eight** round
+   * It matters more here than there. `readLiveSnapshot` issues **eight** round
    * trips per pass -- two sequential (the event, then its occurrence) and six
    * held concurrently -- every five seconds per watched event.
    *
@@ -417,8 +417,8 @@ export function startOpsBroadcast(eventId: string): void {
         return
       }
       // "Meeting tonight" is the host's alone: a room only a venue watches never reads it.
-      const snapshot = await buildLiveSnapshot(eventId, held, { social: rooms.some((r) => r.view === "host") })
-      if (snapshot) for (const { view, room } of rooms) io.to(room).emit("ops:snapshot", asSeenBy(view, snapshot))
+      const read = await readLiveSnapshot(eventId, held, { social: rooms.some((r) => r.view === "host") })
+      if (read) for (const { view, room } of rooms) io.to(room).emit("ops:snapshot", asSeenBy(view, read))
     } catch (error) {
       // A failed pass must not kill the loop or the process — the next one may
       // well succeed, and a dead loop is a silently frozen screen.
@@ -437,8 +437,8 @@ export function startOpsBroadcast(eventId: string): void {
 }
 
 /** The snapshot a watcher of this view is sent. */
-function asSeenBy(view: OpsView, snapshot: LiveSnapshot): LiveSnapshot | VenueLiveSnapshot {
-  return view === "host" ? snapshot : forVenue(snapshot)
+function asSeenBy(view: OpsView, { snapshot, negatives }: { snapshot: LiveSnapshot; negatives: number }): LiveSnapshot | VenueLiveSnapshot {
+  return view === "host" ? snapshot : forVenue(snapshot, negatives)
 }
 
 export function stopOpsBroadcast(eventId: string): void {
@@ -580,12 +580,12 @@ export async function joinEventOps(socket: AuthenticatedSocket, rawEventId: stri
   // One snapshot now, so the screen is populated on open rather than blank
   // until the first tick -- read through the loop's hold, so a crowd of
   // dashboards opening at once costs one read of "Meeting tonight", not one each.
-  const snapshot = await buildLiveSnapshot(eventId, opsTimers.get(eventId)?.held, { social: view === "host" }).catch((error: unknown) => {
+  const read = await readLiveSnapshot(eventId, opsTimers.get(eventId)?.held, { social: view === "host" }).catch((error: unknown) => {
     // The 5 s tick sends the next one; this says why the screen waited for it.
     logger.warn("Initial ops snapshot failed", { eventId, error: error instanceof Error ? error.message : String(error) })
     return null
   })
-  if (snapshot) socket.emit("ops:snapshot", asSeenBy(view, snapshot))
+  if (read) socket.emit("ops:snapshot", asSeenBy(view, read))
 }
 
 async function readTypingMembership(userId: string, chatGroupId: string) {

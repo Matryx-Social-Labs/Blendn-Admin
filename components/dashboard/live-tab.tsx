@@ -11,7 +11,7 @@ import {
   IconShieldExclamation,
 } from "@tabler/icons-react"
 
-import { ArrivalCurve, CategoryBars, type ArrivalPoint } from "@/components/dashboard/charts"
+import { ArrivalCurve, CategoryBars, RaisedList, type ArrivalPoint } from "@/components/dashboard/charts"
 import { Callout } from "@/components/dashboard/kit"
 import { OccupancyHero } from "@/components/dashboard/occupancy-hero"
 import { EmptyState, MetricTile } from "@/components/dashboard/primitives"
@@ -326,7 +326,7 @@ function venueDescription(s: VenueLiveSnapshot): string {
   return `${liveCountLabel(s.checkedInTotal)} checked in, ${liveCountLabel(s.checkedOutTotal)} left. Shown as ranges, so one person arriving or leaving does not show.`
 }
 
-/** The mood and the complaints as ranges: bars would draw the counts back. */
+/** The mood as ranges and the complaints by name: bars would draw the counts back, and a count beside the negatives gives a held one back (SCRUM-1500). */
 function VenueMood({ snapshot }: { snapshot: VenueLiveSnapshot }) {
   const { positive, neutral, negative } = snapshot.sentiment
   return (
@@ -336,17 +336,12 @@ function VenueMood({ snapshot }: { snapshot: VenueLiveSnapshot }) {
         {liveCountLabel(positive)} positive · {liveCountLabel(neutral)} neutral · {liveCountLabel(negative)} negative
       </p>
       <h3 className="mt-2 text-sm font-bold">Complaints — last 30 min</h3>
-      {snapshot.categories.length === 0 ? (
-        <p className="text-[0.78rem] text-muted-foreground">Nothing negative classified yet in this window.</p>
+      {snapshot.raised.length === 0 ? (
+        // No reason either way: none raised, or none the venue may be named (`raisedCategories`). Not "nothing
+        // negative": the mood line above may say otherwise.
+        <p className="text-[0.78rem] text-muted-foreground">Read what is said in the Room chat you moderate.</p>
       ) : (
-        <ul className="flex flex-col gap-1 text-[0.78rem] text-muted-foreground">
-          {snapshot.categories.map((c) => (
-            <li key={c.category} className="flex justify-between gap-3">
-              <span>{c.category.replaceAll("_", " ")}</span>
-              <b className="font-bold tabular-nums text-foreground">{liveCountLabel(c.count)}</b>
-            </li>
-          ))}
-        </ul>
+        <RaisedList categories={snapshot.raised} />
       )}
     </div>
   )

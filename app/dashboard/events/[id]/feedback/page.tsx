@@ -12,7 +12,7 @@ import { eventTabsFor } from "../event-tabs"
 import { eventTitleFor } from "@/lib/dashboard-record-titles"
 import { countLabel, splitShares } from "@/lib/dashboard-format"
 
-import { CategoryBars } from "@/components/dashboard/charts"
+import { CategoryBars, RaisedList } from "@/components/dashboard/charts"
 import { EmptyState, RatingBars } from "@/components/dashboard/primitives"
 
 import { FeedbackFeed } from "./feedback-feed"
@@ -180,6 +180,13 @@ export default async function FeedbackPage({
                 "Fewer than five messages were negative, so how many is held back: in a room this size it could point at somebody."
               ) : negative === 0 ? (
                 "Nothing negative was classified. Read the messages anyway — the classifier is cautious, not omniscient."
+              ) : digest.view === "venue" ? (
+                /* No "N of M" for a venue: a category's count beside its exact negatives gives a held one back (SCRUM-1500). */
+                digest.raised.length > 0 ? (
+                  "The negatives are the takeaway. What they were about is listed; read them where they were said, in the Room chat you moderate."
+                ) : (
+                  "The negatives are the takeaway. Read them where they were said, in the Room chat you moderate."
+                )
               ) : topIssue?.suppressed ? (
                 /* Below the disclosure floor the count is null and the quotes
                    are held back too, so "<5 of 1 … read them" would promise a
@@ -229,6 +236,12 @@ export default async function FeedbackPage({
             )}
 
             <div className="flex flex-col gap-5">
+              {digest.view === "venue" && digest.raised.length > 0 ? (
+                <Panel title="What went wrong" hint="negative + safety messages">
+                  <RaisedList categories={digest.raised} />
+                </Panel>
+              ) : null}
+
               {digest.categories.length > 0 ? (
                 <Panel>
                   <CategoryBars

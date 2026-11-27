@@ -1,5 +1,5 @@
 import { MAX_MESSAGES_PER_SWEEP, SCAN_WINDOW_MS, sweepSentiment } from "@/lib/sentiment-sweeper"
-import { buildLiveSnapshot } from "@/lib/live-snapshot"
+import { readLiveSnapshot } from "@/lib/live-snapshot"
 
 import { classifyMessages } from "@/lib/sentiment/classify"
 
@@ -89,7 +89,7 @@ describe("the sweeper writes what the live screen reads", () => {
     await sweepSentiment()
     const rows = await db.event_feedback.findMany({ where: { event_id: eventId }, select: { topic: true } })
     expect(rows.map((r) => r.topic).sort()).toEqual([...Array(6).fill("music"), null])
-    expect((await buildLiveSnapshot(eventId))?.topics).toEqual([{ topic: "music", people: 6 }])
+    expect((await readLiveSnapshot(eventId, undefined, { social: true }).then((r) => r?.snapshot ?? null))?.topics).toEqual([{ topic: "music", people: 6 }])
   })
 
   it("classifies open-room messages into event_feedback", async () => {
@@ -104,12 +104,12 @@ describe("the sweeper writes what the live screen reads", () => {
   })
 
   it("reaches the live snapshot and fires the alerts that read it", async () => {
-    // The actual join that was missing: rows exist, so `buildLiveSnapshot`
+    // The actual join that was missing: rows exist, so `readLiveSnapshot`
     // aggregates them and `deriveAlerts` can finally see a category.
     const { eventId } = await roomWith(["SAFETY someone is hurt"])
     await sweepSentiment()
 
-    const snapshot = await buildLiveSnapshot(eventId)
+    const snapshot = await readLiveSnapshot(eventId, undefined, { social: true }).then((r) => r?.snapshot ?? null)
     expect(snapshot).not.toBeNull()
     // Listed with no number: one complaint in a room is a sentence with an author (SCRUM-890). The alert still fires.
     expect(snapshot!.categories).toContainEqual(expect.objectContaining({ category: "safety_conduct", count: null, suppressed: true }))

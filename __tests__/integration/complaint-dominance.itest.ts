@@ -12,7 +12,7 @@ jest.mock("@/lib/tigris", () => ({ ...jest.requireActual("@/lib/tigris"), isConf
 import { Prisma } from "@prisma/client"
 
 import { buildFeedbackDigest } from "@/lib/feedback-digest"
-import { buildLiveSnapshot } from "@/lib/live-snapshot"
+import { readLiveSnapshot } from "@/lib/live-snapshot"
 import { purgeClosedLobbies } from "@/lib/lobby-retention"
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, putInRoom, testId } from "./helpers"
 
@@ -71,7 +71,7 @@ const unnamed = (c: object | undefined) => ({ ...c, category: "X" })
 
 describe("the live snapshot", () => {
   it("holds the dominated category back exactly as a category under the floor, and shows the evenly spread one", async () => {
-    const snapshot = (await buildLiveSnapshot(eventId))!
+    const snapshot = (await readLiveSnapshot(eventId, undefined, { social: true }).then((r) => r?.snapshot ?? null))!
     expect(named(snapshot.categories, "entry_queue")).toEqual({ category: "entry_queue", count: null, suppressed: true })
     expect(unnamed(named(snapshot.categories, "entry_queue"))).toEqual(unnamed(named(snapshot.categories, "safety_conduct")))
     expect(named(snapshot.categories, "crowding")).toEqual({ category: "crowding", count: 10, suppressed: false })

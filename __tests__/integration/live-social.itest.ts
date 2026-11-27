@@ -1,4 +1,4 @@
-import { buildLiveSnapshot, HELD_SOCIAL_MS, readLiveSnapshot, type HeldEvent, type HeldSocial } from "@/lib/live-snapshot"
+import { HELD_SOCIAL_MS, readLiveSnapshot, type HeldEvent, type HeldSocial } from "@/lib/live-snapshot"
 import * as liveSocial from "@/lib/live-social"
 import { liveSocialCounts } from "@/lib/live-social"
 
@@ -112,7 +112,7 @@ describe("the snapshot", () => {
   it("carries the host's disclosed block", async () => {
     const { eventId, guests } = await room(8)
     await db.event_waves.createMany({ data: [{ event_id: eventId, from_id: guests[0], to_id: guests[1] }, { event_id: eventId, from_id: guests[1], to_id: guests[0] }] })
-    const snapshot = await buildLiveSnapshot(eventId)
+    const snapshot = await readLiveSnapshot(eventId, undefined, { social: true }).then((r) => r?.snapshot ?? null)
     expect(snapshot!.social).toMatchObject({ attendees: 8, met: { held: false, pct: 25, connected: 2, connections: { atLeast: 1 }, byWay: { waves: "few", lobby: 0, requests: 0 } } })
   })
 
@@ -122,13 +122,13 @@ describe("the snapshot", () => {
     const counter = sqlCounter()
     const waves = (sql: string[]) => sql.filter((s) => /event_waves/.test(s)).length
     try {
-      const first = await counter.during(() => buildLiveSnapshot(eventId, held))
-      const second = await counter.during(() => buildLiveSnapshot(eventId, held))
+      const first = await counter.during(() => readLiveSnapshot(eventId, held, { social: true }).then((r) => r?.snapshot ?? null))
+      const second = await counter.during(() => readLiveSnapshot(eventId, held, { social: true }).then((r) => r?.snapshot ?? null))
       expect(waves(first.sql)).toBe(1)
       expect(waves(second.sql)).toBe(0)
       expect(second.result!.social).toEqual(first.result!.social)
       held.social = { ...held.social!, readAt: Date.now() - HELD_SOCIAL_MS - 1 }
-      expect(waves((await counter.during(() => buildLiveSnapshot(eventId, held))).sql)).toBe(1)
+      expect(waves((await counter.during(() => readLiveSnapshot(eventId, held, { social: true }).then((r) => r?.snapshot ?? null))).sql)).toBe(1)
     } finally {
       await counter.stop()
     }
@@ -149,15 +149,15 @@ describe("the snapshot", () => {
   it("keeps the headcount and alerts when the social read fails, with the last minute's block or none", async () => {
     const { eventId } = await room(8)
     const held: { current?: HeldEvent; social?: HeldSocial } = {}
-    const first = await buildLiveSnapshot(eventId, held)
+    const first = await readLiveSnapshot(eventId, held, { social: true }).then((r) => r?.snapshot ?? null)
     const failing = jest.spyOn(liveSocial, "liveSocialCounts").mockRejectedValue(new Error("statement timeout"))
     try {
       held.social = { ...held.social!, readAt: Date.now() - HELD_SOCIAL_MS - 1 }
-      const stale = await buildLiveSnapshot(eventId, held)
+      const stale = await readLiveSnapshot(eventId, held, { social: true }).then((r) => r?.snapshot ?? null)
       expect(stale!.inside).toBe(8)
       expect(stale!.social).toEqual(first!.social)
       // The control: with nothing held, the panel is left out, the snapshot is not.
-      const fresh = await buildLiveSnapshot(eventId)
+      const fresh = await readLiveSnapshot(eventId, undefined, { social: true }).then((r) => r?.snapshot ?? null)
       expect(fresh!.inside).toBe(8)
       expect(fresh!.social).toBeNull()
       expect(failing).toHaveBeenCalledTimes(2)
@@ -171,12 +171,12 @@ describe("the snapshot", () => {
     const held: { current?: HeldEvent; social?: HeldSocial } = {}
     const reads = jest.spyOn(liveSocial, "liveSocialCounts")
     try {
-      const snapshots = await Promise.all(Array.from({ length: 5 }, () => buildLiveSnapshot(eventId, held)))
+      const snapshots = await Promise.all(Array.from({ length: 5 }, () => readLiveSnapshot(eventId, held, { social: true }).then((r) => r?.snapshot ?? null)))
       expect(reads).toHaveBeenCalledTimes(1)
       for (const s of snapshots) expect(s!.social).toMatchObject({ attendees: 8 })
       // And a copy for a venue alone does not read it at all.
       held.social = undefined
-      expect((await buildLiveSnapshot(eventId, held, { social: false }))!.social).toBeNull()
+      expect((await readLiveSnapshot(eventId, held, { social: false }).then((r) => r?.snapshot ?? null))!.social).toBeNull()
       expect(reads).toHaveBeenCalledTimes(1)
     } finally {
       reads.mockRestore()
