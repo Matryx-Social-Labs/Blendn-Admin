@@ -54,7 +54,8 @@ describe("with the client set", () => {
     const html = await render()
     const at = html.indexOf("Forgotten your password?")
     const staff = html.slice(at)
-    expect(staff).toContain('<p id="staff-google-label"')
+    // The domain is one unbreakable word: at the largest text it breaks inside rather than running out of the card.
+    expect(staff).toMatch(/<p id="staff-google-label" class="[^"]*wrap-anywhere[^"]*"/)
     expect(staff).toContain("Platform staff · @matrixsociallabs.com")
     expect(staff).toMatch(/<button[^>]*type="button"[^>]*aria-describedby="staff-google-label"[^>]*>.*Sign in with Google<\/button>/)
     // Wraps at large text rather than running out of the card, and is a 44 px target.

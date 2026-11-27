@@ -223,7 +223,7 @@ export function SignInForm({ staffGoogle, googleError }: { staffGoogle: StaffGoo
             unset, this card is exactly what it was. */}
         {staffGoogle === "off" ? null : (
           <div className="flex flex-col gap-2.5 border-t border-border pt-4">
-            <p id="staff-google-label" className="text-center text-xs text-muted-foreground">
+            <p id="staff-google-label" className="text-center text-xs text-muted-foreground wrap-anywhere">
               {`Platform staff · @${COMPANY.staffEmailDomain}`}
             </p>
             {googleError ? (
