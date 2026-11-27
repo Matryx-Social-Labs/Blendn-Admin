@@ -203,16 +203,6 @@ export async function keptApartIn(userId: string, roomKind: string): Promise<str
   return [...new Set([...blocked, ...closed])]
 }
 
-/** Did these two leave each other? Checked in both directions, like a block. */
-export async function pairIsClosed(a: string, b: string): Promise<boolean> {
-  const [user1_id, user2_id] = conversationPair(a, b)
-  const row = await db.private_conversations.findUnique({
-    where: { user1_id_user2_id: { user1_id, user2_id } },
-    select: { closed_at: true },
-  })
-  return row?.closed_at != null
-}
-
 /** The other user in every closed pair involving this user. */
 export async function closedPairKeys(userId: string): Promise<Set<string>> {
   const rows = await db.private_conversations.findMany({

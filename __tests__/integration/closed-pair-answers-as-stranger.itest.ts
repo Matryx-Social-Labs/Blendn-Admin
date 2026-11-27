@@ -20,6 +20,7 @@ process.env.MOBILE_JWT_SECRET ??= "itest-mobile-secret-0123456789abcdefghij"
 
 import * as socketServer from "@/lib/socket-server"
 import * as push from "@/lib/push-notifications"
+import * as roomMatch from "@/lib/room-match"
 import { connectionCounts } from "@/lib/connection-metrics"
 import { conversationPair } from "@/lib/conversations"
 import { signAccessToken } from "@/lib/mobile-auth"
@@ -136,8 +137,10 @@ describe("waves: a closed pair's handle answers as a stranger's (SCRUM-1476)", (
     expect(rows.map((r) => r.to_id).sort()).toEqual([x.id, s.id].sort())
     // The ping goes to whoever's list shows the sender: S, never X.
     expect(pings.mock.calls.map(([to]) => to)).toEqual([s.id])
-    // X waving back reopens nothing: still the one closed conversation, no new ping.
+    // X waving back reopens nothing: still the one closed conversation, no new ping, no room:match.
+    const matched = jest.spyOn(roomMatch, "announceRoomMatch")
     expect((await wave(x, v)).body).toEqual({ success: true, data: { sent: true, mutual: false } })
+    expect(matched).not.toHaveBeenCalled()
     expect(await pairRows(v, x)).toEqual([{ closed_at: expect.any(Date) }])
     expect(pings.mock.calls.map(([to]) => to)).toEqual([s.id])
     // And the host's counts do not call an unmatched pair met here.
@@ -202,7 +205,9 @@ describe("likes: a closed pair's handle answers as a stranger's", () => {
     expect(liked.map((r) => r.liked_id).sort()).toEqual([x.id, s.id].sort())
 
     // X likes back: the reciprocal like is there, and the closed pair stays closed (`openIfMutual`: linked).
+    const matched = jest.spyOn(roomMatch, "announceRoomMatch")
     expect((await like(x, v)).body).toEqual({ success: true, data: { mutual: false } })
+    expect(matched).not.toHaveBeenCalled()
     expect(await pairRows(v, x)).toEqual([{ closed_at: expect.any(Date) }])
     expect(matches).not.toHaveBeenCalled()
   })

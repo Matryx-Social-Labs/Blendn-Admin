@@ -240,6 +240,8 @@ it("answers a block either way exactly like 'not here'", async () => {
 it("answers somebody whose lists hide the sender (an unmatch, a report) as a stranger, stored, and pings nobody (SCRUM-1476)", async () => {
   const stranger = await wave()
   expect(mockEmitWave).toHaveBeenCalledTimes(1)
+  // Read for the stranger too, so a held ping does the same work as a sent one.
+  expect(mockHidden).toHaveBeenCalledWith(THEM)
   mockEmitWave.mockClear()
   inside(ME, THEM, "x")
   mockHidden.mockImplementation(async (viewer: string) => new Set(viewer === "x" ? [ME] : []))

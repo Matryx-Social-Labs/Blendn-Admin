@@ -139,15 +139,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     /*
-     * A closed pair (an unmatch) is liked like a stranger: the row is stored and
-     * the answer is `{ mutual: false }`, the work and the words of a like
-     * nobody returned. A refusal here named, by elimination, the one handle in
-     * this room that belongs to the person from another (SCRUM-1476). Leaving
-     * stays permanent: `openIfMutual` treats any conversation, closed included,
-     * as linked and opens nothing, so a like back reopens nothing either.
-     */
-
-    /*
+     * No closed-pair refusal: an unmatch is liked like a stranger, stored, and
+     * `openIfMutual` (linked) opens nothing, a like back included. A 404 here
+     * named the one handle in this room that belongs to the person from
+     * another (SCRUM-1476).
+     *
      * A friend is never a stranger to like (the owner's rule, 2026-10-22): no
      * row is written, so an unfriend later cannot resurrect a match from it, and
      * the answer is that of a like nobody returned. `likeAtEvent` keeps its own
