@@ -387,7 +387,7 @@ export async function readMark(key: string): Promise<string | null> {
   try {
     return await bounded(redis.get(key))
   } catch (error) {
-    logger.warn("Redis mark read failed", { key: keyForLog(key), error: error instanceof Error ? error.message : String(error) })
+    logger.warn("Redis mark read failed", { key, error: error instanceof Error ? error.message : String(error) })
     return null
   }
 }
@@ -398,7 +398,7 @@ export async function writeMark(key: string, value: string): Promise<void> {
   try {
     await bounded(redis.set(key, value))
   } catch (error) {
-    logger.warn("Redis mark write failed", { key: keyForLog(key), error: error instanceof Error ? error.message : String(error) })
+    logger.warn("Redis mark write failed", { key, error: error instanceof Error ? error.message : String(error) })
   }
 }
 
