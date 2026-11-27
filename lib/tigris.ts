@@ -633,7 +633,7 @@ export function chatMediaKey(url: string, ownerId: string): string | null {
   return sealedChatKey(url) ?? ownedObjectKey(url, ownerId, "chat")
 }
 
-export type ChatMediaRefusal = "other host" | "our bucket, not as we write it" | "traversal" | "empty" | "not the author's prefix" | "another prefix"
+export type ChatMediaRefusal = "other host" | "our bucket, not as we write it" | "traversal" | "empty" | "not the author’s prefix" | "another prefix"
 
 /** Why `chatMediaKey` named nothing, for a log line that must not carry the URL. A label only: the decision is `chatMediaKey`'s. */
 export function chatMediaRefusal(url: string, ownerId: string): ChatMediaRefusal {
@@ -645,7 +645,7 @@ export function chatMediaRefusal(url: string, ownerId: string): ChatMediaRefusal
   }
   if (key === `chat/${ownerId}/` || key === `chat/${ownerId}`) return "empty"
   if (key.startsWith(SEALED_CHAT_PREFIX)) return "our bucket, not as we write it"
-  return key.startsWith("chat/") ? "not the author's prefix" : "another prefix"
+  return key.startsWith("chat/") ? "not the author’s prefix" : "another prefix"
 }
 
 /**

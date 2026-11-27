@@ -404,7 +404,7 @@ describe("the purge, photos stored under the older layout", () => {
     expect(detail.byClass).toEqual({
       "other host": 4,
       "our bucket, not as we write it": 1,
-      "not the author's prefix": 1,
+      "not the author’s prefix": 1,
       "another prefix": 2,
       traversal: 1,
       empty: 1,
@@ -429,7 +429,7 @@ describe("the purge, photos stored under the older layout", () => {
     expect(chatMediaRefusal(`${bucket}/chat/sealed/not-a-uuid`, author)).toBe("our bucket, not as we write it")
     expect(chatMediaRefusal(`${bucket}/chat/${author}`, author)).toBe("empty")
     expect(chatMediaRefusal(`chat/${author}/1-x-a.jpg`, author)).toBe("other host")
-    expect(chatMediaRefusal(`${bucket}/chat/${other}/1-x-a.jpg`, author)).toBe("not the author's prefix")
+    expect(chatMediaRefusal(`${bucket}/chat/${other}/1-x-a.jpg`, author)).toBe("not the author’s prefix")
     expect(chatMediaRefusal(`https://blendn-media.fly.storage.tigris.dev/profile/${author}/1-x-a.jpg`, author)).toBe("another prefix")
     expect(chatMediaRefusal(`${bucket}/chat/${author}/%2e%2e/${other}/1-x-a.jpg`, author)).toBe("traversal")
     expect(chatMediaRefusal(`${bucket}/chat/${author}/../${other}/1-x-a.jpg`, author)).toBe("traversal")

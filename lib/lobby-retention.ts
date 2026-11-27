@@ -96,7 +96,7 @@ const holdingReport = (since: Date) => Prisma.sql`(r.status = 'pending' OR (r.st
 
 async function messagesPastTheirTime(since: Date) {
   return db.$queryRaw<PastTheirTime[]>`
-    SELECT m.id, m.metadata->>'mediaUrl' AS url, m.user_id AS owner_id
+    SELECT m.id, m.metadata->>'mediaUrl' AS url, m.user_id AS author_id
       FROM chat_messages m
       JOIN chat_groups g ON g.id = m.chat_group_id
       LEFT JOIN board_posts bp ON bp.id = g.board_post_id
@@ -115,7 +115,7 @@ async function messagesPastTheirTime(since: Date) {
 
 async function postsPastTheirTime(since: Date) {
   return db.$queryRaw<PastTheirTime[]>`
-    SELECT p.id, p.photo_url AS url, p.author_id AS owner_id
+    SELECT p.id, p.photo_url AS url, p.author_id
       FROM board_posts p
       JOIN events e ON e.id = p.event_id
      WHERE ${closesAt} < ${since}
@@ -135,7 +135,7 @@ async function postsPastTheirTime(since: Date) {
 }
 
 /** A message or post past its time, with its photo's stored URL and whose row it is. */
-type PastTheirTime = { id: string; url: string | null; owner_id: string }
+type PastTheirTime = { id: string; url: string | null; author_id: string }
 
 type Refused = { id: string; why: ChatMediaRefusal | "possibly named by another row" }
 
@@ -174,7 +174,7 @@ async function deleteObjects(rows: PastTheirTime[]): Promise<{ ids: string[]; ph
   const refused: Refused[] = []
   let photos = 0
   let kept = 0
-  const keys = new Map(rows.map((row) => [row.id, row.url ? chatMediaKey(row.url, row.owner_id) : null]))
+  const keys = new Map(rows.map((row) => [row.id, row.url ? chatMediaKey(row.url, row.author_id) : null]))
   const older = [...new Set([...keys.values()].filter((k): k is string => k !== null && !k.startsWith("chat/sealed/")))]
   const named = await stillNamed(older, rows.map((r) => r.id))
   const deleted = new Set<string>()
@@ -185,7 +185,7 @@ async function deleteObjects(rows: PastTheirTime[]): Promise<{ ids: string[]; ph
       continue
     }
     if (!key || named.has(key)) {
-      if (row.url) refused.push({ id: row.id, why: key ? "possibly named by another row" : chatMediaRefusal(row.url, row.owner_id) })
+      if (row.url) refused.push({ id: row.id, why: key ? "possibly named by another row" : chatMediaRefusal(row.url, row.author_id) })
       ids.push(row.id)
       continue
     }
@@ -256,7 +256,7 @@ export async function purgeClosedLobbies(now: Date = new Date()): Promise<PurgeP
   if (refused.length) {
     const byClass: Record<string, number> = {}
     for (const r of refused) byClass[r.why] = (byClass[r.why] ?? 0) + 1
-    logger.warn("Lobby purge: photos not the row's alone to delete; rows deleted, storage untouched", { count: refused.length, byClass, rows: refused.slice(0, 5) })
+    logger.warn("Lobby purge: photos not the row’s alone to delete; rows deleted, storage untouched", { count: refused.length, byClass, rows: refused.slice(0, 5) })
   }
   if (postsGone.ids.length) {
     const [, deleted] = await db.$transaction([
