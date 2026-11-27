@@ -1744,6 +1744,24 @@
       "observed": "Each: minor-dating-fields-cleared.itest.ts 1 of 1 failing. Restored; 1 of 1.",
       "date": "2026-09-29"
     },
+    "report-reasons.test.ts": {
+      "guards": "SCRUM-1176: the one list of report reasons. Every value the installed app sends reads as itself; urgent is exactly child_safety, impersonation, intimate_image, under_18; a stored free string reads as other; case and padding read as the value they spell; an inherited property name is never a reason.",
+      "mutation": "(M9) Object.hasOwn replaced by `key in REPORT_REASONS`. (M10) the trim and lower-case removed.",
+      "observed": "M9: 1 of 7 failing (inherited names). M10: 1 of 7 (case and padding). Restored each; 7 of 7.",
+      "date": "2026-11-27"
+    },
+    "report-evidence.itest.ts": {
+      "guards": "SCRUM-1176 on a db:migrate database: a message report (room, DM, Block and report) copies the message into excerpt and the copy survives the message's deletion; a person report named by a room's or DM's handle, from Unmatch and report, or from a crew room (redesign-crews-blends.itest.ts) copies their last 20 lines there, oldest first, each bounded, only from a place the reporter is in; the reporter's data export carries no excerpt; the dismissed-report sweep clears user_reports' excerpt and description at 180 days and keeps a pending one's.",
+      "mutation": "(M1) the message route's excerpt removed. (M2) the person route's excerpt removed. (M3) the leave route's excerpt always null. (M4) the DM lines without the reporter's participation. (M5) the room lines without the reporter's membership. (M6) the per-line clip removed. (M7) the oldest-first reverse removed. (M8) the sweep's user_reports line removed. (M11) the export selects user_reports.excerpt. (M12) the crew-room report's excerpt removed. (M13) empty lines kept. (M14) a DM with text and a photo read as its text alone.",
+      "observed": "M1: 3 of 12 failing. M2: 3 of 12. M3: 2 of 12. M4: 1 of 12. M5: 1 of 12. M6: 1 of 12. M7: 2 of 12. M8: 1 of 12. M11: 1 of 12. M12: 1 of 3 room-member report tests in redesign-crews-blends.itest.ts. M13: 1 of 13. M14: 1 of 13. Restored each; 13 of 13 and 3 of 3 on trust10.",
+      "date": "2026-11-27"
+    },
+    "report-evidence-place.test.ts": {
+      "guards": "SCRUM-1176: placeOfRef reads the place a handle was minted in (an event's room, a crew's, a Blend's or a board post's room, a DM) and none from a raw id or a forged handle.",
+      "mutation": "(M15) a crew, Blend or board-post handle read as an event id.",
+      "observed": "M15: 1 of 2 failing. Restored; 2 of 2.",
+      "date": "2026-11-27"
+    },
     "deletion-erases-participation.itest.ts": {
       "guards": "SCRUM-481: DELETE /account ends every open check-in through performCheckout, so an erased person is not 'here now' in a live room (getOccupancy drops them) while the check-in row stays, closed, as the organiser's attendance, and their presence session is departed. Another attendee in the same room is untouched. Review pass: every open check-in goes (a second event's too), each session is closed as departed_source 'user', and a failure to read them never costs the storage erasure (account-deletion.test.ts: still 200, both folders deleted).",
       "mutation": "M322: the performCheckout call in the deletion route's open-check-in loop replaced with a no-op. Review pass: M368 the check-in read outside the try (a rejection skips the uploads). M369 only the first open row checked out. M370 the checkout reason left_area instead of manual.",
@@ -3009,24 +3027,6 @@
       "mutation": "(A3) the call site passes 'organizer' for every application. (A5) the approval's reviewed_at write removed.",
       "observed": "A3: 1 of 8 failing (the venue owner). A5: 2 of 8. Restored each; 8 of 8 on blendn_growth09a.",
       "date": "2026-11-26"
-    },
-    "report-reasons.test.ts": {
-      "guards": "SCRUM-1176: the one list of report reasons. Every value the installed app sends reads as itself; urgent is exactly child_safety, impersonation, intimate_image, under_18; a stored free string reads as other; case and padding read as the value they spell; an inherited property name is never a reason.",
-      "mutation": "(M9) Object.hasOwn replaced by `key in REPORT_REASONS`. (M10) the trim and lower-case removed.",
-      "observed": "M9: 1 of 7 failing (inherited names). M10: 1 of 7 (case and padding). Restored each; 7 of 7.",
-      "date": "2026-11-27"
-    },
-    "report-evidence.itest.ts": {
-      "guards": "SCRUM-1176 on a db:migrate database: a message report (room, DM, Block and report) copies the message into excerpt and the copy survives the message's deletion; a person report named by a room's or DM's handle, from Unmatch and report, or from a crew room (redesign-crews-blends.itest.ts) copies their last 20 lines there, oldest first, each bounded, only from a place the reporter is in; the reporter's data export carries no excerpt; the dismissed-report sweep clears user_reports' excerpt and description at 180 days and keeps a pending one's.",
-      "mutation": "(M1) the message route's excerpt removed. (M2) the person route's excerpt removed. (M3) the leave route's excerpt always null. (M4) the DM lines without the reporter's participation. (M5) the room lines without the reporter's membership. (M6) the per-line clip removed. (M7) the oldest-first reverse removed. (M8) the sweep's user_reports line removed. (M11) the export selects user_reports.excerpt. (M12) the crew-room report's excerpt removed. (M13) empty lines kept. (M14) a DM with text and a photo read as its text alone.",
-      "observed": "M1: 3 of 12 failing. M2: 3 of 12. M3: 2 of 12. M4: 1 of 12. M5: 1 of 12. M6: 1 of 12. M7: 2 of 12. M8: 1 of 12. M11: 1 of 12. M12: 1 of 3 room-member report tests in redesign-crews-blends.itest.ts. M13: 1 of 13. M14: 1 of 13. Restored each; 13 of 13 and 3 of 3 on trust10.",
-      "date": "2026-11-27"
-    },
-    "report-evidence-place.test.ts": {
-      "guards": "SCRUM-1176: placeOfRef reads the place a handle was minted in (an event's room, a crew's, a Blend's or a board post's room, a DM) and none from a raw id or a forged handle.",
-      "mutation": "(M15) a crew, Blend or board-post handle read as an event id.",
-      "observed": "M15: 1 of 2 failing. Restored; 2 of 2.",
-      "date": "2026-11-27"
     }
   },
   "grandfathered": [
