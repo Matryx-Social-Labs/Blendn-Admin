@@ -137,26 +137,43 @@ export async function dueForDeletion(db: PrismaClient, now: Date): Promise<strin
 
 /**
  * Erase every account due, oldest stamp first, one at a time, each one's
- * deferred work awaited before the next. Stops at the first failure, naming
- * the id; the ones before it stay erased, and a run after takes up the rest.
- * Each id is read again just before its erasure, so one a staff correction
- * cleared since the list was read is skipped. `erase` is `eraseAccount`; a
- * test passes its own.
+ * deferred work awaited before the next. Each id is read again just before its
+ * erasure, so one a staff correction cleared since the list was read is
+ * skipped (and listed). Stops at the first failure, or at the first account
+ * with a part not erased (storage, RevenueCat), naming the id, the ids erased
+ * before it, and whether its account row is erased: a row not erased is due
+ * again; the parts of an erased one are not retried by a later run.
+ * `erase` is `eraseAccount`; a test passes its own.
  */
-export async function deleteDue(db: PrismaClient, now: Date, erase: typeof eraseAccount = eraseAccount): Promise<string[]> {
+export async function deleteDue(
+  db: PrismaClient,
+  now: Date,
+  erase: typeof eraseAccount = eraseAccount
+): Promise<{ erased: string[]; skipped: string[] }> {
   const erased: string[] = []
+  const skipped: string[] = []
   for (const id of await dueForDeletion(db, now)) {
-    if ((await db.profiles.count({ where: { id, ...dueWhere(now) } })) === 0) continue
+    if ((await db.profiles.count({ where: { id, ...dueWhere(now) } })) === 0) {
+      skipped.push(id)
+      continue
+    }
     const deferred: Promise<void>[] = []
+    let failure: string | null = null
     try {
-      await erase(id, { ipAddress: "script", defer: (task) => void deferred.push(task()) })
+      const notErased = await erase(id, { ipAddress: "script", defer: (task) => void deferred.push(task()) })
       await Promise.all(deferred)
+      if (notErased.length > 0) failure = `not erased: ${notErased.join(", ")}`
     } catch (error) {
-      throw new Error(`Erasing ${id} failed (${erased.length} erased before it): ${error instanceof Error ? error.message : String(error)}`)
+      failure = error instanceof Error ? error.message : String(error)
+    }
+    if (failure) {
+      const row = await db.user.findUnique({ where: { id }, select: { deletedAt: true } })
+      const state = row?.deletedAt ? "the account row is erased" : "the account row is not erased, a run after retries it"
+      throw new Error(`Erasing ${id} failed (erased before it: ${erased.join(", ") || "none"}; ${state}): ${failure}`)
     }
     erased.push(id)
   }
-  return erased
+  return { erased, skipped }
 }
 
 /** Set a corrected birth date, clear the stamp, and record who did it. Throws, changing nothing, on a refused date, account or actor. */
@@ -217,7 +234,9 @@ async function main() {
     }
     if (command.mode === "apply") {
       printIds("stamped now (known age under 18)", await stampKnownMinors(db, now))
-      printIds(`erased (stamped ${DELETE_AFTER_DAYS}+ days ago)`, await deleteDue(db, now))
+      const { erased, skipped } = await deleteDue(db, now)
+      printIds(`erased (stamped ${DELETE_AFTER_DAYS}+ days ago)`, erased)
+      printIds("skipped (no longer due when its turn came)", skipped)
       return
     }
     printIds("would stamp (known age under 18, no stamp)", await knownMinorsUnstamped(db, now))

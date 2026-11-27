@@ -1596,8 +1596,8 @@
     },
     "under-18-accounts.itest.ts": {
       "guards": "SCRUM-1477, D-026: scripts/under-18-accounts.ts --apply erases each account stamped 14 or more days ago through eraseAccount (lib/account-erasure.ts, the erasure DELETE /api/mobile/account runs), and none stamped since: deletedAt set, the deleted-account record written, under_18_since null on the erased row. One at a time, each erasure's deferred work awaited before the next, stopping at the first failure with the id named.",
-      "mutation": "M1: dueForDeletion's `under_18_since: { lte: ... }` made `gte` (the 14-day comparison flipped). M2: revokeAppleAfterErasure's audit row written fire-and-forget (`auditLog`) instead of awaited. M3: deleteDue's per-id re-read before each erasure removed. RED before the change: deleteDue not exported.",
-      "observed": "M1: 3 of 9 failing (the deletion list, and both deleteDue tests). M2: 1 of 11 failing (no account.apple_revoke row when deleteDue returns). M3: 1 of 12 failing (the account a staff correction cleared mid-run is erased). RED: 2 of 9 failing (deleteDue is not a function). Restored; 9 of 9.",
+      "mutation": "M1: dueForDeletion's `under_18_since: { lte: ... }` made `gte` (the 14-day comparison flipped). M2: revokeAppleAfterErasure's audit row written fire-and-forget (`auditLog`) instead of awaited. M3: deleteDue's per-id re-read before each erasure removed. M4: eraseAccount's not-erased parts ignored by deleteDue (RED before the change: the storage failure test and the message tests). RED before the change: deleteDue not exported.",
+      "observed": "M1: 3 of 9 failing (the deletion list, and both deleteDue tests). M2: 1 of 11 failing (no account.apple_revoke row when deleteDue returns). M3: 1 of 12 failing (the account a staff correction cleared mid-run is erased). M4: 6 of 13 failing before the change (storage failure not reported, the skipped list and the messages); 13 of 13 after. RED: 2 of 9 failing (deleteDue is not a function). Restored; 9 of 9.",
       "date": "2026-11-27"
     },
     "rsc-boundary.test.ts": {

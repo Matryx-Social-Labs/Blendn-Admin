@@ -34,11 +34,14 @@ export interface EraseAccountOptions {
  * PII, revoke all auth (refresh tokens, push tokens, OAuth links, any
  * dashboard sessions), and mark deletedAt so the account can never be signed
  * back into. Throws if the database erasure fails; nothing is erased then.
+ * Resolves with the parts of the person's data it could not erase after that
+ * (storage, RevenueCat), each also logged; empty when all of it went.
  */
 export async function eraseAccount(
   userId: string,
   { ipAddress, appleAuthorizationCode, defer }: EraseAccountOptions
-): Promise<void> {
+): Promise<string[]> {
+  const notErased: string[] = []
   // Read before the erasure, which deletes the link: whether there is an Apple grant to revoke.
   // Every Apple link, not the first: the code's Apple ID is checked against all of them (review L1).
   const appleSubs = new Set(
@@ -608,12 +611,13 @@ export async function eraseAccount(
   const rcKey = revenuecatSecretKey()
   const erasedId = userId
   if (rcKey) {
-    await deleteSubscriber(erasedId, rcKey).catch((error) =>
+    await deleteSubscriber(erasedId, rcKey).catch((error) => {
+      notErased.push("RevenueCat customer")
       logger.warn("Account deletion: RevenueCat delete failed; delete the customer in RevenueCat by hand", {
         userId: erasedId,
         error: error instanceof Error ? error.message : String(error),
       })
-    )
+    })
   }
 
   // Seats they held are free now; the waitlist moves, per event.
@@ -671,12 +675,13 @@ export async function eraseAccount(
   for (const { photo_url } of lobbyPhotos) {
     const key = photo_url ? sealedChatKey(photo_url) : null
     if (!key) continue
-    await deleteFile(key).catch((error) =>
+    await deleteFile(key).catch((error) => {
+      notErased.push("a Lobby photo")
       logger.error("Account deletion: Lobby photo NOT removed from storage", {
         userId: erasedId,
         error: error instanceof Error ? error.message : String(error),
       })
-    )
+    })
   }
 
   for (const folder of ["profile", "chat"] as const) {
@@ -694,6 +699,7 @@ export async function eraseAccount(
       }
       logger.info("Account deletion: uploads removed from storage", { userId: userId, folder, gone })
     } catch (error) {
+      notErased.push(`storage ${folder}/`)
       logger.error("Account deletion: uploads NOT removed from storage", {
         userId: userId,
         folder,
@@ -711,6 +717,7 @@ export async function eraseAccount(
   if (appleSubs.size > 0) {
     defer(() => revokeAppleAfterErasure(userId, appleSubs, appleAuthorizationCode, ipAddress))
   }
+  return notErased
 }
 
 /**
