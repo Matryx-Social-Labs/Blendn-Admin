@@ -844,7 +844,7 @@ registry.registerPath({
   summary: "Send announcement (organizer only)",
   description:
     "Text only, up to 1000 characters: media is refused with 400. `kind: \"sponsored\"` is refused with 400 " +
-    "`Sponsored messages go out through a campaign` and writes nothing; sponsored content reaches a room only through a campaign.",
+    "`Sponsored content goes out through a campaign` and writes nothing; sponsored content reaches a room only through a campaign.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),

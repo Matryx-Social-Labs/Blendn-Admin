@@ -69,7 +69,7 @@ export async function POST(
      * announcement either (SCRUM-1070).
      */
     if (rawKind === "sponsored") {
-      return errorResponse("Sponsored messages go out through a campaign", 400)
+      return errorResponse("Sponsored content goes out through a campaign", 400)
     }
 
     const KINDS: readonly BroadcastKind[] = ["announcement", "system"]

@@ -281,6 +281,13 @@ describe("creating a poll", () => {
     expect(mockDb.chat_polls.create).not.toHaveBeenCalled()
     expect(mockDb.chat_messages.create).not.toHaveBeenCalled()
   })
+
+  it("refuses any other kind as not an announcement", async () => {
+    await expect(
+      createPoll(EVENT, { question: "Which flavour?", options: ["Original", "Sugarfree"], kind: "system" })
+    ).rejects.toThrow("A poll is an announcement")
+    expect(mockDb.chat_polls.create).not.toHaveBeenCalled()
+  })
 })
 
 describe("voting", () => {

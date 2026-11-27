@@ -122,7 +122,7 @@ export const AnnounceRequestSchema = z
       .default("announcement")
       .describe(
         "`announcement` (the organising org, `canEdit`) or `system` (an app_admin). `sponsored` is refused: 400 " +
-          "`Sponsored messages go out through a campaign`, nothing written. Sponsored content reaches a room only through a campaign."
+          "`Sponsored content goes out through a campaign`, nothing written. Sponsored content reaches a room only through a campaign."
       ),
   })
   .openapi("AnnounceRequest")

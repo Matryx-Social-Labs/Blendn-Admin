@@ -57,7 +57,10 @@ const pollSchema = z.object({
    * it, the room keeps its gap and the send is counted (SCRUM-1070).
    */
   kind: z
-    .literal("announcement", { error: "Sponsored content goes out through a campaign" })
+    .literal("announcement", {
+      error: (issue) =>
+        issue.input === "sponsored" ? "Sponsored content goes out through a campaign" : "A poll is an announcement",
+    })
     .default("announcement"),
 })
 

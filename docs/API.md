@@ -3954,7 +3954,7 @@ and only the second is worth blocking.
 |---|---|---|
 | `announcement` | `canEdit` — the organising org, or an `app_admin`. **Not** the venue owner | no: 400 `Announcements carry text only` |
 | `system` | `app_admin` only — it speaks as Blend'n | no: 400, as above |
-| `sponsored` | nobody: **400** `Sponsored messages go out through a campaign`, nothing written | — |
+| `sponsored` | nobody: **400** `Sponsored content goes out through a campaign`, nothing written | — |
 
 **Sponsored content reaches a room only through a campaign** (SCRUM-1070,
 D-050): `/api/events/:id/sponsored-messages` on the dashboard, sent by
@@ -3992,12 +3992,12 @@ in.
 send one could issue a safety notice, or a "verified by Blend'n" claim, in the
 platform's voice.
 
-**Media rides on `sponsored` alone, and that is a safety rule.** The event room
+**This route carries words only, and that is a safety rule.** The event room
 is pseudonymous, and a photograph is an identity — of whoever is *in* it, who is
 not always the person posting. Attendee media is not built at all. An
 announcement is a host addressing that same room, so it inherits the rule.
-Sponsored artwork depicts nobody in the room, which is what makes it the
-exception.
+Media in a room is a campaign's creative alone (`broadcastMayCarryMedia`):
+artwork that depicts nobody in the room, reviewed before it runs.
 
 **One refusal message for both kinds.** Which rule refused is not the caller's
 to probe: `403 You cannot broadcast to this event`.
