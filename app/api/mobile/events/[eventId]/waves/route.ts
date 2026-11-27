@@ -12,7 +12,7 @@ import {
   unauthorizedResponse,
   validationErrorResponse,
 } from "@/lib/api-response"
-import { blockedEitherWay, pairIsClosed } from "@/lib/conversations"
+import { blockedEitherWay } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { inRoomWhere } from "@/lib/event-kind"
 import { logger } from "@/lib/logger"
@@ -20,7 +20,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { emitRoomWave } from "@/lib/socket-server"
 import { roomMemberFromRef } from "@/lib/room-handle"
-import { knownToEachOther, LISTED_IN_ROSTER } from "@/lib/room-people"
+import { hiddenInRooms, knownToEachOther, LISTED_IN_ROSTER } from "@/lib/room-people"
 import { openIfMutual } from "@/lib/matches"
 import { announceRoomMatch } from "@/lib/room-match"
 import { operatesEvent } from "@/lib/tonight"
@@ -176,7 +176,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Banned from the room is not in it: the same answer, never which.
     if (await eventRoomBan(eventId, toUserId)) return notHere()
     if (await blockedEitherWay(fromUserId, toUserId)) return notHere()
-    if (await pairIsClosed(fromUserId, toUserId)) return notHere()
+    // A closed pair (an unmatch) is NOT refused: their handle answers as a stranger's, stored and capped
+    // alike, or the one refused handle names the person from another room (SCRUM-1476). The ping is held below.
     // A friend is never a stranger to wave at (lib/room-people.ts).
     if (await knownToEachOther(fromUserId, toUserId)) return notHere()
     // Nobody waves at a host either.
@@ -197,7 +198,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       // `room:match` to both, in place of the ping: the moment is "You both waved". Never rejects.
       await announceRoomMatch(eventId, outcome.conversationId)
     } else {
-      emitRoomWave(toUserId, { eventId, fromUserId, fromName: await roomNameOf(eventId, fromUserId, toUserId) })
+      /*
+       * Pinged only if their own lists show the sender (`hiddenInRooms`): not
+       * the person they unmatched, not somebody they reported. Both reads run
+       * for every wave, so a held ping takes as long as a sent one.
+       */
+      const [fromName, hidden] = await Promise.all([roomNameOf(eventId, fromUserId, toUserId), hiddenInRooms(toUserId)])
+      if (!hidden.has(fromUserId)) emitRoomWave(toUserId, { eventId, fromUserId, fromName })
     }
 
     return successResponse({ sent: true, ...outcome })

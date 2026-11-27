@@ -842,9 +842,9 @@ export async function openIfMutual(eventId: string, actorId: string, otherId: st
    * was not do the same work up to that point, so how long it takes says nothing
    * about whether the other person liked back.
    *
-   * A closed pair is linked too, which is the invariant the old closed-pair
-   * guard defended: `POST /matches/likes` refuses closed pairs before calling in,
-   * but this is the shared write path.
+   * A closed pair is linked too, and this is the ONLY thing that keeps an
+   * unmatch permanent: the like and wave routes answer a closed pair as a
+   * stranger (SCRUM-1476), store the gesture, and call in here.
    */
   try {
     const opened = await db.$transaction(async (tx) => {

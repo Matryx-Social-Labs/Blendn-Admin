@@ -5,7 +5,7 @@ import { lobbyMetInFor, metInFor, metInRoomSelect, metInSelect } from "@/lib/met
 import { lobbyMeeting } from "@/lib/lobby-meeting"
 import { z } from "zod"
 import { randomUUID } from "crypto"
-import { haveSharedAnEvent, pairIsClosed } from "@/lib/conversations"
+import { haveSharedAnEvent } from "@/lib/conversations"
 import { identityForRef } from "@/lib/identity"
 import { resolveUserRef, userIdFromRef } from "@/lib/room-handle"
 import { knownToEachOther, LISTED_IN_ROSTER } from "@/lib/room-people"
@@ -137,21 +137,6 @@ export async function POST(request: NextRequest) {
     }
 
     /*
-     * Leaving is permanent, and the same words as the likes route.
-     *
-     * A pair whose conversation was closed used to fall through to the
-     * duplicate-request guard, which answered with whatever the old row said:
-     * "This user has already sent you a request. Check your incoming requests"
-     * -- to someone whose inbox is empty, about a request that was accepted,
-     * talked through and ended. That tells the caller the other person once
-     * wanted to talk and then stopped, which is a rejection notice by another
-     * name. Driven 2026-09-13 on two phones after an unmatch.
-     */
-    if (await pairIsClosed(authUser.userId, recipientId)) {
-      return notFoundResponse("User not found")
-    }
-
-    /*
      * You have to have been in the room.
      *
      * There was no such check: any authenticated caller could send a request to
@@ -257,7 +242,18 @@ export async function POST(request: NextRequest) {
       // too — never the 409. The 409 would say "a request or a DM already
       // exists" about an id the match's pseudonym is hiding. They are already in
       // your inbox, where the conversation is.
-      if ((await identityForRef(authUser.userId, ref)).identified) return conflictResponse(refusal)
+      if ((await identityForRef(authUser.userId, ref)).identified) {
+        /*
+         * Leaving is permanent. A closed pair is told "not found", never the
+         * 409, which described the old accepted request ("this user has already
+         * sent you a request") to somebody who was unmatched: a rejection notice
+         * by another name (driven 2026-09-13). Only here, to somebody who can
+         * see who this is; to anybody else a closed pair is the silent 201
+         * below, as a stranger already asked (SCRUM-1476: a 404 on one handle
+         * named the person from another room).
+         */
+        return existingConversation?.closed_at ? notFoundResponse("User not found") : conflictResponse(refusal)
+      }
       await countSilentRequest(authUser.userId)
       return successResponse(
         {

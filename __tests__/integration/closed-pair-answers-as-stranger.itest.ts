@@ -244,13 +244,16 @@ describe("message requests: a closed pair's handle answers as a stranger's", () 
     expect(await db.message_requests.count({ where: { sender_id: v.id, recipient_id: x.id } })).toBe(0)
   })
 
-  it("somebody who can see who this is still hears 404, as before", async () => {
+  it("somebody who can see who this is still hears 404, as before, never the 409", async () => {
     const [v, x] = [await person("cpn-v"), await person("cpn-x")]
     await closePair(v, x)
-    // X chose to be named in room B: V sees who this is, so the closed pair is no secret to V.
-    await db.event_match_preferences.create({ data: { event_id: roomB, user_id: x.id, revealed: true } })
-    const r = await ask(v, roomHandle(roomB, x.id))
+    // A friend asked by real id is identified (`identityForRef`): the closed pair is no secret to V.
+    const [user1_id, user2_id] = conversationPair(v.id, x.id)
+    await db.friendships.create({ data: { user1_id, user2_id } })
+    const r = await ask(v, x.id)
     expect(r.status).toBe(404)
     expect(r.body.error).toBe("User not found")
+    // Even by X's room handle a closed pair is nobody V can see in the room: the stranger's 201 (`identityFor` hides it).
+    expect((await ask(v, roomHandle(roomB, x.id))).status).toBe(201)
   })
 })

@@ -251,7 +251,9 @@ export async function likePersonAsCrew(
   const mine = await crewHereNow(asCrewId, here.occurrenceId)
   if (!mine || !mine.present.includes(likerId)) return MY_CREW_NOT_HERE
   if (!mine.open_to_solo || mine.members.length > CREW.MAX_SOLO_MATCH) return NO_ROOM_FOR_ONE
-  if (personId === likerId || mine.members.includes(personId)) return NO_PERSON
+  if (personId === likerId) return NO_PERSON
+  // Your own crewmate, by their room handle: the answer about anybody else, or a 404 says "this handle is in my crew" (SCRUM-1476).
+  if (mine.members.includes(personId)) return nothingTold
 
   const [theirCheckIn, them] = await Promise.all([
     db.event_check_ins.findFirst({ where: { user_id: personId, ...hereNowAt(here.occurrenceId), user: LISTED_IN_ROSTER }, select: { id: true } }),

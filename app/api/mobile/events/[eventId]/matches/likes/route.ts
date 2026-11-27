@@ -12,7 +12,7 @@ import {
   unauthorizedResponse,
   validationErrorResponse,
 } from "@/lib/api-response"
-import { blockedEitherWay, pairIsClosed } from "@/lib/conversations"
+import { blockedEitherWay } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { inRoomWhere } from "@/lib/event-kind"
 import { logger } from "@/lib/logger"
@@ -139,21 +139,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     /*
-     * Leaving is permanent, and the pool is not the gate.
-     *
-     * `lib/matches.ts` hides closed pairs from the ranked list, but that is
-     * only what the client renders -- this endpoint takes a user id directly.
-     * Without the check, someone who unmatched could like the same person
-     * again, hit the reciprocal like that was never deleted, and get
-     * `mutual: true` back pointing at a conversation that is closed.
-     *
-     * Same shape as the block response above, and deliberately the same words:
-     * a distinct error here would tell the caller "this specific person
-     * unmatched you", which is a rejection notice by another name.
+     * A closed pair (an unmatch) is liked like a stranger: the row is stored and
+     * the answer is `{ mutual: false }`, the work and the words of a like
+     * nobody returned. A refusal here named, by elimination, the one handle in
+     * this room that belongs to the person from another (SCRUM-1476). Leaving
+     * stays permanent: `openIfMutual` treats any conversation, closed included,
+     * as linked and opens nothing, so a like back reopens nothing either.
      */
-    if (await pairIsClosed(authUser.userId, likedId)) {
-      return notFoundResponse("User not found")
-    }
 
     /*
      * A friend is never a stranger to like (the owner's rule, 2026-10-22): no
