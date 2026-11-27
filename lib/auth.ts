@@ -1,11 +1,15 @@
 import { PrismaAdapter } from "@auth/prisma-adapter"
-import { NextAuthOptions, getServerSession, User } from "next-auth"
+import { NextAuthOptions, getServerSession, User, type Profile } from "next-auth"
 import CredentialsProvider from "next-auth/providers/credentials"
+import GoogleProvider from "next-auth/providers/google"
 import bcrypt from "bcryptjs"
 import { db } from "./db"
-import { cookies } from "next/headers"
+import { cookies, headers } from "next/headers"
 import { auditLog } from "./audit-log"
+import { clientIpFrom } from "./client-ip"
+import { COMPANY, isStaffEmail } from "./company"
 import { DUMMY_HASH, MAX_EMAIL_LENGTH, refuseOverSigninLimits, settleSigninSuccess, signinIp, signinKeys } from "./dashboard-signin-limits"
+import { adminSsoRequired, dashboardGoogleClient } from "./env"
 import { KNOWN_DEVICE_MAX_AGE_SECONDS, isKnownDevice, knownDeviceCookie } from "./known-device"
 import { logger } from "./logger"
 import { sessionAccount, signinAccount } from "./org-membership"
@@ -54,11 +58,84 @@ async function hasLiveInvite(email: string): Promise<boolean> {
   return Boolean(invite)
 }
 
+/*
+ * Who was in, and from where (SCRUM-1238; security audit 2026-11-25 finding 8), whichever door they came through. Not
+ * awaited: `auditLog` catches its own failures, so a slow or failing write neither holds up nor refuses a sign-in.
+ */
+function recordDashboardSignin(userId: string, role: user_role, provider: "credentials" | "google", ipAddress?: string): void {
+  auditLog({ action: "auth.dashboard_signin", resource: "user", resourceId: userId, userId, ipAddress, details: { provider } })
+  if (role === "app_admin") logger.warn("Admin dashboard sign-in", { userId, ipAddress })
+}
+
+/** The request's address inside a NextAuth event, which is handed no request. Never a reason to fail a sign-in. */
+async function requestIp(): Promise<string | undefined> {
+  try {
+    return clientIpFrom(await headers())
+  } catch {
+    return undefined
+  }
+}
+
+type GoogleClaims = Profile & { email_verified?: boolean; hd?: string }
+
+/**
+ * Whether a Google sign-in is platform staff, and if so the link from that Google account to their row (SCRUM-1241).
+ *
+ * Google has verified the id token by now; these are its claims. In: a verified address on the staff domain, from the
+ * company Workspace (`hd`), belonging to a live, unsuspended `app_admin`. The `hd` claim is what Google says about the
+ * account; the `hd` sent with the request is only a hint to its account picker.
+ *
+ * The link is written here, to the row just checked, and never by NextAuth: its handler would link an unlinked account
+ * to whichever session is already in the browser, or to whatever row the e-mail matches, or create one (the adapter
+ * below refuses both writes). A row already linked to another Google account is refused: a Workspace address handed
+ * to a new person must not inherit the old one's admin row; an admin removes the old link first. No Google token is
+ * kept: nothing here calls Google.
+ *
+ * Every refusal writes nothing and says only "not staff": which check failed is in the log, not on the page.
+ */
+async function admitStaffGoogle(sub: string, profile: Profile | undefined): Promise<boolean> {
+  const claims = profile as GoogleClaims | undefined
+  const email = claims?.email?.trim().toLowerCase()
+  const refuse = (reason: string) => {
+    logger.warn("Staff Google sign-in refused", { reason })
+    return false
+  }
+  if (!sub || !email || claims?.email_verified !== true || claims.hd !== COMPANY.staffEmailDomain || !isStaffEmail(email)) {
+    return refuse("not a verified address on the staff Workspace")
+  }
+  const row = await signinAccount(email)
+  if (!row || row.role !== "app_admin" || row.deletedAt || row.suspended_at) return refuse("no live admin with that address")
+
+  const links = await db.account.findMany({
+    where: { provider: "google", OR: [{ providerAccountId: sub }, { userId: row.id }] },
+    select: { userId: true, providerAccountId: true },
+  })
+  if (links.some((l) => l.userId !== row.id || l.providerAccountId !== sub)) return refuse("linked to another Google account or row")
+  if (links.length === 0) {
+    // Two first sign-ins at once: one row wins, and both read back which.
+    await db.account.createMany({ data: [{ userId: row.id, type: "oauth", provider: "google", providerAccountId: sub }], skipDuplicates: true })
+    const link = await db.account.findUnique({
+      where: { provider_providerAccountId: { provider: "google", providerAccountId: sub } },
+      select: { userId: true },
+    })
+    if (link?.userId !== row.id) return refuse("linked to another row")
+  }
+  return true
+}
+
+const refuseAdapterWrite = (): never => {
+  throw new Error("The dashboard never creates or links an account through NextAuth")
+}
+const googleClient = dashboardGoogleClient()
+
 export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(db),
+  // Reads only: no sign-in creates a user, and the one link is written by `admitStaffGoogle`.
+  adapter: { ...PrismaAdapter(db), createUser: refuseAdapterWrite, linkAccount: refuseAdapterWrite },
   session: { strategy: "jwt" },
   pages: {
     signIn: "/login",
+    // A refused Google sign-in lands back on the form, which says it in its own words (app/login/page.tsx).
+    error: "/login",
   },
   providers: [
     CredentialsProvider({
@@ -82,7 +159,13 @@ export const authOptions: NextAuthOptions = {
         const user = await signinAccount(email)
 
         const isValid = await bcrypt.compare(credentials.password, user?.password ?? DUMMY_HASH)
-        if (!user?.password || !isValid) {
+        /*
+         * An admin signs in with Google once ADMIN_SSO_REQUIRED is on (SCRUM-1241). Refused as a wrong password is, and
+         * after the compare, so neither the answer nor its time says the password was right: the mobile door still
+         * takes it. The form tells a staff address where to go instead.
+         */
+        const ssoOnly = adminSsoRequired() && user?.role === "app_admin"
+        if (!user?.password || !isValid || ssoOnly) {
           return null
         }
         await settleSigninSuccess(keys, knownDevice)
@@ -118,20 +201,28 @@ export const authOptions: NextAuthOptions = {
           throw new Error(APP_ONLY_SIGNIN)
         }
 
-        /*
-         * Who was in, and from where (SCRUM-1238; security audit 2026-11-25
-         * finding 8). Not awaited: `auditLog` catches its own failures, so a
-         * slow or failing write neither holds up nor refuses a sign-in.
-         */
-        const ipAddress = signinIp(req?.headers)
-        auditLog({ action: "auth.dashboard_signin", resource: "user", resourceId: user.id, userId: user.id, ipAddress, details: { provider: "credentials" } })
-        if (role === "app_admin") logger.warn("Admin dashboard sign-in", { userId: user.id, ipAddress })
+        recordDashboardSignin(user.id, role, "credentials", signinIp(req?.headers))
 
         return { id: user.id, email: user.email, name: user.name, role }
       },
     }),
+    // Platform staff, with the company Google account. Registered only when the dashboard's own client is configured.
+    ...(googleClient
+      ? [
+          GoogleProvider({
+            ...googleClient,
+            authorization: { params: { hd: COMPANY.staffEmailDomain, prompt: "select_account" } },
+          }),
+        ]
+      : []),
   ],
   callbacks: {
+    /** Default deny: Credentials has decided in `authorize`; Google is decided by `admitStaffGoogle`; nothing else exists. */
+    async signIn({ account, profile }) {
+      if (account?.provider === "credentials") return true
+      if (account?.provider === "google") return admitStaffGoogle(account.providerAccountId, profile)
+      return false
+    },
     async session({ session, token }) {
       if (!token || !session.user) return session
       return {
@@ -183,6 +274,13 @@ export const authOptions: NextAuthOptions = {
       // `provenAt` written back, so a session that only had `iat` keeps the
       // first one it was judged by rather than its next re-encode's.
       return { ...token, role, signedInAt: provenAt(token)!, inviteOnly }
+    },
+  },
+  events: {
+    // After the session is made, so a sign-in the handler still refuses leaves no row. Credentials records in `authorize`.
+    async signIn({ user, account }) {
+      if (account?.provider !== "google") return
+      recordDashboardSignin(user.id, (user as User & { role: user_role }).role, "google", await requestIp())
     },
   },
 }

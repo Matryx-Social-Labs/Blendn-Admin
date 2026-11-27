@@ -47,7 +47,7 @@ function withEnv(extra: Record<string, string | undefined>) {
 function loadAuth(): NextAuthOptions {
   let options: NextAuthOptions | undefined
   jest.isolateModules(() => {
-    options = (require("@/lib/auth") as typeof import("@/lib/auth")).authOptions
+    options = jest.requireActual<typeof import("@/lib/auth")>("@/lib/auth").authOptions
   })
   return options!
 }
