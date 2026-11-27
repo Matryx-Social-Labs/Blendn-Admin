@@ -701,6 +701,28 @@ Each line is `_time`, `env`, `level`, `message`, `deploymentId` and
 to 18:30 UTC. Logs hold personal data (user ids, sometimes an IP address):
 quote what a line says, never paste lines into a ticket, a chat or a reply.
 
+**What a line can hold** (SCRUM-1512, advisor picks of 2026-11-27). Never an
+email address, a phone number or a limiter's network: a limiter key is logged
+as its leading words and a 12-character sha256 of the rest
+(`rl:auth:dashboard-signin:acct:3f9a0c…`), the same for the same key so lines
+still match. That is a pseudonym, not anonymity: anyone who has the address can
+compute it. A mail line names the recipient's domain only. What a line can
+still hold:
+
+- user, event, venue and other internal ids;
+- the IP of an `app_admin`'s dashboard sign-in ("Admin dashboard sign-in"),
+  kept: a privileged sign-in's address is the security-log content CERT-In
+  expects, and what an unexpected-network check reads (staff should know the
+  copy sits in Axiom's US region);
+- the moderation list words that matched a sign-in name ("Sign-in name
+  refused" / "flagged for review"), kept: that line has no user id. A user-text
+  line beside a user id says `matchedCount`; the words are in the audit row;
+- a profile photo's object key on a failed check, never its URL;
+- residual: a vendor's or Prisma's `error.message` as it comes (Resend's body
+  has addresses replaced with `[address]`, others are not filtered), and the
+  boot-time `console` errors in `server.ts`, which print a whole error and its
+  stack.
+
 **What happened last Tuesday** (the last 30 days): Axiom, Query, in APL:
 
 ```

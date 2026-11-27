@@ -205,7 +205,8 @@ export async function moderateProfilePhoto(url: string, userId: string): Promise
     // should have come down and did not is worth a real log line.
     logger.error("Profile photo moderation failed; photo left in place", {
       userId,
-      url,
+      // Which photo, not a link to the person's face in a 180-day log (SCRUM-1512).
+      key: ownedPhotoKey(url, userId),
       error: error instanceof Error ? error.message : String(error),
     })
   }
@@ -243,7 +244,8 @@ export async function moderateBlurPhoto(url: string, userId: string): Promise<vo
   } catch (error) {
     logger.error("Blurred photo moderation failed; left in place", {
       userId,
-      url,
+      // Which photo, not a link to the person's face in a 180-day log (SCRUM-1512).
+      key: ownedPhotoKey(url, userId),
       error: error instanceof Error ? error.message : String(error),
     })
   }

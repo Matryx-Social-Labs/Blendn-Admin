@@ -200,10 +200,8 @@ export async function sendEmail(opts: {
   if (!key || !from) {
     // Logged at info, not error: an environment without email configured is a
     // valid environment, and this is how a developer gets the link locally.
-    logger.info("Email not sent — RESEND_API_KEY/EMAIL_FROM unset", {
-      to: opts.to,
-      subject: opts.subject,
-    })
+    // The domain only, as below: an address is somebody's, and a subject can carry a name.
+    logger.info("Email not sent — RESEND_API_KEY/EMAIL_FROM unset", { domain: opts.to.split("@").pop() })
     return { sent: false, reason: "not_configured" }
   }
 
@@ -262,7 +260,7 @@ export async function sendEmail(opts: {
       }
       const detail = await res.text().catch(() => "")
       if (last || !retryable(res.status)) {
-        logger.error("Email send failed", { status: res.status, attempt, detail: detail.slice(0, 300) })
+        logger.error("Email send failed", { status: res.status, attempt, detail: detail.slice(0, 300).replace(/[^\s"'<>@]+@[^\s"'<>]+/g, "[address]") })
         return { sent: false, reason: "provider_error", detail: `HTTP ${res.status}` }
       }
     } catch (err) {
