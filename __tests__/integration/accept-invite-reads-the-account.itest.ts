@@ -91,6 +91,8 @@ it("refuses a session the database has ended", async () => {
   expect(await db.organisation_members.count({ where: { org_id: org, user_id: id } })).toBe(0)
 })
 
+// The claim says attendee and the row venue_owner: the row is not rewritten. Since SCRUM-1247 a dashboard is the
+// membership, and with none before this one the person had no dashboard, so the session must be renewed (roleChanged).
 it("promotes on the role the database holds, not the claim", async () => {
   const invited = `l4-claim-${testId("x").toLowerCase()}@toit.in`
   const { token } = await invitedTo(invited)
@@ -100,6 +102,6 @@ it("promotes on the role the database holds, not the claim", async () => {
 
   const res = await accept(token)
   expect(res.status).toBe(200)
-  expect((await res.json()).roleChanged).toBe(false)
+  expect((await res.json()).roleChanged).toBe(true)
   expect((await db.user.findUniqueOrThrow({ where: { id }, select: { role: true } })).role).toBe("venue_owner")
 })

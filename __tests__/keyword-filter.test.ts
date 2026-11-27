@@ -14,6 +14,17 @@ describe("checkKeywords", () => {
     expect(result!.confidence).toBeGreaterThanOrEqual(0.7)
   })
 
+  it("says whether a hide is a slur or plain profanity: only a slur counts toward a mute (D-052a)", () => {
+    for (const line of ["you are a retard", "you faggot", "chutiya retard"]) {
+      expect(checkKeywords(line)).toMatchObject({ action: "hide", categories: { slur: expect.any(Number) } })
+      expect(checkKeywords(line)!.categories).not.toHaveProperty("profanity")
+    }
+    for (const line of ["tu ek chutiya hai", "bhenchod", "तू एक चूतिया है", "thevadiya"]) {
+      expect(checkKeywords(line)).toMatchObject({ action: "hide", categories: { profanity: expect.any(Number) } })
+      expect(checkKeywords(line)!.categories).not.toHaveProperty("slur")
+    }
+  })
+
   it("detects Hindi transliterated profanity", () => {
     const result = checkKeywords("tu ek chutiya hai")
     expect(result).not.toBeNull()
@@ -38,8 +49,7 @@ describe("checkKeywords", () => {
   })
 
   it("detects abbreviation keywords", () => {
-    const result = checkKeywords("bc tu pagal hai")
-    expect(result).not.toBeNull()
+    expect(checkKeywords("bsdk tu pagal hai")?.action).toBe("hide")
   })
 
   it("handles leetspeak evasion", () => {

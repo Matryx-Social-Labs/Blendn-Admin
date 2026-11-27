@@ -19,7 +19,7 @@ import { rsvpCounts } from "@/lib/event-tallies"
 import { discloseStarsAcross, discloseVenueCounts, spreadsByEventId } from "@/lib/disclosure"
 import { publishedRatingGroups } from "@/lib/rating-batches"
 import { ATTENDED } from "@/lib/counting"
-import { loopClosure } from "@/lib/loop-closure"
+import { loopClosure, signupCohorts } from "@/lib/loop-closure"
 import { activeSince } from "@/lib/product-events"
 import { cityDemand } from "@/lib/demand"
 import { cityKey } from "@/lib/address"
@@ -336,6 +336,7 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     cityRows,
     demandRows,
     checkInsPrior,
+    cohorts,
   ] = await Promise.all([
     /*
      * All four queues, from the module the sidebar badges also read.
@@ -470,6 +471,8 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     db.event_check_ins.count({
       where: { status: { in: ATTENDED }, event: eventScope(), created_at: inPrior },
     }),
+    // Staff only: this builder is the app_admin branch of getDashboardOverview (SCRUM-1281).
+    signupCohorts(8, now),
   ])
 
   /*
@@ -585,6 +588,7 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     upcomingEvents,
     curated: { published: curatedPublished, unclaimed: curatedUnclaimed },
     funnel,
+    cohorts,
     supply,
     cities: Array.from(cityMap.values()).sort((a, b) => b.events - a.events),
   }

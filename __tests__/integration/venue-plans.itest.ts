@@ -300,13 +300,21 @@ describe("no charge before three months of venue-day data", () => {
   it.each([
     ["staff of the venue’s organisation", () => staff, "venue_owner", "Only an owner or admin"],
     ["another organisation’s owner", () => stranger, "venue_owner", "isn’t one of your organisation’s"],
-    ["an organiser of the same organisation", () => organiser, "organizer", "Only an owner or admin"],
   ] as const)("refuses %s", async (_label, who, role, sentence) => {
     const v = await venue("vp-refuse")
     await liveSince(v, 95)
     as(who(), role)
     await expect(actions.startVenueProCheckout(v, "monthly")).rejects.toThrow(sentence)
     expect(await db.billing_checkouts.count({ where: { venue_id: v } })).toBe(0)
+  })
+
+  it("lets an owner of the venue's organisation buy whatever their User.role (SCRUM-1246)", async () => {
+    // `organiser` is an organizer-role owner of the venue's org: the org's facts decide, not the role.
+    const v = await venue("vp-org-owner")
+    await liveSince(v, 95)
+    as(organiser, "organizer")
+    const out = await actions.startVenueProCheckout(v, "monthly")
+    expect(await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: out.subscriptionId }, select: { venue_id: true, org_id: true } })).toEqual({ venue_id: v, org_id: orgId })
   })
 
   it("refuses while Venue Pro is already live from a founding grant", async () => {

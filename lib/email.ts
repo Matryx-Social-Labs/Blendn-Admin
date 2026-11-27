@@ -1,13 +1,23 @@
+import { randomUUID } from "crypto"
+
+import type { user_role } from "@prisma/client"
+
+import { db } from "./db"
 import { logger } from "./logger"
-import { dashboardHost, publicSiteOrigin } from "./env"
+import { BILLING_PLANS, grossRupees, gstSplit, planDay, rupees } from "./billing-plans"
+import { MIN_ATTENDEES } from "./connection-metrics"
+import { dashboardHost, emailReplyTo, publicSiteOrigin } from "./env"
 import {
   approvedHtml,
+  freeWindowEndingHtml,
   claimDecisionHtml,
   declinedHtml,
   domainVerifyHtml,
   passwordResetHtml,
   applyAgainHtml,
+  resultsHtml,
   inviteHtml,
+  liveAlertHtml,
   onboardingVerifyHtml,
   ticketOrderHtml,
 } from "./email-html"
@@ -31,7 +41,7 @@ import {
 
 export interface SendResult {
   sent: boolean
-  reason?: "not_configured" | "provider_error"
+  reason?: "not_configured" | "provider_error" | "suppressed"
   detail?: string
   id?: string
 }
@@ -116,7 +126,7 @@ const ONE_ADDRESS = /^[^\s@,<>"]+@([^\s@,<>"]+)$/
 
 function mayDeliverTo(to: string): boolean {
   if (process.env.RAILWAY_ENVIRONMENT_NAME === "production") return true
-  const address = to.trim().toLowerCase()
+  const address = canonicalEmail(to)
   const domain = ONE_ADDRESS.exec(address)?.[1]
   if (!domain) return false
   const listed = (process.env.EMAIL_ALLOWLIST ?? "").split(",").map((a) => a.trim().toLowerCase())
@@ -128,11 +138,61 @@ export function headerSafe(value: string): string {
   return value.replace(/[\r\n\u2028\u2029]+/g, " ")
 }
 
+/**
+ * The one form of an address: trimmed and lower-cased, which is how every account's address is stored (SCRUM-328) and
+ * how sign-in and the password reset look it up. No Unicode folding and no `+tag` stripping: either would make two
+ * stored accounts one string. `email_suppressions` is written and read in this form. Anything not a string is "".
+ */
+export function canonicalEmail(raw: unknown): string {
+  return typeof raw === "string" ? raw.trim().toLowerCase() : ""
+}
+
+/**
+ * Which mail a send is (SCRUM-1280). Unset is transactional: verification, invites, domain verification, claim and
+ * application decisions, tickets, staff alerts. `password_reset` is a person asking for their own way back in;
+ * `lifecycle` is the mail that carries List-Unsubscribe (growth 04b, 04c, 09a).
+ */
+export type MailStream = "password_reset" | "lifecycle"
+
+/**
+ * Whether a suppression stops this send. A hard bounce stops everything: the address does not exist. A complaint stops
+ * everything but the reset, which the person asked for. An unsubscribe stops only the lifecycle mail it came from:
+ * leaving the morning mail must not stop an org invite or a claim decision.
+ */
+function blocks(reason: string, stream: MailStream | undefined): boolean {
+  if (reason === "unsubscribe") return stream === "lifecycle"
+  return !(reason === "complaint" && stream === "password_reset")
+}
+
+/**
+ * Fails open: a lookup that throws sends. A pilot guest's verification or reset matters more than one extra mail to a
+ * bounced address, which Resend's own suppression list stops anyway.
+ */
+async function suppressed(to: string, stream: MailStream | undefined): Promise<boolean> {
+  try {
+    const row = await db.email_suppressions.findUnique({ where: { email: canonicalEmail(to) }, select: { reason: true } })
+    return !!row && blocks(row.reason, stream)
+  } catch (err) {
+    logger.warn("Email suppression lookup failed; sending anyway", { error: err instanceof Error ? err.message : String(err) })
+    return false
+  }
+}
+
+/** Resend answers these again later (resend.com/docs/api-reference/errors); a 4xx is refused the same way twice. */
+const retryable = (status: number) => status === 429 || status >= 500
+/** About a second, plus up to half a second of jitter so a burst of failures does not retry in step. */
+const retryDelay = () => 1_000 + Math.floor(Math.random() * 500)
+
 export async function sendEmail(opts: {
   to: string
   subject: string
   text: string
   html?: string
+  stream?: MailStream
+  /** Extra headers (List-Unsubscribe); each value is made one line. */
+  headers?: Record<string, string>
+  /** Resend tags: names and values of ASCII letters, digits, `_` and `-`. */
+  tags?: { name: string; value: string }[]
 }): Promise<SendResult> {
   const key = process.env.RESEND_API_KEY
   const from = emailFrom()
@@ -159,34 +219,61 @@ export async function sendEmail(opts: {
     return { sent: false, reason: "not_configured", detail: "recipient not allowlisted outside production" }
   }
 
-  try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from,
-        // No CR/LF in anything a header is made of (step 18 security review,
-        // M4): a subject or an address carrying one is a second header.
-        to: [headerSafe(opts.to)],
-        subject: headerSafe(opts.subject),
-        text: opts.text,
-        ...(opts.html ? { html: opts.html } : {}),
-      }),
-      // A hung mail provider must not hold a request open indefinitely.
-      signal: AbortSignal.timeout(10_000),
-    })
+  if (await suppressed(opts.to, opts.stream)) {
+    // Info, not an error: the address bounced or complained, and not mailing it is the point. The domain only.
+    logger.info("Email not sent — address suppressed", { domain: opts.to.split("@").pop(), stream: opts.stream })
+    return { sent: false, reason: "suppressed" }
+  }
 
-    if (!res.ok) {
+  const replyTo = emailReplyTo()
+  const body = JSON.stringify({
+    from,
+    // No CR/LF in anything a header is made of (step 18 security review,
+    // M4): a subject or an address carrying one is a second header.
+    to: [headerSafe(opts.to)],
+    subject: headerSafe(opts.subject),
+    text: opts.text,
+    ...(opts.html ? { html: opts.html } : {}),
+    ...(replyTo ? { reply_to: headerSafe(replyTo) } : {}),
+    ...(opts.headers
+      ? { headers: Object.fromEntries(Object.entries(opts.headers).map(([k, v]) => [headerSafe(k), headerSafe(v)])) }
+      : {}),
+    ...(opts.tags ? { tags: opts.tags } : {}),
+  })
+  // One key for both attempts: Resend answers a repeat with the first send's result and sends nothing again, so a retry
+  // after an answer that was lost (a timeout, a 5xx after the mail went) is never a second mail.
+  const idempotencyKey = randomUUID()
+
+  // ponytail: one retry in the request, no outbox; a send that fails twice is logged and the caller's fallback runs.
+  for (let attempt = 1; ; attempt++) {
+    const last = attempt === 2
+    try {
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+        body,
+        // A hung mail provider must not hold a request open indefinitely.
+        signal: AbortSignal.timeout(10_000),
+      })
+
+      if (res.ok) {
+        const sent = (await res.json().catch(() => ({}))) as { id?: string }
+        return { sent: true, id: sent.id }
+      }
       const detail = await res.text().catch(() => "")
-      logger.error("Email send failed", { status: res.status, detail: detail.slice(0, 300) })
-      return { sent: false, reason: "provider_error", detail: `HTTP ${res.status}` }
+      if (last || !retryable(res.status)) {
+        logger.error("Email send failed", { status: res.status, attempt, detail: detail.slice(0, 300) })
+        return { sent: false, reason: "provider_error", detail: `HTTP ${res.status}` }
+      }
+    } catch (err) {
+      // Not after our own timeout: the first send may still be in flight (a second would only get Resend's 409), and a
+      // second ten seconds would double what an awaiting caller waits.
+      if (last || (err instanceof Error && err.name === "TimeoutError")) {
+        logger.error("Email send threw", { attempt, error: err instanceof Error ? err.message : String(err) })
+        return { sent: false, reason: "provider_error", detail: String(err) }
+      }
     }
-
-    const body = (await res.json().catch(() => ({}))) as { id?: string }
-    return { sent: true, id: body.id }
-  } catch (err) {
-    logger.error("Email send threw", { error: err instanceof Error ? err.message : String(err) })
-    return { sent: false, reason: "provider_error", detail: String(err) }
+    await new Promise((resolve) => setTimeout(resolve, retryDelay()))
   }
 }
 
@@ -245,12 +332,31 @@ export function inviteEmail(
 }
 
 /**
+ * The account's one next step, after the password (SCRUM-1342): an organizer's first event, a venue owner's venue (added
+ * or claimed: `/dashboard/venues`, where their first step is). Anyone else (a sponsor creates no events and holds no
+ * venue) keeps the Members line.
+ */
+function approvedNextStep(role: user_role) {
+  if (role === "organizer") return { line: "Next, create your first event:", href: `${dashboardUrl()}/dashboard/events/new`, label: "Create your first event" }
+  if (role === "venue_owner")
+    return { line: "Next, add your venue, or claim it if it’s already listed:", href: `${dashboardUrl()}/dashboard/venues`, label: "Add or claim your venue" }
+  return null
+}
+
+/**
  * `setPasswordLink` is null for an account that already existed and keeps its
  * password. Never a password: see SCRUM-134.
  */
-export function approvedEmail(name: string, orgName: string, email: string, setPasswordLink: string | null) {
+export function approvedEmail(
+  name: string,
+  orgName: string,
+  email: string,
+  setPasswordLink: string | null,
+  role: user_role
+) {
+  const next = approvedNextStep(role)
   return {
-    html: approvedHtml(name, orgName, email, setPasswordLink),
+    html: approvedHtml(name, orgName, email, setPasswordLink, next),
     subject: "Your Blend’n host account is ready",
     text: [
       `Hi ${name},`,
@@ -269,7 +375,7 @@ export function approvedEmail(name: string, orgName: string, email: string, setP
           ]
         : ["", "Sign in with your existing password."]),
       "",
-      "You can invite colleagues from Organisation → Members.",
+      ...(next ? [next.line, next.href] : ["You can invite colleagues from Organisation → Members."]),
     ].join("\n"),
   }
 }
@@ -385,5 +491,221 @@ export function ticketOrderEmail(opts: { subject: string; heading: string; parag
     subject: opts.subject,
     text: [opts.heading, "", ...paragraphs.flatMap((p) => [p, ""]), link].join("\n"),
     html: ticketOrderHtml({ heading: opts.heading, paragraphs, link }),
+  }
+}
+
+/**
+ * The host's morning results mail (SCRUM-1282). Free figures only, each already through `lib/disclosure`'s floor by
+ * the caller: `checkedIn` null is under the floor, `averageRating` null is fewer than five raters. No names, no
+ * pseudonyms, no paid figure and no Plus (r-pricing "Do not"). No time either, so there is no zone to label.
+ */
+export interface NightResults {
+  title: string
+  checkedIn: number | null
+  averageRating: number | null
+  ratingCount: number
+  moodMessages: number
+  overviewUrl: string
+  nextUrl: string
+  unsubscribeUrl: string
+}
+
+const NEXT_LABEL = "List your next night"
+/** Why each lifecycle mail came: its footer, in the text part and the HTML. */
+const MORNING_WHY = "You get this the morning after each night your organization runs on Blend’n."
+const NEXT_NIGHT_WHY = "You get this a week after a night with nothing listed next, at most once a month."
+const footer = (why: string, unsubscribeUrl: string) => [
+  "—",
+  `${why} Invites and account mail still come.`,
+  `Unsubscribe from these mails: ${unsubscribeUrl}`,
+]
+const count = (n: number) => n.toLocaleString("en-US")
+
+export function resultsEmail(r: NightResults) {
+  const lines = [
+    r.checkedIn === null ? "Fewer than 5 people checked in on Blend’n." : `${count(r.checkedIn)} people checked in on Blend’n.`,
+    r.averageRating === null
+      ? "Guests are asked to rate the night today. The average shows on the results page once 5 people have rated."
+      : `${r.averageRating.toFixed(1)} average rating from ${count(r.ratingCount)} people.`,
+    ...(r.moodMessages > 0 ? [`The room’s mood, from ${count(r.moodMessages)} chat message${r.moodMessages === 1 ? "" : "s"}, is on the results page.`] : []),
+  ]
+  const note = r.checkedIn === null ? "Counts under 5 show as “fewer than 5”, so nobody can be picked out." : null
+  const subject = `${r.title}: your night in numbers`
+  return {
+    subject,
+    text: [
+      `Here’s how ${r.title} went.`,
+      "",
+      ...lines,
+      "",
+      "Open the night’s results:",
+      r.overviewUrl,
+      "",
+      `${NEXT_LABEL}:`,
+      r.nextUrl,
+      ...(note ? ["", note] : []),
+      "",
+      ...footer(MORNING_WHY, r.unsubscribeUrl),
+    ].join("\n"),
+    html: resultsHtml({
+      title: subject,
+      preheader: lines[0],
+      heading: "Your night in numbers",
+      lines: [`Here’s how ${r.title} went.`, ...lines],
+      button: { href: r.overviewUrl, label: "Open the night’s results" },
+      next: { href: r.nextUrl, label: NEXT_LABEL },
+      note,
+      why: MORNING_WHY,
+      unsubscribeUrl: r.unsubscribeUrl,
+    }),
+  }
+}
+
+/**
+ * Nobody checked in through the app (Fable advisor, 2026-11-26): sent for an organization's first mailed night only,
+ * and "on Blend’n" throughout, never "nobody came", which a full room with no QR at the door would make false. The
+ * one ask is the next night, so it is the button and there is no second link.
+ */
+export function noCheckInsEmail(r: { title: string; nextUrl: string; unsubscribeUrl: string }) {
+  const lines = [
+    `Nobody checked in on Blend’n at ${r.title}, so there are no figures to show you this morning.`,
+    "That usually means guests didn’t see your door QR. Put it up at the entrance next time, from your event’s “QR & link” tab, and your check-ins, ratings and the room’s mood will be here the morning after.",
+  ]
+  const subject = `${r.title}: no check-ins on Blend’n`
+  return {
+    subject,
+    text: [
+      ...lines.flatMap((l) => [l, ""]),
+      `${NEXT_LABEL}:`,
+      r.nextUrl,
+      "",
+      ...footer(MORNING_WHY, r.unsubscribeUrl),
+    ].join("\n"),
+    html: resultsHtml({
+      title: subject,
+      preheader: "No figures this time. One thing to try at the door next time.",
+      heading: "No check-ins this time",
+      lines,
+      button: { href: r.nextUrl, label: NEXT_LABEL },
+      next: null,
+      note: null,
+      why: MORNING_WHY,
+      unsubscribeUrl: r.unsubscribeUrl,
+    }),
+  }
+}
+
+/**
+ * The "list your next" nudge (SCRUM-1284): a week after an organization's latest night, with nothing coming up. One line
+ * on that night and one button; no second ask. `checkedIn` is through the disclosure floor (null: fewer than 5), and 0
+ * means nobody checked in, so no figure is quoted at all.
+ */
+export function nextNightEmail(r: { title: string; checkedIn: number | null; nextUrl: string; unsubscribeUrl: string }) {
+  const line =
+    r.checkedIn === 0
+      ? `It’s a week since ${r.title}, and nothing is listed after it yet.`
+      : `${r.checkedIn === null ? "Fewer than 5" : count(r.checkedIn)} people checked in on Blend’n at ${r.title} last week. Nothing is listed after it yet.`
+  const subject = `${r.title}: what’s next?`
+  return {
+    subject,
+    text: [line, "", `${NEXT_LABEL}:`, r.nextUrl, "", ...footer(NEXT_NIGHT_WHY, r.unsubscribeUrl)].join("\n"),
+    html: resultsHtml({
+      title: subject,
+      preheader: line,
+      heading: "What’s next?",
+      lines: [line],
+      button: { href: r.nextUrl, label: NEXT_LABEL },
+      next: null,
+      note: null,
+      why: NEXT_NIGHT_WHY,
+      unsubscribeUrl: r.unsubscribeUrl,
+    }),
+  }
+}
+
+/**
+ * The first-night nudge (SCRUM-1342): three days after an organizer was approved, with nothing listed. One button to
+ * a new event, and one line on what the morning results mail shows, only what it really sends (04b).
+ */
+export function firstNightEmail(r: { orgName: string; nextUrl: string; unsubscribeUrl: string }) {
+  const lines = [
+    `${r.orgName} is set up on Blend’n, and nothing is listed yet.`,
+    "The morning after each night, you’ll get an email with how it went: how many people checked in, the average rating once 5 people have rated, and, once people have chatted, the room’s mood on the results page.",
+  ]
+  const label = "Create your first event"
+  const why = "You get this once, three days after your organization was approved, if nothing is listed yet."
+  const subject = "List your first night on Blend’n"
+  return {
+    subject,
+    text: [...lines.flatMap((l) => [l, ""]), `${label}:`, r.nextUrl, "", ...footer(why, r.unsubscribeUrl)].join("\n"),
+    html: resultsHtml({
+      title: subject,
+      preheader: lines[0],
+      heading: "List your first night",
+      lines,
+      button: { href: r.nextUrl, label },
+      next: null,
+      note: null,
+      why,
+      unsubscribeUrl: r.unsubscribeUrl,
+    }),
+  }
+}
+
+/**
+ * A critical live alert, to the organizer's owners and admins (SCRUM-1286). `body` is the alert's own body as the Live
+ * tab shows it (`deriveAlerts`, written down by the issue sweep), never a second version; `openedAt` is already on the
+ * event's clock, with no zone label. Transactional: no unsubscribe, because a safety alert must not be lost with the
+ * morning mail.
+ */
+export function liveAlertEmail(a: { eventTitle: string; alertTitle: string; body: string; openedAt: string; liveUrl: string }) {
+  const subject = `${a.eventTitle}: ${a.alertTitle}`
+  const lines = [a.body, `${a.eventTitle}, opened at ${a.openedAt}.`]
+  const why = "You get this as an owner or admin of the organization running this night, when a critical alert opens on it."
+  return {
+    subject,
+    text: [...lines.flatMap((l) => [l, ""]), "Open the Live tab:", a.liveUrl, "", "—", why].join("\n"),
+    html: liveAlertHtml({ title: subject, heading: a.alertTitle, lines, button: { href: a.liveUrl, label: "Open the Live tab" }, note: why }),
+  }
+}
+
+/**
+ * 14 days before an organisation's free Analytics ends (SCRUM-1275; DECISIONS
+ * 2026-11-25, OWNER.md "When free months end": the views lock as coded and the
+ * mail names today's prices). Prices from the price table, as /pricing shows
+ * them: what is paid, then the GST split. No invoice is promised (none is
+ * issued yet) and no figure of theirs is shown, blurred or otherwise.
+ */
+export function freeWindowEndingEmail(opts: { orgName: string; endsAt: Date }) {
+  const date = planDay(opts.endsAt)
+  const pass = BILLING_PLANS.event_pass
+  const monthly = BILLING_PLANS.analytics_monthly
+  const link = `${dashboardUrl()}/dashboard/plan`
+  const heading = `Your free Analytics ends on ${date}`
+  const paragraphs = [
+    `Every Analytics view for ${opts.orgName} has been free so far. That ends on ${date}.`,
+    [
+      "Free for good:",
+      "• Running events: listing, GPS check-in, the live room and its safety tools",
+      "• Each event’s own numbers",
+      `• The analytics of your first event with at least ${MIN_ATTENDEES} people checked in`,
+    ].join("\n"),
+    [
+      `Locked from ${date}:`,
+      "• Return rates and comparisons across your events",
+      "• The deeper Event Insights of every other event",
+    ].join("\n"),
+    [
+      "To keep them open:",
+      `• Event Insights, one event, for good: ${rupees(grossRupees(pass))} once (${gstSplit(pass)})`,
+      `• Analytics, all your events: ${rupees(grossRupees(monthly))} a month (${gstSplit(monthly)})`,
+    ].join("\n"),
+    "Nothing is deleted. Your events and their data are kept, and a view opens with its full history as soon as your payment is confirmed.",
+  ]
+  const note = `You’re getting this once, as an owner or admin of ${opts.orgName} on Blend’n.`
+  return {
+    subject: heading,
+    text: [...paragraphs.flatMap((p) => [p, ""]), `See your plan: ${link}`, "", note].join("\n"),
+    html: freeWindowEndingHtml({ heading, paragraphs, link, note }),
   }
 }

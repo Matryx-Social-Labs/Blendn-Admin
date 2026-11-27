@@ -36,9 +36,9 @@ import { lockCharge } from "@/lib/razorpay-webhook"
  * Link (`sendPaymentLink`), which the webhook settles; money that arrives any
  * other way is still settled by hand with its reference.
  *
- * `external_ref` is the pricing note while a draft, the link's id once one is
- * sent, and otherwise whatever reference the finance side uses. Deliberately
- * free text for that last case.
+ * `external_ref` is the pricing note until the charge settles, then the id of
+ * the link that paid it, or whatever reference the finance side typed when
+ * settling by hand. Deliberately free text for that last case.
  *
  * ## Minor units, integers, never a float
  *

@@ -277,7 +277,7 @@ export async function notifyEventCancelled(
  * The hour, on the event's own clock, the morning after: a 01:00 close no
  * longer wakes the room at 01:00 (launch gate 7, SCRUM-1274).
  */
-const RATING_REQUEST_HOUR = 10
+export const RATING_REQUEST_HOUR = 10
 
 /**
  * Which ended events the sweep still looks at: up to 24 h from an end to the

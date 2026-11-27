@@ -66,3 +66,9 @@ it("leaves /apply with no field outside the labelled wrapper", () => {
   expect(src).not.toMatch(/function Field\(/)
   expect(src).toMatch(/from "\.\/field"/)
 })
+
+it("SCRUM-1151: says the GSTIN is India's, and that a website works anywhere", () => {
+  const html = renderToStaticMarkup(createElement(ApplyPage))
+  expect(html).toMatch(/<label[^>]*>GSTIN \(India only\)/)
+  expect(html).toContain("A website works anywhere.")
+})

@@ -121,7 +121,7 @@ async function newNight(endedDaysAgo: number, people: Attendance[]) {
   return id
 }
 const listed = async () =>
-  (await billing.planPageData({ orgId, orgName: "x", memberRole: "owner", mayBuy: true })).events.map((e) => e.id)
+  (await billing.planPageData({ orgId, orgName: "x", memberRole: "owner", mayBuy: true, mayBuyHere: true })).events.map((e) => e.id)
 
 const as = (id: string, role: "organizer" | "app_admin" | "venue_owner") => mockGetAuth.mockResolvedValue({ user: { id, role } })
 const newOrg = async (label: string, status: "verified" | "suspended" = "verified") => {
@@ -152,6 +152,10 @@ beforeAll(async () => {
   orgId = await newOrg("bill-org")
   const otherOrgId = await newOrg("bill-other")
   const venueOrg = await newOrg("bill-venue-org")
+  // A venue owner's organisation is one (SCRUM-1247): approved as a venue owner, no venue yet.
+  await db.organiser_onboarding_requests.create({
+    data: { org_id: venueOrg, display_name: testId("bill-venue-app"), contact_name: "V", contact_email: `${testId("bill-venue-app")}@itest.invalid`, requested_role: "venue_owner", status: "approved" },
+  })
   const suspended = await newOrg("bill-susp-org", "suspended")
   await db.organisation_members.createMany({
     data: [
@@ -205,6 +209,7 @@ afterEach(async () => {
 afterAll(async () => {
   await db.audit_logs.deleteMany({ where: { resource_id: { in: orgs } } })
   await db.payment_events.deleteMany({ where: { provider_event_id: { startsWith: "itest_ba_" } } })
+  await db.organiser_onboarding_requests.deleteMany({ where: { org_id: { in: orgs } } })
   await db.organisations.deleteMany({ where: { id: { in: orgs } } })
   await cleanup(users, events)
   await closeDb()
@@ -655,14 +660,16 @@ describe("when one side fails (scan 3)", () => {
       expect(await db.entitlements.count({ where: { subject_id: orgId } })).toBe(0)
     })
 
-    it("a buyer demoted, or suspended, since the session began buys nothing", async () => {
+    // Since SCRUM-1247 a host is their membership, not their row: what ends a buyer is losing it, or a suspension.
+    it("a buyer removed from the organisation, or suspended, since the session began buys nothing", async () => {
       const demoted = await makeUser(testId("bill-demoted"), "organizer")
       users.push(demoted)
       await db.organisation_members.create({ data: { org_id: orgId, user_id: demoted, role: "owner" } })
-      await db.user.update({ where: { id: demoted }, data: { role: "attendee" } })
+      await db.organisation_members.deleteMany({ where: { user_id: demoted } })
       as(demoted, "organizer")
       await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow(/organizer’s organisation/)
-      await db.user.update({ where: { id: demoted }, data: { role: "organizer", suspended_at: new Date() } })
+      await db.organisation_members.create({ data: { org_id: orgId, user_id: demoted, role: "owner" } })
+      await db.user.update({ where: { id: demoted }, data: { suspended_at: new Date() } })
       await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Unauthorized")
       expect(calls).toHaveLength(0)
       await db.organisation_members.deleteMany({ where: { user_id: demoted } })

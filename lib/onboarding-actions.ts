@@ -22,6 +22,7 @@ import { notifyEventUpdate } from "@/lib/push-notifications"
 import { refuseMixedScript } from "@/lib/name-script"
 import { orgNameTaken, orgNameTakenRefusal, refuseIfOrgNameTaken } from "@/lib/org-name-key"
 import { realEventsWhere } from "./event-kind"
+import { isUuid } from "./api-input"
 import { liveAnalyticsByOrg } from "./entitlements"
 
 /**
@@ -363,10 +364,10 @@ export async function approveOnboardingRequest(
   if (emailConfigured()) {
     const result = await sendEmail({
       to: request.contact_email,
-      ...approvedEmail(request.contact_name, request.display_name, request.contact_email, setPasswordLink || null),
+      ...approvedEmail(request.contact_name, request.display_name, request.contact_email, setPasswordLink || null, request.requested_role),
     })
     emailSent = result.sent
-    if (!result.sent) {
+    if (!result.sent && result.reason !== "suppressed") {
       logger.error("Approval email failed", { requestId, reason: result.reason })
     }
   }
@@ -421,7 +422,7 @@ export async function declineOnboardingRequest(requestId: string, reason: string
       to: request.contact_email,
       ...declinedEmail(request.contact_name, trimmed),
     })
-    if (!result.sent) logger.error("Decline email failed", { requestId, reason: result.reason })
+    if (!result.sent && result.reason !== "suppressed") logger.error("Decline email failed", { requestId, reason: result.reason })
   }
 
   revalidatePath("/dashboard/onboarding")
@@ -561,6 +562,7 @@ export async function setOrganisationStatus(
   reason?: string
 ): Promise<void> {
   const admin = await requireAdmin()
+  if (!isUuid(orgId)) throw new Refusal("Organisation not found.")
 
   const trimmed = reason?.trim() || null
   if (status === "suspended" && (trimmed ?? "").length < 10) {
@@ -568,6 +570,9 @@ export async function setOrganisationStatus(
   }
 
   const hidden = await db.$transaction(async (tx) => {
+    // Locked, so of two admins changing it at once the second records the first's status as its "from".
+    const [before] = await tx.$queryRaw<{ status: string }[]>`SELECT status::text AS status FROM organisations WHERE id = ${orgId}::uuid FOR UPDATE`
+    if (!before) throw new Refusal("Organisation not found.")
     await tx.organisations.update({
       where: { id: orgId },
       data: {
@@ -581,36 +586,38 @@ export async function setOrganisationStatus(
       },
     })
 
+    let hiddenEvents: { id: string; title: string; end_time: Date }[] = []
+    let restored = 0
     if (status === "suspended") {
       /*
        * The org's own nights, not its venues' daily live rooms: a venue day is
        * the venue's, the platform moderates it, and suspending the company that
        * claimed a bar does not shut the bar's room on everybody standing in it.
        */
-      const events = await tx.events.findMany({
+      hiddenEvents = await tx.events.findMany({
         where: { organizer_org_id: orgId, ...realEventsWhere, status: "published", deleted_at: null },
         select: { id: true, title: true, end_time: true },
       })
       await tx.events.updateMany({
-        where: { id: { in: events.map((e) => e.id) }, ...realEventsWhere },
+        where: { id: { in: hiddenEvents.map((e) => e.id) }, ...realEventsWhere },
         data: { status: "draft", pre_suspension_status: "published" },
       })
-      return events
+    } else {
+      restored = (await tx.events.updateMany({
+        where: { organizer_org_id: orgId, ...realEventsWhere, status: "draft", pre_suspension_status: "published", deleted_at: null },
+        data: { status: "published", pre_suspension_status: null },
+      })).count
     }
 
-    await tx.events.updateMany({
-      where: { organizer_org_id: orgId, ...realEventsWhere, status: "draft", pre_suspension_status: "published", deleted_at: null },
-      data: { status: "published", pre_suspension_status: null },
+    // In the transaction: a status change whose record cannot be written is not made.
+    await auditInTx(tx, {
+      userId: admin.id,
+      action: `organisation.${status}`,
+      resource: "organisation",
+      resourceId: orgId,
+      details: { from: before.status, reason: trimmed, eventsHidden: hiddenEvents.length, eventsRestored: restored },
     })
-    return []
-  })
-
-  auditLog({
-    userId: admin.id,
-    action: `organisation.${status}`,
-    resource: "organisation",
-    resourceId: orgId,
-    details: { reason: trimmed, eventsHidden: hidden.length },
+    return hiddenEvents
   })
 
   // After the commit: a push about a hidden event must never precede the
@@ -655,7 +662,7 @@ export async function setOrganisationStatus(
  *
  * Revoking does NOT stop campaigns already running. `may_sponsor` gates the
  * WRITE path (`canBroadcast`), not the scheduler, and silently killing live
- * placements an organiser has paid for is not a decision this toggle should
+ * placements a sponsor has paid for is not a decision this toggle should
  * make on its own. Cancel the placements to stop the sends.
  */
 export async function setOrganisationMaySponsor(
@@ -680,7 +687,7 @@ export async function setOrganisationMaySponsor(
   if (!org) throw new Refusal("Organisation not found")
 
   /*
-   * A suspended organisation cannot be granted placement.
+   * Only a verified organisation can be granted placement: not a suspended one, nor one still pending.
    *
    * Suspension is how an organisation is stopped; handing it a paid capability
    * in that state would be the two controls contradicting each other, with

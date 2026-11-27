@@ -2,6 +2,8 @@ const mockWarn = jest.fn()
 jest.mock("@/lib/logger", () => ({
   logger: { info: jest.fn(), warn: (...a: unknown[]) => mockWarn(...a), error: jest.fn(), debug: jest.fn() },
 }))
+// No address here is suppressed (SCRUM-1280; that is email-send.test.ts).
+jest.mock("@/lib/db", () => ({ db: { email_suppressions: { findUnique: async () => null } } }))
 
 import { sendEmail } from "@/lib/email"
 

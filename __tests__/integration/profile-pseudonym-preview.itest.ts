@@ -127,8 +127,11 @@ describe("GET /me/preview (See as others do)", () => {
     expect(res.body.data.anonymous).toEqual({
       id: me.id,
       name: "Attendee",
+      // D-030: no age or city before a reveal; no room yet, so no band; no events yet, so new.
       age: null,
-      location: expect.anything(),
+      location: null,
+      ageBand: null,
+      tenure: "new",
       isOwnProfile: false,
       identityVisible: false,
     })

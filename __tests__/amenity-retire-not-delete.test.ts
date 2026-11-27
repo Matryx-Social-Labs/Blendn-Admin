@@ -20,6 +20,7 @@
  */
 
 const mockDb = {
+  $queryRaw: jest.fn((): Promise<Record<string, unknown>[]> => mockSessionRows(mockDb.user.findUnique())),
   // requireAdmin reads the role from the database (lib/current-user.ts): here, the session's own.
   user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null })) },
   amenities: {
@@ -42,6 +43,7 @@ const mockAuth = jest.fn()
 jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth(); return s?.user ? { ...s, user: { signedInAt: Date.now(), ...s.user } } : s } }))
 
 import { setAmenityActive, updateAmenity, createAmenity } from "@/lib/amenity-actions"
+import { mockSessionRows } from "./support/session-account"
 
 const ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 

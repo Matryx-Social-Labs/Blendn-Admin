@@ -142,14 +142,19 @@ describe("receipts", () => {
 
     await checkPushReceipts(later())
 
+    // One path to Sentry: logger.error reports (SCRUM-1397), split by code and platform through its message and tags.
     expect(error).toHaveBeenCalledTimes(2)
-    expect(error).toHaveBeenCalledWith("Push receipt errors", { error: "InvalidCredentials", platform: "android", count: 2, message: "bad key" })
-    expect(error).toHaveBeenCalledWith("Push receipt errors", { error: "InvalidCredentials", platform: "ios", count: 1, message: "bad key" })
-    expect(capture).toHaveBeenCalledTimes(2)
-    expect(capture).toHaveBeenCalledWith(
+    expect(error).toHaveBeenCalledWith(
       "Push receipt errors: InvalidCredentials (android)",
-      expect.objectContaining({ level: "error", tags: { push_error: "InvalidCredentials", platform: "android" } })
+      { error: "InvalidCredentials", platform: "android", count: 2, message: "bad key" },
+      { push_error: "InvalidCredentials", platform: "android" }
     )
+    expect(error).toHaveBeenCalledWith(
+      "Push receipt errors: InvalidCredentials (ios)",
+      { error: "InvalidCredentials", platform: "ios", count: 1, message: "bad key" },
+      { push_error: "InvalidCredentials", platform: "ios" }
+    )
+    expect(capture).not.toHaveBeenCalled()
     expect(deleteTokens).not.toHaveBeenCalled()
   })
 
@@ -160,7 +165,7 @@ describe("receipts", () => {
 
     await expect(checkPushReceipts(later())).resolves.toEqual(pass(0, 0, 1))
     expect(error).toHaveBeenCalledWith("Push receipt request failed", expect.objectContaining({ error: "503" }))
-    expect(capture).toHaveBeenCalledWith("Push receipt request failed", expect.objectContaining({ level: "error" }))
+    expect(capture).not.toHaveBeenCalled()
 
     getReceipts.mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, { status: "ok" }])))
     await expect(checkPushReceipts(later())).resolves.toEqual(pass(1, 0))

@@ -1,8 +1,6 @@
 /*
- * SCRUM-1159: production refuses to boot without OPENAI_API_KEY. Without it
- * every model check is skipped — big rooms proceed, crew text skips its
- * fail-closed, the Lobby and both sweepers stop — and launch moderation is the
- * keyword list alone, silently. Gated on the Railway name, never NODE_ENV: the
+ * SCRUM-1159: production runs the model checks, so it refuses to boot without
+ * OPENAI_API_KEY. Gated on the Railway name, never NODE_ENV: the
  * CI e2e lane boots NODE_ENV=production with no key and must keep booting.
  */
 import { openaiKeyProblem, validateEnv } from "@/lib/env"
@@ -30,6 +28,12 @@ describe("openaiKeyProblem", () => {
     ["whitespace", "  "],
   ])("refuses production with the key %s, naming the variable", (_label, key) => {
     expect(openaiKeyProblem(key, "production")).toMatch(/^OPENAI_API_KEY /)
+  })
+
+  it("says what is required and where to set it", () => {
+    expect(openaiKeyProblem(undefined, "production")).toBe(
+      "OPENAI_API_KEY is required in production: set it on the Railway production service"
+    )
   })
 
   it("allows production with a key", () => {

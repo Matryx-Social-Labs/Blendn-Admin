@@ -5,10 +5,14 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 
 function Table({ className, ...props }: React.ComponentProps<"table">) {
+  // A named table scrolls sideways where it does not fit (a phone), so its
+  // container is a named region a keyboard can reach (axe scrollable-region-focusable).
+  const name = props["aria-label"]
   return (
     <div
       data-slot="table-container"
-      className="relative w-full overflow-x-auto"
+      className="relative w-full overflow-x-auto rounded-[inherit] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      {...(name ? { role: "region", "aria-label": name, tabIndex: 0 } : {})}
     >
       <table
         data-slot="table"

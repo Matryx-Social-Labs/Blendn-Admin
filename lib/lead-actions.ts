@@ -6,7 +6,7 @@ import type { lead_status } from "@prisma/client"
 
 import { db } from "@/lib/db"
 import { requireAdmin } from "@/lib/current-user"
-import { auditLog } from "@/lib/audit-log"
+import { auditInTx, auditLog } from "@/lib/audit-log"
 import { CLOSED_LEAD_STATUSES, openKey, openKeyFor } from "@/lib/leads"
 
 /**
@@ -121,8 +121,20 @@ export async function addLeadNote(leadId: string, body: string): Promise<void> {
   const text = body.trim()
   if (text.length < 2) throw new Refusal("Write something first.")
 
-  await db.lead_notes.create({
-    data: { lead_id: leadId, author_id: admin.id, body: text },
+  // The row records that a note was added, never what it says: the text is a
+  // stranger's details, and an audit row outlives the lead's erasure.
+  await db.$transaction(async (tx) => {
+    const note = await tx.lead_notes.create({
+      data: { lead_id: leadId, author_id: admin.id, body: text },
+      select: { id: true },
+    })
+    await auditInTx(tx, {
+      userId: admin.id,
+      action: "lead.note_added",
+      resource: "lead",
+      resourceId: leadId,
+      details: { noteId: note.id, length: text.length },
+    })
   })
   revalidatePath("/dashboard/leads")
 }

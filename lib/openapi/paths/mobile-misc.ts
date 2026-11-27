@@ -70,7 +70,7 @@ const VenueListItemSchema = z
         closesAt: z.string().regex(/^\d\d:\d\d$/),
       })
       .nullable()
-      .describe("Tonight's opening from `venues.hours`: wall-clock `HH:MM` in the venue's own timezone, for the weekday of its current day (a day resets at its `dayResetHour`, not midnight). A close at or before the open runs past midnight. With two openings in a day, the later one. Null when no hours are given for that day (all of them, today: nothing writes `hours` yet)."),
+      .describe("Tonight's opening from `venues.hours`: wall-clock `HH:MM` in the venue's own timezone, for the weekday of its current day (a day resets at its `dayResetHour`, not midnight). A close at or before the open runs past midnight. With two openings in a day, the later one. Null when no hours are given for that day. The venue's owner sets the week on the dashboard: one opening a day, opening at or after `dayResetHour` and closing by the next one (SCRUM-1154)."),
     floors: z.number().int().min(1).max(200).nullable()
       .describe(
         "How many floors the venue's building has, set by its owner or an admin: the 3D map draws it " +
@@ -250,7 +250,7 @@ const VenueDetailSchema = z
       hours: z
         .array(z.object({ day: z.number().int().min(0).max(6), open: z.string(), close: z.string() }))
         .nullable()
-        .describe("Opening hours: `day` 0 (Sunday) to 6, wall-clock `HH:MM` in the venue's own timezone; a close at or before the open runs past midnight. Null until given."),
+        .describe("Opening hours: `day` 0 (Sunday) to 6, wall-clock `HH:MM` in the venue's own timezone; a close at or before the open runs past midnight. Null until given. Set by the venue's owner on the dashboard: one opening a day, opening at or after `dayResetHour` and closing by the next `dayResetHour`, so a night always belongs to the day it starts on (SCRUM-1154)."),
       description: z.string().nullable(),
       amenities: z.array(z.string()).describe("Names from the shared amenity vocabulary (`venue_amenities`), in display order. `[]` until given."),
       upcoming: z
@@ -575,7 +575,7 @@ registry.registerPath({
   tags: ["Mobile Users"],
   summary: "Get user public profile",
   description: ROOM_BAN_GATE +
-    "What a room card opens. `userId` may be a room handle, and `id` echoes it as sent (SCRUM-371). A handle is answered in that room's terms — revealed there, or a friend with `friends_see_me_in_rooms` on — never from a reveal, like or conversation elsewhere. For somebody the room keeps anonymous only `id`, `name` (their pseudonym there), `age`, `location`, `isOwnProfile` and `identityVisible` come back. `connection` is present only when `identityVisible` is true. A friend's raw id (a friendship, no block either way, no open pseudonymous conversation) is named like `GET /friends/{userId}` does (SCRUM-863). A crew's, Mix's or Lobby post's handle is that room's card for somebody it admits now — a crew's first name, a Mix's or post's pseudonym, the same five fields — and 404 for anyone else (SCRUM-864).",
+    "What a room card opens. `userId` may be a room handle, and `id` echoes it as sent (SCRUM-371). A handle is answered in that room's terms — revealed there, or a friend with `friends_see_me_in_rooms` on — never from a reveal, like or conversation elsewhere. For somebody the room keeps anonymous only `id`, `name` (their pseudonym there), `age` and `location` (both null), `ageBand`, `tenure`, `isOwnProfile` and `identityVisible` come back (D-030, SCRUM-1384): no exact age, city, join date or counts. A raw id that does not name them also sends `age`/`location` null, `ageBand`/`tenure` null and no `memberSince` or `stats`. `connection` is present only when `identityVisible` is true. A friend's raw id (a friendship, no block either way, no open pseudonymous conversation) is named like `GET /friends/{userId}` does (SCRUM-863). A crew's, Mix's or Lobby post's handle is that room's card for somebody it admits now — a crew's first name, a Mix's or post's pseudonym, the same fields with `ageBand` null (no event to count a band over) — and 404 for anyone else (SCRUM-864).",
   security: bearerAuth,
   request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {

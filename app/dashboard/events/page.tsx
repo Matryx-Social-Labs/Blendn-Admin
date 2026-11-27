@@ -11,7 +11,7 @@ import { db } from "@/lib/db"
 import { discloseVenueCounts } from "@/lib/disclosure"
 import { eventHost } from "@/lib/event-host"
 import { stillArriving } from "@/lib/occurrences"
-import { hostsEvent, visibleEventsScope } from "@/lib/event-visibility"
+import { reachedThroughBuilding, visibleEventsScope } from "@/lib/event-visibility"
 import { canAccessDashboard } from "@/lib/rbac"
 
 import { routeMetadata } from "@/lib/dashboard-route-content"
@@ -100,15 +100,13 @@ export default async function EventsPage() {
   const [arrivals, going] = await Promise.all([distinctAttendeeCounts(eventIds), rsvpCounts(eventIds)])
 
   /*
-   * A venue owner sees another host's event as the venue does: counts under
-   * the floor held back, by the rule the venue page and the exports use, so
-   * this list cannot print what they blank (SCRUM-501). Their own events, and
-   * everybody else's lists, are exact.
+   * Another host's event, reached through the building, shows as the venue
+   * sees it: counts under the floor held back, by the rule the venue page and
+   * the exports use, so this list cannot print what they blank (SCRUM-501).
+   * Membership decides, not User.role (SCRUM-1246).
    */
   const throughBuilding = new Set(
-    session.user.role === "venue_owner"
-      ? events.filter((e) => !hostsEvent(actor, e)).map((e) => e.id)
-      : []
+    events.filter((e) => reachedThroughBuilding(session.user.role, actor, e)).map((e) => e.id)
   )
   const counts = (event: (typeof events)[number]) => {
     const exact = { going: going.get(event.id) ?? 0, arrivals: arrivals.get(event.id) ?? 0 }

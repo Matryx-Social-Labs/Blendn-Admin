@@ -1,5 +1,4 @@
-import "server-only"
-
+// Relative imports and no "server-only": the reminder sweeper reaches `freeWindow` from server.ts (SCRUM-1421).
 import { distinctAttendeeCounts } from "./attendee-counts"
 import { MIN_ATTENDEES } from "./connection-metrics"
 import { db } from "./db"
@@ -27,6 +26,15 @@ import { realEventsWhere } from "./event-kind"
  * 4. **An Event Pass** opens one event's pass features. It is sold only for
  *    a night that has ended with at least `MIN_CELL` people checked in
  *    (`worthAPass`): under that floor every pass feature is held back.
+ * 5. **Where plans are not sold, everything is open** (SCRUM-1277; DECISIONS
+ *    2026-11-25: Canada stays free until a Canadian host asks to pay). An
+ *    organisation that may not buy here (`mayBuyHere`, lib/plan-market.ts, the
+ *    one market rule) has nothing it could pay for, so nothing is locked:
+ *    reason "market", no end date, whatever its window says. A view neither
+ *    reads nor writes its window (the free-window mail's pass may write it,
+ *    the same date a view would find later). The day it may buy again (its Toronto night
+ *    deleted, or plans sold in its country) the ordinary rule applies from its
+ *    window, stored or found then, which can mean locked at once.
  *
  * Every paid figure is computed only after this says yes
  * (`lib/org-analytics.ts`); a locked screen is drawn from
@@ -36,14 +44,14 @@ import { realEventsWhere } from "./event-kind"
 export const FREE_WINDOW_DAYS = 90
 const DAY_MS = 24 * 60 * 60 * 1000
 
-export type AccessReason = "analytics" | "grant" | "free_window" | "free"
+export type AccessReason = "analytics" | "grant" | "free_window" | "free" | "market"
 
 export interface AnalyticsAccess {
   orgId: string
   /** The cross-event views: cohorts, comparison, pacing vs your median, ranges. */
   org: boolean
   reason: AccessReason
-  /** When the free window closes. Null while no event has cleared the floor (the clock has not started). */
+  /** When the free window closes. Null while no event has cleared the floor (the clock has not started), and where plans are not sold. */
   freeUntil: Date | null
   /** When a paid subscription or a grant ends. Null for a free org, or one that never ends. */
   paidUntil: Date | null
@@ -56,12 +64,15 @@ export interface AnalyticsAccess {
 /** The decision itself, from facts already loaded. Pure, for DK-U01. */
 export function decideAccess(input: {
   entitled: "analytics" | "grant" | null
+  /** `mayBuyHere` (lib/plan-market.ts): false where plans are not sold. */
+  mayBuyHere: boolean
   /** The written-once end of the free window; null while no event has cleared the floor. */
   freeUntil: Date | null
   now: Date
 }): { org: boolean; reason: AccessReason; freeUntil: Date | null } {
   const { freeUntil } = input
   if (input.entitled) return { org: true, reason: input.entitled, freeUntil }
+  if (!input.mayBuyHere) return { org: true, reason: "market", freeUntil: null }
   if (freeUntil === null || input.now < freeUntil) return { org: true, reason: "free_window", freeUntil }
   return { org: false, reason: "free", freeUntil }
 }
@@ -108,9 +119,10 @@ async function firstQualifyingEvent(orgId: string, now: Date): Promise<{ id: str
 /**
  * The organisation's free window, from its row once written; otherwise found
  * now and written once (a concurrent first read writes the same answer, and
- * only the first write lands).
+ * only the first write lands). The one writer of the window: `analyticsAccess`
+ * on a view, and the free-window mail's pass for a host who never opened one.
  */
-async function freeWindow(orgId: string, now: Date): Promise<{ until: Date; eventId: string } | null> {
+export async function freeWindow(orgId: string, now: Date): Promise<{ until: Date; eventId: string } | null> {
   const org = await db.organisations.findUnique({
     where: { id: orgId },
     select: { analytics_free_until: true, first_free_event_id: true },
@@ -134,11 +146,26 @@ async function freeWindow(orgId: string, now: Date): Promise<{ until: Date; even
     : { until, eventId: first.id }
 }
 
-export async function analyticsAccess(orgId: string, now: Date = new Date()): Promise<AnalyticsAccess> {
+/**
+ * The organisation as every caller already holds it: `billingOrgFor` answers
+ * `mayBuyHere` on each page load, so the market costs this no query.
+ * Required, so no caller can forget it.
+ */
+export interface AccessOrg {
+  orgId: string
+  mayBuyHere: boolean
+}
+
+export async function analyticsAccess({ orgId, mayBuyHere }: AccessOrg, now: Date = new Date()): Promise<AnalyticsAccess> {
   const subject = { kind: "org" as const, id: orgId }
-  const [live, window] = await Promise.all([liveEntitlement(subject, "analytics", now), freeWindow(orgId, now)])
+  const [live, window] = await Promise.all([
+    liveEntitlement(subject, "analytics", now),
+    // Never where plans are not sold: a view neither reads nor writes the window there (rule 5).
+    mayBuyHere ? freeWindow(orgId, now) : null,
+  ])
   const decision = decideAccess({
     entitled: live ? (live.source === "grant" ? "grant" : "analytics") : null,
+    mayBuyHere,
     freeUntil: window?.until ?? null,
     now,
   })

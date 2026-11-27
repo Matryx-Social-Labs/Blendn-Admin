@@ -127,54 +127,68 @@ export async function lastMessagesOf(chatGroupIds: string[], blockedIds: string[
 }
 
 /**
- * Read markers, then what was said after each: the one pair of queries here
- * that cannot overlap, as the count is taken from the marker's timestamp.
+ * The most a room's `unreadCount` says (SCRUM-1223): the app shows "9+" above 9, so 10 is all it needs, and each room's
+ * count stops at its tenth row (`LIMIT` inside the `LATERAL`) however long the room's history is.
+ */
+const UNREAD_ROOM_CAP = 10
+
+/** A line that can be unread for this viewer: visible, not theirs, not from a block, not hidden, not an advert. */
+const mayBeUnread = (notUnread: string[], hiddenLineIds: string[]) => Prisma.sql`deleted_at IS NULL
+  AND NOT (user_id = ANY(${notUnread}::text[]))
+  AND NOT (id = ANY(${hiddenLineIds}::uuid[]))
+  AND ${NOT_AN_ADVERT}`
+
+/**
+ * What was said after each room's read marker, capped at `UNREAD_ROOM_CAP`: the read markers first, then one statement.
+ * A marker whose message is gone counts the room from its start, as `unreadTotalsOf` would.
  */
 export async function unreadAfterMarkers(rooms: { chat_group_id: string; last_read_message_id: string | null }[], notUnread: string[], hiddenLineIds: string[]) {
-  const markerIds = rooms.flatMap((m) => (m.last_read_message_id ? [m.last_read_message_id] : []))
-  const markers = markerIds.length > 0
-    ? await db.chat_messages.findMany({ where: { id: { in: markerIds } }, select: { id: true, created_at: true } })
-    : []
-  const lastReadMessageMap = new Map(markers.map((m) => [m.id, m.created_at]))
-
-  // For groups with a read marker, count messages after that timestamp
-  const read = rooms.flatMap((m) => {
-    const lastReadAt = m.last_read_message_id ? lastReadMessageMap.get(m.last_read_message_id) : null
-    return lastReadAt ? [{ chatGroupId: m.chat_group_id, lastReadAt }] : []
-  })
-  const unreadCountMap = new Map<string, number>()
-  if (read.length > 0) {
-    // Build parameterized SQL conditions for each group
-    const conditions = read.map((m) => Prisma.sql`(chat_group_id = ${m.chatGroupId}::uuid AND created_at > ${m.lastReadAt}::timestamptz)`)
-    const counts = await db.$queryRaw<Array<{ chat_group_id: string; unread_count: bigint }>>`
-      SELECT chat_group_id, COUNT(*) as unread_count
-      FROM chat_messages
-      WHERE deleted_at IS NULL
-        AND NOT (user_id = ANY(${notUnread}::text[]))
-        AND NOT (id = ANY(${hiddenLineIds}::uuid[]))
-        AND ${NOT_AN_ADVERT}
-        AND (${Prisma.join(conditions, " OR ")})
-      GROUP BY chat_group_id
-    `
-    for (const row of counts) unreadCountMap.set(row.chat_group_id, Number(row.unread_count))
-  }
-  return { lastReadMessageMap, unreadCountMap }
+  const marked = rooms.flatMap((m) => (m.last_read_message_id ? [{ roomId: m.chat_group_id, markerId: m.last_read_message_id }] : []))
+  if (marked.length === 0) return new Map<string, number>()
+  const markers = await db.chat_messages.findMany({ where: { id: { in: marked.map((m) => m.markerId) } }, select: { id: true, created_at: true } })
+  const readAt = new Map(markers.map((m) => [m.id, m.created_at]))
+  const counts = await db.$queryRaw<Array<{ chat_group_id: string; unread: number }>>`
+    SELECT r.id AS chat_group_id, count(*)::int AS unread
+    FROM unnest(${marked.map((m) => m.roomId)}::uuid[], ${marked.map((m) => readAt.get(m.markerId) ?? null)}::timestamptz[]) AS r(id, read_at)
+    CROSS JOIN LATERAL (
+      SELECT 1 FROM chat_messages
+      WHERE chat_group_id = r.id
+        AND created_at > COALESCE(r.read_at, '-infinity')
+        AND ${mayBeUnread(notUnread, hiddenLineIds)}
+      LIMIT ${UNREAD_ROOM_CAP}
+    ) m
+    GROUP BY r.id
+  `
+  return new Map(counts.map((r) => [r.chat_group_id, r.unread]))
 }
 
-/** Every message per room that can be unread: what is unread for a member who has read nothing. */
+/**
+ * Reading a room's newest page moves the reader's marker to `messageId`, and writes only when it moves (SCRUM-1225):
+ * a busy room re-read on every socket event made each message one row write per reader. The `null` arm is a first
+ * read; a bare Prisma `not` excludes NULL, so without it the marker would never be written.
+ */
+export function markRoomRead(chatGroupId: string, userId: string, messageId: string) {
+  return db.chat_group_members.updateMany({
+    where: { chat_group_id: chatGroupId, user_id: userId, OR: [{ last_read_message_id: null }, { last_read_message_id: { not: messageId } }] },
+    data: { last_read_message_id: messageId, updated_at: new Date() },
+  })
+}
+
+/** Unread for a member who has read nothing, capped at `UNREAD_ROOM_CAP`. Pass only the rooms with no read marker. */
 export async function unreadTotalsOf(chatGroupIds: string[], notUnread: string[], hiddenLineIds: string[]): Promise<Map<string, number>> {
   if (chatGroupIds.length === 0) return new Map()
-  const rows = await db.$queryRaw<Array<{ chat_group_id: string; total: bigint }>>`
-    SELECT chat_group_id, COUNT(*) AS total
-    FROM chat_messages
-    WHERE chat_group_id = ANY(${chatGroupIds}::uuid[])
-      AND deleted_at IS NULL
-      AND NOT (user_id = ANY(${notUnread}::text[]))
-      AND NOT (id = ANY(${hiddenLineIds}::uuid[]))
-      AND ${NOT_AN_ADVERT}
-    GROUP BY chat_group_id
+  const rows = await db.$queryRaw<Array<{ chat_group_id: string; total: number }>>`
+    SELECT g.id AS chat_group_id, count(*)::int AS total
+    FROM unnest(${chatGroupIds}::uuid[]) AS g(id)
+    CROSS JOIN LATERAL (
+      SELECT 1 FROM chat_messages
+      WHERE chat_group_id = g.id
+        AND ${mayBeUnread(notUnread, hiddenLineIds)}
+      LIMIT ${UNREAD_ROOM_CAP}
+    ) m
+    GROUP BY g.id
   `
-  return new Map(rows.map((r) => [r.chat_group_id, Number(r.total)]))
+  return new Map(rows.map((r) => [r.chat_group_id, r.total]))
 }
 
 /** "With Lunar Fox, Velvet Owl and 2 others": the Banter row names three at most (Flow 5 C5). */

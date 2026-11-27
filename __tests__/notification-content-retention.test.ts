@@ -17,9 +17,7 @@
 import { readFileSync } from "fs"
 import { join } from "path"
 
-const mockDb = {
-  notifications: { findMany: jest.fn(), deleteMany: jest.fn() },
-}
+const mockDb = { $executeRaw: jest.fn() }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 const mockPurgeDeletedAccountRecords = jest.fn()
@@ -30,6 +28,8 @@ jest.mock("@/lib/leads", () => ({ purgeLeadPii: mockPurgeLeadPii }))
 import { storedBodyFor } from "@/lib/push-notifications"
 import {
   pruneNotifications,
+  pruneProductEvents,
+  runSweep,
   READ_RETENTION_DAYS,
   UNREAD_RETENTION_DAYS,
   startNotificationRetentionSweeper,
@@ -39,9 +39,15 @@ import { logger } from "@/lib/logger"
 
 beforeEach(() => {
   jest.clearAllMocks()
-  mockDb.notifications.findMany.mockResolvedValue([])
-  mockDb.notifications.deleteMany.mockResolvedValue({ count: 0 })
+  mockDb.$executeRaw.mockResolvedValue(0)
 })
+
+/** The SQL text and bound values of the nth `$executeRaw` tagged-template call. */
+const rawCall = (n = 0) => {
+  const [strings, ...values] = mockDb.$executeRaw.mock.calls[n] as [TemplateStringsArray, ...unknown[]]
+  return { sql: strings.join("?").replace(/\s+/g, " "), values }
+}
+const DAY = 24 * 60 * 60 * 1000
 
 describe("the stored row does not keep what somebody wrote", () => {
   it("redacts a private message", () => {
@@ -130,44 +136,120 @@ describe("the table stops growing forever", () => {
     const now = new Date("2026-08-20T12:00:00Z")
     await pruneNotifications(now)
 
-    const { where } = mockDb.notifications.findMany.mock.calls[0][0]
-    const [readClause, unreadClause] = where.OR
-
-    const readCutoff = readClause.read_at.lt as Date
-    const unreadCutoff = unreadClause.created_at.lt as Date
-
-    expect(readClause.read_at.not).toBeNull()
-    expect(unreadClause.read_at).toBeNull()
-    // The read window is the shorter one, so its cutoff is the later date.
-    expect(readCutoff.getTime()).toBeGreaterThan(unreadCutoff.getTime())
+    const { sql, values } = rawCall()
+    expect(sql).toContain("WHERE read_at < ? OR (read_at IS NULL AND created_at < ?)")
+    expect(values[0]).toEqual(new Date(now.getTime() - READ_RETENTION_DAYS * DAY))
+    expect(values[1]).toEqual(new Date(now.getTime() - UNREAD_RETENTION_DAYS * DAY))
   })
 
-  it("is bounded per pass", async () => {
+  it("is bounded per batch", async () => {
     /*
      * A first run against a table that has never been pruned would otherwise be
      * one unbounded delete over years of rows, taking locks on a table every
      * bell read touches.
      */
     await pruneNotifications(new Date())
-    const { take } = mockDb.notifications.findMany.mock.calls[0][0]
-    expect(typeof take).toBe("number")
-    expect(take).toBeGreaterThan(0)
+    const { sql, values } = rawCall()
+    expect(sql).toMatch(/LIMIT \?/)
+    expect(values.at(-1)).toBe(5_000)
   })
 
-  it("deletes nothing when nothing is stale", async () => {
-    mockDb.notifications.findMany.mockResolvedValue([])
-    expect(await pruneNotifications(new Date())).toBe(0)
-    expect(mockDb.notifications.deleteMany).not.toHaveBeenCalled()
+  it("deletes a batch by primary key, never IN (subquery)", async () => {
+    // With IN the planner hash-joins every batch against a scan of the whole table (EXPLAIN, SCRUM-1224).
+    await pruneNotifications(new Date())
+    await pruneProductEvents(new Date())
+    for (const n of [0, 1]) {
+      expect(rawCall(n).sql).toMatch(/WHERE id = ANY\(ARRAY\( SELECT id FROM/)
+      expect(rawCall(n).sql).not.toMatch(/\bIN \(/)
+    }
+  })
+})
+
+describe("one sweep drains the backlog, within a bound (SCRUM-1224)", () => {
+  const BATCH = 5_000
+  let info: jest.SpyInstance
+  let error: jest.SpyInstance
+
+  beforeEach(() => {
+    jest.useFakeTimers()
+    info = jest.spyOn(logger, "info").mockImplementation(() => {})
+    error = jest.spyOn(logger, "error").mockImplementation(() => {})
+  })
+  afterEach(() => {
+    jest.useRealTimers()
+    info.mockRestore()
+    error.mockRestore()
   })
 
-  it("deletes exactly the rows it selected", async () => {
-    mockDb.notifications.findMany.mockResolvedValue([{ id: "a" }, { id: "b" }])
-    mockDb.notifications.deleteMany.mockResolvedValue({ count: 2 })
+  /** Notification batches return what `batch` says; product events find nothing. */
+  function notificationBatches(batch: (n: number) => number) {
+    let n = 0
+    mockDb.$executeRaw.mockImplementation(async (strings: TemplateStringsArray) =>
+      strings.join("").includes("FROM notifications") ? batch(n++) : 0
+    )
+  }
+  const productEventBatches = () =>
+    mockDb.$executeRaw.mock.calls.filter(([strings]) => (strings as TemplateStringsArray).join("").includes("FROM product_events")).length
 
-    expect(await pruneNotifications(new Date())).toBe(2)
-    expect(mockDb.notifications.deleteMany).toHaveBeenCalledWith({
-      where: { id: { in: ["a", "b"] } },
+  async function sweep() {
+    const done = runSweep()
+    await jest.runAllTimersAsync()
+    await done
+  }
+
+  it("repeats while a batch comes back full, and stops at the first short one", async () => {
+    notificationBatches((n) => [BATCH, BATCH, 2_000][n] ?? 0)
+    await sweep()
+    expect(info).toHaveBeenCalledWith("Pruned notifications", { deleted: 12_000, batches: 3 })
+    expect(error).not.toHaveBeenCalled()
+  })
+
+  it("stops at 20 batches, and says so as an error: the drain is not keeping up", async () => {
+    notificationBatches(() => BATCH)
+    await sweep()
+    expect(error).toHaveBeenCalledWith("Pruning notifications could not keep up", { deleted: 100_000, batches: 20, reason: "batches" })
+  })
+
+  it("stops after a minute however many batches that is", async () => {
+    notificationBatches(() => {
+      jest.setSystemTime(Date.now() + 15_000) // each batch takes 15 s
+      return BATCH
     })
+    await sweep()
+    expect(error).toHaveBeenCalledWith("Pruning notifications could not keep up", { deleted: 20_000, batches: 4, reason: "time" })
+  })
+
+  it("logs nothing when nothing is stale", async () => {
+    notificationBatches(() => 0)
+    await sweep()
+    expect(info).not.toHaveBeenCalled()
+    expect(error).not.toHaveBeenCalled()
+  })
+
+  it("a batch that throws still reports what went before it, and the other table is still swept", async () => {
+    notificationBatches((n) => {
+      if (n === 1) throw new Error("canceling statement due to statement timeout")
+      return BATCH
+    })
+    await sweep()
+    expect(error).toHaveBeenCalledWith("Pruning notifications failed", {
+      deleted: BATCH,
+      batches: 1,
+      error: "Error: canceling statement due to statement timeout",
+    })
+    expect(productEventBatches()).toBe(1)
+  })
+
+  // Last in this describe: `stopped` is module state, and only the next describe's `start` clears it.
+  it("stops between batches when the sweeper is stopped, as a shutdown, not a failure", async () => {
+    notificationBatches(() => {
+      stopNotificationRetentionSweeper()
+      return BATCH
+    })
+    await sweep()
+    expect(info).toHaveBeenCalledWith("Pruned notifications", { deleted: BATCH, batches: 1, reason: "stopped" })
+    expect(error).not.toHaveBeenCalled()
+    expect(productEventBatches()).toBe(0)
   })
 })
 

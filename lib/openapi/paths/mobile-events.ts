@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, MODERATION_UNAVAILABLE_NOTE, moderationUnavailableError, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, MODERATION_UNAVAILABLE_NOTE, moderationUnavailableError, PARTICIPATION_GATE, RoomPersonFactsFields, standardErrors, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
 import {
   EventQuerySchema,
   EventCheckinRequestSchema,
@@ -343,7 +343,8 @@ const NightPersonSchema = z
     userId: z.string().describe("Their handle in this room (`rh_…`), never an account id. `POST /matches/likes` and message requests take it."),
     displayName: z.string().describe("The room's pseudonym, or their name where they revealed here."),
     photo: z.string().nullable().describe("Only beside a name; null beside a pseudonym."),
-    age: z.number().int().nullable(),
+    age: z.number().int().nullable().describe("Only beside a name; null beside a pseudonym (D-030)."),
+    ...RoomPersonFactsFields,
     insideNow: z.boolean().describe("Still checked in. False reads \"Was here\"."),
     youLiked: z.boolean(),
     overlap: z.string().nullable().describe("One sentence of what you share, or null. Always null on a night under 8 people."),
@@ -712,7 +713,7 @@ registry.registerPath({
     "**Limits, read before anything about the recipient:** 20 per room per hour, 60 a day; 5 per room per hour and 15 a day for an account under 24 h; 5 per room per hour once 20 of your waves in the last 24 h are unanswered. Counted from stored waves, so a refused wave never counts.\n\n" +
     "`toUserId` must be the handle this event's roster gave you (SCRUM-371). A raw user id, another event's handle or a forged one is answered exactly as somebody not in the room (403 `RECIPIENT_NOT_HERE`). Your own id is 400.\n\n" +
     "**For your crew (`asCrewId`, crews 5-A):** a crew → person wave, stored as the crew like with `is_wave` and shown to that person alone (`crewWaves` on `GET` here, `crewRooms` on `GET /waves`, a `room:crew_wave` ping, `wavedAtYou` on the crew's card); never a line in your crew's chat, never a push. The crew like's rules, limits (the 30 a day) and refusals about your own crew apply (403 not checked in, crew not here, no room for one more). Every refusal about THEM — not here, not open to crews, a block across the crew, a friend, banned, a forged handle — is `{ sent: true, mutual: false }`, storing nothing. Their wave back at the crew opens the Mix (`blend`).\n\n" +
-    "**Error codes:** `VALIDATION_FAILED` (400, waving at yourself), `NOT_CHECKED_IN` (403, you: not in the room, staff, a host, or the room closed), `RECIPIENT_NOT_HERE` (403 — not in the room, hidden, banned, a friend, a host, or a block either way; and also when YOU have Show online off, since a hidden person waves at nobody (SCRUM-1056); deliberately indistinguishable), `RATE_LIMITED` (429, a limit above, with `retryAfter`; says nothing about them), `WAVE_TOO_SOON` (429, a new wave at the same person within 10 minutes in another room, with `retryAfter`)",
+    "**Error codes:** `VALIDATION_FAILED` (400, waving at yourself), `NOT_CHECKED_IN` (403, you: not in the room, staff, a host, or the room closed), `RECIPIENT_NOT_HERE` (403 — not in the room, hidden, banned, a friend, a host, or a block either way; and also when YOU have Show online off, since a hidden person waves at nobody (SCRUM-1056); deliberately indistinguishable), `RATE_LIMITED` (429, a limit above, with `retryAfter`; says nothing about them)",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -912,9 +913,10 @@ registry.registerPath({
   description: [
     "Send a message to an event chat. Same moderation pipeline as group chat:",
     "",
-    "1. **Spam check** → 2. **Keyword filter** (instant) → 3. **OpenAI Moderation** (1s timeout)",
+    "1. **Spam check** → 2. **Keyword filter** (instant) → 3. **OpenAI Moderation** (raced against 1 s; a later verdict is waited for in an event room with more than 200 people inside, " +
+      "and in a smaller room the message is broadcast at once and removed again if the verdict hides it)",
     "",
-    "If caught, response has `moderation_hidden: true`, `content: null`. Message is never broadcast.",
+    "If caught before the send returns, response has `moderation_hidden: true`, `content: null`. Message is never broadcast.",
     "",
     "**Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `NOT_CHECKED_IN` (403), `SPAM_BLOCKED` (429), `MODERATION_UNAVAILABLE` (503)",
     "",

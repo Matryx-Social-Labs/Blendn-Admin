@@ -36,7 +36,9 @@ import { join } from "path"
 import { planPageData } from "@/lib/billing"
 import { advanceCharge, getChargeLedger, pricePlacement, sendPaymentLink } from "@/lib/charge-actions"
 import { logger } from "@/lib/logger"
+import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
+import { canBroadcast, eventPermissionSelect } from "@/lib/rbac"
 import { getSponsorOverview } from "@/lib/sponsor-actions"
 import { placementReach, reachKey } from "@/lib/sponsor-reach"
 import { materialiseEndedReach, sweepSponsored } from "@/lib/sponsored-scheduler"
@@ -799,7 +801,7 @@ describe("the webhook, against our rows (review H3, M2, M5; db M1, M2)", () => {
   it("the organisation’s Plan page never lists a sponsor link payment (review 16, db M3)", async () => {
     const { linkId } = await sentLink(420_000)
     await post(linkPaid(linkId, { amount: 420_000 }))
-    const page = await planPageData({ orgId: sponsorOrg, orgName: "x", memberRole: "owner", mayBuy: true })
+    const page = await planPageData({ orgId: sponsorOrg, orgName: "x", memberRole: "owner", mayBuy: true, mayBuyHere: true })
     expect(page.payments).toEqual([])
   })
 })
@@ -1126,5 +1128,80 @@ describe("final review: prices, references and the paid states nothing expects",
     expect(await db.billing_payments.count({ where: { provider_payment_id: paymentId } })).toBe(1)
     expect(await auditCount(chargeId, "charge.paid_unexpected")).toBe(1)
     expect(loggedWith("chargeStatus", "draft")).toBe(true)
+  })
+})
+
+/*
+ * Stage 0 of the sponsor plan sells a night through this path by hand
+ * (SCRUM-1454). Every test above enters it with a
+ * charge row already written; these walk it from the admin's first action,
+ * and pin the gate on posting `sponsored`: one organisation with the flag and
+ * an approved placement at the event. Payment is not part of that gate.
+ */
+describe("Stage 0: one sold night, end to end (SCRUM-1454)", () => {
+  it("price → agreed → link → payment_link.paid → settled, each step through the admin's own actions", async () => {
+    const eventId = await makeEvent(host)
+    events.push(eventId)
+    const placement = await db.event_sponsors.create({ data: { event_id: eventId, sponsor_id: brand, status: "approved", created_by: host } })
+    placements.push(placement.id)
+    as(admin, "app_admin")
+
+    await pricePlacement(placement.id, { amount: 3000, note: "One sponsored night" })
+    const priced = await db.placement_charges.findFirstOrThrow({ where: { placement_id: placement.id } })
+    expect(priced).toMatchObject({ status: "draft", amount_minor: 300_000, currency: "INR", priced_by: admin, agreed_at: null })
+
+    await advanceCharge(priced.id, "agreed")
+    const agreed = await chargeRow(priced.id)
+    expect(agreed.status).toBe("agreed")
+    expect(agreed.agreed_at).not.toBeNull()
+
+    const { linkId } = await sendPaymentLink(priced.id)
+    expect(await db.billing_checkouts.findFirstOrThrow({ where: { charge_id: priced.id } })).toMatchObject({ provider_ref: linkId, org_id: sponsorOrg, amount_minor: 300_000, status: "created" })
+
+    expect((await post(linkPaid(linkId, { amount: 300_000 }))).status).toBe(200)
+    const settled = await chargeRow(priced.id)
+    expect(settled).toMatchObject({ status: "settled", external_ref: linkId })
+    expect(settled.settled_at?.getTime()).toBe(T0 * 1000)
+    for (const action of ["charge.priced", "charge.agreed", "charge.link_sent", "charge.settled"]) expect(await auditCount(priced.id, action)).toBe(1)
+  })
+
+  it("the sponsor's organisation may post sponsored at its approved placement, and nowhere it has no approved one", async () => {
+    const member = await makeUser("pl-granted", "organizer")
+    users.push(member)
+    await db.user.update({ where: { id: member }, data: { role: "sponsor" } })
+    const org = await db.organisations.create({ data: { kind: "company", display_name: testId("pl-granted-org"), status: "verified", may_sponsor: true } })
+    orgs.push(org.id)
+    await db.organisation_members.create({ data: { org_id: org.id, user_id: member, role: "owner" } })
+    const ownBrand = await db.sponsors.create({ data: { name: testId("pl-granted-brand"), name_key: testId("pl-grantedkey"), created_by: admin, org_id: org.id } })
+    sponsors.push(ownBrand.id)
+
+    const [placedAt, proposedAt, elsewhere] = [await makeEvent(host), await makeEvent(host), await makeEvent(host)]
+    events.push(placedAt, proposedAt, elsewhere)
+    for (const [eventId, status] of [[placedAt, "approved"], [proposedAt, "proposed"]] as const) {
+      const p = await db.event_sponsors.create({ data: { event_id: eventId, sponsor_id: ownBrand.id, status, created_by: host } })
+      placements.push(p.id)
+    }
+    // Another brand, of another organisation, placed at the third night.
+    const other = await db.event_sponsors.create({ data: { event_id: elsewhere, sponsor_id: brand, status: "approved", created_by: host } })
+    placements.push(other.id)
+
+    const mayPost = async (eventId: string) => {
+      const actor = await actorFor({ id: member, role: "sponsor" })
+      const event = await db.events.findUniqueOrThrow({ where: { id: eventId }, select: eventPermissionSelect })
+      return canBroadcast(actor, event, "sponsored", (await resolveSponsorGrant(actor, eventId)) ?? undefined)
+    }
+
+    expect(await mayPost(placedAt)).toBe(true)
+    expect(await mayPost(proposedAt)).toBe(false)
+    expect(await mayPost(elsewhere)).toBe(false)
+    // The same organisation without the flag an admin grants.
+    await db.organisations.update({ where: { id: org.id }, data: { may_sponsor: false } })
+    expect(await mayPost(placedAt)).toBe(false)
+    // Nor a second organisation of theirs that holds the flag and no placement:
+    // both facts must come from one organisation.
+    const flagged = await db.organisations.create({ data: { kind: "company", display_name: testId("pl-flag-only-org"), status: "verified", may_sponsor: true } })
+    orgs.push(flagged.id)
+    await db.organisation_members.create({ data: { org_id: flagged.id, user_id: member, role: "owner" } })
+    expect(await mayPost(placedAt)).toBe(false)
   })
 })

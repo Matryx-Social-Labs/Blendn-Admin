@@ -151,7 +151,7 @@ describe("canJoinEvent", () => {
       venue: null,
     })
     mockDb.user.findUnique.mockResolvedValue({ role: "organizer" })
-    mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: "org_nightshift" }])
+    mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: "org_nightshift", role: "owner" }])
     mockDb.event_rsvps.findFirst.mockResolvedValue(null)
     await expect(canJoinEvent(USER, EVENT_ID)).resolves.toBe(true)
   })
@@ -165,7 +165,7 @@ describe("canJoinEvent", () => {
       venue: null,
     })
     mockDb.user.findUnique.mockResolvedValue({ role: "organizer" })
-    mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: "org_elsewhere" }])
+    mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: "org_elsewhere", role: "owner" }])
     mockDb.event_rsvps.findFirst.mockResolvedValue(null)
     await expect(canJoinEvent(USER, EVENT_ID)).resolves.toBe(false)
   })
@@ -210,9 +210,9 @@ describe("canJoinEvent", () => {
 
 describe("malformed room IDs", () => {
   // Room ID columns are `@db.Uuid`, so Prisma throws on a non-UUID string
-  // instead of returning null. These must reject so `guardJoin` can deny;
-  // an escaping rejection would crash the process (Socket.io does not await
-  // its listeners).
+  // instead of returning null. These must reject, never resolve true: `guardJoin`
+  // refuses a non-uuid before asking, and answers any rejection that gets past
+  // it as "try again" (SCRUM-1402) rather than letting it crash the process.
   const prismaError = new Error("Inconsistent column data: Error creating UUID")
 
   it("propagates the error from canJoinChat rather than resolving true", async () => {

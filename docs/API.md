@@ -349,7 +349,9 @@ Crossing from one column to the other is the message request, and it is the only
 crossing: `GET /events/:eventId/checkins` returns pseudonyms, never real names or
 photos — except for someone who turned on "Show who I am" in that room
 (`event_match_preferences.revealed`), who is listed by name with `image`, the
-same rule the Grid card already applied. Blocks are honoured in both directions everywhere, and are reported as
+same rule the Grid card already applied. Beside a pseudonym `age` and
+`location` are null and the row carries `ageBand` and `tenure` instead (D-030,
+see *Matches*). Blocks are honoured in both directions everywhere, and are reported as
 "not found" rather than "blocked" — confirming an account exists tells a blocked
 person they were blocked.
 
@@ -421,10 +423,11 @@ an opaque, url-safe string. Field names and shapes did not change.
   on `friends_see_me_in_rooms`. A reveal at another event, a mutual like or an
   open conversation does not name them through this room's handle — a raw id
   still answers as before. For somebody the room keeps anonymous,
-  `GET /users/:userId` returns only `{ id, name, pseudonym, age, location,
-  isOwnProfile, identityVisible: false }` with `name` their pseudonym in that room;
-  `GET /profiles/:userId` returns only `{ id, name, pseudonym, profile: { id, age,
-  onboarded, location } }`; and `GET /profiles/:userId/interests` returns an
+  `GET /users/:userId` returns only `{ id, name, pseudonym, age: null, location:
+  null, ageBand, tenure, isOwnProfile, identityVisible: false }` with `name` their
+  pseudonym in that room and `ageBand`/`tenure` the roster's (see *Matches*:
+  D-030); `GET /profiles/:userId` returns only `{ id, name, pseudonym, profile: {
+  id, age: null, onboarded, location: null, ageBand, tenure } }`; and `GET /profiles/:userId/interests` returns an
   empty list. `pseudonym` (SCRUM-1046, 2026-11-20) is that same name as a
   contract: present exactly when `name` IS a room pseudonym, so it is never a
   real name, never on a raw id's answer or a named card, and absent (with
@@ -432,7 +435,10 @@ an opaque, url-safe string. Field names and shapes did not change.
   `POST /message-requests` and whether `POST /friends/requests` is refused.
   Otherwise `GET /users/:userId` also sends `work_field`, and, when
   `identityVisible` is false, `blurPhoto` (the stored derivative) in place of
-  `image` and `photos` (SCRUM-458).
+  `image` and `photos` (SCRUM-458), with `age`, `location`, `ageBand` and
+  `tenure` all null and no `memberSince` or `stats`; `GET /profiles/:userId`
+  then sends `profile.age`/`location`/`ageBand`/`tenure` null and no
+  `createdAt` (D-030). A raw id has no room to count a band over.
 - **A raw id of a friend is named** (SCRUM-863): with a friendship row, no block
   either way and no open pseudonymous conversation between you, `GET /users/:userId`
   and `GET /profiles/:userId` answer as for somebody you may see
@@ -442,9 +448,10 @@ an opaque, url-safe string. Field names and shapes did not change.
   `friends_see_me_in_rooms` on.
 - **A crew's, Mix's or Lobby post's handle is a room card** (SCRUM-864), for a
   caller that room admits now and a person it admits now; otherwise 404 as before.
-  `GET /users/:userId` returns `{ id, name, age, location, isOwnProfile: false,
-  identityVisible: false }` and `GET /profiles/:userId` the `{ id, name,
-  profile: { id, age, onboarded, location } }` subset, with `name` the room's own
+  `GET /users/:userId` returns `{ id, name, age: null, location: null, ageBand:
+  null, tenure, isOwnProfile: false, identityVisible: false }` and `GET
+  /profiles/:userId` the `{ id, name, profile: { id, age: null, onboarded,
+  location: null, ageBand: null, tenure } }` subset (no event, so no band), with `name` the room's own
   name for them: a crew's first name only, a Mix's or a Lobby post's pseudonym.
   `pseudonym` repeats the name for a Mix's or a Lobby post's card, never for a
   crew's (a first name). No photos, bio or interests. A block either way is a 404.
@@ -481,13 +488,15 @@ withholds. No id in the path: it is only ever yours.
 
 ```json
 { "pseudonym": "Velvet Otter",
-  "anonymous": { "id": "<you>", "name": "Velvet Otter", "pseudonym": "Velvet Otter", "age": 27, "location": "Toronto", "isOwnProfile": false, "identityVisible": false },
+  "anonymous": { "id": "<you>", "name": "Velvet Otter", "pseudonym": "Velvet Otter", "age": null, "location": null, "ageBand": "25-34", "tenure": "regular", "isOwnProfile": false, "identityVisible": false },
   "named": { "id": "<you>", "name": "Priya", "work_field": null, "image": "…", "photos": ["…"], "bio": "…", "occupation": null, "education": null,
              "languages": [], "homeState": null, "sign": null, "age": 27, "location": "Toronto", "interests": [], "memberSince": "…",
              "stats": { "eventsAttended": 3, "eventsFavorited": 1, "eventsOrganized": 0 }, "isOwnProfile": false, "identityVisible": true, "badges": [] } }
 ```
 
-- `anonymous` — before you reveal: your pseudonym, age and city, nothing else.
+- `anonymous` — before you reveal: your pseudonym, and the `ageBand` and
+  `tenure` that room shows beside it (D-030; the band from the room `pseudonym`
+  comes from), with `age` and `location` null. Nothing else.
 - `named` — to somebody who may see who you are in a room: first name, photos and
   the rest; `badges` only while "Show my badges" is on.
 - `pseudonym` is the one you carry in the event room you joined last; `null`
@@ -1156,9 +1165,29 @@ Each card names what the two of you share rather than who the other person is:
 
 ```json
 { "userId": "...", "displayName": "Cosmic Panda", "revealed": false, "photo": null,
+  "age": null, "ageBand": "25-34", "tenure": "regular",
   "sharedInterests": ["Techno", "Board games"],
   "sharedIntents": ["networking"], "insideNow": true, "youLiked": false }
 ```
+
+**Before a reveal: a band and a chip, never the age** (D-030, SCRUM-1384,
+2026-11-27). A row the room keeps anonymous carries `age: null` (the key stays
+for installed builds), and in its place:
+
+- `ageBand` — `"18-24"`, `"25-34"`, `"35-44"`, `"45+"` or `null`. Shown only
+  when **3 or more people who ever checked in at this event as attendees**
+  share it; null below that, and when the age is unknown. That population is
+  the same for every viewer and every route (this deck, `/people`,
+  `/checkins`, the room card on `/users/:id` and `/profiles/:id`), and only
+  grows, so comparing two of them shows nothing. Ages are taken at the event's
+  start. A revealed row carries its band too, beside the exact `age`.
+- `tenure` — `"regular"` once they came to 2 or more distinct events (a
+  multi-day event is one), else `"new"`. Two values, never a count.
+- **Somebody who runs or hosts the event** (the organizing organisation, the
+  venue's, an admin) gets `age`, `ageBand` and `tenure` all `null`: hosts see
+  totals only.
+- No city, join date or counts on any of these rows. `sharedEvents`,
+  `sharedPlans` and `badges` are unchanged (the client decides what it draws).
 
 `displayName` is the room pseudonym and `photo` is null unless that person chose
 to be revealed at this event. `revealed` says which (SCRUM-1067): true exactly when
@@ -1272,9 +1301,10 @@ anonymous conversation.
   inside, `NOT_CHECKED_IN` after leaving), before anything about the recipient
   is read; nothing is stored and nobody is pinged. A client should offer
   "Turn on Show online to wave" from its own setting rather than wait for this.
-  A new wave at the
-  same person within 10 minutes in another room is `429 WAVE_TOO_SOON` (a wave
-  back is never held by it).
+  Nothing limits the
+  pair across rooms: a wave at the same person in another room is a first wave
+  there (SCRUM-1385), so a handle is answered the same whoever is behind it.
+  `WAVE_TOO_SOON` is no longer sent (installed clients still map it).
 
 `GET /events/:eventId/waves?cursor=` — who waved at you here, newest first, 20 a
 page: `{ open, total, waves: [{ userId, displayName, wavedAt, wavedBack }], nextCursor }`.
@@ -1389,15 +1419,17 @@ GET /events/:eventId/people?limit=30&cursor=rh_…
 { "success": true, "data": {
   "open": true, "total": 5120, "nextCursor": "rh_…",
   "people": [
-    { "userId": "rh_…", "displayName": "Cosmic Panda", "photo": null, "age": 27,
-      "insideNow": false, "youLiked": false, "overlap": "You both picked chai over filter coffee" }
+    { "userId": "rh_…", "displayName": "Cosmic Panda", "photo": null, "age": null,
+      "ageBand": "25-34", "tenure": "new", "insideNow": false, "youLiked": false, "overlap": "You both picked chai over filter coffee" }
   ]
 } }
 ```
 
 - **As the room shows them.** `userId` is the person's handle in this room,
   never an account id; `displayName` is their pseudonym, or their name (with a
-  `photo`) only where they revealed here — the roster's rule.
+  `photo`) only where they revealed here — the roster's rule. `age` only beside
+  a name; beside a pseudonym `age: null` with `ageBand` and `tenure`, as on the
+  deck (*Matches*, D-030).
 - **Never listed:** you; staff; anyone in a block with you, either way; anyone
   you closed a conversation with; **your friends**, whatever their "friends can
   see me in rooms" setting — friends never meet as stranger cards (owner,
@@ -1952,7 +1984,7 @@ vocabulary, meaning exactly what it means there.
 | `venueType` | One of the 35 slugs, or a comma list (`pub_bar,brewery`): a venue of any of them. An unknown slug is a 400. `venueTypes` is the same filter under its plural name; send both and a venue of either matches |
 | `area` | A neighbourhood by `areaSlug` (`koramangala-1st-block`). A venue with no area is in none |
 | `area` / `areaSlug` (on every item) | The neighbourhood a person would name, from Overture's own division polygons (`scripts/places/areas.sql`, set by `scripts/backfill-venue-areas.ts`); both `null` when unknown, never guessed: fall back to the address or city. The list of areas is `GET /venues/summary` |
-| `tonight` (on every item) | `{ opensAt, closesAt }` (`HH:MM`, wall clock in the venue's own timezone) from `venues.hours` for the weekday of the venue's current day, or `null` when no hours are given for it. A close at or before the open runs past midnight. A day with two openings answers with the later one. `venues.hours` has no writer yet, so this is `null` everywhere until one exists |
+| `tonight` (on every item) | `{ opensAt, closesAt }` (`HH:MM`, wall clock in the venue's own timezone) from `venues.hours` for the weekday of the venue's current day, or `null` when no hours are given for it. A close at or before the open runs past midnight. A day with two openings answers with the later one (the dashboard writes one a day, SCRUM-1154). `null` until the venue's owner sets its hours |
 | `sortBy` | `name` (default) or `distance` |
 | `tier` (on every item) | `live`, `open` or `quiet`: the tier `order=live` ranks by, computed by the same rule whatever the order — `live` if `liveNow` is not `quiet`; `open` if open tonight (hours for the venue's current day, or its next public event starts before that day ends); else `quiet`. Under `order=live` it is read from the sets that ordered the page, so it can never disagree with the order; a caller whose `liveNow` is null is never shown `live` |
 | `order` | `live`: three tiers — **live now** (`liveNow` not `quiet`), then **open tonight** (`venues.hours` has a row for the weekday of the venue's current day, or a public event starts before that day ends), then the rest. Each tier is in the chosen sort with the id as tiebreak, so pages never repeat or skip a venue; read until the first quiet venue and nothing open tonight is lost. A caller who may not go live (`liveNow` null) gets the last two tiers. The response echoes `pagination.order: "live"` when applied; without it the server did not honour the order. A venue can change tier (somebody goes live) between two page requests, so **de-duplicate by venue `id` across pages** |
@@ -2088,7 +2120,7 @@ deleted venue; 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) for a profile
 | `live.liveNow` | `quiet` (fewer than 5, none included), `5-9`, `10-19` or `20+`. **Never a number** (D-19, D-x2): a count that moved from 4 to 5 as you watched would tell you somebody just walked in. Guests only (not the venue's staff), never counting you, read at most once a minute per venue, and slow to fall (it drops a bucket only once one more person would not hold it) |
 | `live.youAreLive` … `chatGroupId` | Your own window. Count down from `expiresAt`, never from the tap; open the room by `venueDayId` / `chatGroupId` |
 | `live.stayUntil` | The furthest "stay" can carry your window (four hours from the first stay today); null until you chose stay |
-| `venue.hours` | Opening hours, `[{ day: 0-6 (Sun-Sat), open: "HH:MM", close: "HH:MM" }]` in the venue's own timezone (a close at or before the open runs past midnight); null until given |
+| `venue.hours` | Opening hours, `[{ day: 0-6 (Sun-Sat), open: "HH:MM", close: "HH:MM" }]` in the venue's own timezone (a close at or before the open runs past midnight); null until given. Set by the venue's owning organisation or an admin on the dashboard venue page (`setVenueHours`, SCRUM-1154): one opening a day, opening at or after `dayResetHour` and closing by the next `dayResetHour`, never at the time it opens |
 | `venue.description`, `venue.amenities` | Free text about the place (null) and amenity names from the shared vocabulary (`[]`) until given |
 | `venue.capacity`, `venue.dayResetHour`, `venue.timezone` | The venue's capacity (null if unknown), the local hour its day starts (0-23) and the IANA timezone (`Asia/Kolkata`, `UTC`) that hour is in. Read the two together: the phone derives neither from a time such as `dayEndsAt`, which is wrong across timezones |
 | `venue.upcoming` | Its next public events, at most 5, soonest first: the Places card's filter (published, public, not ended, link not disputed by the venue, within your age) — never its own live rooms |
@@ -2337,7 +2369,10 @@ place and time are not separate fields: the post's words carry them, as `name`.
 `groups` and `rooms` alike, `lastMessage` and `unreadCount` leave out messages
 from anybody you blocked or who blocked you — the same filter the room's
 history applies — so a blocked person's line is never previewed, named or
-counted. Your own messages are never unread. Reading a room's newest page
+counted. Your own messages are never unread. **`unreadCount` stops at 10** on
+every row (SCRUM-1223): the app says "9+" above 9, and a capped count reads at
+most ten rows a room however long its history, a room with a read marker only
+after it. Reading a room's newest page
 (`GET /chat/groups/:chatGroupId/messages` without `before`) marks it read, as
 `GET /events/:eventId/chat` does for an event's room. On `rooms`, `lastMessageAt` is the time of the newest message you can
 see, and the list is ordered by it. (A `groups` row's `lastMessageAt`, and the
@@ -2609,8 +2644,8 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 2. **Keyword filter** (sync, <1ms) — slurs/profanity in 9 languages → saves as hidden, returns `moderation_hidden: true`
 3. **OpenAI Moderation** (pre-emit, 1s timeout) — AI content analysis → hides before broadcast
 
-If caught, response returns `{ moderation_hidden: true, content: null }`. The message is never emitted via socket.
-If OpenAI times out (>1s), message is broadcast and moderation falls back to async (socket delete event).
+If caught before the send returns, response returns `{ moderation_hidden: true, content: null }` and the message is never emitted via socket.
+If OpenAI has not answered within 1s, the message is broadcast and moderation falls back to async (socket delete event), except in a busy event room, which waits for the verdict (below).
 
 **While OpenAI is down** (5 consecutive failed calls open a 30 s breaker per server process): a room of 200 or fewer inside, and every room that is not an event's, still delivers the line, and a sweeper re-checks every `unchecked` room message from the last 24 h each minute, hiding or flagging late through the usual actions. A **busy event room (more than 200 inside now) refuses instead**: when the 1 s race has no verdict the route waits for the call in flight (its own 8 s deadline); with still none it deletes the row it just wrote (nothing was emitted) and answers `503 MODERATION_UNAVAILABLE`, `retryAfter: 5` in the body and `Retry-After`, error "This room is busy and messages can’t be checked right now. Try again in a few seconds." With the breaker already open the refusal comes before anything is written. Resend with the same `clientId`. A missing `OPENAI_API_KEY` is not an outage and never refuses.
 
@@ -3984,7 +4019,7 @@ and only the second is worth blocking.
 | kind | who | media |
 |---|---|---|
 | `announcement` | `canEdit` — the organising org, or an `app_admin`. **Not** the venue owner | no |
-| `sponsored` | one organisation holding `may_sponsor` **and** an approved placement at this event, or an `app_admin` | **yes** |
+| `sponsored` | one organisation holding `may_sponsor` **and** an approved placement at this event, or an `app_admin` | not yet: refused with 400 (nothing stores it) |
 | `system` | `app_admin` only — it speaks as Blend'n | no |
 
 **This route used to compare two user ids.** `event.organizer_id !== caller.id`,
@@ -4005,8 +4040,9 @@ announces as one.
 everyone who can announce can also mark a message sponsored, the label stops
 meaning anything and becomes a styling choice — an organizer could dress an
 advertisement as an announcement or the reverse, and a reader has no way to tell
-which they are looking at. `organisations.may_sponsor` is off for every row and
-granted by an admin, because the word is only worth having if it is scarce.
+which they are looking at. `organisations.may_sponsor` is off by default and
+turned on only by an admin (the Organisations toggle, or approving a sponsor's
+application), because the word is only worth having if it is scarce.
 
 It is an **organisation** flag rather than a role: the permission belongs to the
 company with the commercial agreement, not to whichever of its staff is logged
@@ -4157,9 +4193,9 @@ can tell "no specialisms here" from "this field is unknown to me".
 
 **Suppressed in small rooms.** A match card omits `workField` when the room has
 fewer than 8 other attendees. The roster already gives an unrevealed person an
-age and a city; adding a field of work makes four attributes, and "29,
-Bengaluru, works in fintech, into techno and board games" is one specific person
-in a room of eight. Ranking still uses it there — the score never leaves the
+age band and a new / regular chip (D-030); adding a field of work makes four
+attributes, and "25-34, a regular, works in fintech, into techno and board
+games" is one specific person in a room of eight. Ranking still uses it there — the score never leaves the
 server, so suppressing the *attribute* costs nothing in ordering.
 
 **`sharedWorkField` is suppressed by the same floor, and must be.** The card also
@@ -4354,6 +4390,20 @@ venue, invite, send a domain email or file an event claim.
 
 Set by the organizer in the dashboard event form, bounded 13–25.
 
+**A moderator's delisting sticks** (SCRUM-1394). The report queue's `delist`
+sets the event `unlisted` and records when and by whom (`events.delisted_at`,
+`delisted_by`); its audit row (`report.delist`) keeps the title and
+description as they were when it was delisted. From then on
+`PATCH /api/events/:id` answers **403** with *"A moderator set this event to
+Unlisted, so its visibility can’t be changed. Contact support to ask for a
+review."* to a non-admin whose save changes `visibility`, and writes nothing
+of that save; a save that sends the same `unlisted` goes through. An admin's change to `public` lifts the delisting (both columns
+cleared, audited `event.relist` in the same transaction). A second delist
+keeps the first one's time and moderator. `delisted_by` is `@ignore`d in the
+Prisma client, so no answer carries it: which moderator acted is in the audit
+row, never in a response an organizer reads. Duplicate (`/dashboard/events/new?from=`)
+of a delisted event opens the plain form.
+
 **A suspended organizer's events are drafts** (SCRUM-8). Suspending an
 organisation flips its published events to `draft` and reinstating flips them
 back, so everything above applies: absent from `GET /events` and
@@ -4415,7 +4465,7 @@ Chat is unaffected: posting a message is its own choice to be seen.
 | POST | `/users/:userId/block` | Block/unblock user (`DELETE` to unblock) |
 | GET | `/users/blocked` | The people you blocked. `blocked_id` is an **opaque ref to the block** (`bk_…`), not their account id — somebody blocked by their Lobby post or room handle was never shown one, and this list must not be where it arrives. Send it back to `DELETE /users/:userId/block` to unblock; only a block you made is removed. A raw id still unblocks, for older clients, on your own block only. Name and photo appear only where the identity rules allow. Each row also carries `seen_as` (the pseudonym you were shown for them when you blocked — a room's, the Lobby's or a match's, never a real name; null when none was shown or the block predates 2026-11-20 outside a match), `seen_in` (where you blocked from: the event's title, a venue day's venue, or a crew's, Mix's or post's room name — a message request sent from a Lobby room keeps that room's name; null when not recorded) and `account_deleted`. `?q=` (1–100 characters, trimmed; longer is 400) searches on the server, case-insensitively, over `seen_as`, `seen_in`, a match's pseudonym and a real name **only where this list would show it** — a hidden name finds nobody — with `pagination.totalCount` the number of matches. 60 a minute |
 | GET | `/users/:userId/favorites` | Get your saved events, each with `visibility` — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176); also `changedAt`/`changedFields`, as on `GET /me/rsvps`, and `organizer` as `GET /events/:eventId` sends it (the org, never the creating user) |
-| GET | `/profiles/:userId` | Get a profile. Your own carries `email` and the whole `profile` row except `date_of_birth` (`age` derived) — `name`, `gender`, `interested_in`, `intent_default`, `reveal_by_default`, `blur_photo`, `interests`, `created_at`, `updated_at` included, and `expertise` as slugs. Anybody else's `profile` is `id, age, onboarded, location, interests, work_field, expertise` (labels), plus `bio, occupation, education, photos` if you can see who they are, else `blurPhoto`; no `email`, and `image` only if you can see who they are |
+| GET | `/profiles/:userId` | Get a profile. Your own carries `email` and the whole `profile` row except `date_of_birth` (`age` derived) — `name`, `gender`, `interested_in`, `intent_default`, `reveal_by_default`, `blur_photo`, `interests`, `created_at`, `updated_at` included, and `expertise` as slugs. Anybody else's `profile` is `id, age, onboarded, location, interests, work_field, expertise` (labels), plus `bio, occupation, education, photos` if you can see who they are, else `blurPhoto` with `age`/`location`/`ageBand`/`tenure` null and no `createdAt` (D-030); no `email`, and `image` only if you can see who they are |
 | PUT | `/profiles/:userId` | Update profile |
 | GET | `/profiles/:userId/interests` | Get category interests — 404 when either of you has blocked the other, as the profile answers (SCRUM-299); empty through a room handle for somebody that room keeps anonymous |
 | PUT | `/profiles/:userId/interests` | Update interests |
@@ -4500,12 +4550,12 @@ Returns: `{ flags: [...], stats: { pending, autoHidden, total }, pagination }`
 Messages go through a **pre-emit** pipeline — moderation runs before the message is broadcast to other users:
 1. **Spam check** (sync, blocks before save) — burst rate (5 msgs/10s), duplicate detection, link density (max 2)
 2. **Keyword filter** (sync, before save, <1ms) — Exact-match wordlists for English + 8 Indian languages. If matched, message saved as hidden and never broadcast.
-3. **OpenAI Moderation API** (pre-emit, 1s timeout) — Multilingual AI detection for hate, harassment, sexual, violence, self-harm. If caught within 1s, message hidden before broadcast. If timeout, emitted and falls back to async.
+3. **OpenAI Moderation API** (pre-emit, 1s timeout) — Multilingual AI detection for hate, harassment, sexual, violence, self-harm. If caught within 1s, message hidden before broadcast. If timeout, emitted and falls back to async, except in an event room with more than 200 checked in, which waits for the verdict (up to 8s) and refuses the send (`503 MODERATION_UNAVAILABLE`) without one.
 4. **Image moderation** (async, if applicable) — OpenAI omni-moderation for images
 
-Thresholds: `>=0.70` confidence → auto-hide, `>=0.40` → flag for review. Auto-mute after 3 hidden abusive messages in 1 hour (a message hidden only for a contact detail does not count). Auto-unmute after 1 hour with no new violations (checked on next send attempt).
+Thresholds: `>=0.70` confidence → auto-hide, `>=0.40` → flag for review. Auto-mute after 3 hidden abusive messages in 1 hour (a message hidden only for a contact detail or a swear word does not count; a slur, or the model judging the line abusive, does). Auto-unmute after 1 hour with no new violations (checked on next send attempt).
 
-Requires `OPENAI_API_KEY` env var: Railway production refuses to boot without it; elsewhere moderation degrades to keyword-only if absent.
+Requires `OPENAI_API_KEY` env var: Railway production refuses to boot without it; elsewhere the server boots with a warning.
 
 ### Reports from the app
 
@@ -4601,8 +4651,7 @@ safety, reports and legal requests, and hard-deleted 180 days after the close by
 the chat sweeper (`lib/lobby-retention.ts`): room messages, posts with their asks
 and photos, the posts' rooms, the host's note. Removed or reported content is
 held 180 days from its removal, and anything with a pending report until it is
-decided. Alert switches go at the close. The purge is a dry run that logs what it
-would delete until `LOBBY_PURGE=delete` is set. See `docs/RETENTION.md`.
+decided. Alert switches go at the close. See `docs/RETENTION.md`.
 
 #### Types, spots and the list
 

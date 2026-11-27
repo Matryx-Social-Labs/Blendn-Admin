@@ -1,19 +1,21 @@
 const mockCheck = jest.fn()
 const mockHide = jest.fn()
 const mockRecord = jest.fn()
+const mockFlag = jest.fn()
+const mockMute = jest.fn()
 jest.mock("@/lib/moderation/openai-moderation", () => ({
   checkTextContent: (...a: unknown[]) => mockCheck(...a),
   checkImageContent: jest.fn(),
 }))
 jest.mock("@/lib/moderation/actions", () => ({
   hideMessage: (...a: unknown[]) => mockHide(...a),
-  flagForReview: jest.fn(),
-  checkAndAutoMute: jest.fn(),
+  flagForReview: (...a: unknown[]) => mockFlag(...a),
+  checkAndAutoMute: (...a: unknown[]) => mockMute(...a),
   recordExamined: (...a: unknown[]) => mockRecord(...a),
 }))
 jest.mock("@/lib/tigris", () => ({ readableUrl: jest.fn() }))
 
-import { moderateMessage } from "@/lib/moderation"
+import { inlineFlags, moderateMessage } from "@/lib/moderation"
 import type { ModerationCheck } from "@/lib/moderation/openai-moderation"
 
 /**
@@ -61,4 +63,57 @@ describe("moderateMessage with the send route's in-flight check", () => {
     await run()
     expect(mockCheck).toHaveBeenCalledTimes(1)
   })
+})
+
+describe("a keyword flag on the async path (SCRUM-1167)", () => {
+  it("records an ordinary word on the review list for a human, does not hide it, and does not call it clean", async () => {
+    await moderateMessage("m1", "chod yaar, let's go", "text", "u1", "g1", undefined, Promise.resolve(CLEAN))
+    expect(mockHide).not.toHaveBeenCalled()
+    expect(mockFlag).toHaveBeenCalledWith("m1", "g1", "u1", expect.objectContaining({ action: "flag", source: "keyword", matched: ["chod"] }))
+    expect(mockRecord).not.toHaveBeenCalled()
+  })
+})
+
+describe("a keyword hide on the async path (D-052a)", () => {
+  const send = (content: string, textCheck?: Promise<ModerationCheck>) => moderateMessage("m1", content, "text", "u1", "g1", undefined, textCheck)
+
+  it("hides a swear word and does not count it when the model finds the line clean", async () => {
+    await send("tu chutiya hai", Promise.resolve(CLEAN))
+    expect(mockHide).toHaveBeenCalledTimes(1)
+    expect(mockFlag).toHaveBeenCalledTimes(1)
+    expect(mockFlag).toHaveBeenCalledWith("m1", "g1", "u1", expect.objectContaining({ source: "keyword", categories: { profanity: expect.any(Number) } }))
+    expect(mockMute).not.toHaveBeenCalled()
+  })
+
+  it("records the model's hide on a line that also carries a swear word, and counts it", async () => {
+    await send("tu chutiya hai", Promise.resolve(HIDE))
+    expect(mockHide).toHaveBeenCalledTimes(1)
+    expect(mockFlag).toHaveBeenNthCalledWith(2, "m1", "g1", "u1", HIDE.result)
+    expect(mockMute).toHaveBeenCalledWith("u1", "g1")
+  })
+
+  it("asks again when the call failed outright, as the rest of the pipeline does, and counts a hide", async () => {
+    mockCheck.mockResolvedValue(HIDE)
+    await send("tu chutiya hai", Promise.resolve({ checked: false, reason: "error" }))
+    expect(mockCheck).toHaveBeenCalledTimes(1)
+    expect(mockMute).toHaveBeenCalledWith("u1", "g1")
+  })
+
+  it("does not count the line when the model could not judge it", async () => {
+    await send("tu chutiya hai", Promise.resolve({ checked: false, reason: "timeout" }))
+    expect(mockFlag).toHaveBeenCalledTimes(1)
+    expect(mockMute).not.toHaveBeenCalled()
+  })
+
+  it("counts a slur without asking the model", async () => {
+    await send("you are a retard")
+    expect(mockCheck).not.toHaveBeenCalled()
+    expect(mockMute).toHaveBeenCalledWith("u1", "g1")
+  })
+})
+
+it("inlineFlags keeps only the flags, in order, and drops a hide or nothing (SCRUM-1167)", () => {
+  const flag = (source: "keyword" | "openai_text") => ({ action: "flag" as const, source, categories: {}, confidence: 0.5 })
+  expect(inlineFlags(flag("openai_text"), flag("keyword"))).toEqual([flag("openai_text"), flag("keyword")])
+  expect(inlineFlags({ ...flag("keyword"), action: "hide" }, null)).toEqual([])
 })
