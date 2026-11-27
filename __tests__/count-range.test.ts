@@ -22,7 +22,10 @@ describe("compactCount", () => {
     [9960, "9.9k"],
     [10_000, "10k"],
     [12_480, "12k"],
+    [9_999, "9.9k"],
+    [99_999, "99k"],
     [999_999, "999k"],
+    [1_000_000, "1M"],
     [1_250_000, "1.2M"],
   ])("%i reads %s: exact to 999, then compact, rounded down", (n, shown) => {
     expect(compactCount(n)).toBe(shown)
@@ -87,6 +90,12 @@ describe("hereSentence", () => {
   it("says nobody when nobody was seen", () => {
     expect(hereSentence(52, 52)).toBe(
       `Nobody was seen in the last ${W} minutes; all 52 are still checked in, but their phones have gone quiet, as phones in pockets do.`
+    )
+  })
+
+  it("says one person who went quiet in the singular", () => {
+    expect(hereSentence(1, 1)).toBe(
+      `Nobody was seen in the last ${W} minutes; the one person here is still checked in, but their phone has gone quiet, as phones in pockets do.`
     )
   })
 

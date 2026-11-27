@@ -18,6 +18,7 @@ jest.mock("@/lib/use-ops-snapshot", () => ({ useOpsSnapshot: () => mockOps }))
 jest.mock("@/app/dashboard/events/[id]/issue-actions", () => ({ acknowledgeIssue: jest.fn() }))
 
 import { LiveTab } from "@/components/dashboard/live-tab"
+import { LiveBanner } from "@/components/dashboard/overview-organizer"
 
 const HOUR = 3_600_000
 // 22:41 in Bengaluru, on the event's clock.
@@ -220,5 +221,41 @@ describe("a screen reader is not told the range every five seconds", () => {
     const h = hero(render(host()))
     expect(h).toMatch(/<span class="sr-only">38 to 52 people here<\/span>/)
     expect(h).toMatch(/aria-hidden="true"[^>]*>38–52</)
+  })
+})
+
+describe("the bar's two ends at the edges", () => {
+  it("never draws more seen guests than there are guests, when the seen are staff", () => {
+    // 40 guests all quiet, 12 staff seen: inside 52, unconfirmed 40, seen 12 — of whom no guest. The solid part is an upper bound, capped at the guests.
+    const h = hero(render(host({ inside: 52, guestsInside: 40, staffInside: 12, unconfirmed: 52, capacity: 80, fillPct: 50 })))
+    expect(h).toMatch(/left:0;width:0%/)
+    expect(h).toMatch(/left:0%;width:50%/)
+  })
+
+  it("keeps the hatch when over capacity, the solid part in the over colour", () => {
+    const h = hero(render(host({ inside: 52, guestsInside: 52, unconfirmed: 14, capacity: 50, fillPct: 104, overCapacity: true })))
+    expect(h).toMatch(/left:0;width:73\.0769\d*%;background:var\(--primary\)/)
+    expect(h).toContain("repeating-linear-gradient")
+    expect(h).toContain("Fill: 52 guests of capacity 50")
+  })
+})
+
+describe("the organizer Overview's live banner", () => {
+  const banner = (inside: number, unconfirmed: number) =>
+    renderToStaticMarkup(
+      <LiveBanner live={{ id: "e1", title: "Rooftop Sundowner", venue: "Toit", doors: "20:30", flags: 0, inside, unconfirmed, checkedIn: 1234, messages: 2000 }} />
+    )
+
+  it("prints the Live hero's range through the same formatter, said in full", () => {
+    const html = banner(52, 14)
+    expect(html).toContain('<span aria-hidden="true">38–52</span>')
+    expect(html).toContain('<span class="sr-only">38 to 52 people here</span>')
+    expect(html).toContain(">1,234<")
+    expect(html).toContain(">2,000<")
+  })
+
+  it("prints one number when everybody was seen, and a compact range for a concert", () => {
+    expect(banner(52, 0)).toContain('<span aria-hidden="true">52</span>')
+    expect(banner(12_480, 2_520)).toContain('<span aria-hidden="true">9.9k–12k</span>')
   })
 })

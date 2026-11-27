@@ -275,3 +275,27 @@ describe("per-occurrence capacity", () => {
     expect(o.capacity).toBe(80)
   })
 })
+
+/*
+ * The organizer Overview's live banner prints the Live hero's range (SCRUM-1328),
+ * so `getOccupancy` carries the low end the snapshot already has: of `inside`,
+ * who has not been seen within `CONFIRMED_WINDOW_MINUTES` (30). Staff count too,
+ * as in the snapshot.
+ */
+describe("getOccupancy says how much of the room was seen", () => {
+  it("counts a session quiet for 31 minutes as unconfirmed and one quiet for 29 as seen, as the snapshot does", async () => {
+    const { eventId, occurrenceId } = await eventWithCapacity(100)
+    await checkIn(eventId, occurrenceId, "seen")
+    const quiet = await checkIn(eventId, occurrenceId, "quiet31")
+    const nearly = await checkIn(eventId, occurrenceId, "quiet29")
+    const crew = await checkIn(eventId, occurrenceId, "crew31", "staff")
+    const ago = (m: number) => new Date(Date.now() - m * 60_000)
+    await db.presence_sessions.updateMany({ where: { event_id: eventId, user_id: { in: [quiet, crew] } }, data: { last_seen_at: ago(31) } })
+    await db.presence_sessions.updateMany({ where: { event_id: eventId, user_id: nearly }, data: { last_seen_at: ago(29) } })
+
+    const occ = await getOccupancy(eventId)
+    expect(occ).toMatchObject({ inside: 4, guestsInside: 3, staffInside: 1, unconfirmed: 2 })
+    const snapshot = await buildLiveSnapshot(eventId)
+    expect(snapshot!.unconfirmed).toBe(occ.unconfirmed)
+  })
+})

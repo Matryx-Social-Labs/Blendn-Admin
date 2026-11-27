@@ -86,7 +86,10 @@ export function hereSentence(inside: number, unconfirmed: number): string {
   const window = `in the last ${CONFIRMED_WINDOW_MINUTES} minutes`
   if (unconfirmed === 0) return `Everyone here was seen ${window}.`
   const quiet = "as phones in pockets do."
-  if (seen === 0) return `Nobody was seen ${window}; all ${formatNumber(inside)} are still checked in, but their phones have gone quiet, ${quiet}`
+  if (seen === 0)
+    return inside === 1
+      ? `Nobody was seen ${window}; the one person here is still checked in, but their phone has gone quiet, ${quiet}`
+      : `Nobody was seen ${window}; all ${formatNumber(inside)} are still checked in, but their phones have gone quiet, ${quiet}`
   const rest =
     unconfirmed === 1
       ? "the other one is still checked in, but their phone has gone quiet"

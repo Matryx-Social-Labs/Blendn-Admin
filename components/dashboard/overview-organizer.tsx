@@ -260,7 +260,7 @@ export function OverviewOrganizer({ data, canCreate = true }: { data: OrganizerO
  * The night that is running now. A red-edged strip, the only one on the page,
  * there only while it runs; the flagged-message count is the one red sentence.
  */
-function LiveBanner({ live }: { live: LiveEvent }) {
+export function LiveBanner({ live }: { live: LiveEvent }) {
   const room = hereRange(live.inside, live.unconfirmed)
   return (
     <section
