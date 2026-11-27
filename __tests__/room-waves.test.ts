@@ -8,7 +8,7 @@ process.env.NEXTAUTH_SECRET = "room-waves-test-secret-at-least-32-chars"
  * a host, the room open), then the sender's stored caps (W3-W6) BEFORE
  * anything about the recipient (W8), then the recipient (not here, blocked,
  * banned, unmatched, a friend, a host: one answer), one wave per pair per room
- * (W1), the 10-minute live-ping window across rooms (W2), and a mutual through
+ * (W1) and nothing on the pair across rooms (SCRUM-1385), and a mutual through
  * the like-match path. `lib/waves.ts` is mocked here with an in-memory store;
  * the stored caps and the real tables are `integration/recorded-waves.itest.ts`.
  */
@@ -56,15 +56,10 @@ jest.mock("@/lib/waves", () => ({
   hasWaved: async (e: string, f: string, t: string) => waves.has(`${e}|${f}|${t}`),
   // The viewer's list rule is the integration suite's; here a stored wave is a visible one.
   hasVisibleWaveFrom: async (viewer: string, e: string, from: string) => waves.has(`${e}|${from}|${viewer}`),
-  // As lib/waves.ts orders it: the duplicate first, then the pair window (W2) for a new wave only, then the row.
-  recordWave: async (e: string, f: string, t: string, { answering }: { answering: boolean }) => {
+  // As lib/waves.ts orders it: the duplicate in this room first, then the row.
+  recordWave: async (e: string, f: string, t: string) => {
     const k = `${e}|${f}|${t}`
     if (waves.has(k)) return { recorded: false, capped: null }
-    if (!answering) {
-      const { hit } = jest.requireActual("@/lib/rate-limit-store")
-      const { count, resetAt } = await hit(`rl:wave:${f}:${t}`, 10 * 60 * 1000)
-      if (count > 1) return { recorded: false, capped: { cap: "pair", retryAfter: Math.ceil((resetAt - Date.now()) / 1000) } }
-    }
     waves.add(k)
     return { recorded: true }
   },
@@ -257,24 +252,23 @@ it("W1: one wave per pair per room, never again: a second tap is the first answe
   expect(waves.size).toBe(1)
 })
 
-it("W2: a new wave at the same person in another room within ten minutes is 429 WAVE_TOO_SOON", async () => {
+it("no window across rooms (SCRUM-1385): a new wave at the same person in another room is a first wave there, stored and pinged", async () => {
   const OTHER = "44444444-4444-4444-8444-444444444444"
   expect((await wave(inRoom(THEM), EVENT)).status).toBe(200)
   const res = await wave(inRoom(THEM, OTHER), OTHER)
-  expect(res.status).toBe(429)
-  const body = await res.json()
-  expect(body.errorCode).toBe("WAVE_TOO_SOON")
-  expect(body.retryAfter).toBeGreaterThan(9 * 60)
-  expect(mockEmitWave).toHaveBeenCalledTimes(1)
+  expect(res.status).toBe(200)
+  expect(await res.json()).toEqual({ success: true, data: { sent: true, mutual: false } })
+  expect(waves.has(`${OTHER}|${ME}|${THEM}`)).toBe(true)
+  expect(mockEmitWave).toHaveBeenCalledTimes(2)
 })
 
-it("keeps the window per pair: waving at someone else is fine", async () => {
+it("waving at someone else is fine", async () => {
   inside(ME, THEM, "other")
   expect((await wave()).status).toBe(200)
   expect((await wave(inRoom("other"))).status).toBe(200)
 })
 
-it("does not start the clock on a wave that was refused", async () => {
+it("stores nothing for a wave that was refused, so the next one goes", async () => {
   mockBlocked.mockResolvedValueOnce(true)
   expect((await wave()).status).toBe(403)
   expect((await wave()).status).toBe(200)
@@ -312,20 +306,25 @@ describe("room handles (SCRUM-371)", () => {
     expect(mockEmitWave).not.toHaveBeenCalled()
   })
 
-  it("closes the too-soon finder: a raw-id wave is refused and starts no window", async () => {
-    /*
-     * The attack: wave at a friend's real id, then at each roster handle —
-     * the one answered 429 is the friend. The raw-id wave is now nobody, so
-     * it cannot start the pair's clock, and the handle's first wave goes.
-     */
+  it("a raw-id wave is nobody: refused, and the handle's first wave goes", async () => {
     expect((await wave(THEM)).status).toBe(403)
     expect((await wave(inRoom(THEM))).status).toBe(200)
   })
 
-  it("keys the ten-minute window on the real pair, so a new room is not a new window", async () => {
-    // Pins today's behaviour (SCRUM-1385).
+  it("a handle you waved at in another room is answered exactly as a stranger's there: status, body, headers and the ping (SCRUM-1385)", async () => {
+    const send = async (ref: string) => {
+      const res = await wave(ref, OTHER_EVENT)
+      return { status: res.status, headers: Object.fromEntries(res.headers), body: await res.json() }
+    }
+    inside(ME, THEM, "stranger")
     expect((await wave(inRoom(THEM), EVENT)).status).toBe(200)
-    expect((await wave(inRoom(THEM, OTHER_EVENT), OTHER_EVENT)).status).toBe(429)
+    mockEmitWave.mockClear()
+    const same = await send(inRoom(THEM, OTHER_EVENT))
+    const pingedSame = mockEmitWave.mock.calls.length
+    const stranger = await send(inRoom("stranger", OTHER_EVENT))
+    expect(same).toEqual(stranger)
+    expect(pingedSame).toBe(1)
+    expect(mockEmitWave).toHaveBeenCalledTimes(2)
   })
 
   it("refuses your own id, and your own handle, as waving at yourself", async () => {
@@ -411,7 +410,7 @@ describe("a wave back may be sent until the room closes, even if either has left
     expect((await wave()).status).toBe(200)
   })
 
-  it("is never held by the ten-minute window from another room", async () => {
+  it("a new wave in one room, then a wave back in another: both go", async () => {
     const OTHER = "55555555-5555-4555-8555-555555555555"
     waves.add(`${OTHER}|${THEM}|${ME}`)
     expect((await wave(inRoom(THEM), EVENT)).status).toBe(200)

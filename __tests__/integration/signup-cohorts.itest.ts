@@ -28,7 +28,12 @@ const users: string[] = []
 const events: string[] = []
 const venues: string[] = []
 
+const hostOrgs: string[] = []
+
 afterAll(async () => {
+  await db.organisation_members.deleteMany({ where: { org_id: { in: hostOrgs } } })
+  await db.organiser_onboarding_requests.deleteMany({ where: { org_id: { in: hostOrgs } } })
+  await db.organisations.deleteMany({ where: { id: { in: hostOrgs } } })
   await db.event_rsvps.deleteMany({ where: { user_id: { in: users } } })
   await cleanup(users, events)
   await db.venues.deleteMany({ where: { id: { in: venues } } })
@@ -187,6 +192,15 @@ describe("who receives it", () => {
     const owner = await makeUser(testId("sc-owner"), "organizer")
     users.push(admin, organizer, owner)
     await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
+    // Each a member of an organisation of their kind: that is what their dashboard is (SCRUM-1247).
+    for (const [id, kind] of [[organizer, "organizer"], [owner, "venue_owner"]] as const) {
+      const org = await db.organisations.create({ data: { display_name: testId(`sc-${kind}`), kind: "company", status: "verified" } })
+      hostOrgs.push(org.id)
+      await db.organisation_members.create({ data: { org_id: org.id, user_id: id, role: "owner" } })
+      await db.organiser_onboarding_requests.create({
+        data: { org_id: org.id, display_name: testId("sc-app"), contact_name: "S", contact_email: `${testId("sc-app")}@itest.invalid`, requested_role: kind, status: "approved" },
+      })
+    }
 
     session = { user: { id: admin, role: "app_admin" } }
     const staff = await getDashboardOverview()

@@ -7,6 +7,7 @@
  * points and never cuts inside a grapheme.
  */
 const mockDb = {
+  $queryRaw: jest.fn((): Promise<Record<string, unknown>[]> => mockSessionRows(mockDb.user.findUnique())),
   moderation_flags: {
     findMany: jest.fn(),
     count: jest.fn().mockResolvedValue(1),
@@ -22,6 +23,7 @@ jest.mock("@/lib/trust", () => ({ trustSignalsFor: jest.fn().mockResolvedValue(n
 jest.mock("@/lib/socket-server", () => ({ emitChatMessageHidden: jest.fn() }))
 
 import { getModerationQueue } from "@/app/dashboard/moderation/actions"
+import { mockSessionRows } from "./support/session-account"
 
 const EXCERPT_MAX = 140
 const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/

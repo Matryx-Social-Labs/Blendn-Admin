@@ -70,7 +70,8 @@ describe("the room roster", () => {
       expect(res.body.data.pagination.totalCount).toBe(8) // not the viewer's friend or blocked, not "offline"
       expect(label.size).toBe(10)
 
-      expect(fetchSpy).not.toHaveBeenCalled() // three within a budget once; no read geocodes now (SCRUM-1229)
+      // No read geocodes (SCRUM-1229), and beside a pseudonym no city is sent at all (D-030).
+      expect(fetchSpy).not.toHaveBeenCalled()
 
       // Before: every member of the room; after: the page's ids.
       const pseudonymRead = sql.find((q) => /FROM "public"\."chat_group_members"/.test(q) && /"anonymous_name"/.test(q))!
