@@ -32,6 +32,9 @@ let eventId = ""
 let groupId = ""
 let host = ""
 let brandMember = ""
+let admin = ""
+// The organising org's other admin: the route allows 3 broadcasts a minute per person.
+let colleague = ""
 
 afterAll(async () => {
   await db.event_sponsors.deleteMany({ where: { event_id: { in: events } } })
@@ -56,9 +59,12 @@ async function orgOf(userId: string, maySponsor = false) {
 beforeAll(async () => {
   host = await makeUser(testId("soc-host"), "organizer")
   brandMember = await makeUser(testId("soc-brand"))
-  users.push(host, brandMember)
+  admin = await makeUser(testId("soc-admin"), "app_admin")
+  colleague = await makeUser(testId("soc-colleague"), "organizer")
+  users.push(host, brandMember, admin, colleague)
   await db.user.update({ where: { id: brandMember }, data: { role: "sponsor" } })
   const hostOrg = await orgOf(host)
+  await db.organisation_members.create({ data: { org_id: hostOrg, user_id: colleague, role: "admin" } })
   const brandOrg = await orgOf(brandMember, true)
 
   eventId = await makeEvent(host)
@@ -114,6 +120,40 @@ describe("POST /api/mobile/events/:id/announce", () => {
     expect(await inRoom()).toBe(0)
   })
 
+  it("reads a mixed-case Sponsored as an unknown kind: an announcement, which the brand may not send", async () => {
+    const res = await post(brandMember, { kind: "Sponsored", content: "Two for one at the bar" })
+
+    expect(res.status).toBe(403)
+    expect(await announcements()).toBe(0)
+    expect(await inRoom()).toBe(0)
+  })
+
+  it("refuses media on an announcement, and writes nothing", async () => {
+    for (const media of [{ mediaUrl: "https://cdn.invalid/a.png", mediaType: "image" }, { mediaType: "image" }]) {
+      const res = await post(colleague, { content: "Look at this", ...media })
+      expect(res.status).toBe(400)
+      expect((await res.json()).error).toBe("Announcements carry text only")
+    }
+    expect(await announcements()).toBe(0)
+    expect(await inRoom()).toBe(0)
+    expect(emitChatMessage).not.toHaveBeenCalled()
+  })
+
+  it("still takes system from an app_admin, speaking as Blend'n", async () => {
+    const res = await post(admin, { kind: "system", content: "The venue is at capacity" })
+
+    expect(res.status).toBe(200)
+    expect(await inRoom()).toBe(1)
+    expect(emitChatMessage.mock.calls[0][1]).toMatchObject({ type: "system", userName: "Blend’n" })
+  })
+
+  it("refuses system from the organising org", async () => {
+    const res = await post(colleague, { kind: "system", content: "Official notice" })
+
+    expect(res.status).toBe(403)
+    expect(await inRoom()).toBe(0)
+  })
+
   it("still delivers the host's announcement, one row", async () => {
     const res = await post(host, { content: "Doors close at eleven" })
 
@@ -144,7 +184,12 @@ describe("createPoll", () => {
 
     expect(await db.chat_polls.count({ where: { id: pollId } })).toBe(1)
     expect(await polls()).toBe(1)
-    const row = await db.chat_messages.findFirstOrThrow({ where: { chat_group_id: groupId }, select: { metadata: true } })
+    const row = await db.chat_messages.findFirstOrThrow({ where: { chat_group_id: groupId }, select: { metadata: true, created_at: true } })
     expect(row.metadata).toMatchObject({ poll: true, kind: "announcement" })
+    // The host's poll moves the room in the chat list, as any announcement does.
+    const room = await db.chat_groups.findUniqueOrThrow({ where: { id: groupId }, select: { last_message_at: true } })
+    expect(room.last_message_at).toEqual(row.created_at)
+    expect(emitChatMessage).toHaveBeenCalledTimes(1)
+    expect(emitChatMessage.mock.calls[0][1]).not.toHaveProperty("kind")
   })
 })
