@@ -56,12 +56,8 @@ const SUMMARY_ROOMS = 20
 /** B-A: the Banter row draws the newest three faces (board 03). */
 const PILE_FACES = 3
 
-/** The live ping across rooms (W2): one per pair per this long, whichever room. A wave back is never held by it. */
-const PAIR_WINDOW_MS = 10 * 60 * 1000
-
 export interface WaveCap {
-  /** `pair`: a new wave at the same person within `PAIR_WINDOW_MS`, in another room (W2, `WAVE_TOO_SOON`). */
-  cap: "room_hour" | "day" | "pair"
+  cap: "room_hour" | "day"
   /** Seconds until one more wave would be accepted. */
   retryAfter: number
 }
@@ -188,16 +184,14 @@ export type RecordOutcome = { recorded: true } | { recorded: false; capped: Wave
  * looking at the recipient). A second wave at the same person here is
  * `recorded: false, capped: null`: no row, and the route answers it as sent.
  *
- * The pair window (W2) is counted here too, after that duplicate check and
- * every cap, and only for a new wave (`answering` false): counted before the
- * lock, the second of two taps at once found the first one's count and was
- * refused `WAVE_TOO_SOON` for a wave that was stored (SCRUM-1058).
+ * Nothing here is keyed on the pair across rooms (SCRUM-1385): a limit on the
+ * real pair answers differently for one person's handle in another room, which
+ * links the handles (SCRUM-371). One wave per pair per room (W1) is the key.
  */
 export async function recordWave(
   eventId: string,
   fromId: string,
   toId: string,
-  { answering }: { answering: boolean },
   now: Date = new Date()
 ): Promise<RecordOutcome> {
   return db.$transaction(async (tx) => {
@@ -209,10 +203,6 @@ export async function recordWave(
     if (stored) return { recorded: false, capped: null }
     const capped = await waveCapFor(fromId, eventId, now, tx)
     if (capped) return { recorded: false, capped }
-    if (!answering) {
-      const { count, resetAt } = await hit(`rl:wave:${fromId}:${toId}`, PAIR_WINDOW_MS)
-      if (count > 1) return { recorded: false, capped: { cap: "pair", retryAfter: Math.max(1, Math.ceil((resetAt - now.getTime()) / 1000)) } }
-    }
     const { count } = await tx.event_waves.createMany({
       data: [{ event_id: eventId, from_id: fromId, to_id: toId, created_at: now }],
       skipDuplicates: true,

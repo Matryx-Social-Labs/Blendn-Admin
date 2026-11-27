@@ -7,6 +7,7 @@
  * decision now does too.
  */
 const mockDb = {
+  $queryRaw: jest.fn((): Promise<Record<string, unknown>[]> => mockSessionRows(mockDb.user.findUnique())),
   // requireAdmin reads the role from the database (lib/current-user.ts): an admin's row.
   user: { findUnique: jest.fn().mockResolvedValue({ role: "app_admin", suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null }) },
   moderation_flags: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
@@ -25,6 +26,7 @@ jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "admin", role: "app_admin", signedInAt: Date.now() } }) }))
 
 import { resolveFlag } from "@/app/dashboard/moderation/actions"
+import { mockSessionRows } from "./support/session-account"
 
 beforeEach(() => {
   jest.clearAllMocks()

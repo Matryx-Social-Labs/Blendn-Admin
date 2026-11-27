@@ -116,8 +116,9 @@ describe("admin-only server actions read the role from the database", () => {
     expect(fn).toMatch(/const user = await currentUser\(\)/)
     expect(fn).not.toMatch(/getAuth\(/)
     const current = src.slice(src.indexOf("async function accountOf("), src.indexOf("export async function requireAdmin("))
-    expect(current).toMatch(/db\.user\.findUnique\(/)
-    expect(current).toMatch(/return \{ id, role: account\.role \}/)
+    // One statement: the row, and the dashboard role derived from it and the memberships (`app_admin` only from the row, SCRUM-1247).
+    expect(current).toMatch(/await sessionAccount\(id\)/)
+    expect(current).toMatch(/return \{ id, role: account\.dashboardRole \}/)
     // And the one revocation rule on that row (step 18, M6).
     expect(current).toMatch(/isRevoked\(\{ sub: id, signedInAt: session\?\.user\?\.signedInAt \}, account\)/)
   })

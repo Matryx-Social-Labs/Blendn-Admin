@@ -481,3 +481,38 @@ describe("editing an email", () => {
     expect(await auditRows(id)).toEqual([])
   })
 })
+
+/*
+ * Since SCRUM-1247 the dashboard is the membership, not the row: demoting a host's row to `attendee` while they are
+ * in a live organisation would be a control that says it worked and changes nothing. It refuses, naming what does.
+ */
+describe("demoting a host to attendee", () => {
+  const orgs: string[] = []
+  afterAll(async () => {
+    await db.organisation_members.deleteMany({ where: { org_id: { in: orgs } } })
+    await db.organisations.deleteMany({ where: { id: { in: orgs } } })
+  })
+  async function hostIn(status: "verified" | "suspended") {
+    const id = await person("host@example.com")
+    await db.user.update({ where: { id }, data: { role: "organizer" } })
+    const org = await db.organisations.create({ data: { display_name: testId("lock-org"), kind: "company", status } })
+    orgs.push(org.id)
+    await db.organisation_members.create({ data: { org_id: org.id, user_id: id, role: "owner" } })
+    return id
+  }
+
+  it("refuses while they are in a live organisation, and writes nothing", async () => {
+    await signedInAdmin()
+    const id = await hostIn("verified")
+    await expect(updateUserRole(id, "attendee")).rejects.toThrow("Remove them from it")
+    expect(await roleOf(id)).toBe("organizer")
+    expect(await auditRows(id)).toEqual([])
+  })
+
+  it("goes through when their only organisation is suspended: it grants nothing", async () => {
+    await signedInAdmin()
+    const id = await hostIn("suspended")
+    await expect(updateUserRole(id, "attendee")).resolves.toEqual({ success: true })
+    expect(await roleOf(id)).toBe("attendee")
+  })
+})

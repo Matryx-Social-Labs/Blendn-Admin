@@ -618,6 +618,8 @@ export async function resolveReport(
   let tookPostDown = false
   // A dissolved crew's room and its Blends' rooms, or a hidden crew's Blends, for their sockets after the commit.
   let crewRoomIds: string[] = []
+  // A delisted event as it was reported, for the audit row: its organizer can still edit the text (SCRUM-1394).
+  let delisted: { eventId: string; title: string; description: string } | null = null
 
   await db.$transaction(async (tx) => {
     // A reinstate after the fact leaves the report's own verdict alone: the
@@ -645,10 +647,20 @@ export async function resolveReport(
      * the way this is: an admin who delists wrongly can put it back.
      */
     if (decision === "delist") {
-      await tx.events.update({
-        where: { id: (report as { event_id: string }).event_id },
+      const eventId = (report as { event_id: string }).event_id
+      const { title, description } = await tx.events.update({
+        where: { id: eventId },
         data: { visibility: "unlisted" },
+        select: { title: true, description: true },
       })
+      /*
+       * When and by whom, which is what stops its organizer putting it back
+       * (`updateEventTracked`). The first delisting stands: a second report's
+       * keeps it, and still snapshots the text in its own audit row. Raw,
+       * because `delisted_by` is @ignore'd: no Prisma read hands it to anybody.
+       */
+      await tx.$executeRaw`UPDATE events SET delisted_at = now(), delisted_by = ${admin.id} WHERE id = ${eventId}::uuid AND delisted_at IS NULL`
+      delisted = { eventId, title, description }
     }
 
     if (decision === "remove_message" && subject.boardPost) {
@@ -746,6 +758,7 @@ export async function resolveReport(
         ...(subject.boardPost && { boardPostId: (report as { message_id: string }).message_id }),
         ...(crewReport && { crewId: (report as { message_id: string }).message_id }),
         ...(removed !== null && { removed }),
+        ...delisted,
       },
     })
   })
