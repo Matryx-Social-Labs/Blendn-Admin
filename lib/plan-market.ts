@@ -27,6 +27,8 @@ export function mayBuyIn(countries: readonly (string | null)[]): boolean {
   return countries.every((c) => c === null || c === PLAN_MARKET)
 }
 
+export type Listing = { city: string | null; latitude: number | null; longitude: number | null }
+
 /**
  * A listing's market: the country of the catalogued city its label names, only when its pin is inside that city's
  * box (SCRUM-1447). The label is free text its owner can type (`updateVenue`, an event's city), the pin is where the
@@ -41,10 +43,7 @@ export function mayBuyIn(countries: readonly (string | null)[]): boolean {
  * Brampton or western Mississauga pin against Toronto's) says nothing, so that Canadian host is offered Buy. The fix
  * is the city's box, which is data (`/dashboard/markets`).
  */
-export function marketOf(
-  catalogue: Catalogue,
-  row: { city: string | null; latitude: number | null; longitude: number | null }
-): string | null {
+export function marketOf(catalogue: Catalogue, row: Listing): string | null {
   const city = cityFor(catalogue, row.city)
   if (!city || row.latitude === null || row.longitude === null) return null
   return cityHolds(city, row.latitude, row.longitude) ? city.country : null
@@ -67,4 +66,13 @@ export async function mayBuyHere(orgId: string): Promise<boolean> {
     db.venues.findMany({ where: { owner_org_id: orgId, deleted_at: null }, select: { city: true, latitude: true, longitude: true } }),
   ])
   return mayBuyIn([...events, ...venues].map((row) => marketOf(catalogue, row)))
+}
+
+/**
+ * May Venue Pro be bought for this venue (SCRUM-1448)? Its own row, never its organisation's answer: one Toronto venue
+ * never takes the same organisation's Bengaluru venues out of India, for Buy, for checkout, or for what Pro opens.
+ * Where it may not, what Venue Pro adds is open with no plan named (`lib/venue-insights.ts`, plan "market").
+ */
+export async function mayBuyVenueHere(venue: Listing): Promise<boolean> {
+  return mayBuyIn([marketOf(await cityCatalogue(), venue)])
 }

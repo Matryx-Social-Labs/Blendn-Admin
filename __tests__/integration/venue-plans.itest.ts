@@ -1034,3 +1034,101 @@ describe("GAP clearOpenConflicts only runs for a subscription becoming open", ()
     expect(calls.filter((c) => c.url.endsWith(`/subscriptions/${second}/cancel`)).length).toBe(cancelsBefore)
   })
 })
+
+/*
+ * SCRUM-1448 (task 04a): where Venue Pro cannot be bought for a venue (its own
+ * city and pin, `mayBuyVenueHere`), what it adds is open with no plan named:
+ * plan "market", 12 months and the pre-claim totals. The venue's own row
+ * decides, never its organisation's: the same organisation's Bengaluru venue
+ * stays Listed, is offered Buy under the ordinary 90-day rule, and is never
+ * refused as not sold. Reads write nothing. Its own owner and organisation, so
+ * nothing else in this file sees them.
+ */
+describe("SCRUM-1448: a venue where Venue Pro is not sold", () => {
+  const TORONTO = { city: "Toronto", latitude: 43.6431, longitude: -79.4246 }
+  const BENGALURU = { city: "Bengaluru", latitude: 12.97, longitude: 77.64 }
+  const NOT_SOLD = "Plans aren’t sold in your city yet. Free while we launch there."
+  let mixedOwner = ""
+  let mixedOrg = ""
+  let toronto = ""
+  let bengaluru = ""
+
+  const rowOf = (id: string) =>
+    db.$queryRaw<{ updated_at: Date; city: string | null; entitlements: bigint; checkouts: bigint }[]>`
+      SELECT v.updated_at, v.city,
+             (SELECT count(*) FROM entitlements e WHERE e.subject_kind = 'venue' AND e.subject_id = v.id) AS entitlements,
+             (SELECT count(*) FROM billing_checkouts c WHERE c.venue_id = v.id) AS checkouts
+        FROM venues v WHERE v.id = ${id}::uuid`
+
+  beforeAll(async () => {
+    mixedOwner = await makeUser(testId("vp-mixed-owner"), "organizer")
+    users.push(mixedOwner)
+    await db.user.update({ where: { id: mixedOwner }, data: { role: "venue_owner" } })
+    mixedOrg = (await db.organisations.create({ data: { kind: "company", display_name: testId("vp-mixed"), status: "verified" } })).id
+    orgs.push(mixedOrg)
+    await db.organisation_members.create({ data: { org_id: mixedOrg, user_id: mixedOwner, role: "owner" } })
+    toronto = await venue("vp-toronto", { org: mixedOrg, claimedDaysAgo: 100 })
+    bengaluru = await venue("vp-bengaluru", { org: mixedOrg, claimedDaysAgo: 100 })
+    await db.venues.update({ where: { id: toronto }, data: TORONTO })
+    for (const v of [toronto, bengaluru]) {
+      // Inside a year, outside 30 days, after the claim; and six guests before the claim.
+      await night(v, new Date(Date.now() - 60 * DAY), await guests(7, "vp-mx-year"))
+      await night(v, new Date(Date.now() - 130 * DAY), await guests(6, "vp-mx-before"))
+    }
+  })
+
+  it("a Toronto venue without Venue Pro reads its year and its past, plan market; the reads write nothing", async () => {
+    const before = await rowOf(toronto)
+    const view = await venueInsights(toronto)
+    expect(view).toMatchObject({ plan: "market", recent: { window: "12m" } })
+    expect(view!.recent.regulars.visitors).toBe(7)
+    expect(view!.preClaim).toEqual({ nights: 1, people: 6, since: expect.stringMatching(/^\d{4}-\d{2}$/) })
+    expect(await rowOf(toronto)).toEqual(before)
+    expect(before[0]).toMatchObject({ entitlements: BigInt(0), checkouts: BigInt(0) })
+  })
+
+  it("the same organisation's Bengaluru venue is unchanged: 30 days, nothing paid computed", async () => {
+    expect(await venueInsights(bengaluru)).toMatchObject({ plan: "listed", recent: { window: "30d" }, preClaim: null })
+  })
+
+  it("the Plan page asks each venue's own market: Toronto not sold, Bengaluru sold", async () => {
+    const page = await venuePlanPage({ id: mixedOwner, role: "venue_owner" })
+    const sold = Object.fromEntries(page.venues.map((r) => [r.venueId, r.mayBuyHere]))
+    expect(sold).toEqual({ [toronto]: false, [bengaluru]: true })
+  })
+
+  it("checkout: Toronto refused as not sold; Bengaluru refused only for its own reason, never as not sold", async () => {
+    as(mixedOwner, "venue_owner")
+    await expect(actions.startVenueProCheckout(toronto, "monthly")).rejects.toThrow(NOT_SOLD)
+    await expect(actions.startVenueProCheckout(bengaluru, "monthly")).rejects.toThrow("three months after people first go live")
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0)
+  })
+
+  it("the venue page names no plan for Toronto: no tag, no preview, no See Venue Pro, no offers panel", async () => {
+    as(mixedOwner, "venue_owner")
+    // The page's tree with the insights section rendered in place, as the RSC payload would carry it.
+    const expand = (node: unknown): unknown => {
+      if (Array.isArray(node)) return node.map(expand)
+      if (!isValidElement(node)) return node
+      const el = node as ReactElement<Record<string, unknown>>
+      if (typeof el.type === "function" && el.type.name === "VenueInsights") return expand((el.type as (p: unknown) => unknown)(el.props))
+      return { ...el, props: { ...el.props, children: expand(el.props.children) } }
+    }
+    const el = await venuePage.default({ params: Promise.resolve({ id: toronto }), searchParams: Promise.resolve({ range: "90d" }) })
+    const tree = JSON.stringify(expand(el), (k, value) => (k === "type" || k === "_owner" || typeof value === "function" ? undefined : value))
+    expect(tree).toContain("last 12 months")
+    expect(tree).toContain("free while we launch in your city")
+    expect(tree).toContain("Before you claimed it")
+    expect(tree).toContain('"people":6')
+    expect(tree).not.toMatch(/"plan":"Venue Pro"|See Venue Pro|See your plan|Regulars & offers|₹/)
+  })
+
+  it("moved to Bengaluru (label and pin), the venue reads the ordinary rule at once", async () => {
+    await db.venues.update({ where: { id: toronto }, data: BENGALURU })
+    try {
+      expect(await venueInsights(toronto)).toMatchObject({ plan: "listed", recent: { window: "30d" }, preClaim: null })
+    } finally {
+      await db.venues.update({ where: { id: toronto }, data: TORONTO })
+    }
+  })
+})

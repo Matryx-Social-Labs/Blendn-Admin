@@ -26,7 +26,7 @@ import {
   RazorpayError,
 } from "@/lib/razorpay"
 import { activeMembership } from "@/lib/org-membership"
-import { mayBuyHere } from "@/lib/plan-market"
+import { mayBuyHere, mayBuyVenueHere } from "@/lib/plan-market"
 import { mayManageVenueBilling } from "@/lib/rbac"
 import { Refusal } from "@/lib/refusal"
 import { cancelThenRecord } from "@/lib/subscription-cancel"
@@ -122,7 +122,7 @@ async function requireVenueBuyer(venueId: string) {
   if (!user) throw new Refusal("Unauthorized")
   const venue = await db.venues.findFirst({
     where: { id: venueId, deleted_at: null },
-    select: { id: true, owner_org_id: true },
+    select: { id: true, owner_org_id: true, city: true, latitude: true, longitude: true },
   })
   if (!venue?.owner_org_id) throw new Refusal(NOT_YOUR_VENUE)
   const member = await db.organisation_members.findFirst({
@@ -133,15 +133,16 @@ async function requireVenueBuyer(venueId: string) {
   if (!mayManageVenueBilling(member.role)) {
     throw new Refusal("Only an owner or admin of the venue’s organisation can change its plan.")
   }
-  return { user, orgId: venue.owner_org_id, keyId: await payable(`venue:${venue.id}`) }
+  return { user, venue, orgId: venue.owner_org_id, keyId: await payable(`venue:${venue.id}`) }
 }
 
 /**
  * Plans are sold only where their prices are (`mayBuyHere`, SCRUM-1151): the
- * server's gate, not the page's. Asked by each of the three starts (Analytics,
- * Event Insights, Venue Pro) once the buyer and payments are checked, before
- * any of the start's own refusals, a lock, a row or a Razorpay call; never by
- * a cancel, so an organisation that already pays can always stop it.
+ * server's gate, not the page's. Asked by the Analytics and Event Insights
+ * starts (Venue Pro asks the same of the venue's own row, `mayBuyVenueHere`,
+ * SCRUM-1448) once the buyer and payments are checked, before any of the
+ * start's own refusals, a lock, a row or a Razorpay call; never by a cancel,
+ * so an organisation that already pays can always stop it.
  */
 async function requireSoldHere(orgId: string): Promise<void> {
   if (!(await mayBuyHere(orgId))) throw new Refusal(NOT_SOLD_HERE)
@@ -343,8 +344,9 @@ export async function startAnalyticsCheckout(period: "monthly" | "yearly"): Prom
 export async function startVenueProCheckout(venueId: string, period: "monthly" | "yearly"): Promise<SubscriptionCheckout> {
   const id = parse(idSchema, venueId, NOT_YOUR_VENUE)
   const chosen = parse(periodSchema, period, "Choose monthly or yearly.")
-  const { user, orgId, keyId } = await requireVenueBuyer(id)
-  await requireSoldHere(orgId)
+  const { user, venue, orgId, keyId } = await requireVenueBuyer(id)
+  // The venue's own market, not its organisation's (SCRUM-1448): a Bengaluru venue beside a Toronto one is sold.
+  if (!(await mayBuyVenueHere(venue))) throw new Refusal(NOT_SOLD_HERE)
   const ready = await venueReadiness(id)
   if (!ready.chargeable) {
     throw new Refusal(
