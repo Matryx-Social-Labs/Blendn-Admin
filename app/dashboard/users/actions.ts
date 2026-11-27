@@ -3,7 +3,7 @@
 import { Refusal } from "@/lib/refusal"
 import { logger } from "@/lib/logger"
 import { db } from "@/lib/db"
-import { normalizeLocationToCity } from "@/lib/location"
+import { locationToStore, storedCity } from "@/lib/location"
 import { revalidatePath } from "next/cache"
 import { requireAdmin } from "@/lib/current-user"
 import { auditInTx } from "@/lib/audit-log"
@@ -181,14 +181,6 @@ export async function getUsers(
     const checkInsBy = new Map(checkIns.map((r) => [r.user_id, r._count._all]))
     const favouritesBy = new Map(favourites.map((r) => [r.user_id, r._count._all]))
 
-    await Promise.all(
-      users.map(async (user) => {
-        if (!user.profile?.location) return
-        const normalized = await normalizeLocationToCity(user.profile.location)
-        user.profile.location = normalized
-      })
-    )
-
     const shaped = users.map((user) => ({
       ...user,
       _count: {
@@ -201,6 +193,8 @@ export async function getUsers(
       profile: user.profile
         ? {
             ...user.profile,
+            // The stored city, or none while it is still coordinates: a list never geocodes (SCRUM-1229).
+            location: storedCity(user.profile.location),
             date_of_birth: undefined,
             age: ageFrom(user.profile),
             ageFromBirthDate: user.profile.date_of_birth != null,
@@ -233,11 +227,6 @@ export async function updateUser(
   try {
     const admin = await requireAdmin()
 
-    // Only when sent: `normalizeLocationToCity(undefined)` is null, and a null
-    // here would clear the column on a partial edit.
-    const normalizedLocation =
-      data.profile?.location !== undefined ? await normalizeLocationToCity(data.profile.location) : undefined
-
     // Read before the write, so the audit row carries what changed rather
     // than only what was sent.
     const before = await db.user.findUnique({
@@ -251,6 +240,19 @@ export async function updateUser(
     })
     // Its address is the one thing that keeps anybody from signing in as it.
     if (!before || id === SYSTEM_USER_ID) throw new Refusal("User not found")
+
+    /*
+     * Undefined leaves the column alone: when nothing was sent, when the
+     * coordinates could not be geocoded, and when what was sent is what the
+     * list showed. The dialog sends every field back, and a location still
+     * stored as coordinates lists as empty (`storedCity`), so without the last
+     * case editing only the phone erased it (SCRUM-1229 review).
+     */
+    const sentLocation = data.profile?.location
+    const normalizedLocation =
+      sentLocation !== undefined && (sentLocation?.trim() || null) === storedCity(before.profile?.location)
+        ? undefined
+        : await locationToStore(sentLocation)
 
     // Stored the way sign-in looks it up (lib/auth.ts): a capital letter typed here locked the person out.
     const email = data.email?.trim().toLowerCase()

@@ -73,11 +73,8 @@ export async function GET(request: NextRequest) {
       db.chat_group_members.findMany({
         where: eventRoomsWhere,
         ...eventMemberArgs,
-        orderBy: {
-          chat_group: {
-            last_message_at: "desc",
-          },
-        },
+        // A member has one row per room, so the room's id breaks ties: rooms with no message all tie on NULL (SCRUM-1356).
+        orderBy: [{ chat_group: { last_message_at: "desc" } }, { chat_group_id: "asc" }],
         skip: (page - 1) * limit,
         take: limit,
       }),

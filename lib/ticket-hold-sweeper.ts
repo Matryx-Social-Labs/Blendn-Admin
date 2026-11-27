@@ -1,6 +1,7 @@
 // Relative imports: reached from lib/background.ts, which server.ts requires, and `build:server`
 // compiles with plain tsc, which emits the @/ alias verbatim into the require().
 import { ticketingOn } from "./env"
+import { beat } from "./heartbeat"
 import { logger } from "./logger"
 import { releaseExpiredHolds } from "./ticket-holds"
 
@@ -33,6 +34,7 @@ export async function sweepTicketHolds(): Promise<number> {
 async function run(): Promise<void> {
   try {
     const released = await sweepTicketHolds()
+    beat("ticket-holds", TICKET_HOLD_SWEEP_MS)
     if (released > 0) logger.info("Ticket holds released", { released })
   } catch (error) {
     logger.error("Ticket hold sweep failed", { error: error instanceof Error ? error.message : String(error) })
@@ -48,6 +50,7 @@ export function startTicketHoldSweeper(): void {
     timer = setTimeout(() => void run().finally(schedule), TICKET_HOLD_SWEEP_MS)
     timer.unref?.()
   }
+  beat("ticket-holds", TICKET_HOLD_SWEEP_MS)
   void run().finally(schedule)
 }
 

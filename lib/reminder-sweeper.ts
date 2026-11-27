@@ -3,6 +3,7 @@
 // alias verbatim into the require() and fails at boot.
 import { sendFreeWindowEndingMail } from "./free-window-mail"
 import { logger } from "./logger"
+import { beat } from "./heartbeat"
 import { cleanupExpiredTokens } from "./mobile-auth"
 import { checkPushReceipts, pruneIdlePushTokens, releaseHeldNotifications } from "./push-notifications"
 import { sendFirstNightNudges, sendNextNightNudges } from "./next-night-nudge"
@@ -31,7 +32,7 @@ import { sendEventReminders, sendRatingRequests } from "./services/event-notific
 const SWEEP_MS = 5 * 60_000
 
 let timer: NodeJS.Timeout | null = null
-let running = false
+let inFlight: Promise<void> | null = null
 
 async function pass(): Promise<void> {
   await pushUpkeep()
@@ -101,20 +102,31 @@ async function pushUpkeep(): Promise<void> {
 export function startReminderSweeper(): void {
   if (timer) return
   const tick = async () => {
-    if (running) return
-    running = true
+    if (inFlight) return
     try {
-      await pass()
+      inFlight = pass()
+      await inFlight
+      beat("reminders", SWEEP_MS)
     } catch (error) {
       logger.error("Reminder sweep failed", {
         error: error instanceof Error ? error.message : String(error),
       })
     } finally {
-      running = false
+      inFlight = null
       if (timer) timer = setTimeout(tick, SWEEP_MS).unref()
     }
   }
   timer = setTimeout(tick, SWEEP_MS).unref()
+  beat("reminders", SWEEP_MS)
+}
+
+/**
+ * The pass that is sending right now, for the shutdown to wait on: reminders are
+ * claimed before they are sent, so a pass cut off mid-batch loses the rest of it.
+ * Never rejects; settled at once when no pass is running.
+ */
+export function reminderPassInFlight(): Promise<void> {
+  return (inFlight ?? Promise.resolve()).catch(() => {})
 }
 
 export function stopReminderSweeper(): void {

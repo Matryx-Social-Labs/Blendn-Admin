@@ -405,9 +405,11 @@ venue days never crowd real events out of the 200-room pass (F5):
 3. **The fence**, the same per-room pass and guard events get
    (`MAX_VENUE_DAYS_PER_SWEEP` = 200): an out-of-fence burst at a venue day
    still trips the guard.
-4. **Coordinates** where somebody went live are kept three days after the
-   window ended, then nulled on the check-in and its session
-   (`forgetGoLiveCoordinates`, 1,000 a pass).
+4. **Coordinates** of every check-in, door or Go Live, are kept three days
+   after the night (check-out, else the window's end, else the occurrence's
+   end), then nulled; `device_info` keeps only `KEPT_DEVICE_INFO_KEYS`
+   (`forgetCheckInPoints`, 1,000 a pass; D-029, `docs/RETENTION.md`). A
+   presence session stores no point.
 
 The presence ping also checks out a window that has ended, so a phone pinging
 past its expiry is told at once.

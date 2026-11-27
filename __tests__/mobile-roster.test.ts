@@ -38,11 +38,6 @@ jest.mock("@/lib/anonymous-names", () => ({
   pseudonymsForEvent: jest.fn().mockResolvedValue(new Map([["u2", "Cosmic Panda"]])),
 }))
 
-jest.mock("@/lib/location", () => ({
-  normalizeLocationToCity: jest.fn().mockImplementation(async (l: string | null) => l),
-  geocodeBudget: jest.fn(() => ({ take: () => true })),
-}))
-
 import { NextRequest } from "next/server"
 import { GET } from "@/app/api/mobile/events/[eventId]/checkins/route"
 import { resolveUserRef } from "@/lib/room-handle"

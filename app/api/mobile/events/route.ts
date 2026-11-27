@@ -8,7 +8,7 @@ import { PRODUCT_EVENTS, record } from "@/lib/product-events"
 import { getBoundingBox, haversineDistance } from "@/lib/geo"
 import { ageFrom } from "@/lib/age"
 import { selfProfileEnvelope } from "@/lib/self-profile"
-import { resolveEventCity, geocodeBudget } from "@/lib/location"
+import { storedCity } from "@/lib/location"
 import {
   successResponse,
   validationErrorResponse,
@@ -362,10 +362,11 @@ export async function GET(request: NextRequest) {
     if (cached && cached.expiresAt > Date.now()) {
       ;({ events, totalCount } = cached)
     } else {
-      // Build orderBy
-      const orderBy: Prisma.eventsOrderByWithRelationInput = shouldSortByDistance
-        ? { start_time: "asc" }
-        : { [sortBy === "distance" ? "start_time" : sortBy]: sortOrder }
+      // `id` last: rows that tie (19:00 is everybody's) keep one order from page to page (SCRUM-1356).
+      const orderBy: Prisma.eventsOrderByWithRelationInput[] = [
+        shouldSortByDistance ? { start_time: "asc" } : { [sortBy === "distance" ? "start_time" : sortBy]: sortOrder },
+        { id: "asc" },
+      ]
       /*
        * The page in `orderBy`, and the count beside it. Both at once: `count`
        * needs only `where`, so awaiting the page first added a full sequential
@@ -449,7 +450,7 @@ export async function GET(request: NextRequest) {
         const lightweight = await db.events.findMany({
           where,
           select: { id: true, latitude: true, longitude: true },
-          orderBy: { start_time: "asc" },
+          orderBy: [{ start_time: "asc" }, { id: "asc" }],
           take: DISTANCE_SORT_CEILING,
         })
 
@@ -604,9 +605,6 @@ export async function GET(request: NextRequest) {
 
 
     // Transform response
-    // One budget for the whole response. See lib/location.ts.
-    const geocodes = geocodeBudget()
-
     const transformedEvents = await transformEvents(events, {
       favoriteEventIds,
       rsvpStatuses,
@@ -615,7 +613,6 @@ export async function GET(request: NextRequest) {
       userLon: lon,
       includeCheckins: includeSet.has("checkins"),
       featuredSeed: seed,
-      geocodes,
       counts,
     })
 
@@ -640,7 +637,7 @@ export async function GET(request: NextRequest) {
               endTime: c.event.end_time,
               venueName: c.event.venue_name,
               address: c.event.address,
-              city: await resolveEventCity(c.event.city, null, null, geocodes),
+              city: storedCity(c.event.city),
               status: c.event.status,
             },
           }))

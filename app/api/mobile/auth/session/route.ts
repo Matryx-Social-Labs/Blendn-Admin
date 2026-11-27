@@ -4,7 +4,7 @@ import { profileForSelfResponse } from "@/lib/self-profile"
 import { db } from "@/lib/db"
 import { accountBlockReason, getAuthenticatedUser, signInMethodOf } from "@/lib/mobile-auth"
 import { accountRefusal } from "@/lib/account-refusal"
-import { normalizeLocationToCity } from "@/lib/location"
+import { storedCity } from "@/lib/location"
 import {
   successResponse,
   unauthorizedResponse,
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
     if (blocked || !user) return errorResponse("User not found", 404, ErrorCode.NOT_FOUND, ErrorCode.ACCOUNT_DELETED)
 
     // Return user directly (not wrapped in { user: ... })
-    const normalizedLocation = await normalizeLocationToCity(user.profile?.location)
+    const normalizedLocation = storedCity(user.profile?.location)
 
     return successResponse({
       id: user.id,

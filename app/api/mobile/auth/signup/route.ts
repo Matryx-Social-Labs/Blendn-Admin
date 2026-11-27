@@ -19,7 +19,7 @@ import {
 import { signupSchema } from "@/lib/validations/auth"
 import { rateLimit, createAuthRateLimit } from "@/lib/rate-limit"
 import { checkPassword } from "@/lib/password"
-import { normalizeLocationToCity } from "@/lib/location"
+import { storedCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
 import { screenUserText, textNotAllowedResponse } from "@/lib/moderation/user-text"
 
@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
      * has to make a second call before it can navigate, on the one screen where
      * a spinner is least welcome.
      */
-    const normalizedLocation = await normalizeLocationToCity(profile.location)
+    const normalizedLocation = storedCity(profile.location)
 
     return successResponse(
       {
