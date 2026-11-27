@@ -182,12 +182,12 @@ live from day one). Columns: `name, address, lat, lng, maps_url, type, city` —
 `name` and `city` required; `lat`+`lng` or a Google Maps link. Each row meets the
 dashboard's own rules (`lib/venue-rules.ts`): refused within 100 m of a listed
 venue or an earlier row, an area sized for its type, unclaimed. The owner claims
-it later at `/claim/venue/<id>`.
+it later at `/claim/venue/<id>`. Building outlines come from Overture in one
+offline pass, `scripts/backfill-venue-fences.ts`.
 
 ```bash
-DATABASE_URL=<url> npx tsx scripts/import-venues.ts venues.csv                # dry run: rows + duplicates, writes nothing
-DATABASE_URL=<url> npx tsx scripts/import-venues.ts venues.csv --apply        # write
-DATABASE_URL=<url> npx tsx scripts/import-venues.ts venues.csv --apply --osm  # + the building's OSM outline where named
+DATABASE_URL=<url> npx tsx scripts/import-venues.ts venues.csv          # dry run: rows + duplicates, writes nothing
+DATABASE_URL=<url> npx tsx scripts/import-venues.ts venues.csv --apply  # write
 ```
 
 **`npx tsx`, not `npm run`.** npm 11 takes `--apply` given to `npm run` as its

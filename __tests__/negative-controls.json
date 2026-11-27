@@ -2869,7 +2869,7 @@
       "date": "2026-11-01"
     },
     "import-venues.test.ts": {
-      "guards": "SCRUM-709 P6: the venue import names each venue's catalogue time zone on insert (source check over scripts/import-venues.ts createManyAndReturn), so no imported row lands on the column's Asia/Kolkata default; plus the import's pure rules (venue type, maps-URL coordinates, catalogue placement, OSM fences).",
+      "guards": "SCRUM-709 P6: the venue import names each venue's catalogue time zone on insert (source check over scripts/import-venues.ts createManyAndReturn), so no imported row lands on the column's Asia/Kolkata default; plus the import's pure rules (venue type, maps-URL coordinates, catalogue placement). The OSM-fence rule went with `--osm` (SCRUM-1317).",
       "mutation": "M709a scripts/import-venues.ts `timezone: row.timezone!,` changed to `timezone: row.timezone ?? undefined,` in the insert.",
       "observed": "M709a: 1 of 26 failing ('writes the zone it found'). Restored from a saved copy; 26/26.",
       "date": "2026-11-02"
