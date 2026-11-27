@@ -11,6 +11,7 @@ import { CREW } from "../constants"
 import { conversationPair } from "../conversations"
 import { db } from "../db"
 import { friendIdsOf } from "../friends"
+import { REACHABLE } from "../room-people"
 import { logger } from "../logger"
 import { findProfileContactInfo } from "../moderation/contact-info"
 import { foldForStorage, foldText, hasInvisibleChars } from "../moderation/fold"
@@ -389,10 +390,13 @@ export async function mayJoinCrews(userId: string): Promise<boolean> {
   return age !== null && isAdult(age)
 }
 
-/** The ids among `userIds` that are not friends of `inviterId` — must be none. */
+/** The ids among `userIds` that are not friends of `inviterId`, or cannot be reached (`REACHABLE`) — must be none. */
 async function strangersTo(inviterId: string, userIds: string[]): Promise<string[]> {
-  const friends = new Set(await friendIdsOf(inviterId))
-  return userIds.filter((id) => !friends.has(id))
+  const [friends, reachable] = await Promise.all([
+    friendIdsOf(inviterId).then((ids) => new Set(ids)),
+    db.user.findMany({ where: { id: { in: userIds }, ...REACHABLE }, select: { id: true } }).then((rows) => new Set(rows.map((r) => r.id))),
+  ])
+  return userIds.filter((id) => !friends.has(id) || !reachable.has(id))
 }
 
 /**

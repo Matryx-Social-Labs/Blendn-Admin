@@ -6,6 +6,7 @@
  */
 // The erasure (sockets, auth, storage) is not this file's subject; the itest runs it for real.
 jest.mock("@/lib/account-erasure", () => ({ eraseAccount: jest.fn() }))
+jest.mock("@/lib/checkout", () => ({ performCheckout: jest.fn() }))
 
 import { environmentRefusal, parseArgs } from "../scripts/under-18-accounts"
 
@@ -50,10 +51,16 @@ describe("environmentRefusal", () => {
 describe("parseArgs", () => {
   const ID = "3f1d2c4b-0000-4000-8000-000000000001"
 
-  it("is a dry run by default and writes only with --apply", () => {
+  it("is a dry run by default and writes only with --apply and a --limit", () => {
     expect(parseArgs([])).toEqual({ mode: "dry-run" })
-    expect(parseArgs(["--apply"])).toEqual({ mode: "apply" })
-    expect(parseArgs(["--apply", "--environment", "staging"])).toEqual({ mode: "apply", environment: "staging" })
+    expect(parseArgs(["--apply", "--limit", "5"])).toEqual({ mode: "apply", limit: 5 })
+    expect(parseArgs(["--apply", "--limit", "5", "--environment", "staging"])).toEqual({ mode: "apply", limit: 5, environment: "staging" })
+  })
+
+  it("refuses --apply with no --limit, or one that is not a whole number", () => {
+    expect(parseArgs(["--apply"])).toMatch(/--limit/)
+    for (const n of ["0.5", "-1", "five", "", "1e3"]) expect(parseArgs(["--apply", "--limit", n])).toMatch(/--limit/)
+    expect(parseArgs(["--apply", "--limit", "0"])).toEqual({ mode: "apply", limit: 0 })
   })
 
   it("takes a correction as an id, a date and the staff address making it", () => {
@@ -72,7 +79,7 @@ describe("parseArgs", () => {
 
   it("refuses anything it does not know, and --apply with --correct", () => {
     expect(parseArgs(["--delete"])).toMatch(/usage/)
-    expect(parseArgs(["--apply", "--correct", ID, "1990-04-02", "--by", "ops@matrixsociallabs.com"])).toMatch(/usage/)
+    expect(parseArgs(["--apply", "--limit", "1", "--correct", ID, "1990-04-02", "--by", "ops@matrixsociallabs.com"])).toMatch(/usage/)
     expect(parseArgs(["--correct", ID])).toMatch(/usage/)
     expect(parseArgs(["--environment"])).toMatch(/usage/)
   })

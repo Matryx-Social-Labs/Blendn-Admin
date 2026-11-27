@@ -132,11 +132,25 @@ async function refreshTokenMatches(token: string, stored: string): Promise<boole
  * the same span (SCRUM-119 recorded the bound; this closes it to seconds).
  */
 export function accountBlockReason(
-  user: { id?: string; deletedAt: Date | null; suspended_at: Date | null; role: string } | null
-): "deleted" | "suspended" | "staff" | null {
+  user: {
+    id?: string
+    deletedAt: Date | null
+    suspended_at: Date | null
+    role: string
+    /** Required, so a caller whose select leaves it out does not typecheck: a missing stamp would read as "not locked". */
+    profile: { under_18_since: Date | null } | null
+  } | null
+): AccountBlock | null {
   // The owner of every venue day is nobody to be (lib/event-kind.ts).
   if (!user || user.deletedAt || user.id === SYSTEM_USER_ID) return "deleted"
   if (user.suspended_at) return "suspended"
+  /*
+   * Known to be under 18 and stamped (scripts/under-18-accounts.ts, D-026): the
+   * account is locked until a staff correction clears the stamp or it is
+   * erased. Only the stamp: an unstamped account with an age under 18 on file
+   * is refused at each entry instead (`participationDenial`, lib/age.ts).
+   */
+  if (user.profile?.under_18_since) return "under_18"
   /*
    * The app is for attendees (SCRUM-198). Organisers, venue owners, sponsors
    * and admins have the dashboard, and an operator app is planned for after
@@ -147,6 +161,8 @@ export function accountBlockReason(
   if (user.role !== "attendee") return "staff"
   return null
 }
+
+export type AccountBlock = "deleted" | "suspended" | "staff" | "under_18"
 
 /** What a suspended account is told, in the app, at every entry point. */
 export const SUSPENDED_MESSAGE =

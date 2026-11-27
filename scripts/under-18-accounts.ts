@@ -1,8 +1,9 @@
-import { PrismaClient } from "@prisma/client"
+import { type Prisma, PrismaClient } from "@prisma/client"
 
 import { eraseAccount } from "../lib/account-erasure"
 import { ACCOUNT_MIN_AGE, ageFrom, dateOfBirthRefusal, isKnownMinor, parseDateOfBirth } from "../lib/age"
 import { auditInTx } from "../lib/audit-log"
+import { performCheckout } from "../lib/checkout"
 import { isStaffEmail } from "../lib/company"
 import { closeDb, db as appDb } from "../lib/db"
 
@@ -10,20 +11,28 @@ import { closeDb, db as appDb } from "../lib/db"
  * Accounts known to be under 18 (SCRUM-1169, D-026).
  *
  *   npx tsx scripts/under-18-accounts.ts                     dry run: counts and ids
- *   npx tsx scripts/under-18-accounts.ts --apply             stamp, then erase the ones due
+ *   npx tsx scripts/under-18-accounts.ts --apply --limit <n> stamp, end their check-ins, then erase the ones due
  *   npx tsx scripts/under-18-accounts.ts --correct <userId> <YYYY-MM-DD> --by <staff address>
  *
  * A known age under 18 takes part nowhere (`participationDenial`, lib/age.ts).
  * `--apply` stamps `profiles.under_18_since = now()` on every live account with
- * a known age under 18 and no stamp, once: a stamp is never moved. It then
+ * a known age under 18 and no stamp, once: a stamp is never moved. A stamp
+ * locks the account (`accountBlockReason`, lib/mobile-auth.ts). An account
+ * with a staff role or an organisation membership is never stamped or erased
+ * here: it is listed apart, for a person to look at. `--apply` then ends every stamped
+ * account's open check-ins through `performCheckout`, and
  * erases each account stamped `DELETE_AFTER_DAYS` or more days ago through
  * `eraseAccount` (lib/account-erasure.ts), the erasure the account deletion
  * runs, one at a time, and stops at the first failure, naming the id. The
  * 14 days are for a birth date entered wrong (D-026). The dry run lists them.
  *
+ * `--limit <n>` is required with `--apply`: a run that would stamp more than
+ * n accounts, or erase more than n, is refused before it writes anything.
+ *
  * In this process `eraseAccount`'s in-memory steps (the token blocklist and
- * socket eviction) reach only this process. The server's blocklist refresh and
- * its socket handshake read `deletedAt`. The Apple revoke has no code from the
+ * socket eviction) reach only this process. The server reads `deletedAt` and
+ * the stamp at its next blocklist refresh, which closes the account's open
+ * sockets, and at its socket handshake. The Apple revoke has no code from the
  * app here, so it logs and audits "not revoked", as the route does without one.
  *
  * `--correct` is the answer to a person who writes to the grievance address
@@ -47,10 +56,10 @@ const DAY_MS = 86_400_000
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"])
 const ENVIRONMENTS = new Set(["staging", "production"])
 const USAGE =
-  "usage: under-18-accounts.ts [--apply | --correct <userId> <YYYY-MM-DD> --by <staff address>] [--environment <staging|production>]"
+  "usage: under-18-accounts.ts [--apply --limit <n> | --correct <userId> <YYYY-MM-DD> --by <staff address>] [--environment <staging|production>]"
 
 type Env = Record<string, string | undefined>
-type Mode = { mode: "dry-run" } | { mode: "apply" } | { mode: "correct"; userId: string; dateOfBirth: string; by: string }
+type Mode = { mode: "dry-run" } | { mode: "apply"; limit: number } | { mode: "correct"; userId: string; dateOfBirth: string; by: string }
 export type Command = Mode & { environment?: string }
 
 /** The command, or why it is refused. */
@@ -66,7 +75,11 @@ export function parseArgs(args: string[]): Command | string {
   const env = environment ? { environment } : {}
 
   if (rest.length === 0) return { mode: "dry-run", ...env }
-  if (rest.length === 1 && rest[0] === "--apply") return { mode: "apply", ...env }
+  if (rest[0] === "--apply" && rest.length <= 3) {
+    const limit = rest[1] === "--limit" && /^\d+$/.test(rest[2] ?? "") ? Number(rest[2]) : null
+    if (limit === null || rest.length !== 3) return "--apply needs --limit <n>: the most accounts this run may stamp, and the most it may erase"
+    return { mode: "apply", limit, ...env }
+  }
   if (rest[0] !== "--correct" || rest.length !== 5 || rest[3] !== "--by") return USAGE
   const [, userId, dateOfBirth, , by] = rest
   if (!isStaffEmail(by)) return "--by must be the staff address making the correction (on the company domain)"
@@ -94,18 +107,28 @@ export function environmentRefusal(env: Env, environment: string | undefined): s
   return `${where} is not a local database. Run it through railway run -e <staging|production> with --environment <the same name>.`
 }
 
-/** Live accounts with a known age under 18 and no stamp, by id. */
-export async function knownMinorsUnstamped(db: PrismaClient, now: Date): Promise<string[]> {
-  // A superset in SQL (a stored age under 18, or a birth date after the cut-off); `isKnownMinor` decides, as the routes do.
+/** A staff role or an organisation membership: never stamped, never erased here, listed for a person (`staffKnownMinors`). */
+const STAFF = { OR: [{ role: { not: "attendee" } }, { org_memberships: { some: {} } }] } satisfies Prisma.UserWhereInput
+
+/** Live accounts with a known age under 18 and no stamp, by id; staff are `staffKnownMinors`. */
+export function knownMinorsUnstamped(db: PrismaClient, now: Date): Promise<string[]> {
+  return knownMinors(db, now, { under_18_since: null, user: { deletedAt: null, NOT: STAFF } })
+}
+
+/** Live accounts with a staff role or an organisation membership and a known age under 18, stamped or not. */
+export function staffKnownMinors(db: PrismaClient, now: Date): Promise<string[]> {
+  return knownMinors(db, now, { user: { deletedAt: null, ...STAFF } })
+}
+
+async function knownMinors(db: PrismaClient, now: Date, where: Prisma.profilesWhereInput): Promise<string[]> {
+  // A superset in SQL (a stored age under 18, a birth date after the cut-off, or a stamp); `isKnownMinor` decides, as the routes do.
   // A day early, so 29 February's roll-over to 1 March cannot leave a birthday out.
   const cutoff = new Date(now)
   cutoff.setUTCFullYear(cutoff.getUTCFullYear() - ACCOUNT_MIN_AGE)
   cutoff.setUTCDate(cutoff.getUTCDate() - 1)
   const rows = await db.profiles.findMany({
     where: {
-      under_18_since: null,
-      user: { deletedAt: null },
-      OR: [{ age: { lt: ACCOUNT_MIN_AGE } }, { date_of_birth: { gt: cutoff } }],
+      AND: [where, { OR: [{ age: { lt: ACCOUNT_MIN_AGE } }, { date_of_birth: { gt: cutoff } }, { under_18_since: { not: null } }] }],
     },
     select: { id: true, age: true, date_of_birth: true, under_18_since: true },
     orderBy: { id: "asc" },
@@ -120,9 +143,60 @@ export async function stampKnownMinors(db: PrismaClient, now: Date): Promise<str
   return ids
 }
 
+/**
+ * End every open check-in of a live stamped account, the way a check-out does.
+ * One that fails is named (`<check-in id>: <error>`) and the rest still end;
+ * one another writer closed first is `unchanged`.
+ */
+export async function endStampedCheckIns(
+  db: PrismaClient,
+  now: Date
+): Promise<{ checkedOut: string[]; unchanged: string[]; failed: string[] }> {
+  const open = await db.event_check_ins.findMany({
+    where: { status: "checked_in", user: { deletedAt: null, profile: { is: { under_18_since: { not: null } } } } },
+    select: { id: true },
+  })
+  const run = { checkedOut: [] as string[], unchanged: [] as string[], failed: [] as string[] }
+  for (const { id } of open) {
+    try {
+      const result = await performCheckout(id, "manual", now)
+      if (result?.changed) run.checkedOut.push(result.userId)
+      else run.unchanged.push(id)
+    } catch (error) {
+      run.failed.push(`${id}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  return run
+}
+
+/**
+ * `--apply`: stamp, end the stamped accounts' check-ins, erase the ones due.
+ * Refused, before anything is written, when it would stamp more than `limit`
+ * accounts or erase more than `limit`.
+ */
+export async function applyRun(db: PrismaClient, now: Date, limit: number, erase: typeof eraseAccount = eraseAccount) {
+  const [toStamp, due, notStamped] = await Promise.all([
+    knownMinorsUnstamped(db, now),
+    dueForDeletion(db, now),
+    staffKnownMinors(db, now),
+  ])
+  if (toStamp.length > limit || due.length > limit) {
+    throw new Error(`REFUSING: would stamp ${toStamp.length} and erase ${due.length}, over --limit ${limit}. Nothing written.`)
+  }
+  const stamped = await stampKnownMinors(db, now)
+  const checkIns = await endStampedCheckIns(db, now)
+  try {
+    return { stamped, notStamped, checkIns, ...(await deleteDue(db, now, erase)) }
+  } catch (error) {
+    // The stamps are written: say which, since a re-run no longer lists them as to stamp.
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(`${reason} (this run stamped: ${stamped.join(", ") || "none"}; checked out: ${checkIns.checkedOut.join(", ") || "none"})`)
+  }
+}
+
 const dueWhere = (now: Date) => ({
   under_18_since: { lte: new Date(now.getTime() - DELETE_AFTER_DAYS * DAY_MS) },
-  user: { deletedAt: null },
+  user: { deletedAt: null, NOT: STAFF },
 })
 
 /** Live accounts stamped `DELETE_AFTER_DAYS` or more days before `now`, oldest stamp first. */
@@ -233,15 +307,21 @@ async function main() {
       return
     }
     if (command.mode === "apply") {
-      printIds("stamped now (known age under 18)", await stampKnownMinors(db, now))
-      const { erased, skipped } = await deleteDue(db, now)
-      printIds(`erased (stamped ${DELETE_AFTER_DAYS}+ days ago)`, erased)
-      printIds("skipped (no longer due when its turn came)", skipped)
+      const run = await applyRun(db, now, command.limit)
+      printIds("stamped now (known age under 18)", run.stamped)
+      printIds("not stamped or erased (staff role or organisation member: for a person to look at)", run.notStamped)
+      printIds("checked out (stamped, still checked in)", run.checkIns.checkedOut)
+      printIds("check-ins already ended by another writer", run.checkIns.unchanged)
+      printIds("check-outs that FAILED (re-run to retry)", run.checkIns.failed)
+      printIds(`erased (stamped ${DELETE_AFTER_DAYS}+ days ago)`, run.erased)
+      printIds("skipped (no longer due when its turn came)", run.skipped)
+      if (run.checkIns.failed.length > 0) process.exitCode = 1
       return
     }
     printIds("would stamp (known age under 18, no stamp)", await knownMinorsUnstamped(db, now))
+    printIds("would not stamp or erase (staff role or organisation member)", await staffKnownMinors(db, now))
     printIds(`would erase (stamped ${DELETE_AFTER_DAYS}+ days ago)`, await dueForDeletion(db, now))
-    console.log("\nDry run: nothing written. Re-run with --apply to stamp and erase.")
+    console.log("\nDry run: nothing written. Re-run with --apply --limit <n> to stamp and erase.")
   } finally {
     await closeDb()
   }

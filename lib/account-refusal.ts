@@ -1,6 +1,7 @@
 import { ErrorCode, errorResponse } from "@/lib/api-response"
+import { UNDER_18_ACCOUNT } from "@/lib/age"
 import { COMPANY } from "@/lib/company"
-import { STAFF_MESSAGE, SUSPENDED_MESSAGE } from "@/lib/mobile-auth"
+import { STAFF_MESSAGE, SUSPENDED_MESSAGE, type AccountBlock } from "@/lib/mobile-auth"
 import { SUSPENSION_CATEGORIES, suspensionCategory } from "@/lib/suspension"
 
 /**
@@ -16,7 +17,8 @@ export function suspendedMessageFor(suspensionReason: string | null): string {
 
 /**
  * The 403 an account that may not hold a session gets, at every entry point
- * (sign-in, Google, Apple, refresh, session). `errorCode` stays `FORBIDDEN` and
+ * (sign-in, Google, Apple, refresh, session): suspended, staff, or locked as
+ * known to be under 18 (`AGE_RESTRICTED`, the sentence 07 shows at each entry). `errorCode` stays `FORBIDDEN` and
  * the reason is `reasonCode`: installed builds show the sentence on that pair.
  *
  * `owner` is the suspended account itself, passed only where the caller has
@@ -25,7 +27,8 @@ export function suspendedMessageFor(suspensionReason: string | null): string {
  * is the generic one, so no refusal tells anyone else why an account was
  * suspended.
  */
-export function accountRefusal(reason: "suspended" | "staff", owner?: { suspension_reason: string | null } | null) {
+export function accountRefusal(reason: Exclude<AccountBlock, "deleted">, owner?: { suspension_reason: string | null } | null) {
+  if (reason === "under_18") return errorResponse(UNDER_18_ACCOUNT, 403, ErrorCode.FORBIDDEN, ErrorCode.AGE_RESTRICTED)
   if (reason === "staff") return errorResponse(STAFF_MESSAGE, 403, ErrorCode.FORBIDDEN, ErrorCode.ACCOUNT_STAFF)
   const message = owner ? suspendedMessageFor(owner.suspension_reason) : SUSPENDED_MESSAGE
   return errorResponse(message, 403, ErrorCode.FORBIDDEN, ErrorCode.ACCOUNT_SUSPENDED)

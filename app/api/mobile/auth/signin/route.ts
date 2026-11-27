@@ -147,7 +147,7 @@ export async function POST(request: NextRequest) {
      * file.
      */
     const blocked = accountBlockReason(user)
-    if (blocked === "suspended" || blocked === "staff") return accountRefusal(blocked, user)
+    if (blocked && blocked !== "deleted") return accountRefusal(blocked, user)
     if (blocked) return unauthorizedResponse("Invalid email or password")
 
     // Generate tokens
