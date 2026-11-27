@@ -125,7 +125,7 @@ describe("--apply", () => {
     expect(await db.presence_sessions.count({ where: { user_id: teen, departed_at: null } })).toBe(0)
   })
 
-  it("never stamps an account with a staff role or an organisation membership, and lists it apart", async () => {
+  it("never stamps or erases an account with a staff role or an organisation membership, and lists it apart", async () => {
     const organizer = await person("u18-staff-role", { age: 16 })
     await db.user.update({ where: { id: organizer }, data: { role: "organizer" } })
     const member = await person("u18-staff-member", { age: 16 })
@@ -133,30 +133,41 @@ describe("--apply", () => {
     orgs.push(org.id)
     await db.organisation_members.create({ data: { org_id: org.id, user_id: member, role: "staff" } })
     const teen = await person("u18-not-staff", { age: 16 })
+    // Stamped before it held the role, and due: still not erased here.
+    const stampedHost = await person("u18-staff-due", { age: 16, under_18_since: new Date(Date.now() - 20 * DAY_MS) })
+    await db.user.update({ where: { id: stampedHost }, data: { role: "venue_owner" } })
 
     expect(await knownMinorsUnstamped(db, new Date())).not.toEqual(expect.arrayContaining([organizer]))
+    expect(await dueForDeletion(db, new Date())).not.toContain(stampedHost)
     const run = await applyRun(db, new Date(), 1000, never)
     expect(run.stamped).toContain(teen)
     expect(run.stamped).not.toContain(organizer)
     expect(run.stamped).not.toContain(member)
-    expect(run.notStamped).toEqual(expect.arrayContaining([organizer, member]))
+    expect(run.notStamped).toEqual(expect.arrayContaining([organizer, member, stampedHost]))
     expect(await stampOf(organizer)).toBeNull()
     expect(await stampOf(member)).toBeNull()
   })
 
-  it("refuses, writing nothing, when it would stamp or erase more than --limit", async () => {
+  it("refuses, writing nothing, when it would stamp or erase more than --limit, and runs at exactly the limit", async () => {
     const now = new Date()
     const teen = await person("u18-limit", { age: 16 })
-    await expect(applyRun(db, now, 0, never)).rejects.toThrow(/--limit 0/)
+    const atLimit = async () => Math.max((await knownMinorsUnstamped(db, now)).length, (await dueForDeletion(db, now)).length)
+    await expect(applyRun(db, now, (await atLimit()) - 1, never)).rejects.toThrow(/over --limit/)
     expect(await stampOf(teen)).toBeNull()
 
     const due = await person("u18-limit-due", { age: 16, under_18_since: new Date(now.getTime() - 20 * DAY_MS) })
-    await db.profiles.update({ where: { id: teen }, data: { under_18_since: now } })
-    const erase = jest.fn(never)
-    await expect(applyRun(db, now, 0, erase)).rejects.toThrow(/--limit 0/)
-    expect(erase).not.toHaveBeenCalled()
-    expect((await db.user.findUniqueOrThrow({ where: { id: due }, select: { deletedAt: true } })).deletedAt).toBeNull()
-    await db.user.update({ where: { id: due }, data: { deletedAt: new Date() } })
+    try {
+      await db.profiles.update({ where: { id: teen }, data: { under_18_since: now } })
+      const erase = jest.fn(never)
+      await expect(applyRun(db, now, 0, erase)).rejects.toThrow(/--limit 0/)
+      expect(erase).not.toHaveBeenCalled()
+      expect((await db.user.findUniqueOrThrow({ where: { id: due }, select: { deletedAt: true } })).deletedAt).toBeNull()
+    } finally {
+      await db.user.update({ where: { id: due }, data: { deletedAt: new Date() } })
+    }
+
+    const another = await person("u18-limit-again", { age: 16 })
+    expect((await applyRun(db, now, await atLimit(), never)).stamped).toContain(another)
   })
 })
 

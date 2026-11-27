@@ -140,28 +140,52 @@ describe("a stamped account answers as an unknown id, and nothing is written", (
     expect(await db.private_conversations.count({ where: { user1_id, user2_id } })).toBe(0)
   })
 
-  it("a wave and a like in the room", async () => {
-    const { viewer, adult, minor } = await trio("cu-wl")
-    const host = await makeUser(testId("cu-wl-host"), "organizer")
+  async function roomOfThree(label: string) {
+    const { viewer, adult, minor } = await trio(label)
+    const host = await makeUser(testId(`${label}-host`), "organizer")
     world.users.push(host)
     const { eventId, occurrenceId } = await liveEvent(host)
     for (const p of [viewer, adult, minor]) await arrive(eventId, occurrenceId, p)
     await stamp(minor)
-    const wave = (ref: string) => call(routes.waves.POST, `/api/mobile/events/${eventId}/waves`, viewer, { method: "POST", body: { toUserId: ref }, params: { eventId } })
-    const like = (ref: string) =>
-      call(routes.personLike.POST, `/api/mobile/events/${eventId}/matches/likes`, viewer, { method: "POST", body: { userId: ref }, params: { eventId } })
-    const nobody = roomHandle(eventId, randomUUID())
+    return { viewer, adult, minor, eventId, nobody: roomHandle(eventId, randomUUID()) }
+  }
 
+  it("a wave in the room", async () => {
+    const { viewer, adult, minor, eventId, nobody } = await roomOfThree("cu-w")
+    const wave = (ref: string) => call(routes.waves.POST, `/api/mobile/events/${eventId}/waves`, viewer, { method: "POST", body: { toUserId: ref }, params: { eventId } })
     expect((await wave(roomHandle(eventId, adult.id))).status).toBe(200)
-    expect((await like(roomHandle(eventId, adult.id))).status).toBe(200)
     const [waveMinor, waveNobody] = [await wave(roomHandle(eventId, minor.id)), await wave(nobody)]
     expect(waveMinor.status).toBe(403)
     expect(waveMinor).toEqual(waveNobody)
+    expect(await db.event_waves.count({ where: { from_id: viewer.id, to_id: minor.id } })).toBe(0)
+  })
+
+  it("a like in the room", async () => {
+    const { viewer, adult, minor, eventId, nobody } = await roomOfThree("cu-l")
+    const like = (ref: string) =>
+      call(routes.personLike.POST, `/api/mobile/events/${eventId}/matches/likes`, viewer, { method: "POST", body: { userId: ref }, params: { eventId } })
+    expect((await like(roomHandle(eventId, adult.id))).status).toBe(200)
     const [likeMinor, likeNobody] = [await like(roomHandle(eventId, minor.id)), await like(nobody)]
     expect(likeMinor.status).toBe(404)
     expect(likeMinor).toEqual(likeNobody)
-    expect(await db.event_waves.count({ where: { from_id: viewer.id, to_id: minor.id } })).toBe(0)
     expect(await db.event_likes.count({ where: { liker_id: viewer.id, liked_id: minor.id } })).toBe(0)
+  })
+
+  it("a suspended account answers the same way (POST /conversations, a friend's invite link, the batched rule)", async () => {
+    const { viewer, adult, minor: suspended } = await trio("cu-susp")
+    await db.message_requests.create({ data: { sender_id: viewer.id, recipient_id: suspended.id, status: "accepted", message: "hi" } })
+    const token = await inviteTokenFor(suspended.id)
+    await db.user.update({ where: { id: suspended.id }, data: { suspended_at: new Date() } })
+    const open = (otherUserId: string) =>
+      call(conversationsRoute.POST, "/api/mobile/conversations", viewer, { method: "POST", body: { otherUserId } })
+    const ask = (t: string) => call(friendRequestsRoute.POST, "/api/mobile/friends/requests", viewer, { method: "POST", body: { token: t } })
+
+    expect(await open(suspended.id)).toEqual(await open(randomUUID()))
+    expect(await ask(token)).toEqual(await ask(`${token.slice(0, -4)}zzzz`))
+    expect((await ask(token)).status).toBe(404)
+    expect([...(await connectablePairs(db, [[viewer.id, adult.id], [viewer.id, suspended.id]]))]).toEqual([
+      conversationPair(viewer.id, adult.id).join("|"),
+    ])
   })
 
   it("a crew invite", async () => {

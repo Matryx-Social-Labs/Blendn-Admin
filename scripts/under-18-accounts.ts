@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client"
+import { type Prisma, PrismaClient } from "@prisma/client"
 
 import { eraseAccount } from "../lib/account-erasure"
 import { ACCOUNT_MIN_AGE, ageFrom, dateOfBirthRefusal, isKnownMinor, parseDateOfBirth } from "../lib/age"
@@ -18,8 +18,8 @@ import { closeDb, db as appDb } from "../lib/db"
  * `--apply` stamps `profiles.under_18_since = now()` on every live account with
  * a known age under 18 and no stamp, once: a stamp is never moved. A stamp
  * locks the account (`accountBlockReason`, lib/mobile-auth.ts). An account
- * with a staff role or an organisation membership is never stamped: it is
- * listed apart, for a person to look at. `--apply` then ends every stamped
+ * with a staff role or an organisation membership is never stamped or erased
+ * here: it is listed apart, for a person to look at. `--apply` then ends every stamped
  * account's open check-ins through `performCheckout`, and
  * erases each account stamped `DELETE_AFTER_DAYS` or more days ago through
  * `eraseAccount` (lib/account-erasure.ts), the erasure the account deletion
@@ -107,40 +107,33 @@ export function environmentRefusal(env: Env, environment: string | undefined): s
   return `${where} is not a local database. Run it through railway run -e <staging|production> with --environment <the same name>.`
 }
 
+/** A staff role or an organisation membership: never stamped, never erased here, listed for a person (`staffKnownMinors`). */
+const STAFF = { OR: [{ role: { not: "attendee" } }, { org_memberships: { some: {} } }] } satisfies Prisma.UserWhereInput
+
 /** Live accounts with a known age under 18 and no stamp, by id; staff are `staffKnownMinors`. */
-export async function knownMinorsUnstamped(db: PrismaClient, now: Date): Promise<string[]> {
-  return (await unstampedMinors(db, now)).filter((row) => !row.staff).map((row) => row.id)
+export function knownMinorsUnstamped(db: PrismaClient, now: Date): Promise<string[]> {
+  return knownMinors(db, now, { under_18_since: null, user: { deletedAt: null, NOT: STAFF } })
 }
 
-/** The same, for accounts with a staff role or an organisation membership: never stamped, listed for a person. */
-export async function staffKnownMinors(db: PrismaClient, now: Date): Promise<string[]> {
-  return (await unstampedMinors(db, now)).filter((row) => row.staff).map((row) => row.id)
+/** Live accounts with a staff role or an organisation membership and a known age under 18, stamped or not. */
+export function staffKnownMinors(db: PrismaClient, now: Date): Promise<string[]> {
+  return knownMinors(db, now, { user: { deletedAt: null, ...STAFF } })
 }
 
-async function unstampedMinors(db: PrismaClient, now: Date): Promise<{ id: string; staff: boolean }[]> {
-  // A superset in SQL (a stored age under 18, or a birth date after the cut-off); `isKnownMinor` decides, as the routes do.
+async function knownMinors(db: PrismaClient, now: Date, where: Prisma.profilesWhereInput): Promise<string[]> {
+  // A superset in SQL (a stored age under 18, a birth date after the cut-off, or a stamp); `isKnownMinor` decides, as the routes do.
   // A day early, so 29 February's roll-over to 1 March cannot leave a birthday out.
   const cutoff = new Date(now)
   cutoff.setUTCFullYear(cutoff.getUTCFullYear() - ACCOUNT_MIN_AGE)
   cutoff.setUTCDate(cutoff.getUTCDate() - 1)
   const rows = await db.profiles.findMany({
     where: {
-      under_18_since: null,
-      user: { deletedAt: null },
-      OR: [{ age: { lt: ACCOUNT_MIN_AGE } }, { date_of_birth: { gt: cutoff } }],
+      AND: [where, { OR: [{ age: { lt: ACCOUNT_MIN_AGE } }, { date_of_birth: { gt: cutoff } }, { under_18_since: { not: null } }] }],
     },
-    select: {
-      id: true,
-      age: true,
-      date_of_birth: true,
-      under_18_since: true,
-      user: { select: { role: true, _count: { select: { org_memberships: true } } } },
-    },
+    select: { id: true, age: true, date_of_birth: true, under_18_since: true },
     orderBy: { id: "asc" },
   })
-  return rows
-    .filter((row) => isKnownMinor(row))
-    .map((row) => ({ id: row.id, staff: row.user.role !== "attendee" || row.user._count.org_memberships > 0 }))
+  return rows.filter((row) => isKnownMinor(row)).map((row) => row.id)
 }
 
 /** Stamp every live, unstamped account with a known age under 18. A stamp already set is never moved. */
@@ -186,7 +179,7 @@ export async function applyRun(db: PrismaClient, now: Date, limit: number, erase
 
 const dueWhere = (now: Date) => ({
   under_18_since: { lte: new Date(now.getTime() - DELETE_AFTER_DAYS * DAY_MS) },
-  user: { deletedAt: null },
+  user: { deletedAt: null, NOT: STAFF },
 })
 
 /** Live accounts stamped `DELETE_AFTER_DAYS` or more days before `now`, oldest stamp first. */
@@ -299,14 +292,14 @@ async function main() {
     if (command.mode === "apply") {
       const run = await applyRun(db, now, command.limit)
       printIds("stamped now (known age under 18)", run.stamped)
-      printIds("not stamped (staff role or organisation member: for a person to look at)", run.notStamped)
+      printIds("not stamped or erased (staff role or organisation member: for a person to look at)", run.notStamped)
       printIds("checked out (stamped, still checked in)", run.checkedOut)
       printIds(`erased (stamped ${DELETE_AFTER_DAYS}+ days ago)`, run.erased)
       printIds("skipped (no longer due when its turn came)", run.skipped)
       return
     }
     printIds("would stamp (known age under 18, no stamp)", await knownMinorsUnstamped(db, now))
-    printIds("would not stamp (staff role or organisation member)", await staffKnownMinors(db, now))
+    printIds("would not stamp or erase (staff role or organisation member)", await staffKnownMinors(db, now))
     printIds(`would erase (stamped ${DELETE_AFTER_DAYS}+ days ago)`, await dueForDeletion(db, now))
     console.log("\nDry run: nothing written. Re-run with --apply --limit <n> to stamp and erase.")
   } finally {

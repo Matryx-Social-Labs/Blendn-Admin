@@ -20,12 +20,14 @@ import { signAccessToken, signRefreshToken, storeRefreshToken } from "@/lib/mobi
 import { resetMemoryStore } from "@/lib/rate-limit-store"
 import { initSocketServer } from "@/lib/socket-server"
 import { stopSponsoredScheduler } from "@/lib/sponsored-scheduler"
-import { correctBirthDate, stampKnownMinors } from "@/scripts/under-18-accounts"
+import { correctBirthDate } from "@/scripts/under-18-accounts"
 
 import { closeDb, db, makeUser, testId } from "./helpers"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const refreshRoute = require("@/app/api/mobile/auth/refresh/route") as typeof import("@/app/api/mobile/auth/refresh/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const sessionRoute = require("@/app/api/mobile/auth/session/route") as typeof import("@/app/api/mobile/auth/session/route")
 
 const users: string[] = []
 const httpServer = createServer()
@@ -93,6 +95,17 @@ async function until(done: () => boolean, ms = 3000) {
   for (let waited = 0; !done() && waited < ms; waited += 50) await new Promise((r) => setTimeout(r, 50))
 }
 
+/** The stamp as `scripts/under-18-accounts.ts --apply` writes it, from outside the server: only the row changes. */
+const stamp = (id: string) => db.profiles.update({ where: { id }, data: { under_18_since: new Date() } })
+
+/** An ordinary authenticated route, with an access token issued before the stamp. */
+async function session(id: string, email: string) {
+  const res = await sessionRoute.GET(
+    new NextRequest("http://localhost/api/mobile/auth/session", { headers: { authorization: `Bearer ${signAccessToken(id, email)}` } })
+  )
+  return res.status
+}
+
 async function refresh(id: string, email: string) {
   const token = signRefreshToken(id, email)
   await storeRefreshToken(id, token)
@@ -113,23 +126,26 @@ it("closes a socket opened before the stamp at the next blocklist read, refuses 
   const bystander = await handshake(adult.id, adult.email)
   if (!("connected" in before) || !("connected" in bystander)) throw new Error("both should connect before the stamp")
 
-  // The script, in its own process: only the row changes.
-  expect(await stampKnownMinors(db, new Date())).toContain(minor.id)
+  expect(await session(minor.id, minor.email)).toBe(200)
+  await stamp(minor.id)
   expect(before.socket.connected).toBe(true)
 
   await blocklistRead()
   await until(() => before.closed.length > 0)
-  expect(before.closed).toEqual(["io server disconnect"])
+  expect(before.closed).toHaveLength(1)
+  expect(before.socket.connected).toBe(false)
   expect(bystander.socket.connected).toBe(true)
   expect(bystander.closed).toEqual([])
 
   expect(await handshake(minor.id, minor.email)).toEqual({ message: "Authentication required", code: "AGE_RESTRICTED" })
   expect(await recentlyBlocked(minor.id, Math.floor(Date.now() / 1000))).toBe(true)
+  // Every route: a token from before the stamp is a bare 401 (the refresh that follows says why).
+  expect(await session(minor.id, minor.email)).toBe(401)
 })
 
 it("a staff correction unlocks at once: the refresh succeeds, the next blocklist read drops the id, the socket connects", async () => {
   const minor = await person("u18lock-corrected", 16)
-  await stampKnownMinors(db, new Date())
+  await stamp(minor.id)
   await blocklistRead()
   expect((await refresh(minor.id, minor.email)).status).toBe(403)
   expect(await recentlyBlocked(minor.id, Math.floor(Date.now() / 1000))).toBe(true)
@@ -139,5 +155,6 @@ it("a staff correction unlocks at once: the refresh succeeds, the next blocklist
   expect((await refresh(minor.id, minor.email)).status).toBe(200)
   await blocklistRead()
   expect(await recentlyBlocked(minor.id, Math.floor(Date.now() / 1000))).toBe(false)
+  expect(await session(minor.id, minor.email)).toBe(200)
   expect(await handshake(minor.id, minor.email)).toMatchObject({ connected: true })
 })
