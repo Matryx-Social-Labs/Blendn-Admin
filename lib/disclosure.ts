@@ -332,6 +332,43 @@ export function discloseCategories(
     .sort((a, b) => (b.count ?? 0) - (a.count ?? 0))
 }
 
+/** A count told only as a band of `MIN_CELL` values (D-012): what it hides is never fewer than five possibilities. */
+export type CountRange = { min: number; max: number }
+
+/**
+ * The negative messages as a host may read them beside the complaint categories (SCRUM-1441, register D-012).
+ *
+ * Every negative message is in one category. With exactly one category held back, the exact negative count minus the
+ * shown ones is the held one (negative 27, crowding 7, entry_queue "<5" → 20): a floor that can be subtracted around is
+ * not a floor. So in that state the count is a band of five aligned on the shown negatives: the held count is only known
+ * to be one of five values, and the band moves in fives, never one-for-one with it. The total it is part of is a band
+ * too (`moodSplit`); the bar and the mood alert read its midpoint (`midpoint`), so they give nothing back either.
+ *
+ * Zero held: exact, as before. Two or more: exact too, since only their sum can be worked out. A held category with no
+ * negatives in it (an escalating one raised in another mood) leaves nothing to subtract, so exact too.
+ *
+ * ponytail: per figure as shown, not over time. A host reloading as a band moves learns the held count at that edge;
+ * `liveCountBucket` accepted the same for live buckets (SCRUM-1494 owns the time and relabel paths).
+ */
+export function discloseNegatives(
+  negative: number,
+  categories: readonly DisclosedCategory[],
+  /** Negative messages per category (`tallyFeedback`). */
+  negativesIn: ReadonlyMap<string, number>
+): number | CountRange {
+  const held = categories.filter((c) => c.suppressed)
+  const h = held.length === 1 ? (negativesIn.get(held[0].category) ?? 0) : 0
+  if (h === 0) return negative
+  const min = negative - h + MIN_CELL * Math.floor((h - 1) / MIN_CELL) + 1
+  return { min, max: min + MIN_CELL - 1 }
+}
+
+/** A count as a share bar or an alert threshold reads it: a band at its middle, so nothing drawn is finer than the band. */
+export const midpoint = (c: number | CountRange): number => (typeof c === "number" ? c : (c.min + c.max) / 2)
+
+/** A count as plain text (an alert body): a band as "23–27". */
+export const countText = (c: number | CountRange): string => (typeof c === "number" ? String(c) : `${c.min}–${c.max}`)
+
 /** A topic a host may read, and how many people are behind it. */
 export interface DisclosedTopic {
   topic: string

@@ -117,7 +117,7 @@ export function NightMoodPanel({ mood, live, eventId }: { mood: Pick<FeedbackDig
             </div>
           ) : null}
           <p className="text-[0.78rem] tabular-nums text-muted-foreground">
-            {count(positive)} positive · {count(neutral)} neutral · {count(negative)} negative
+            {count(positive)} positive · {count(neutral)} neutral · <span className="whitespace-nowrap">{count(negative)} negative</span>
           </p>
         </>
       )}

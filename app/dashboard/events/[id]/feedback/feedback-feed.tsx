@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
 import { countLabel } from "@/lib/dashboard-format"
-import type { HeldTotal } from "@/lib/disclosure"
+import type { CountRange, HeldTotal } from "@/lib/disclosure"
 import { eventClock } from "@/lib/event-phase"
 import type { feedback_sentiment, issue_category } from "@prisma/client"
 
@@ -56,7 +56,7 @@ export function FeedbackFeed({
   timezone,
 }: {
   /** A host's: exact. Typed as the digest's, which a venue's may floor (`moodSplit`). */
-  total: number | HeldTotal
+  total: number | HeldTotal | CountRange
   messages: FeedbackMessage[]
   messagesTotal: number
   page: number

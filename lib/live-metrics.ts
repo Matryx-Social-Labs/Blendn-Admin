@@ -8,7 +8,7 @@
  * server-only.
  */
 
-import { liveCountBucket, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type LiveCountBucket } from "./disclosure"
+import { countText, liveCountBucket, midpoint, type CountRange, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type LiveCountBucket } from "./disclosure"
 
 export type { FewCount, HeldTotal }
 
@@ -54,7 +54,8 @@ export interface LiveFigures {
   messagesPerMinute: number
   activeChatters30m: number
   openFlags: number
-  sentiment: { positive: number; neutral: number; negative: number }
+  /** Exact, but the negatives a band beside one held-back category (`discloseNegatives`, D-012): never exact anywhere. */
+  sentiment: { positive: number; neutral: number; negative: number | CountRange }
   /** Negative + safety messages by category, last 30 minutes. */
   categories: Array<{ category: string; count: number }>
 }
@@ -286,15 +287,18 @@ export function deriveAlerts(
     }
   }
 
-  const classified =
-    snapshot.sentiment.positive + snapshot.sentiment.neutral + snapshot.sentiment.negative
+  // Decided and told on the disclosed figures (D-012): a band's midpoint, as the bar draws it, so the alert firing or
+  // its words never narrow a held-back count the screen does not.
+  const { positive, neutral, negative } = snapshot.sentiment
+  const classified = positive + neutral + midpoint(negative)
   // A threshold on a handful of messages is noise, not a mood.
-  if (classified >= 10 && snapshot.sentiment.negative / classified >= 0.4) {
+  if (classified >= 10 && midpoint(negative) / classified >= 0.4) {
+    const total = typeof negative === "number" ? classified : { min: positive + neutral + negative.min, max: positive + neutral + negative.max }
     alerts.push({
       kind: "mood_sliding",
       severity: "warning",
       title: "Mood sliding",
-      body: `${snapshot.sentiment.negative} of ${classified} classified messages in the last 30 minutes are negative.`,
+      body: `${countText(negative)} of ${countText(total)} classified messages in the last 30 minutes are negative.`,
     })
   }
 
@@ -400,7 +404,7 @@ export function forVenue(s: LiveSnapshot): VenueLiveSnapshot {
     sentiment: {
       positive: liveCountBucket(s.sentiment.positive),
       neutral: liveCountBucket(s.sentiment.neutral),
-      negative: liveCountBucket(s.sentiment.negative),
+      negative: liveCountBucket(midpoint(s.sentiment.negative)),
     },
     categories: s.categories.map((c) => ({ category: c.category, count: liveCountBucket(c.count ?? 0) })),
     alerts: alertsForVenue(s.alerts),

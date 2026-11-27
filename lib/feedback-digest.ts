@@ -3,7 +3,7 @@ import type { feedback_sentiment, feedback_topic, issue_category } from "@prisma
 
 import { chatClosesAt } from "./chat-window"
 import { db } from "./db"
-import { discloseCategories, discloseGroup, discloseHeadcount, discloseStars, discloseTopics, publishedRaters, spreadsByEventId, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type StarSpread } from "./disclosure"
+import { discloseCategories, discloseGroup, discloseHeadcount, discloseStars, discloseTopics, publishedRaters, spreadsByEventId, discloseNegatives, type CountRange, type DisclosedCategory, type DisclosedTopic, type FewCount, type HeldTotal, type StarSpread } from "./disclosure"
 import { publishedRatingGroups } from "./rating-batches"
 import { escalates } from "./sentiment/taxonomy"
 
@@ -49,10 +49,10 @@ export interface FeedbackDigest {
   ended: boolean
   windowClosesAt: string
   windowOpen: boolean
-  /** Exact for a host; for a venue, a few under five (`moodSplit`). */
-  counts: { positive: FewCount; neutral: FewCount; negative: FewCount }
-  /** Messages classified; for a venue, a floor once any mood is a few. */
-  total: number | HeldTotal
+  /** Exact for a host, but a band of negatives beside one held category (D-012); for a venue, a few under five (`moodSplit`). */
+  counts: { positive: FewCount; neutral: FewCount; negative: FewCount | CountRange }
+  /** Messages classified; a band with the negatives' (D-012); for a venue, a floor once any mood is a few. */
+  total: number | HeldTotal | CountRange
   categories: DisclosedCategory[]
   /** What the room liked, by people (`discloseTopics`). None for a venue, whose screens do not carry it. */
   topics: DisclosedTopic[]
@@ -141,7 +141,7 @@ export async function buildFeedbackDigest(
     windowClosesAt: closesAt.toISOString(),
     windowOpen: Date.now() < closesAt.getTime(),
     ended: Date.now() >= event.end_time.getTime(),
-    ...moodSplit(counts, view),
+    ...moodSplit(counts, view, discloseNegatives(counts.negative, categories, tally.negatives)),
     /*
      * Counts, suppressed below the disclosure floor.
      *
@@ -180,7 +180,9 @@ export async function buildFeedbackDigest(
 }
 
 /**
- * The mood split as `view` reads it. A host's is exact (owner, 2026-11-13). A
+ * The mood split as `view` reads it. A host's is exact (owner, 2026-11-13), except beside exactly one held-back
+ * complaint category: then `negative` is a band (`discloseNegatives`, D-012) and the total is the same band moved up by
+ * the positive and neutral, which stay exact. A
  * venue's goes through `discloseGroup`, the rule its "Nights here" row uses,
  * so the two pages never disagree about one night (owner, 2026-11-14): each
  * mood under five is a few, and once any is, the total is a floor.
@@ -193,9 +195,14 @@ export async function buildFeedbackDigest(
  */
 export function moodSplit(
   counts: { positive: number; neutral: number; negative: number },
-  view: FeedbackDigest["view"]
+  view: FeedbackDigest["view"],
+  /** The host's negatives as `discloseNegatives` tells them. */
+  negative: number | CountRange = counts.negative
 ): Pick<FeedbackDigest, "counts" | "total"> {
-  if (view === "host") return { counts, total: counts.positive + counts.neutral + counts.negative }
+  if (view === "host") {
+    const rest = counts.positive + counts.neutral
+    return { counts: { ...counts, negative }, total: typeof negative === "number" ? rest + negative : { min: rest + negative.min, max: rest + negative.max } }
+  }
   const { parts, total } = discloseGroup([counts.positive, counts.neutral, counts.negative])
   return { counts: { positive: parts[0], neutral: parts[1], negative: parts[2] }, total }
 }
@@ -225,6 +232,8 @@ export interface TallyRow {
 export function tallyFeedback(rows: readonly TallyRow[]) {
   const counts = { positive: 0, neutral: 0, negative: 0 }
   const categoryCounts = new Map<string, number>()
+  // Negative messages per category: what `discloseNegatives` subtracts (D-012).
+  const negatives = new Map<string, number>()
   // Per category, each person's messages in it.
   const people = new Map<string, Map<string, number>>()
   const liked = new Map<string, Set<string>>()
@@ -233,6 +242,7 @@ export function tallyFeedback(rows: readonly TallyRow[]) {
     if (row.sentiment === "positive" && row.topic && row.userId) liked.set(row.topic, (liked.get(row.topic) ?? new Set<string>()).add(row.userId))
     if (row.sentiment !== "negative" && !escalates(row.category)) continue
     categoryCounts.set(row.category, (categoryCounts.get(row.category) ?? 0) + 1)
+    if (row.sentiment === "negative") negatives.set(row.category, (negatives.get(row.category) ?? 0) + 1)
     const who = people.get(row.category) ?? new Map<string, number>()
     if (row.userId) who.set(row.userId, (who.get(row.userId) ?? 0) + 1)
     people.set(row.category, who)
@@ -241,7 +251,7 @@ export function tallyFeedback(rows: readonly TallyRow[]) {
   // The largest single person's messages per category: the dominance rule's numerator (SCRUM-1285).
   const topMessages = new Map([...people].map(([category, who]) => [category, Math.max(0, ...who.values())]))
   const topics = new Map([...liked].map(([topic, who]) => [topic, who.size]))
-  return { counts, categoryCounts, contributors, topMessages, topics }
+  return { counts, categoryCounts, negatives, contributors, topMessages, topics }
 }
 
 /**
