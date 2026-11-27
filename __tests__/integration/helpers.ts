@@ -154,12 +154,40 @@ export async function makeEvent(
   await db.event_occurrences.create({
     data: {
       event_id: event.id,
-      occurs_on: new Date(event.start_time.toISOString().slice(0, 10)),
+      occurs_on: utcDay(event.start_time),
       start_time: event.start_time,
       end_time: event.end_time,
     },
   })
   return event.id
+}
+
+/** The UTC date of `at`, as an `occurs_on` (`@db.Date`) column keeps it. */
+const utcDay = (at: Date) => new Date(at.toISOString().slice(0, 10))
+
+/** A three-hour night that ended `daysAgo` days ago, dated on the UTC day it started. */
+function pastNight(daysAgo: number) {
+  const end_time = new Date(Date.now() - daysAgo * 86_400_000)
+  const start_time = new Date(end_time.getTime() - 3 * 3_600_000)
+  return { occurs_on: utcDay(start_time), start_time, end_time }
+}
+
+/**
+ * An event whose only occurrence ended `daysAgo` days ago. Its `occurs_on` moves with its times: left on
+ * makeEvent's day (now − 1 h), it shared a UTC date with a night added for yesterday from 00:00 to 01:00 UTC,
+ * and (event_id, occurs_on) is unique (SCRUM-1382).
+ */
+export async function endedEvent(organizerId: string, daysAgo: number) {
+  const id = await makeEvent(organizerId)
+  const { occurs_on, start_time, end_time } = pastNight(daysAgo)
+  await db.events.update({ where: { id }, data: { start_time, end_time } })
+  await db.event_occurrences.updateMany({ where: { event_id: id }, data: { occurs_on, start_time, end_time } })
+  return id
+}
+
+/** Another night of `eventId`, which ended `daysAgo` days ago. */
+export async function addPastNight(eventId: string, daysAgo: number) {
+  await db.event_occurrences.create({ data: { event_id: eventId, ...pastNight(daysAgo) } })
 }
 
 /** The (single) occurrence a fixture event was created with. */

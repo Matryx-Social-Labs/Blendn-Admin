@@ -9,6 +9,7 @@ import { randomUUID } from "crypto"
 import { chatWindowState } from "./chat-window"
 import { SPONSORSHIP } from "./constants"
 import { db } from "./db"
+import { beat } from "./heartbeat"
 import { logger } from "./logger"
 import { placementIsRunnable } from "./placement-phase"
 import { attendeeLabel } from "./pseudonym"
@@ -637,6 +638,7 @@ export function startSponsoredScheduler(): void {
   const run = async () => {
     try {
       await sweepSponsored()
+      beat("sponsored", SWEEP_INTERVAL_MS)
     } catch (error) {
       // A failed pass must not take the process down or stop the loop. Every
       // claim it took expires on its own after LEASE_MINUTES.
@@ -648,6 +650,7 @@ export function startSponsoredScheduler(): void {
     }
   }
   timer = setTimeout(run, SWEEP_INTERVAL_MS)
+  beat("sponsored", SWEEP_INTERVAL_MS)
 }
 
 export function stopSponsoredScheduler(): void {
