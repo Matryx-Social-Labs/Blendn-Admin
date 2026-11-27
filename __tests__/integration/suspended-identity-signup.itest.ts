@@ -9,6 +9,7 @@ import { NextRequest } from "next/server"
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("@/lib/mobile-auth", () => ({ ...jest.requireActual("@/lib/mobile-auth"), verifyGoogleIdToken: jest.fn(), verifyAppleIdToken: jest.fn() }))
 import { SUSPENDED_MESSAGE, verifyAppleIdToken, verifyGoogleIdToken } from "@/lib/mobile-auth"
+import { suspendedMessageFor } from "@/lib/account-refusal"
 import { cleanup, closeDb, db, testId } from "./helpers"
 /* eslint-disable @typescript-eslint/no-require-imports */
 const signupRoute = require("@/app/api/mobile/auth/signup/route") as typeof import("@/app/api/mobile/auth/signup/route")
@@ -65,11 +66,11 @@ async function suspended(email: string, googleSub?: string) {
   return user.id
 }
 
-async function expectSuspendedRefusal(res: Response) {
+async function expectSuspendedRefusal(res: Response, error = SUSPENDED_MESSAGE) {
   expect(res.status).toBe(403)
   expect(await res.json()).toMatchObject({
     success: false,
-    error: SUSPENDED_MESSAGE,
+    error,
     errorCode: "FORBIDDEN",
     reasonCode: "ACCOUNT_SUSPENDED",
   })
@@ -154,11 +155,12 @@ describe("sign-up", () => {
 })
 
 describe("Google", () => {
-  it("refuses a Google account whose sub is a suspended user's", async () => {
+  // The same sub is the suspended account itself, proven by the token: its owner reads the reason (SCRUM-1174).
+  it("refuses a Google account whose sub is a suspended user's, with the owner's sentence", async () => {
     const sub = testId("gsub")
     const email = `${testId("sus-gsub")}@gmail.com`
     await suspended(email, sub)
-    await expectSuspendedRefusal(await google(sub, email))
+    await expectSuspendedRefusal(await google(sub, email), suspendedMessageFor(null))
   })
 
   it("refuses to create an account for a suspended person's Gmail inbox under a new sub, and writes no row", async () => {

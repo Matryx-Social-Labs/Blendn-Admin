@@ -85,20 +85,46 @@ export const SUSPENSION_READ_GATES = [
 type Tx = Prisma.TransactionClient
 
 /**
+ * Why an account was suspended, as the person is told it (`suspendedMessageFor`,
+ * lib/account-refusal.ts): the report reasons the app offers, as fixed phrases.
+ * `suspension_reason` holds a key of this list, never a moderator's note or a
+ * reporter's words; anything else reads as `guidelines`.
+ */
+export const SUSPENSION_CATEGORIES = {
+  harassment: "harassment",
+  hate_speech: "hate speech",
+  spam: "spam",
+  fake_profile: "a fake profile",
+  inappropriate_messages: "inappropriate messages",
+  inappropriate_photos: "inappropriate photos",
+  inappropriate_content: "inappropriate content",
+  guidelines: "breaking our community guidelines",
+} as const
+
+type SuspensionCategory = keyof typeof SUSPENSION_CATEGORIES
+
+/** A report's reason (free text on most report tables) as one of the categories. */
+export function suspensionCategory(reason: string | null | undefined): SuspensionCategory {
+  const key = reason?.trim().toLowerCase() ?? ""
+  return Object.hasOwn(SUSPENSION_CATEGORIES, key) ? (key as SuspensionCategory) : "guidelines"
+}
+
+/**
  * Apply a suspension across every channel.
  *
  * Idempotent: re-suspending an already-suspended account rewrites the same
- * facts. `suspended_at` is deliberately overwritten rather than preserved —
- * the second suspension is the current one.
+ * facts. `suspended_at` and `suspension_reason` are deliberately overwritten
+ * rather than preserved — the second suspension is the current one.
  */
 export async function applySuspension(
   tx: Tx,
   userId: string,
-  suspendedBy: string
+  suspendedBy: string,
+  category: SuspensionCategory = "guidelines"
 ): Promise<void> {
   await tx.user.update({
     where: { id: userId },
-    data: { suspended_at: new Date(), suspended_by: suspendedBy },
+    data: { suspended_at: new Date(), suspended_by: suspendedBy, suspension_reason: category },
   })
 
   // No new app session. Without this the suspension only bites when the
@@ -131,7 +157,7 @@ export async function applySuspension(
 /**
  * Lift a suspension.
  *
- * Deliberately narrow. It clears the fact and nothing else: refresh tokens stay
+ * Deliberately narrow. It clears the fact and its reason, nothing else: refresh tokens stay
  * revoked (they sign in again), push tokens stay deleted (the device
  * re-registers on next launch), and chat membership stays `banned`.
  *
@@ -143,6 +169,6 @@ export async function applySuspension(
 export async function liftSuspension(tx: Tx, userId: string): Promise<void> {
   await tx.user.update({
     where: { id: userId },
-    data: { suspended_at: null, suspended_by: null },
+    data: { suspended_at: null, suspended_by: null, suspension_reason: null },
   })
 }

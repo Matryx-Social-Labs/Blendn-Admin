@@ -1,6 +1,7 @@
 // Relative imports: reachable from `server.ts` (via `background.ts`), which
 // `build:server` compiles with plain tsc -- the `@/` alias would be emitted verbatim.
 import { db } from "./db"
+import { beat } from "./heartbeat"
 import { logger } from "./logger"
 import { bucketFor, deleteFile, extractKeyFromUrl, listPublicObjects } from "./tigris"
 
@@ -353,16 +354,27 @@ export async function sweepAllOrphans(opts: { now?: Date; mode?: OrphanMode } = 
 let timer: ReturnType<typeof setTimeout> | null = null
 let stopped = false
 
+async function run(): Promise<void> {
+  try {
+    // Each sweep logs its own failure and comes back null: the loop beats only on a pass where both worked.
+    const { profile, chat } = await sweepAllOrphans()
+    if (profile && chat) beat("photo-orphans", ORPHAN_SWEEP_INTERVAL_MS)
+  } catch (error) {
+    logger.error("Orphan sweep failed", { error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
 /** Self-scheduling, like the other sweepers. */
 export function startOrphanPhotoSweeper(): void {
   if (timer) return
   stopped = false
   const schedule = () => {
     if (stopped) return
-    timer = setTimeout(() => void sweepAllOrphans().finally(schedule), ORPHAN_SWEEP_INTERVAL_MS)
+    timer = setTimeout(() => void run().finally(schedule), ORPHAN_SWEEP_INTERVAL_MS)
     timer.unref?.()
   }
-  void sweepAllOrphans().finally(schedule)
+  beat("photo-orphans", ORPHAN_SWEEP_INTERVAL_MS)
+  void run().finally(schedule)
 }
 
 /** Stops the loop, and the next start reads the bucket from the top again. */

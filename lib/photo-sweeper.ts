@@ -1,6 +1,7 @@
 // Relative imports: reachable from `server.ts` (via `background.ts`), which
 // `build:server` compiles with plain tsc -- the `@/` alias would be emitted verbatim.
 import { db } from "./db"
+import { beat } from "./heartbeat"
 import { logger } from "./logger"
 import { moderateBlurPhoto, moderateProfilePhoto, pullPhoto } from "./photos"
 import { objectPresence, ownedPhotoKey } from "./tigris"
@@ -163,6 +164,7 @@ async function runSweep(): Promise<void> {
   try {
     const { looked, settled } = await sweepUnmoderatedPhotos()
     if (looked > 0) logger.info("Unchecked photo sweep", { looked, settled })
+    beat("photo-moderation", SWEEP_INTERVAL_MS)
   } catch (error) {
     logger.error("Unchecked photo sweep failed", { error: String(error) })
   }
@@ -179,6 +181,7 @@ export function startPhotoModerationSweeper(): void {
     }, SWEEP_INTERVAL_MS)
     timer.unref?.()
   }
+  beat("photo-moderation", SWEEP_INTERVAL_MS)
   // Boot is when a deploy's backlog gets cleared.
   void runSweep().finally(schedule)
 }

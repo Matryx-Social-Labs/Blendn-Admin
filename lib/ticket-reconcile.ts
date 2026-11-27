@@ -1,6 +1,7 @@
 // Relative imports: reached from server.ts through lib/background.ts (`build:server`, plain tsc).
 import { db } from "./db"
 import { razorpayKeys, ticketingOn } from "./env"
+import { beat } from "./heartbeat"
 import { logger } from "./logger"
 import { orderPayments } from "./razorpay"
 import { settleTicketPayment } from "./ticket-payments"
@@ -142,6 +143,7 @@ let stopped = false
 async function run(): Promise<void> {
   try {
     const done = await reconcileTicketPayments()
+    beat("ticket-reconcile", TICKET_RECONCILE_MS)
     if (done.paid || done.refunded || done.reversed || done.transferred) logger.info("Ticket payments reconciled", done)
   } catch (error) {
     logger.error("Ticket reconcile pass failed", { error: message(error) })
@@ -157,6 +159,7 @@ export function startTicketReconciler(): void {
     timer = setTimeout(() => void run().finally(schedule), TICKET_RECONCILE_MS)
     timer.unref?.()
   }
+  beat("ticket-reconcile", TICKET_RECONCILE_MS)
   void run().finally(schedule)
 }
 

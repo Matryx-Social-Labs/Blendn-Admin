@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client"
 
 import { ageFrom, minAgeRefusal } from "./age"
 import { db } from "./db"
+import { beat } from "./heartbeat"
 import { logger } from "./logger"
 import { performCheckouts, type CheckoutItem } from "./checkout"
 import { realEventsWhere, venueDaysWhere } from "./event-kind"
@@ -497,6 +498,7 @@ export function startPresenceSweeper(): void {
   const run = async () => {
     try {
       await sweepPresence()
+      beat("presence", SWEEP_INTERVAL_MS)
     } catch (error) {
       // A sweep that throws must not take the process down or stop the loop.
       logger.error("Presence sweep failed", {
@@ -517,6 +519,7 @@ export function startPresenceSweeper(): void {
   const expire = async () => {
     try {
       await expireWindows()
+      beat("go-live-expiry", EXPIRY_INTERVAL_MS)
     } catch (error) {
       logger.error("Go Live expiry pass failed", {
         error: error instanceof Error ? error.message : String(error),
@@ -527,6 +530,8 @@ export function startPresenceSweeper(): void {
   }
   timer = setTimeout(run, SWEEP_INTERVAL_MS)
   expiryTimer = setTimeout(expire, EXPIRY_INTERVAL_MS)
+  beat("presence", SWEEP_INTERVAL_MS)
+  beat("go-live-expiry", EXPIRY_INTERVAL_MS)
 }
 
 export function stopPresenceSweeper(): void {
