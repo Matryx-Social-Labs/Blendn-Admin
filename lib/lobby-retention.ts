@@ -92,7 +92,7 @@ export interface PurgePass {
 const closesAt = Prisma.sql`(CASE WHEN e.kind = 'venue_day' THEN e.end_time ELSE e.end_time + make_interval(hours => ${CHAT_WINDOW_HOURS}) END)`
 
 /** A report that holds what it names: still pending, or upheld within the window. */
-const holdingReport = (since: Date) => Prisma.sql`(r.status = 'pending' OR (r.status = 'resolved' AND r.reviewed_at > ${since}))`
+export const holdingReport = (since: Date) => Prisma.sql`(r.status = 'pending' OR (r.status = 'resolved' AND r.reviewed_at > ${since}))`
 
 async function messagesPastTheirTime(since: Date) {
   return db.$queryRaw<PastTheirTime[]>`
@@ -135,7 +135,7 @@ async function postsPastTheirTime(since: Date) {
 }
 
 /** A message or post past its time, with its photo's stored URL and whose row it is. */
-type PastTheirTime = { id: string; url: string | null; author_id: string }
+export type PastTheirTime = { id: string; url: string | null; author_id: string }
 
 type Refused = { id: string; why: ChatMediaRefusal | "possibly named by another row" }
 
@@ -169,7 +169,7 @@ async function stillNamed(keys: string[], purging: string[]): Promise<Set<string
  * deletes nothing in storage and its row still goes: kept, it would never
  * become deletable, and enough of them would fill every batch.
  */
-async function deleteObjects(rows: PastTheirTime[]): Promise<{ ids: string[]; photos: number; kept: number; refused: Refused[] }> {
+export async function deleteObjects(rows: PastTheirTime[], purge = "Lobby purge"): Promise<{ ids: string[]; photos: number; kept: number; refused: Refused[] }> {
   const ids: string[] = []
   const refused: Refused[] = []
   let photos = 0
@@ -197,13 +197,22 @@ async function deleteObjects(rows: PastTheirTime[]): Promise<{ ids: string[]; ph
       ids.push(row.id)
     } catch (error) {
       kept++
-      logger.error("Lobby purge: object NOT deleted; its row is kept for the next pass", {
+      logger.error(`${purge}: object NOT deleted; its row is kept for the next pass`, {
         rowId: row.id,
         error: error instanceof Error ? error.message : String(error),
       })
     }
   }
   return { ids, photos, kept, refused }
+}
+
+/** One warning per pass for the rows `deleteObjects` deleted without touching storage. */
+export function warnRefused(purge: string, refused: Refused[]): void {
+  if (refused.length === 0) return
+  // Never the URL or its key: one stored before SCRUM-426 is whatever a client sent, and `chat/<id>/` names its sender.
+  const byClass: Record<string, number> = {}
+  for (const r of refused) byClass[r.why] = (byClass[r.why] ?? 0) + 1
+  logger.warn(`${purge}: photos not the row’s alone to delete; rows deleted, storage untouched`, { count: refused.length, byClass, rows: refused.slice(0, 5) })
 }
 
 /**
@@ -251,13 +260,7 @@ export async function purgeClosedLobbies(now: Date = new Date()): Promise<PurgeP
   if (pass.pseudonyms === MEMBER_BATCH) pass.hasMore = true
 
   const postsGone = await deleteObjects(posts)
-  const refused = [...gone.refused, ...postsGone.refused]
-  // Never the URL or its key: one stored before SCRUM-426 is whatever a client sent, and `chat/<id>/` names its sender.
-  if (refused.length) {
-    const byClass: Record<string, number> = {}
-    for (const r of refused) byClass[r.why] = (byClass[r.why] ?? 0) + 1
-    logger.warn("Lobby purge: photos not the row’s alone to delete; rows deleted, storage untouched", { count: refused.length, byClass, rows: refused.slice(0, 5) })
-  }
+  warnRefused("Lobby purge", [...gone.refused, ...postsGone.refused])
   if (postsGone.ids.length) {
     const [, deleted] = await db.$transaction([
       // The post's room first: `board_post_id` is ON DELETE RESTRICT. Its messages are gone (the select required it); members cascade.

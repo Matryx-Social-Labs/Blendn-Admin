@@ -8,6 +8,7 @@ import { CHAT_WINDOW_HOURS } from "./chat-window"
 import { closeRoomSockets } from "./room-close"
 import { purgeLapsedCrewLikes, purgeLapsedCrewLinks, repairCrews } from "./crews/sweep"
 import { recheckPendingPhotos } from "./lobby-photo"
+import { purgeClosedConversations } from "./dm-retention"
 import { purgeClosedLobbies, purgeEventGestures, purgeTonightAnswers } from "./lobby-retention"
 
 /** Bounded so one pass cannot hold locks for an unbounded period. */
@@ -182,6 +183,13 @@ async function runSweep(): Promise<void> {
     }
   } catch (error) {
     logger.error("Lobby sweep failed", { error: error instanceof Error ? error.message : String(error) })
+  }
+  /* Direct messages, 180 days after their conversation closed (lib/dm-retention.ts). Its own catch. */
+  try {
+    const dms = await purgeClosedConversations()
+    if (dms.messages > 0 || dms.kept > 0) logger.info("DM purge", { ...dms })
+  } catch (error) {
+    logger.error("DM purge failed", { error: error instanceof Error ? error.message : String(error) })
   }
   /* Tonight's question answers, 30 days after the event (lib/lobby-retention.ts). Its own catch. */
   try {

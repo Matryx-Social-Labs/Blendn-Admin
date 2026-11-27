@@ -36,8 +36,7 @@ let survivor = ""
 let reporter = ""
 const conv: Record<string, string> = {}
 const msg: Record<string, string> = {}
-const ownKey = () => `chat/${author}/1758000000000-${randomUUID().slice(0, 6)}-photo.jpg`
-const ownPhoto = ownKey()
+let ownPhoto = ""
 const sealedPhoto = `chat/sealed/${randomUUID()}`
 let warned: unknown[][] = []
 
@@ -79,6 +78,7 @@ beforeAll(async () => {
   reporter = await makeUser(testId("dmr-reporter"))
   const others = await Promise.all(["a", "b", "c", "d"].map((l) => makeUser(testId(`dmr-other-${l}`))))
   users.push(author, survivor, reporter, ...others)
+  ownPhoto = `chat/${author}/1758000000000-${randomUUID().slice(0, 6)}-photo.jpg`
   await onboard(author, survivor, reporter, ...others)
 
   // Closed 181 days ago (the author deleted their account): past its time.
