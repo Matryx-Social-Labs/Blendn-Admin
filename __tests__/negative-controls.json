@@ -1933,6 +1933,18 @@
       "observed": "M15: 1 of 2 failing. Restored; 2 of 2.",
       "date": "2026-11-27"
     },
+    "reports-queue-severity.itest.ts": {
+      "guards": "SCRUM-1176 on a db:migrate database: the SQL severity rank (SEVERITY_RANK, lib/report-reasons.ts) ranks every stored reason as reportReason reads it (padded with any whitespace JavaScript trims, any case, free text, an inherited property name); the staff reports queue (getReportQueue) shows a message report's kept excerpt once the message row is gone, and before the live text when the message still exists; orders S1 before S2 before S3 across user, message and event reports whatever their age; takes the older of two same-severity reports first inside one hour; lists a report on its own status tab only; and takes each table's page S1 first, then S2, then the oldest S3 in the query, so a full page of older spam keeps newer threats and harassment, and says it is capped.",
+      "mutation": "(C1) the room/DM excerpt read from the live message only. (C2) the merged rows sorted by filing time alone. (C3) the page query ordered by created_at alone. (C9) the merged rows' tie broken by whole hours. (C10) the SQL trim on spaces only. (C11) S2 ranked with S3 in SQL. (C12) newest first inside a severity in SQL. (C13) the page query reading pending whatever the tab. (C14) the live text before the kept words. (C15) the SQL rank without lower(). (C16) reportReason without toLowerCase.",
+      "observed": "Before the change: 3 of 3 (first version) failing, then 2 of 6 for the cases added after review (within the hour; a tab-padded threat at the cap). C1: 2 of 6. C2, C3, C9, C11, C12, C13, C14: 1 of 6 each. With the parity case (7): C10 2 of 7, C15 1 of 7, C16 2 of 7. Restored each; 7 of 7 on trust10a.",
+      "date": "2026-11-27"
+    },
+    "suspension-reason.test.ts": {
+      "guards": "SCRUM-1176: SUSPENSION_CATEGORIES is read from lib/report-reasons.ts: every category but guidelines is a report reason; each reason's suspension phrase is what its owner reads and a reason without one reads as guidelines; the seven phrases and the guidelines line read word for word as SCRUM-1174 shipped them.",
+      "mutation": "(C5) a category that is not a reason added. (C6) the hard-coded list put back beside the reasons, with one extra phrase. (C7) one phrase changed by a character. (C8) a reason without a phrase given one.",
+      "observed": "Before the change: 1 of 21 failing (the phrase test). C5: 1 of 22. C6: 1 of 22. C7: 1 of 22. C8: 1 of 22. Restored each; 22 of 22.",
+      "date": "2026-11-27"
+    },
     "deletion-erases-participation.itest.ts": {
       "guards": "SCRUM-481: DELETE /account ends every open check-in through performCheckout, so an erased person is not 'here now' in a live room (getOccupancy drops them) while the check-in row stays, closed, as the organiser's attendance, and their presence session is departed. Another attendee in the same room is untouched. Review pass: every open check-in goes (a second event's too), each session is closed as departed_source 'user', and a failure to read them never costs the storage erasure (account-deletion.test.ts: still 200, both folders deleted).",
       "mutation": "M322: the performCheckout call in the deletion route's open-check-in loop replaced with a no-op. Review pass: M368 the check-in read outside the try (a rejection skips the uploads). M369 only the first open row checked out. M370 the checkout reason left_area instead of manual.",

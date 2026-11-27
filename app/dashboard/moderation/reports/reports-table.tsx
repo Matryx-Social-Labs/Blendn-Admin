@@ -97,7 +97,7 @@ export function ReportsTable({
       ))}
       <p className="text-[0.8125rem] text-muted-foreground">
         {rows.length} {status}
-        {status === "pending" ? " · oldest first, age is the SLA" : ""} · decisions write to the audit log
+        {status === "pending" ? " · most severe first, then oldest" : ""} · decisions write to the audit log
       </p>
       {/*
         What each lever does, once, under the queue rather than in a tooltip on

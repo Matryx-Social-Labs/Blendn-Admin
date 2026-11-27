@@ -4960,8 +4960,8 @@ motivated to take a post down is the one about to be reported for it.
 - **One report per person per post or ask while it is pending.** A second tap is
   the same `201` and no new row (a partial unique). Reports are limited to 20 a
   minute and **30 a day** per person, in total across every report door (one
-  `report-day` bucket, SCRUM-1050) — a queue showing the oldest hundred is
-  otherwise one script away from burying everybody else's.
+  `report-day` bucket, SCRUM-1050) — a queue showing a hundred of each kind,
+  most severe first, is otherwise one script away from burying everybody else's.
 - **The evidence is kept.** A report stores the words as they were when it was
   filed (`excerpt`), and stamps the post `moderation_status = "reported"`.
   Account erasure deletes only posts with no status, so a reported post is kept

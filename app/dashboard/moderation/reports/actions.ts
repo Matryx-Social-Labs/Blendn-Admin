@@ -2,13 +2,14 @@
 
 import { Refusal } from "@/lib/refusal"
 import { revalidatePath } from "next/cache"
-import type { report_status } from "@prisma/client"
+import { Prisma, type report_status } from "@prisma/client"
 
 import { auditInTx } from "@/lib/audit-log"
 import { ALREADY_DECIDED, decisionFrom, refuseUnlessDecided } from "@/lib/decision"
 import { requireAdmin } from "@/lib/current-user"
 import { REGISTRATION_RETENTION_DAYS } from "@/lib/deleted-account-records"
 import { REPORT_HOLD_DAYS } from "@/lib/retained-media"
+import { REPORT_REASONS, reportReason, SEVERITY_RANK } from "@/lib/report-reasons"
 import { readableUrl } from "@/lib/tigris"
 
 const DAY_MS = 86_400_000
@@ -41,6 +42,19 @@ import { clipCharacters } from "@/lib/utils"
 
 /** The queue is capped per table, and the cap is stated rather than silent. */
 const PAGE = 100
+
+/**
+ * One table's page of the queue: S1 first, oldest first inside each. Ordered in
+ * the query, so the cap leaves out the least severe rather than the newest.
+ */
+async function pageIds(table: "user_reports" | "message_reports" | "event_reports", status: report_status): Promise<string[]> {
+  const rows = await db.$queryRaw<{ id: string }[]>`
+    SELECT id FROM ${Prisma.raw(table)} WHERE status = ${status}::report_status
+    ORDER BY ${SEVERITY_RANK}, created_at, id LIMIT ${PAGE}`
+  return rows.map((r) => r.id)
+}
+
+const severityOf = (row: { reason: string }) => REPORT_REASONS[reportReason(row.reason)].severity
 
 export interface ReportRow {
   id: string
@@ -129,14 +143,18 @@ export async function getReportQueue(status: report_status = "pending") {
 
   const now = Date.now()
 
+  // Most severe first; inside each, oldest first, like the flag queue:
+  // newest-first buries whoever has waited longest.
+  const [userPage, messagePage, eventPage] = await Promise.all([
+    pageIds("user_reports", status),
+    pageIds("message_reports", status),
+    pageIds("event_reports", status),
+  ])
+
   const [userReports, messageReports, eventReports, userCounts, messageCounts, eventCounts] =
     await Promise.all([
     db.user_reports.findMany({
-      where: { status },
-      // Oldest first, like the flag queue: the SLA is how long somebody has
-      // been waiting for an answer, so newest-first buries the worst cases.
-      orderBy: { created_at: "asc" },
-      take: PAGE,
+      where: { id: { in: userPage }, status },
       select: {
         id: true,
         created_at: true,
@@ -148,9 +166,7 @@ export async function getReportQueue(status: report_status = "pending") {
       },
     }),
     db.message_reports.findMany({
-      where: { status },
-      orderBy: { created_at: "asc" },
-      take: PAGE,
+      where: { id: { in: messagePage }, status },
       select: {
         id: true,
         created_at: true,
@@ -172,9 +188,7 @@ export async function getReportQueue(status: report_status = "pending") {
      * report nobody sees is the same defect one step later.
      */
     db.event_reports.findMany({
-      where: { status },
-      orderBy: { created_at: "asc" },
-      take: PAGE,
+      where: { id: { in: eventPage }, status },
       select: {
         id: true,
         created_at: true,
@@ -320,6 +334,7 @@ export async function getReportQueue(status: report_status = "pending") {
   const sameMessage = new Map(messageSubjects.map((g) => [g.message_id, g._count._all]))
   const sameEvent = new Map(eventSubjects.map((g) => [g.event_id, g._count._all]))
 
+  const filedAt = new Map([...userReports, ...messageReports, ...eventReports].map((r) => [r.id, r.created_at.getTime()]))
   const rows: ReportRow[] = [
     ...userReports.map(
       (r): ReportRow => ({
@@ -447,9 +462,9 @@ export async function getReportQueue(status: report_status = "pending") {
         subjectId: author?.id ?? null,
         subjectName: displayName(author),
         subjectSuspended: author?.suspended_at != null,
-        // A message deleted between the report and the review leaves the row
-        // saying so rather than showing an empty quote.
-        excerpt: clipCharacters(group?.content ?? priv?.message_text ?? "", 200) || null,
+        // The words as reported, kept once the message is gone; the live
+        // message if it predates the snapshot.
+        excerpt: clipCharacters(r.excerpt ?? group?.content ?? priv?.message_text ?? "", 200) || null,
         image: imageByReport.get(r.id) ?? null,
         messageType: r.message_type === "private" ? "private" : "group",
         boardKind: null,
@@ -498,14 +513,14 @@ export async function getReportQueue(status: report_status = "pending") {
         reviewedBy: r.reviewed_by,
       })
     ),
-  ].sort((a, b) => b.ageHours - a.ageHours || a.id.localeCompare(b.id))
+  ].sort((a, b) => severityOf(a).localeCompare(severityOf(b)) || filedAt.get(a.id)! - filedAt.get(b.id)! || a.id.localeCompare(b.id))
 
   const counts: Record<string, number> = {}
   for (const c of [...userCounts, ...messageCounts, ...eventCounts]) {
     counts[c.status] = (counts[c.status] ?? 0) + c._count._all
   }
 
-  return { rows, counts, truncated: userReports.length === PAGE || messageReports.length === PAGE }
+  return { rows, counts, truncated: [userPage, messagePage, eventPage].some((page) => page.length === PAGE) }
 }
 
 /**

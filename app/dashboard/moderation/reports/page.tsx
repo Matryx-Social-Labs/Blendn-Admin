@@ -59,7 +59,7 @@ export default async function ReportsPage({
           // Said out loud rather than silently truncated: a capped queue that
           // looks complete is how a backlog gets missed.
           <span className="text-[0.8125rem] text-muted-foreground">
-            Showing the oldest 100 of each kind
+            Showing the 100 most severe of each kind
           </span>
         ) : null}
       </div>
