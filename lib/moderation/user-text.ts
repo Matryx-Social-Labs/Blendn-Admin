@@ -76,7 +76,13 @@ export function recordScreenedText(
     ...(result.matched && { matched: result.matched }),
     ...(result.reason && { reason: result.reason }),
   }
-  logger.info(verdict.action === "refuse" ? "User text refused" : "User text flagged for review", { userId, ...details })
+  // The words go in the audit row; beside a user id in a log line they say what the person wrote (SCRUM-1512).
+  const { matched, ...logged } = details
+  logger.info(verdict.action === "refuse" ? "User text refused" : "User text flagged for review", {
+    userId,
+    ...logged,
+    ...(matched && { matchedCount: matched.length }),
+  })
   auditLog({
     ...(userId && { userId, resourceId: userId }),
     action: verdict.action === "refuse" ? "moderation.text_refused" : "moderation.text_flagged",

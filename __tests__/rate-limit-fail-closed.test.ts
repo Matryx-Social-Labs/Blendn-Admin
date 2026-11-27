@@ -64,6 +64,7 @@ const fake = {
 }
 jest.mock("redis", () => ({ createClient: () => fake }))
 
+import { logger } from "@/lib/logger"
 import { hit, peek, resetMemoryStore, StoreUnavailable } from "@/lib/rate-limit-store"
 
 beforeAll(() => {
@@ -138,5 +139,41 @@ describe("a fail-closed key never lives in memory", () => {
     // Back: the tenth wrong code is the tenth, not the first.
     expect((await hit("door-fail:v1:u1", 300_000, { failClosed: true })).count).toBe(10)
     expect(await peek("door-fail:v1:u1", { failClosed: true })).toBe(10)
+  })
+})
+
+describe("a refused key's log line (SCRUM-1512)", () => {
+  it("holds no email address, phone or network: the key's words, then a short hash of the rest", async () => {
+    const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined)
+    try {
+      fake.down = true
+      const keys = [
+        "rl:auth:dashboard-signin:acct:alice@example.com",
+        "rl:auth:dashboard-signin:phone-day:bob@example.com:9876543210",
+        "rl:auth:dashboard-signin:203.0.113.9",
+      ]
+      for (const key of keys) {
+        await expect(hit(key, 60_000, { failClosed: true })).rejects.toBeInstanceOf(StoreUnavailable)
+        await expect(peek(key, { failClosed: true })).rejects.toBeInstanceOf(StoreUnavailable)
+      }
+      expect(warn).toHaveBeenCalledTimes(6)
+      expect(JSON.stringify(warn.mock.calls)).not.toMatch(/@|example\.com|9876543210|203\.0\.113/)
+      const logged = warn.mock.calls.map(([, context]) => (context as { key: string }).key)
+      expect(logged[0]).toMatch(/^rl:auth:dashboard-signin:acct:[0-9a-f]{12}$/)
+      expect(logged[4]).toMatch(/^rl:auth:dashboard-signin:[0-9a-f]{12}$/)
+      // Lines about one key still correlate: the same key, the same hash.
+      expect(logged[1]).toBe(logged[0])
+      expect(logged[2]).not.toBe(logged[0])
+      // A key with no identifier in it is logged as it is.
+      await expect(hit("entry-wrong", 60_000, { failClosed: true })).rejects.toBeInstanceOf(StoreUnavailable)
+      expect(warn.mock.calls[6][1]).toMatchObject({ key: "entry-wrong" })
+      // No client that can answer at all: refused before any command, the same line shape.
+      fake.isReady = false
+      await expect(hit(keys[0], 60_000, { failClosed: true })).rejects.toBeInstanceOf(StoreUnavailable)
+      expect(warn.mock.calls[7]).toEqual(["Fail-closed limiter refused: rate limit store unavailable", { key: logged[0] }])
+    } finally {
+      fake.isReady = true
+      warn.mockRestore()
+    }
   })
 })

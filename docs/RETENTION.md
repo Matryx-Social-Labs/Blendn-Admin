@@ -59,7 +59,8 @@ deletes their account:
 - **Room messages:** `deleted_at` and `moderation_status = 'hidden'`. Records
   are in `moderation_flags`, `message_reports` and `audit_logs`.
 - **DMs:** `moderation_status = 'hidden'`, with `message_reports`. Account
-  deletion closes the conversation and keeps the messages.
+  deletion closes the conversation; its messages, both people's, go 180 days
+  later with the rest of the closed conversation's (below, SCRUM-1237).
 - **Images in those messages:** account deletion erases the person's
   `chat/<id>/` objects, and the `chat/sealed/<uuid>` copies their own messages
   point at (a sealed copy's key names nobody since SCRUM-448, so the messages
@@ -168,6 +169,43 @@ privacy policy's retention section states them (SCRUM-1138), and production
 takes this purge only once that section is live. Owed, not a gate: a lawyer's read on DPDP Rule 8(3)
 before 13 May 2027, which may ask one year for "personal data, traffic data and
 logs"; if it covers message content, `RETENTION_DAYS` goes up.
+
+## Direct messages (SCRUM-1237)
+
+Register D-029: direct messages go 180 days after the conversation closes or
+the account is deleted. A conversation closes on an unmatch, a block, or either
+person's account deletion (which closes every open conversation of theirs), and
+nothing reopens it; from then on no app read returns it (inbox, thread, unread
+counts and badge all read open conversations only). 180 days after the close the
+chat sweeper (`lib/dm-retention.ts`, every 15 minutes, up to 5,000 messages a
+pass) hard-deletes the conversation's messages, both people's, and the photo each
+carries, by the Lobby purge's rule: the sender's own sealed copy or
+`chat/<id>/` object, never one another row still shows; a URL that names
+anything else deletes nothing in storage and its message still goes, with one
+warning per pass by row id and reason ("DM purge"). The words of the message
+request that opened the conversation (`message_requests.message`) go in the same
+pass; the request row stays. An open conversation is never touched, however old.
+
+**Held:** a message under a report still `pending` (until it is decided), or
+upheld (`resolved`) within 180 days of the decision (an upheld report with no
+decision date holds); and the whole conversation,
+both sides, while one of its two people has such a report on the other (a person
+report, which "unmatch and report" files when no message is named). A sender's
+report of their own message holds nothing. A dismissed report's words
+go 180 days after the dismissal, as above. A direct message is removed by
+moderation only when it is sent (stored hidden), before its conversation
+closed, so its 180 days from removal are always over by then. A storage delete
+that fails keeps its message for the next pass, and a report filed while the
+pass runs keeps its message (the hold is asked again at the delete).
+
+**Kept:** the conversation row, empty: who the two people were, when it opened
+and closed, and why. A closed pair stays apart on every surface, and those rules
+read it. The host's "kept talking" count is frozen with the event's insight
+counts (`event_insight_tallies`), and the purge waits for that row before it
+takes the messages of a conversation opened at the event, for as long as the
+event exists; the admin funnel's "conversed" counts people
+with a message still stored, so a person whose only messages were purged leaves
+that stage.
 
 **Tonight's question answers go at 30 days** (owner, 2026-11-10):
 `event_match_preferences.tonight_answer`, and `work_intent` beside it (why they
