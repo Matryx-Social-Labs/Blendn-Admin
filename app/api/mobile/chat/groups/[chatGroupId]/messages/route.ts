@@ -10,7 +10,7 @@ import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { idForViewer } from "@/lib/room-handle"
 import { crewMemberImages, namesInRoom } from "@/lib/identity"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
+import { moderateMessage, checkSpam, preSaveCheck, inlineFlags, recordHide } from "@/lib/moderation"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
 import { notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 import { textCheckFor } from "@/lib/moderation/staging-override"
@@ -500,7 +500,7 @@ export async function POST(
     }
 
     // --- Pre-save moderation: keywords and contact details (sync, <1ms) ---
-    const preSave = preSaveCheck(content)
+    const { hide: preSave, keyword } = preSaveCheck(content)
     if (preSave) {
       // Save the message but immediately mark it as hidden
       let message
@@ -523,13 +523,11 @@ export async function POST(
         if (!raced) throw error
         return answerRoomRetry(raced, chatGroupId)
       }
-      // Flag for review and, for abuse rather than a phone number, count
-      // toward an auto-mute (fire-and-forget). The flag first: the count reads
+      // Flag for review and, for a slur or a line the model judges abusive,
+      // count toward an auto-mute (`recordHide`, fire-and-forget). The flag first: the count reads
       // flags, and run side by side it missed this message's own, so the mute
       // landed on the fourth hidden message instead of the third (SCRUM-483).
-      void flagForReview(message.id, chatGroupId, user.userId, preSave.result).then(() =>
-        preSave.autoMute ? checkAndAutoMute(user.userId, chatGroupId) : undefined
-      )
+      void recordHide(message.id, chatGroupId, user.userId, content, preSave)
       // Return success to sender but message is already hidden — never emitted to others
       return successResponse({
         id: message.id,
@@ -639,6 +637,7 @@ export async function POST(
      * found nothing. A room message is words only (R9, SCRUM-626).
      */
     let examinedInline = false
+    let flaggedInline = false
 
     // --- Pre-emit moderation: OpenAI check with 1s timeout ---
     // Race the OpenAI text check (started beside the write) against 1 s. Without a
@@ -701,10 +700,10 @@ export async function POST(
           createdAt: message.created_at.toISOString(),
         })
       }
-      // If flagged (not hidden), let it through but flag for review
-      if (openaiResult && openaiResult.action === "flag") {
-        void flagForReview(message.id, chatGroupId, user.userId, openaiResult)
-      }
+      // Delivered, and recorded for review: the model's flag and a keyword one.
+      const flags = examinedInline ? inlineFlags(openaiResult, keyword) : []
+      flaggedInline = flags.length > 0
+      for (const flag of flags) void flagForReview(message.id, chatGroupId, user.userId, flag)
       /*
        * Anything the inline check did not examine goes to the full pipeline,
        * which owns the verdict and will record `unchecked` if it cannot get
@@ -738,6 +737,7 @@ export async function POST(
      */
     if (
       examinedInline &&
+      !flaggedInline &&
       (!message.moderation_status || message.moderation_status === "pending")
     ) {
       void db.chat_messages

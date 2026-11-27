@@ -113,15 +113,17 @@ Exact-match against curated wordlists covering **9 languages** with leetspeak no
 | English | Latin | nigger, faggot, retard, cunt, kike, spic, chink, tranny, wetback |
 | Hindi | Devanagari | मादरचोद, भोसडीके, चूतिया, गांड, लौड़ा, रंडी, बहनचोद |
 | Hindi | Transliterated | madarchod, bhosadike, chutiya, gaand, lauda, randi, behenchod |
-| Tamil | Tamil + Latin | ஒத்த, தேவடியா, thevadiya, otha, punda, sunni |
+| Tamil | Tamil + Latin | தேவடியா, thevadiya, punda, myiru |
 | Telugu | Telugu + Latin | లంజ, దెంగు, lanja, dengu, pooku, modda |
-| Kannada | Kannada + Latin | ಸೂಳೆ, sule, magane, tunne |
+| Kannada | Kannada | ಸೂಳೆ |
 | Malayalam | Malayalam + Latin | തായോളി, thayoli, kunna, myre |
-| Bengali | Bengali + Latin | চোদ, মাগি, chod, magi, khanki |
+| Bengali | Bengali + Latin | চোদ, মাগি, khanki |
 | Marathi | Latin | zavadya, aighala, chinal |
-| Gujarati | Gujarati + Latin | ભોસડી, ghando, bhosadi |
+| Gujarati | Gujarati + Latin | ભોસડી, ghelchodo, bhosadi |
 
-**Abbreviations** (exact word match only): `mc`, `bc`, `bsdk`, `mc bc`
+**Review-only words** (SCRUM-1167): words that are also banter, a name or an ordinary word ("chod" = leave it, "shala" = brother-in-law, "magane" = O son, "boli", "Sunni", "harami", "साले"). A whole-word hit is a **flag** at 0.5: the message is delivered and a `moderation_flags` row (`auto_keyword`, `auto_action: none`) goes to the queue. It is never hidden and never counts toward the auto-mute. Glued back onto the word before it ("madar chod") it is matched as the word it spells. On message requests and Tonight answers the same hit is let through and recorded as `moderation.text_flagged`.
+
+When the inline OpenAI check answers within the second, the send route records the model's flag and the keyword flag itself (`inlineFlags`); otherwise `moderateMessage` does. A flagged message has `moderation_status = "flagged"`, never `clean`.
 
 ### Normalization (evasion prevention)
 
@@ -156,14 +158,14 @@ confidence = 0.85 + (number_of_matched_keywords × 0.1)
 | Message | Matched keywords | Confidence | Result |
 |---|---|---|---|
 | "you're such a chutiya retard" | chutiya, retard | 1.0 | **Hidden** (never broadcast) |
-| "this event is bc terrible" | bc | 0.9 | **Hidden** (never broadcast) |
+| "chod yaar, let's go" | chod (review-only) | 0.5 | **Delivered** and flagged for review |
 | "madarchod bhosadike" | madarchod, bhosadike | 1.0 | **Hidden** (never broadcast) |
 | "what a fag event" | fag | 0.9 | **Hidden** (never broadcast) |
 | "n!gg3r go home" | nigger (via leetspeak) | 0.9 | **Hidden** (never broadcast) |
 | "bsdk kya kar rahe ho" | bsdk | 0.9 | **Hidden** (never broadcast) |
 | "this event sucks" | none | — | **Passes** (no keywords matched) |
 | "the food is terrible" | none | — | **Passes** |
-| "mc bc chutiya" | mc, bc, chutiya | 1.0 | **Hidden** (never broadcast) |
+| "bc the MC is late" | none | — | **Passes** |
 
 ---
 
@@ -281,7 +283,9 @@ The image check uses the same categories and thresholds as text moderation: hide
 
 ### Auto-mute (repeated violations)
 
-If a user accumulates **3 or more hidden abusive messages within 1 hour** in the same chat group, they are automatically muted. A message hidden only for a contact detail (phone, handle, link) is hidden and flagged for review but does **not** count toward a mute (SCRUM-485); a flag that carries anything besides `contact_*` categories does:
+If a user accumulates **3 or more hidden abusive messages within 1 hour** in the same chat group, they are automatically muted. A message hidden only for a contact detail (phone, handle, link) is hidden and flagged for review but does **not** count toward a mute (SCRUM-485); neither does a message the keyword list hid for a swear word, a flag whose only category is `profanity` (D-052a, SCRUM-1469). A keyword hit on the English slurs (the first row of the table above) is written as `slur` and counts. A flag that carries anything besides `contact_*` and `profanity` counts.
+
+The model still judges a line hidden for a swear word or a contact detail, after the response (`recordHide` in `lib/moderation/index.ts`): its `hide` is recorded as a second flag on the message (`auto_text`, the model's categories) and counts. When the model does not answer (no key, an error, a timeout) the line does not count, and a warning is logged. The mute applies only to an `active` member: a host's mute or ban that landed before the count is left as the host set it.
 
 1. `chat_group_members.status` set to `"muted"`
 2. Socket.io emits `chat:memberMuted` with `{ muted: true }` — client disables input
@@ -293,7 +297,7 @@ If a user accumulates **3 or more hidden abusive messages within 1 hour** in the
 
 ### Auto-unmute (mute expiry)
 
-When a muted user tries to send a message, the backend checks if they still have 3+ hidden abusive messages (contact-detail hides do not count) in the last hour:
+When a muted user tries to send a message, the backend checks if they still have 3+ hidden abusive messages (contact-detail and swear-word hides do not count) in the last hour:
 
 1. If **no** (mute window has passed) → auto-unmute: status set to `"active"`, Socket.io emits `chat:memberMuted` with `{ muted: false, reason: "Auto-mute expired" }`, message send proceeds normally
 2. If **yes** (recent violations still in window) → user stays muted, 403 returned
