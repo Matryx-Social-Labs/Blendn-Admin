@@ -4,7 +4,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
-import { distinctAttendeeCounts, hereCountFor } from "@/lib/attendee-counts"
+import { distinctAttendeeCounts, hereNowFor } from "@/lib/attendee-counts"
 import { hostPayload } from "@/lib/event-host"
 import { eventTallies } from "@/lib/event-tallies"
 import { offersClaim } from "@/lib/curation"
@@ -158,7 +158,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    const [found, inside, attendedCounts, hereNow, tallies, userFavorite, userRating, userCheckIn, userRsvp, ticketing, myCrewPlans] =
+    const [found, inside, attendedCounts, here, tallies, userFavorite, userRating, userCheckIn, userRsvp, ticketing, myCrewPlans] =
       await Promise.all([
         eventRead,
         // Counted from check-in rows rather than a stored column. Just the
@@ -173,7 +173,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
          */
         distinctAttendeeCounts([eventId]),
         // Here now, the Room's number: `checkInCount` above keeps who has left.
-        hereCountFor(eventId),
+        hereNowFor(eventId),
         // Not `_count`: that aggregates each whole table per call. See `eventTallies`.
         eventTallies([eventId]),
         db.event_favorites.findUnique({
@@ -351,10 +351,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
        * nothing took one off on a leave, a checkout or an expiry), so it is
        * not read anywhere.
        */
-      chatGroup: event.chat_group && { ...event.chat_group, member_count: hereNow },
+      chatGroup: event.chat_group && { ...event.chat_group, member_count: here.hereCount },
       stats: {
         checkInCount: attendedCounts.get(eventId) ?? 0,
-        hereCount: hereNow,
+        hereCount: here.hereCount,
+        // Of `hereCount`, seen or checked in within the last 30 minutes (SCRUM-1232).
+        hereConfirmed: here.hereConfirmed,
         favoriteCount: tallies.favorites.get(eventId) ?? 0,
         /*
          * No average. Anyone who can open the event could poll it as people

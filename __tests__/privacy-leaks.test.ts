@@ -63,8 +63,11 @@ describe("B3 — the socket roster is for people in the room", () => {
      * exist to prevent. The REST twin already answers this with a 403.
      */
     const src = code("lib/socket-server.ts")
-    const open = /emitAsSeenBy\(io\.in\(`event:\$\{eventId\}`\), eventId, "event:checkin", \(idFor, _recognises, viewer\) => \(\{[\s\S]*?hereCount,\s*\}\)/.exec(src)
+    const open = /emitAsSeenBy\(io\.in\(`event:\$\{eventId\}`\), eventId, "event:checkin", \(idFor, _recognises, viewer\) => \(\{[\s\S]*?\.\.\.here,\s*\}\)/.exec(src)
     expect(open).not.toBeNull()
+    // `here` is the two counts and nothing else (SCRUM-1232): a headcount names nobody.
+    expect(src).toContain("send: (here: HereNow | undefined) =>")
+    expect(code("lib/attendee-counts.ts")).toMatch(/export interface HereNow \{\s*hereCount: number\s*hereConfirmed: number\s*\}/)
     expect(open![0]).not.toContain("userName")
     expect(open![0]).not.toContain("userImage")
     // And not even the id: each watcher reads a handle unless it is their own

@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client"
 import { db } from "./db"
 import { ATTENDED } from "./counting"
-import { inRoomWhere } from "./event-kind"
+import { CONFIRMED_WINDOW_MINUTES } from "./presence"
 
 /**
  * How many *people* attended each of these events.
@@ -83,13 +83,38 @@ export async function distinctAttendeeCountsByDay(
 }
 
 /**
- * Inside now, as `hereCountFor` says it — one predicate for the Room, the list
+ * Inside now, as `hereNow` says it — one predicate for the Room, the list
  * and the detail, and for the room's people (`GET /chat/groups/:id/participants`).
+ * `hereNow` is raw SQL (a FILTER has no Prisma spelling) and writes this
+ * predicate, and `inRoomWhere`'s, out by hand: `here-confirmed.itest.ts` holds
+ * the two to one number.
  */
 export const HERE_NOW = { status: "checked_in", kind: "attendee", user: { suspended_at: null } } as const
 
 /**
- * The Room's headline number: how many people are inside RIGHT NOW.
+ * The Room's headline numbers. `hereCount`: how many people are inside RIGHT
+ * NOW. `hereConfirmed`: how many of them were seen, or checked in, within
+ * `CONFIRMED_WINDOW_MINUTES` (SCRUM-1232) — never more than `hereCount`.
+ */
+export interface HereNow {
+  hereCount: number
+  hereConfirmed: number
+}
+
+const NOBODY_HERE: Readonly<HereNow> = Object.freeze({ hereCount: 0, hereConfirmed: 0 })
+
+/**
+ * `hereNow` for one event: the socket emitters, `room-preview`, the event
+ * detail and the big-room moderation check.
+ */
+export async function hereNowFor(eventId: string): Promise<HereNow> {
+  return (await hereNow([eventId])).get(eventId) ?? NOBODY_HERE
+}
+
+/**
+ * The Room's numbers for a page of events in one read: the events list and the
+ * Banter's room rows, so a card's "here now" is the Room's number and never
+ * the attended one (`checkInCount`), which keeps everyone who has left.
  *
  * Deliberately NOT `distinctAttendeeCounts`. That is "attended" — it keeps
  * `checked_out` so an event's headline stops falling as the night goes on, and
@@ -101,6 +126,8 @@ export const HERE_NOW = { status: "checked_in", kind: "attendee", user: { suspen
  * the check-in row, and a person who cannot enter the room should not be
  * counted in it. "Show online status" off is still counted: the roster's rule
  * is "in the room, counted, not listed" (SCRUM-141), and a count names nobody.
+ * At a venue day, a window still open (`inRoomWhere`), not the sweeper's lag
+ * (SCRUM-922); a real event is unchanged.
  *
  * NOT a chat room's membership. A member row outlives the check-in (checkout
  * and expiry close the window, `last_allowed_at`, and leave the row `active` so
@@ -108,65 +135,69 @@ export const HERE_NOW = { status: "checked_in", kind: "attendee", user: { suspen
  * everybody who was ever in and has not pressed Leave. `GET /chat/groups`
  * served that as "N in the room" and said 515 over a room of 483 (RC drive 3).
  *
+ * `hereConfirmed` takes nobody out of `hereCount`: pings are foreground only,
+ * so a silent phone is in a pocket as often as it went home, and emptying a
+ * full room on a timer is the worse lie. It says how much of the number was
+ * observed. A FILTER on the same rows, so the two can never disagree about who
+ * is in the room, and it costs no second read.
+ *
  * A COUNT in the database, never the rows: this runs on every arrival and
  * departure (the socket emitters), and a concert room is thousands of rows. One
  * row per person without a DISTINCT, because a person holds at most one
  * `checked_in` row anywhere (`event_check_ins_one_open_per_user`, SCRUM-705) —
  * a multi-day run's other days are closed rows. Served by
  * `event_check_ins(event_id, status)`.
- *
- * Read by the socket emitters (`hereCount`), `room-preview`, the events list
- * and detail, and the Banter's room rows (`hereCount`, through `hereCounts`).
  */
-export async function hereCountFor(eventId: string): Promise<number> {
-  // At a venue day, a window still open (`inRoomWhere`), not the sweeper's lag (SCRUM-922); a real event is unchanged.
-  return db.event_check_ins.count({ where: { event_id: eventId, ...HERE_NOW, ...inRoomWhere() } })
+export async function hereNow(eventIds: readonly string[]): Promise<Map<string, HereNow>> {
+  if (eventIds.length === 0) return new Map()
+  const now = new Date()
+  const since = new Date(now.getTime() - CONFIRMED_WINDOW_MINUTES * 60_000)
+  // any-kind: a venue day's room counts too, while its window is open (inRoomWhere); a real event always.
+  const rows = await db.$queryRaw<{ event_id: string; here: number; confirmed: number }[]>`
+    SELECT c.event_id,
+           COUNT(*)::int AS here,
+           COUNT(*) FILTER (WHERE c.last_seen_at > ${since} OR c.check_in_time > ${since})::int AS confirmed
+    FROM event_check_ins c
+    JOIN "User" u ON u.id = c.user_id
+    JOIN events e ON e.id = c.event_id
+    WHERE c.event_id IN (${Prisma.join(eventIds)})
+      AND c.status = 'checked_in'
+      AND c.kind = 'attendee'
+      AND u.suspended_at IS NULL
+      AND (e.kind = 'event' OR c.expires_at > ${now})
+    GROUP BY c.event_id
+  `
+  return new Map(rows.map((r) => [r.event_id, { hereCount: r.here, hereConfirmed: r.confirmed }]))
 }
 
-type CountRead = { running: Promise<number>; next: Promise<number> | null }
+type CountRead = { running: Promise<HereNow>; next: Promise<HereNow> | null }
 const countsInFlight = new Map<string, CountRead>()
 
 /**
- * `hereCountFor` for the socket emitters, where a doors-open minute is dozens of
+ * `hereNowFor` for the socket emitters, where a doors-open minute is dozens of
  * arrivals at once: calls that overlap share reads instead of making one each.
  * Never stale: a call joins only a read that STARTS after it was made, so the
  * count includes the write its caller just committed. At most two reads per
  * round however many callers (the one running, and one for everybody who came
  * while it ran).
  */
-export function hereCountCoalesced(eventId: string): Promise<number> {
+export function hereNowCoalesced(eventId: string): Promise<HereNow> {
   const inFlight = countsInFlight.get(eventId)
-  if (!inFlight) return readHereCount(eventId)
+  if (!inFlight) return readHereNow(eventId)
   return (inFlight.next ??= inFlight.running.then(
-    () => readHereCount(eventId),
-    () => readHereCount(eventId)
+    () => readHereNow(eventId),
+    () => readHereNow(eventId)
   ))
 }
 
-function readHereCount(eventId: string): Promise<number> {
-  const read: CountRead = { running: hereCountFor(eventId), next: null }
+function readHereNow(eventId: string): Promise<HereNow> {
+  const read: CountRead = { running: hereNowFor(eventId), next: null }
   countsInFlight.set(eventId, read)
   const settled = () => {
     if (countsInFlight.get(eventId) === read) countsInFlight.delete(eventId)
   }
   read.running.then(settled, settled)
   return read.running
-}
-
-/**
- * `hereCountFor` for a page of events in one read: the events list's
- * `hereCount`, so a card's "here now" is the Room's number and never the
- * attended one (`checkInCount`), which keeps everyone who has left. A GROUP BY,
- * one row per event, for the reason above.
- */
-export async function hereCounts(eventIds: readonly string[]): Promise<Map<string, number>> {
-  if (eventIds.length === 0) return new Map()
-  const rows = await db.event_check_ins.groupBy({
-    by: ["event_id"],
-    where: { event_id: { in: [...eventIds] }, ...HERE_NOW, ...inRoomWhere() },
-    _count: { _all: true },
-  })
-  return new Map(rows.map((r) => [r.event_id, r._count._all]))
 }
 
 /**

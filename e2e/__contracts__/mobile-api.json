@@ -27,6 +27,7 @@
         "featured",
         "fromPrice",
         "goingCount",
+        "hereConfirmed",
         "hereCount",
         "id",
         "isFavorited",
@@ -220,6 +221,7 @@
     "nested": {
       "groups[]": [
         "event",
+        "hereConfirmed",
         "hereCount",
         "id",
         "isCheckedIn",

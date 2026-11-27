@@ -45,7 +45,7 @@ const OVER: LiveFigures = {
   staffInside: 3,
   checkedInTotal: 115,
   checkedOutTotal: 0,
-  staleInside: 0,
+  unconfirmed: 0,
   capacity: 100,
   fillPct: 112,
   overCapacity: true,

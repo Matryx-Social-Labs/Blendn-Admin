@@ -31,6 +31,7 @@ import { TalkingAbout } from "@/components/dashboard/talking-about"
 import { useOpsSnapshot } from "@/lib/use-ops-snapshot"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
 import { liveCountLabel } from "@/lib/disclosure"
+import { CONFIRMED_WINDOW_MINUTES } from "@/lib/presence"
 import { cn } from "@/lib/utils"
 import { eventClock, livePhaseFor } from "@/lib/event-phase"
 
@@ -319,8 +320,8 @@ export function LiveTab({
 
 function hostDescription(s: LiveSnapshot): string {
   return `${formatNumber(s.checkedInTotal)} checked in, ${formatNumber(s.checkedOutTotal)} left${
-    s.staleInside > 0
-      ? `. ${formatNumber(s.staleInside)} not seen in the last few minutes — phones sleep, so they are still counted`
+    s.unconfirmed > 0
+      ? `. ${formatNumber(s.unconfirmed)} not seen in the last ${CONFIRMED_WINDOW_MINUTES} minutes — phones sleep, so they are still counted`
       : ""
   }${
     s.medianRate10m > 0
@@ -332,8 +333,8 @@ function hostDescription(s: LiveSnapshot): string {
 function venueDescription(s: VenueLiveSnapshot): string {
   return `${liveCountLabel(s.checkedInTotal)} checked in, ${liveCountLabel(s.checkedOutTotal)} left${
     // "Under 5" here could be nobody: said only when it is some.
-    s.staleInside !== "quiet"
-      ? `. ${liveCountLabel(s.staleInside)} not seen in the last few minutes — phones sleep, so they are still counted`
+    s.unconfirmed !== "quiet"
+      ? `. ${liveCountLabel(s.unconfirmed)} not seen in the last ${CONFIRMED_WINDOW_MINUTES} minutes — phones sleep, so they are still counted`
       : ""
   }. Shown as ranges, so one person arriving or leaving does not show.`
 }

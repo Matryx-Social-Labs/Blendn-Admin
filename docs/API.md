@@ -1556,6 +1556,16 @@ does not fall as people go home. `hereCount` is who is inside right now:
 checked in, not checked out, guests only — the Room's and the room preview's
 number. A live card that says "here now" reads `hereCount`.
 
+**`hereConfirmed` says how much of `hereCount` was seen (SCRUM-1232).** Of
+the people in `hereCount`, how many sent a ping or checked in within the last
+30 minutes. Pings stop when the app is in the background, so a silent phone is
+in a pocket as often as it went home: nobody leaves `hereCount` for silence,
+and the rest are "probably here". Same people as `hereCount` (attendees, not
+suspended), never more. Carried wherever `hereCount` is: each list event, the
+detail's `stats`, `room-preview`, each event room on `GET /chat/groups` (null
+with `hereCount` for a venue day's room) and the sockets' `event:checkin`,
+`event:room:checkin` and `event:checkout`. Older clients ignore it.
+
 **Each event carries `goingCount`**: RSVPs with status `going` — not
 `waitlisted`, `maybe` or `not_going`. It is the number `GET /events/:eventId`
 calls `stats.rsvpCount`, on the card so a list need not open every event to
@@ -1668,9 +1678,10 @@ and Carnatic as a party.
 
 ### GET /events/:eventId/room-preview — the room from the door
 
-`{ hereCount, tasteMatchCount }` for anyone who can open the event (the gate of
+`{ hereCount, hereConfirmed, tasteMatchCount }` for anyone who can open the event (the gate of
 `GET /events/:id`; a draft or a stranger's private event is a 404). No check-in
-needed. `hereCount` is the Room's own number, inside now.
+needed. `hereCount` is the Room's own number, inside now; `hereConfirmed`
+is how many of them were seen or checked in within the last 30 minutes.
 
 **`tasteMatchCount` is a bucket, never a count (SCRUM-914).** It is `null`,
 `3` or `10`:
@@ -2639,13 +2650,14 @@ is the place, not by `event.title` ("Venue day · ‹place› · ‹date›", bo
 go live and expire, is the differencing the venue's bucket exists to stop (D-19).
 
 An event's room carries `hereCount`: how many are **in the room now**, the
-Room's own number — checked in, attendees, not suspended (`hereCountFor`, the
+Room's own number — checked in, attendees, not suspended (`hereNowFor`, the
 same figure as `room-preview`, the events list, `GET /events/:id`'s
 `stats.hereCount` and the sockets' `hereCount`). Never the room's members: a
 member row outlives the check-in (a checkout or an expiry leaves it `active`),
 so a count of members was everybody ever in who had not pressed Leave.
 `memberCount` is the same number under its old name, for the apps installed
-before `hereCount`.
+before `hereCount`. `hereConfirmed` is how many of `hereCount` were seen or
+checked in within the last 30 minutes (null with it).
 
 Each group carries `isCheckedIn` — the caller is `checked_in` to that event with
 no `check_out_time`, so the room is live for them right now. The app lifts those

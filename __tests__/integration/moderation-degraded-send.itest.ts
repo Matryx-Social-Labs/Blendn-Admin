@@ -19,7 +19,7 @@ jest.mock("@/lib/moderation/openai-moderation", () => ({
 const mockHere = jest.fn()
 jest.mock("@/lib/attendee-counts", () => ({
   ...jest.requireActual("@/lib/attendee-counts"),
-  hereCountFor: (...a: unknown[]) => mockHere(...a),
+  hereNowFor: async (...a: unknown[]) => ({ hereCount: await mockHere(...a), hereConfirmed: 0 }),
 }))
 const emitted: string[] = []
 jest.mock("@/lib/socket-server", () => ({

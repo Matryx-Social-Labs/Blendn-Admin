@@ -2,7 +2,7 @@ process.env.MOBILE_JWT_SECRET ??= "itest-mobile-secret-0123456789abcdefghij"
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
 import { recognisedInRoomBy, visibleInRoom } from "@/lib/identity"
-import { hereCountCoalesced } from "@/lib/attendee-counts"
+import { hereNowCoalesced } from "@/lib/attendee-counts"
 
 import { arrive, befriend, cleanupCrewWorld, liveEvent, person, type Person } from "./crew-world"
 import { db } from "./helpers"
@@ -14,7 +14,7 @@ import { sqlCounter } from "./sql-count"
  * 1. Which of everyone listening recognises the arriver (`recognisedInRoomBy`):
  *    five reads with `IN (every listener)`. Now the arriver's own reveal and
  *    friendships say who could, and only those are asked the full rule.
- * 2. How many are in the room (`hereCountFor`): a count per arrival. Arrivals
+ * 2. How many are in the room (`hereNowFor`): a count per arrival. Arrivals
  *    that overlap now share one read that started after the last of them committed.
  */
 const counter = sqlCounter()
@@ -74,13 +74,13 @@ describe("the room's headline count", () => {
     const first = await person("hc-1")
     await arrive(eventId, occurrenceId, first)
 
-    const burst = await counter.during(() => Promise.all(Array.from({ length: 20 }, () => hereCountCoalesced(eventId))))
+    const burst = await counter.during(() => Promise.all(Array.from({ length: 20 }, async () => (await hereNowCoalesced(eventId)).hereCount)))
     expect(burst.result).toEqual(Array(20).fill(1))
     expect(burst.sql.length).toBeLessThanOrEqual(2) // before: 20
 
     // A later arrival is counted by a read that starts after it: no stale count.
     const second = await person("hc-2")
     await arrive(eventId, occurrenceId, second)
-    expect(await hereCountCoalesced(eventId)).toBe(2)
+    expect((await hereNowCoalesced(eventId)).hereCount).toBe(2)
   })
 })

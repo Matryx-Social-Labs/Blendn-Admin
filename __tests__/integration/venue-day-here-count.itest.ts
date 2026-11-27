@@ -5,7 +5,7 @@ process.env.NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? "itest-nextauth-sec
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0) }))
 
-import { hereCountCoalesced, hereCountFor, hereCounts } from "@/lib/attendee-counts"
+import { hereNow, hereNowCoalesced, hereNowFor } from "@/lib/attendee-counts"
 
 import { closeDb, db } from "./helpers"
 import { cleanupWorld, goLive, person, venue } from "./go-live-world"
@@ -29,13 +29,13 @@ describe("a venue day's here-count", () => {
     const people = [await person("vdh"), await person("vdh"), await person("vdh")]
     const results = await Promise.all(people.map((p) => goLive(p.token, v)))
     const dayId = results[0].json.data.venueDayId as string
-    expect(await hereCountFor(dayId)).toBe(3)
+    expect((await hereNowFor(dayId)).hereCount).toBe(3)
 
     await db.event_check_ins.updateMany({ where: { event_id: dayId, user_id: people[2].id }, data: { expires_at: new Date(Date.now() - 1_000) } })
     expect((await db.event_check_ins.findFirstOrThrow({ where: { event_id: dayId, user_id: people[2].id } })).status).toBe("checked_in")
 
-    expect(await hereCountFor(dayId)).toBe(2)
-    expect(await hereCountCoalesced(dayId)).toBe(2)
-    expect((await hereCounts([dayId])).get(dayId)).toBe(2)
+    expect((await hereNowFor(dayId)).hereCount).toBe(2)
+    expect((await hereNowCoalesced(dayId)).hereCount).toBe(2)
+    expect((await hereNow([dayId])).get(dayId)?.hereCount).toBe(2)
   })
 })

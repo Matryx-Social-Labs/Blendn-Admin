@@ -1,6 +1,6 @@
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
-import { hereCountFor } from "@/lib/attendee-counts"
+import { hereNowFor } from "@/lib/attendee-counts"
 import { moderationUnavailableResponse } from "@/lib/api-response"
 import { breakerIsOpen } from "./text-breaker"
 import type { ModerationCheck } from "./openai-moderation"
@@ -26,7 +26,7 @@ export const MODERATION_UNAVAILABLE_MESSAGE =
 
 /** One count, and only ever on the failure path. */
 async function isBigRoom(eventId: string | null): Promise<boolean> {
-  return eventId !== null && (await hereCountFor(eventId)) > BIG_ROOM_HERE_COUNT
+  return eventId !== null && (await hereNowFor(eventId)).hereCount > BIG_ROOM_HERE_COUNT
 }
 
 /** The 503 a refused send answers with (also a retry of a held row, `lib/room-retry.ts`). */
