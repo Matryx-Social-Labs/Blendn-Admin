@@ -2041,8 +2041,8 @@
     "csp-report.test.ts": {
       "guards": "Step 16 (MN-E04, G12): the policy's exact token sets (script-src, frame-src, connect-src, frame-ancestors, default-src, form-action) and that next.config.ts sends exactly contentSecurityPolicy(sentryCspReportUri(...)).",
       "mutation": "M834 `https:` added to script-src. M835 next.config.ts sending its own variant of the policy.",
-      "observed": "M834: 1 failing (the exact token sets). M835: 1 failing (is the header next.config.ts sends). Reverted green.",
-      "date": "2026-10-09"
+      "observed": "M834: 1 failing (the exact token sets). M835: 1 failing (is the header next.config.ts sends). Reverted green. SCRUM-1243 (2026-11-26), the enforcing CSP on /dashboard, /pay and /login: M1 `evalSource` always ' 'unsafe-eval'': 6 failing (the policy test and the five enforced paths). M2 next.config passing `true` for allowEval: 5 failing (the enforced paths). M3 the report-only source reset to `/:path*`: 5 failing (report-only sent beside the enforcing header). M4 media-src removed: 1 failing (the exact token sets). M5 the lookahead without its `(?:/|$)` boundaries: 3 failing (/dashboards, /payments, /login-help lose their report-only header). After review: M6 the enforcing header built with a null report-uri: 8 failing (every enforced path). M7 the /pay block moved above `/:path*`: 1 failing (the pay page's no-referrer). M8 /invite dropped from the enforced list only: 1 failing. Reverted; 26 green.",
+      "date": "2026-11-26"
     },
     "razorpay-signature.test.ts": {
       "guards": "Step 16 MN-U02 after review: HMAC over the raw bytes (a multi-byte body), the same signature in upper case or with spaces accepted, a re-serialised body, one changed byte, missing, wrong secret, short, long and non-hex refused without throwing; planMatches on key + price + period.",
