@@ -9,6 +9,7 @@ import {
   signAccessToken,
   signRefreshToken,
   storeRefreshToken,
+  SuspendedIdentityError,
 } from "@/lib/mobile-auth"
 import { profileForSelfResponse } from "@/lib/self-profile"
 import { db } from "@/lib/db"
@@ -125,6 +126,7 @@ export async function POST(request: NextRequest) {
       isNewUser ? 201 : 200
     )
   } catch (error) {
+    if (error instanceof SuspendedIdentityError) return accountRefusal("suspended")
     logger.error("Google auth error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to authenticate with Google")
   }
