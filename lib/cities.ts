@@ -134,11 +134,17 @@ export function cityFor(catalogue: Catalogue, name: string | null | undefined): 
   return catalogue.cityByKey.get(cityKey(name)) ?? null
 }
 
+/** Whether a city's box holds this point, edges included. */
+export function cityHolds(city: CatalogueCity, lat: number, lon: number): boolean {
+  const b = city.bounds
+  return lat >= b.minLat && lat <= b.maxLat && lon >= b.minLon && lon <= b.maxLon
+}
+
 /** The catalogue city whose bounds hold this point; where boxes overlap, the one whose centre is nearest. */
 function cityAt(catalogue: Catalogue, lat: number, lon: number): CatalogueCity | null {
   const distance = (c: CatalogueCity) => (c.centre.latitude - lat) ** 2 + (c.centre.longitude - lon) ** 2
   return catalogue.cities
-    .filter(({ bounds: b }) => lat >= b.minLat && lat <= b.maxLat && lon >= b.minLon && lon <= b.maxLon)
+    .filter((c) => cityHolds(c, lat, lon))
     .reduce<CatalogueCity | null>((best, c) => (!best || distance(c) < distance(best) ? c : best), null)
 }
 

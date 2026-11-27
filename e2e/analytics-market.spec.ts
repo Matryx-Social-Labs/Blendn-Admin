@@ -56,6 +56,9 @@ async function night(label: string, daysAgo: number, attendees: string[], minute
       timezone: "America/Toronto",
       status: "published",
       city: "Toronto",
+      // A label is market evidence only with its pin inside the city (SCRUM-1447).
+      latitude: 43.6431,
+      longitude: -79.4246,
       organizer_id: organizer,
       organizer_org_id: orgId,
     },
@@ -182,7 +185,7 @@ test("a Toronto organizer past its window sees its own figures and the launch li
   }
   await db.entitlements.deleteMany({ where: { subject_id: orgId } })
 
-  await db.events.updateMany({ where: { id: { in: events } }, data: { city: "Bengaluru", timezone: "Asia/Kolkata" } })
+  await db.events.updateMany({ where: { id: { in: events } }, data: { city: "Bengaluru", latitude: 12.9716, longitude: 77.5946, timezone: "Asia/Kolkata" } })
   for (const width of WIDTHS) {
     const { ctx, page } = await open(baseURL!, width)
     await expect(page.getByText(LINE)).toHaveCount(0)

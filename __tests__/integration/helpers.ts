@@ -61,6 +61,18 @@ export async function refusingWrites(
   }
 }
 
+/**
+ * A pin inside the catalogue city a label names (the migration's boxes), as a real listing has: a city's market is
+ * read from label and pin together (SCRUM-1447, `marketOf`). A label it does not know gets no pin.
+ */
+const CITY_PINS: Record<string, { latitude: number; longitude: number }> = {
+  bengaluru: { latitude: 12.9716, longitude: 77.5946 },
+  bangalore: { latitude: 12.9716, longitude: 77.5946 },
+  toronto: { latitude: 43.6431, longitude: -79.4246 },
+  mississauga: { latitude: 43.6, longitude: -79.6 },
+}
+export const pinOf = (city: string | null) => CITY_PINS[city?.toLowerCase() ?? ""] ?? { latitude: null, longitude: null }
+
 /** Namespace every fixture so a failed run can never collide with the next. */
 export const testId = (label: string) =>
   `itest_${label}_${Math.random().toString(36).slice(2, 10)}`
