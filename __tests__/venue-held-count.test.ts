@@ -2,11 +2,16 @@
 const mockDb: Record<string, Record<string, jest.Mock>> = {}
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/rating-batches", () => ({ publishedRatingGroups: async () => [] }))
+// Room tonight's read of the live snapshot, and its offers (none: the venue below has no owner org).
+const mockRead = jest.fn()
+jest.mock("@/lib/live-snapshot", () => ({ readLiveSnapshot: (...a: unknown[]) => mockRead(...a) }))
+jest.mock("@/lib/offers/venue", () => ({ redeemedByNight: async () => new Map() }))
 
-import { discloseCategories, discloseNegatives } from "@/lib/disclosure"
+import { discloseCategories, discloseNegatives, raisedCategories, type DisclosedCategory } from "@/lib/disclosure"
 import { buildFeedbackDigest, tallyFeedback, type TallyRow } from "@/lib/feedback-digest"
 import { forVenue, type LiveSnapshot } from "@/lib/live-metrics"
 import { venueMood } from "@/lib/venue-nights"
+import { venueTonight } from "@/lib/venue-room-tonight"
 
 /*
  * A venue cannot work out a held-back complaint count either (SCRUM-1500, the venue half of register D-012).
@@ -72,7 +77,10 @@ function hostSnapshot(feedback: TallyRow[]): LiveSnapshot {
   }
 }
 
-/** Every venue surface for one night: the Feedback tab, the Nights here row, the Live tab and Room tonight's word. */
+/**
+ * Every venue surface for one night with a figure: the Feedback tab, the Nights here row and the Live tab. Room
+ * tonight's word on another host's night reads the same exact negatives (tested on its own below), so adds nothing.
+ */
 async function venueSurfaces(feedback: TallyRow[]) {
   const t = tallyFeedback(feedback)
   // `readLiveSnapshot` hands the venue's copy the window's exact negatives, never the host's band.
@@ -81,8 +89,6 @@ async function venueSurfaces(feedback: TallyRow[]) {
     feedbackTab: await venueDigest(feedback),
     nightsHere: venueMood(t.counts),
     live: { sentiment: live.sentiment, raised: live.raised },
-    // Room tonight on another host's night: the word from the same exact negatives (`venue-room-tonight.ts`).
-    tonight: venueMood(t.counts)?.word ?? "quiet",
   }
 }
 
@@ -153,6 +159,66 @@ describe("when the names alone would pin a held count", () => {
     const s = await venueSurfaces(rows("entry_queue", [3]))
     expect(s.feedbackTab.counts.negative).toBe("few")
     expect(s.feedbackTab.raised).toEqual(["entry_queue"])
+  })
+})
+
+describe("raisedCategories, on its own", () => {
+  const held = (category: string): DisclosedCategory => ({ category, count: null, suppressed: true })
+  const shown = (category: string, count: number): DisclosedCategory => ({ category, count, suppressed: false })
+
+  it("puts a category the taxonomy does not know last, by name", () => {
+    expect(raisedCategories([shown("zeta", 9), shown("alpha", 9), shown("crowding", 5), held("safety_conduct")], 30)).toEqual(["safety_conduct", "crowding", "alpha", "zeta"])
+  })
+
+  it("withholds at four values left and names at five: k names leave a held one 1 to negative − k + 1", () => {
+    expect(raisedCategories([held("entry_queue"), held("facilities")], 5)).toEqual([])
+    expect(raisedCategories([held("entry_queue"), held("facilities")], 6)).toEqual(["entry_queue", "facilities"])
+  })
+
+  it("names a held category raised alone when the venue reads only \"a few\" negatives", () => {
+    expect(raisedCategories([held("entry_queue")], "few")).toEqual(["entry_queue"])
+    expect(raisedCategories([held("entry_queue")], 12)).toEqual([])
+  })
+
+  it("never withholds when nothing is held: no count to protect", () => {
+    expect(raisedCategories([shown("crowding", 5)], 5)).toEqual(["crowding"])
+  })
+})
+
+describe("the venue's mood alert (forVenue)", () => {
+  // 5 positive, 4 neutral, the host's band 6–10: on its middle (8 of 17, 47%) the alert fires. Exact 5 (5 of 14, 36%)
+  // does not; exact 9 (9 of 18, 50%) does.
+  const snapshot = (): LiveSnapshot => ({
+    ...hostSnapshot([]),
+    sentiment: { positive: 5, neutral: 4, negative: { min: 6, max: 10 } },
+    alerts: [{ kind: "mood_sliding", severity: "warning", title: "Mood sliding", body: "6–10 of 15–19 classified messages in the last 30 minutes are negative." }],
+  })
+
+  it("is decided again on the exact negatives, not the band's middle", () => {
+    expect(forVenue(snapshot(), 5).alerts.map((a) => a.kind)).not.toContain("mood_sliding")
+    expect(forVenue({ ...snapshot(), alerts: [] }, 9).alerts).toEqual([expect.objectContaining({ kind: "mood_sliding", body: "Most of the recent classified messages are negative." })])
+  })
+})
+
+describe("Room tonight's mood word (venue-room-tonight.ts)", () => {
+  // 10 positive, the exact 16 negative: "mostly negative". The host's band 12–16 (midpoint 14) reads "mixed".
+  const room = (organizer_org_id: string) => [{ id: "evt", kind: "event", organizer_org_id, organizer_org: { display_name: "Host" }, organizer: null }]
+  const tonight = async (organizer_org_id: string) => {
+    mockDb.events = { findMany: jest.fn().mockResolvedValue(room(organizer_org_id)) }
+    mockRead.mockResolvedValue({
+      snapshot: { guestsInside: 30, checkInRate10m: 4, social: null, sentiment: { positive: 10, neutral: 0, negative: { min: 12, max: 16 } } },
+      negatives: 16,
+    })
+    const venue = { id: "v1", owner_org_id: null, claimed_at: new Date("2026-01-01T00:00:00Z"), timezone: "Asia/Kolkata", day_reset_hour: 6 }
+    return (await venueTonight(venue, { id: "owner", orgIds: ["org-venue"] }))?.mood
+  }
+
+  it("reads another host's night from the exact negatives, as the venue reads the night", async () => {
+    expect(await tonight("org-host")).toBe("mostly negative")
+  })
+
+  it("reads a night its own organisation hosts from the band's middle, as that night's host does", async () => {
+    expect(await tonight("org-venue")).toBe("mixed")
   })
 })
 

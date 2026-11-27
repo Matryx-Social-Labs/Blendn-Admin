@@ -350,8 +350,9 @@ function VenueMood({ snapshot }: { snapshot: VenueLiveSnapshot }) {
       </p>
       <h3 className="mt-2 text-sm font-bold">Complaints — last 30 min</h3>
       {snapshot.raised.length === 0 ? (
-        // No reason either way: none raised, or none the venue may be named (`raisedCategories`).
-        <p className="text-[0.78rem] text-muted-foreground">Nothing to list in this window.</p>
+        // No reason either way: none raised, or none the venue may be named (`raisedCategories`). Not "nothing
+        // negative": the mood line above may say otherwise.
+        <p className="text-[0.78rem] text-muted-foreground">Read what is said in the Room chat you moderate.</p>
       ) : (
         <RaisedList categories={snapshot.raised} />
       )}

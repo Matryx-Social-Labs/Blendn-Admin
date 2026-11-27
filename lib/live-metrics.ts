@@ -294,9 +294,7 @@ export function deriveAlerts(
   // Decided and told on the disclosed figures (D-012): a band's midpoint, as the bar draws it, so the alert firing or
   // its words never narrow a held-back count the screen does not.
   const { positive, neutral, negative } = snapshot.sentiment
-  const classified = positive + neutral + midpoint(negative)
-  // A threshold on a handful of messages is noise, not a mood.
-  if (classified >= 10 && midpoint(negative) / classified >= 0.4) {
+  if (moodSliding(positive, neutral, midpoint(negative))) {
     alerts.push({
       kind: "mood_sliding",
       severity: "warning",
@@ -380,6 +378,23 @@ export function alertsForVenue<T extends { kind: string; body: string }>(alerts:
   })
 }
 
+/** The mood alert's rule. A threshold on a handful of messages is noise, not a mood. */
+function moodSliding(positive: number, neutral: number, negative: number): boolean {
+  const classified = positive + neutral + negative
+  return classified >= 10 && negative / classified >= 0.4
+}
+
+/**
+ * The host's alerts with the mood alert decided again on the window's exact negatives, for a venue: decided on the
+ * band's middle, whether it fired moved with where the held count sat in the band, and beside the exact negatives the
+ * venue reads that narrowed it (SCRUM-1500). The venue's body names no figure (`FOR_THE_VENUE`).
+ */
+function withVenueMood(s: LiveSnapshot, negatives: number): LiveAlert[] {
+  const rest = s.alerts.filter((a) => a.kind !== "mood_sliding")
+  if (!moodSliding(s.sentiment.positive, s.sentiment.neutral, negatives)) return rest
+  return [...rest, { kind: "mood_sliding", severity: "warning", title: "Mood sliding", body: "" }]
+}
+
 /**
  * The host's snapshot as a venue may see it.
  *
@@ -414,6 +429,6 @@ export function forVenue(
       negative: liveCountBucket(negatives),
     },
     raised: raisedCategories(s.categories, negatives),
-    alerts: alertsForVenue(s.alerts),
+    alerts: alertsForVenue(withVenueMood(s, negatives)),
   }
 }

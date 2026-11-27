@@ -146,3 +146,21 @@ describe("the unconfirmed line", () => {
     expect(render(host(), "live")).not.toContain("not seen in the last")
   })
 })
+
+describe("a venue's complaints on the Live tab (SCRUM-1500)", () => {
+  const HEADING = "Complaints — last 30 min"
+  const complaints = (html: string) => html.slice(html.indexOf(HEADING) + HEADING.length, html.indexOf("This channel carries"))
+
+  it("names them in the order it is sent, safety in red, with no count", () => {
+    const html = complaints(render({ ...venue(), raised: ["safety_conduct", "crowding"] } as VenueLiveSnapshot, "live"))
+    expect(html).toMatch(/safety conduct → mod[\s\S]*crowding/)
+    expect(html).toContain("text-destructive")
+    expect(html.replace(/<[^>]*>/g, " ")).not.toMatch(/\d/)
+  })
+
+  it("points to the Room chat when none is named, and never says nothing negative was said", () => {
+    const html = complaints(render({ ...venue(), sentiment: { positive: "quiet", neutral: "quiet", negative: "20+" }, raised: [] } as VenueLiveSnapshot, "live"))
+    expect(html).toContain("Read what is said in the Room chat you moderate.")
+    expect(html).not.toContain("Nothing negative")
+  })
+})

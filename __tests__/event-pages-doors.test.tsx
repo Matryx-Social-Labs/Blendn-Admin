@@ -253,6 +253,22 @@ describe("the Feedback tab's page", () => {
     expect(html).toContain("What they were about is listed; read them where they were said, in the Room chat you moderate.")
   })
 
+  it("names none and points to the Room chat when the venue's list is withheld (SCRUM-1500)", async () => {
+    mockSession.user.role = "venue_owner"
+    mockEvent = { status: "published", kind: "event", ...over, organizer_org_id: "org-b" }
+    jest.requireMock("@/lib/feedback-digest").buildFeedbackDigest.mockResolvedValue({
+      ...emptyDigest(),
+      view: "venue",
+      counts: { positive: 0, neutral: 0, negative: 12 },
+      total: 12,
+      raised: [],
+    })
+    const html = renderToStaticMarkup(await feedback())
+    expect(html).toContain("The negatives are the takeaway. Read them where they were said, in the Room chat you moderate.")
+    expect(html).not.toContain("What went wrong")
+    expect(html).not.toContain("is listed")
+  })
+
   it("shows no stars panel when nobody rated and nothing was classified", async () => {
     mockEvent = { status: "published", kind: "event", ...over, organizer_org_id: "org-a" }
     jest.requireMock("@/lib/feedback-digest").buildFeedbackDigest.mockResolvedValue(emptyDigest())
