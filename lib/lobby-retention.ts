@@ -136,23 +136,45 @@ async function postsPastTheirTime(since: Date) {
 /** A message or post past its time, with its photo's stored URL and whose row it is. */
 type PastTheirTime = { id: string; url: string | null; owner_id: string }
 
-type Refused = { id: string; why: ChatMediaRefusal }
+type Refused = { id: string; why: ChatMediaRefusal | "named by another row" }
+
+/**
+ * Older objects (`chat/<id>/`, before SCRUM-448) that a row this pass does not
+ * take still names: a DM, a room inside its window, an image held for a report.
+ * Those stay in storage. A sealed copy is made once per send, so only these are
+ * asked. ponytail: scans the three tables, only on a pass with an older key due;
+ * none was written after 2026-09-30, so this ends when the last of them goes.
+ */
+async function stillNamed(keys: string[], purging: string[]): Promise<Set<string>> {
+  if (keys.length === 0) return new Set()
+  const rows = await db.$queryRaw<{ key: string }[]>`
+    SELECT k AS key FROM unnest(${keys}::text[]) k
+     WHERE EXISTS (SELECT 1 FROM chat_messages m WHERE strpos(m.metadata->>'mediaUrl', k) > 0 AND m.id::text <> ALL(${purging}::text[]))
+        OR EXISTS (SELECT 1 FROM board_posts b WHERE strpos(b.photo_url, k) > 0 AND b.id::text <> ALL(${purging}::text[]))
+        OR EXISTS (SELECT 1 FROM private_messages p WHERE strpos(p.media_url, k) > 0)
+        OR EXISTS (SELECT 1 FROM retained_report_media r WHERE r.object_key = k)`
+  return new Set(rows.map((r) => r.key))
+}
 
 /**
  * Storage first, then the row: an object whose delete failed keeps its row, so
  * the next pass finds it again. A URL that names no object of the row's own
- * (`chatMediaKey`) deletes nothing in storage and its row still goes: kept, it
- * would never become deletable, and enough of them would fill every batch.
+ * (`chatMediaKey`), or an older object another row still names (`stillNamed`),
+ * deletes nothing in storage and its row still goes: kept, it would never
+ * become deletable, and enough of them would fill every batch.
  */
 async function deleteObjects(rows: PastTheirTime[]): Promise<{ ids: string[]; photos: number; kept: number; refused: Refused[] }> {
   const ids: string[] = []
   const refused: Refused[] = []
   let photos = 0
   let kept = 0
+  const keys = new Map(rows.map((row) => [row.id, row.url ? chatMediaKey(row.url, row.owner_id) : null]))
+  const older = [...new Set([...keys.values()].filter((k): k is string => k !== null && !k.startsWith("chat/sealed/")))]
+  const named = await stillNamed(older, rows.map((r) => r.id))
   for (const row of rows) {
-    const key = row.url ? chatMediaKey(row.url, row.owner_id) : null
-    if (!key) {
-      if (row.url) refused.push({ id: row.id, why: chatMediaRefusal(row.url, row.owner_id) })
+    const key = keys.get(row.id)
+    if (!key || named.has(key)) {
+      if (row.url) refused.push({ id: row.id, why: key ? "named by another row" : chatMediaRefusal(row.url, row.owner_id) })
       ids.push(row.id)
       continue
     }
@@ -230,7 +252,7 @@ export async function purgeClosedLobbies(now: Date = new Date()): Promise<PurgeP
   const refused = [...gone.refused, ...postsGone.refused]
   // Never the URL: one stored before SCRUM-426 is whatever a client sent.
   if (refused.length) {
-    logger.warn("Lobby purge: photo URLs naming no object of the row's own; rows deleted, storage untouched", { count: refused.length, rows: refused.slice(0, 5) })
+    logger.warn("Lobby purge: photos not the row's alone to delete; rows deleted, storage untouched", { count: refused.length, rows: refused.slice(0, 5) })
   }
 
   pass.hostPosts = await db.$executeRaw`DELETE FROM board_host_posts h USING events e WHERE e.id = h.event_id AND ${closesAt} < ${since}`

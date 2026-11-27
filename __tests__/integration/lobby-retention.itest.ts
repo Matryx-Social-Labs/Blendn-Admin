@@ -28,6 +28,7 @@ const sealed = () => {
 }
 
 afterAll(async () => {
+  await db.retained_report_media.deleteMany({ where: { user_id: { in: users } } })
   await db.message_reports.deleteMany({ where: { reporter_id: { in: users } } })
   await db.board_alert_preferences.deleteMany({ where: { event_id: { in: events } } })
   await db.board_seen.deleteMany({ where: { event_id: { in: events } } })
@@ -268,6 +269,7 @@ describe("the purge", () => {
 describe("the purge, photos stored under the older layout", () => {
   const legacy: Record<string, { id: string; key: string }> = {}
   const refused: Record<string, string> = {}
+  const shared: Record<string, { id: string; key: string }> = {}
   let room = ""
   let other = ""
   let warned: unknown[][] = []
@@ -300,6 +302,28 @@ describe("the purge, photos stored under the older layout", () => {
     }
     for (const [name, url] of Object.entries(shapes)) refused[name] = await withPhoto(url)
 
+    // An older object another row still shows: a DM, a room inside its window, an image held for a report.
+    const named = (tag: string) => {
+      const key = `chat/${author}/1758000000000-${tag}-shared.jpg`
+      return { key, url: `https://blendn-media-private.fly.storage.tigris.dev/${key}` }
+    }
+    const inDm = named("dm0001")
+    shared.inDm = { id: await withPhoto(inDm.url), key: inDm.key }
+    const conversation = await db.private_conversations.create({ data: { user1_id: author, user2_id: other }, select: { id: true } })
+    shared.dm = { id: (await db.private_messages.create({ data: { conversation_id: conversation.id, sender_id: author, media_url: inDm.url }, select: { id: true } })).id, key: inDm.key }
+    const inOpenRoom = named("open01")
+    shared.inOpenRoom = { id: await withPhoto(inOpenRoom.url), key: inOpenRoom.key }
+    shared.openRoom = { id: (await db.chat_messages.create({ data: { chat_group_id: recent.room, user_id: author, content: "", metadata: { mediaUrl: inOpenRoom.url } }, select: { id: true } })).id, key: inOpenRoom.key }
+    const held = named("held01")
+    shared.held = { id: await withPhoto(held.url), key: held.key }
+    await db.retained_report_media.create({
+      data: { user_id: author, object_key: held.key, message_id: randomUUID(), message_type: "private", account_deleted_at: ago(1), erase_by: ago(-30) },
+    })
+    // Two messages due in the same pass: once both go, nothing names it.
+    const twice = named("twice1")
+    legacy.twiceA = { id: await withPhoto(twice.url), key: twice.key }
+    legacy.twiceB = { id: await withPhoto(twice.url), key: twice.key }
+
     mockDeleteFile.mockClear()
     const warn = jest.spyOn(logger, "warn")
     await purgeClosedLobbies()
@@ -314,7 +338,22 @@ describe("the purge, photos stored under the older layout", () => {
 
   it("deletes nothing in storage for a URL that names anything but the author's own chat/ object", async () => {
     const deleted = mockDeleteFile.mock.calls.map((c) => c[0])
-    expect(deleted.sort()).toEqual(Object.values(legacy).map((l) => l.key).sort())
+    expect([...new Set(deleted)].sort()).toEqual([...new Set(Object.values(legacy).map((l) => l.key))].sort())
+  })
+
+  it("leaves an older object in storage while another row still names it, and still deletes the due row", async () => {
+    for (const name of ["inDm", "inOpenRoom", "held"]) {
+      expect(mockDeleteFile).not.toHaveBeenCalledWith(shared[name].key)
+      expect(await exists.message(shared[name].id)).toBe(false)
+    }
+    expect(await db.private_messages.count({ where: { id: shared.dm.id } })).toBe(1)
+    expect(await exists.message(shared.openRoom.id)).toBe(true)
+    expect(await db.retained_report_media.count({ where: { object_key: shared.held.key } })).toBe(1)
+  })
+
+  it("deletes an older object named only by messages the same pass takes", async () => {
+    expect(mockDeleteFile).toHaveBeenCalledWith(legacy.twiceA.key)
+    for (const name of ["twiceA", "twiceB"]) expect(await exists.message(legacy[name].id)).toBe(false)
   })
 
   it("still deletes the row of every refused URL: its text is due like any other", async () => {
@@ -324,9 +363,10 @@ describe("the purge, photos stored under the older layout", () => {
   it("says so in one warning for the pass, by row id and refusal class, never the URL", async () => {
     expect(warned).toHaveLength(1)
     const [, detail] = warned[0] as [string, { count: number; rows: { id: string; why: string }[] }]
-    expect(detail.count).toBe(Object.keys(refused).length)
+    expect(detail.count).toBe(Object.keys(refused).length + 3)
     expect(detail.rows).toHaveLength(5)
-    for (const row of detail.rows) expect(Object.values(refused)).toContain(row.id)
+    const ids = [...Object.values(refused), shared.inDm.id, shared.inOpenRoom.id, shared.held.id]
+    for (const row of detail.rows) expect(ids).toContain(row.id)
     const text = JSON.stringify(warned)
     for (const fragment of ["http", "example.com", "chat/", "profile/", "events/", "photo.jpg", other]) expect(text).not.toContain(fragment)
   })
@@ -362,10 +402,10 @@ describe("the purge, photos stored under the older layout", () => {
     await db.chat_messages.createMany({
       data: Array.from({ length: pile }, (_, i) => ({ chat_group_id: room, user_id: author, content: "", metadata: { mediaUrl: `https://gifs.example.com/${i}.gif` } })),
     })
-    // Written after the pile, so a select that keeps re-reading the pile never gets to it.
     const key = `chat/${author}/1758000000000-m4n5o6-last.jpg`
     const id = await withPhoto(`https://blendn-media-private.fly.storage.tigris.dev/${key}`)
-    for (let i = 0; i < 4 && (await exists.message(id)); i++) await purgeClosedLobbies()
+    // The sweeper's loop: passes until one reports nothing more. Refused rows that stayed would fill every batch.
+    for (let i = 0; i < 4; i++) if (!(await purgeClosedLobbies()).hasMore) break
     expect(await exists.message(id)).toBe(false)
     expect(mockDeleteFile).toHaveBeenCalledWith(key)
     expect(await db.chat_messages.count({ where: { chat_group_id: room } })).toBe(0)
