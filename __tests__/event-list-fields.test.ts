@@ -8,7 +8,7 @@ jest.mock("@/lib/location", () => ({
   resolveEventCity: jest.fn(async (city: string | null) => city),
   geocodeBudget: () => ({ take: () => true, exhausted: false, spent: 0 }),
 }))
-jest.mock("@/lib/attendee-counts", () => ({ distinctAttendeeCounts: jest.fn(async () => new Map()), hereCounts: jest.fn(async () => new Map()) }))
+jest.mock("@/lib/attendee-counts", () => ({ distinctAttendeeCounts: jest.fn(async () => new Map()), hereNow: jest.fn(async () => new Map()) }))
 jest.mock("@/lib/event-tallies", () => ({ eventTallies: jest.fn(async () => ({ favorites: new Map(), ratings: new Map(), going: new Map() })) }))
 const mockFindMany = jest.fn()
 jest.mock("@/lib/db", () => ({ db: { ticket_types: { findMany: (...a: unknown[]) => mockFindMany(...a) } } }))

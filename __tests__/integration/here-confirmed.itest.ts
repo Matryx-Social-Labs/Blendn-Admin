@@ -5,6 +5,7 @@ process.env.MOBILE_JWT_SECRET = process.env.MOBILE_JWT_SECRET ?? "itest-mobile-s
 process.env.NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? "itest-nextauth-secret-0123456789abcdefghij"
 
 import { HERE_NOW, hereNow, hereNowFor } from "@/lib/attendee-counts"
+import { headcount } from "@/lib/presence-sessions"
 import { inRoomWhere } from "@/lib/event-kind"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { CONFIRMED_WINDOW_MINUTES } from "@/lib/presence"
@@ -122,6 +123,8 @@ describe("hereConfirmed: the part of hereCount seen or checked in within the win
     await w.seat(c, minutesAgo(60), minutesAgo(45))
     await w.seat(d, minutesAgo(60), minutesAgo(45))
     await db.user.update({ where: { id: d }, data: { suspended_at: new Date() } })
+    // A has sent no ping yet: confirmed by the check-in alone (the `check_in_time` arm).
+    await db.event_check_ins.updateMany({ where: { event_id: w.eventId, user_id: a }, data: { last_seen_at: null } })
     viewer = a
   }, 60_000)
 
@@ -138,6 +141,11 @@ describe("hereConfirmed: the part of hereCount seen or checked in within the win
     expect(result).toEqual({ hereCount: 3, hereConfirmed: 2 })
     expect(statements).toHaveLength(1)
     expect(statements[0]).toMatch(/FILTER/)
+  })
+
+  it("the host's unconfirmed figure is on the same 30 minutes: C and D, not B seen 10 minutes ago", async () => {
+    // The live tab reads presence sessions (no suspension rule there): four inside, two not seen within the window.
+    expect(await headcount({ eventId: w.eventId })).toMatchObject({ insideGuests: 4, unconfirmed: 2 })
   })
 
   it("C pings: confirmed again, and hereCount does not move", async () => {

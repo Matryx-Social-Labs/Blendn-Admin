@@ -3,7 +3,7 @@ jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), e
 const mockUpdateMany = jest.fn()
 jest.mock("@/lib/db", () => ({ db: { chat_messages: { delete: jest.fn(), updateMany: (...a: unknown[]) => mockUpdateMany(...a) } } }))
 const mockHere = jest.fn()
-jest.mock("@/lib/attendee-counts", () => ({ hereCountFor: (...a: unknown[]) => mockHere(...a) }))
+jest.mock("@/lib/attendee-counts", () => ({ hereNowFor: async (...a: unknown[]) => ({ hereCount: await mockHere(...a), hereConfirmed: 0 }) }))
 
 import { BIG_ROOM_HERE_COUNT, refuseBigRoomWhileDown, verdictForBigRoom } from "@/lib/moderation/degraded-room"
 import { BREAKER_FAILURES_TO_OPEN, recordTextFailure, recordTextSuccess } from "@/lib/moderation/text-breaker"

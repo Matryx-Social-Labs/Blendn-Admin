@@ -13,7 +13,7 @@ import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom, mayUs
 import { liveInVenueDay } from "./chat-window"
 import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from "./socket-ops-auth"
 import { buildLiveSnapshot, type Held } from "./live-snapshot"
-import { hereCountCoalesced } from "./attendee-counts"
+import { hereNowCoalesced, type HereNow } from "./attendee-counts"
 import { roomHandle, type RoomScope } from "./room-handle"
 import { ownerAdmits, roomOwnerDenial, roomScope, withOwnerDoor } from "./room-kind"
 import { readableUrl } from "./tigris"
@@ -112,11 +112,13 @@ export interface ServerToClientEvents {
     userId?: string
     checkInTime: string
     /**
-     * Distinct people inside right now (`hereCountFor`) — goes down on a
+     * Distinct people inside right now (`hereNowFor`) — goes down on a
      * checkout. Not `checkInCount`, which is "ever attended".
      * Absent only when the count query failed; keep the last one you had.
      */
     hereCount?: number
+    /** Of `hereCount`, seen or checked in within 30 minutes (SCRUM-1232). Absent with it. */
+    hereConfirmed?: number
   }) => void
   /** Who arrived, by pseudonym. Only to `event:room:{id}` — checked-in only. Never for an arriver the roster hides (`show_online` off). */
   "event:room:checkin": (data: {
@@ -129,6 +131,8 @@ export interface ServerToClientEvents {
     checkInTime: string
     /** As on `event:checkin`. */
     hereCount?: number
+    /** As on `event:checkin`. */
+    hereConfirmed?: number
   }) => void
   "event:checkout": (data: {
     eventId: string
@@ -137,6 +141,8 @@ export interface ServerToClientEvents {
     checkOutTime: string
     /** As on `event:checkin`. */
     hereCount?: number
+    /** As on `event:checkin`. */
+    hereConfirmed?: number
   }) => void
   /**
    * Your board post was taken down by a moderator or the automatic check (SV9).
@@ -1468,8 +1474,8 @@ async function toChatRoom<E extends keyof ServerToClientEvents>(
  * somebody arrived or left matters more than the number, and a client that
  * keeps its last number is right, where one handed a made-up 0 is not.
  */
-function sendWithHereCount(eventId: string, send: (hereCount: number | undefined) => void | Promise<void>): Promise<void> {
-  return hereCountCoalesced(eventId)
+function sendWithHereCount(eventId: string, send: (here: HereNow | undefined) => void | Promise<void>): Promise<void> {
+  return hereNowCoalesced(eventId)
     .catch((error: unknown) => {
       logger.warn("hereCount lookup failed; emitting without it", {
         eventId,
@@ -1530,7 +1536,7 @@ export function emitEventCheckIn(
    * to the whole room, and a friend's copy lacking it while a show-online-off
    * stranger's has it would tell a friend which of the two arrivals was a friend.
    */
-  return notStrangersTo(userId).then((friends) => sendWithHereCount(eventId, (hereCount) => {
+  return notStrangersTo(userId).then((friends) => sendWithHereCount(eventId, (here) => {
     const shown = (viewer: string) => viewer === userId || (listed && !friends.has(viewer) && !excludeUserIds.includes(viewer))
     /*
      * Two rooms, because two audiences want different things.
@@ -1553,7 +1559,7 @@ export function emitEventCheckIn(
         eventId,
         ...(shown(viewer) ? { userId: idFor(userId) } : {}),
         checkInTime,
-        hereCount,
+        ...here,
       })),
       /*
        * Per recipient, like the roster this arrival lands on: the real name
@@ -1577,7 +1583,7 @@ export function emitEventCheckIn(
             revealed: !!named,
             ...(named && identity?.image ? { userImage: identity.image } : {}),
             checkInTime,
-            hereCount,
+            ...here,
           }
         },
         undefined,
@@ -1623,7 +1629,7 @@ export function emitEventCheckOuts(eventId: string, userIds: readonly string[]):
       // One audience for all of them: the sockets do not change between two leavers of one pass.
       const sockets = io.in(`event:${eventId}`).fetchSockets()
       const audience = { fetchSockets: () => sockets }
-      return sendWithHereCount(eventId, async (hereCount) => {
+      return sendWithHereCount(eventId, async (here) => {
         let told = 0
         for (const userId of userIds) {
           const friends = friendsOf.get(userId) ?? new Set<string>()
@@ -1634,7 +1640,7 @@ export function emitEventCheckOuts(eventId: string, userIds: readonly string[]):
             eventId,
             ...(shown(viewer) ? { userId: idFor(userId) } : {}),
             checkOutTime,
-            hereCount,
+            ...here,
           })).catch((error: unknown) =>
             logger.warn("Checkout emit failed for one leaver", { eventId, error: error instanceof Error ? error.message : String(error) })
           )

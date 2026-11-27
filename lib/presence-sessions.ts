@@ -6,7 +6,7 @@ import { Prisma } from "@prisma/client"
 // green and the container dies on boot with MODULE_NOT_FOUND. This module is
 // reachable from server.ts through the presence sweeper, so the rule applies.
 import { db } from "./db"
-import { OCCURRENCE_GRACE_MINUTES } from "./presence"
+import { CONFIRMED_WINDOW_MINUTES, OCCURRENCE_GRACE_MINUTES } from "./presence"
 
 /**
  * Presence, asked once.
@@ -32,9 +32,6 @@ import { OCCURRENCE_GRACE_MINUTES } from "./presence"
 
 /** How long silence is tolerated before somebody stops counting as present. */
 export const PRESENCE_CUTOFF_MINUTES = 10
-
-export const cutoffFrom = (now: Date = new Date()): Date =>
-  new Date(now.getTime() - PRESENCE_CUTOFF_MINUTES * 60_000)
 
 export interface ArrivalInput {
   eventId: string
@@ -346,13 +343,15 @@ export interface Headcount {
   /** Distinct staff inside right now. */
   insideStaff: number
   /**
-   * Of those inside, how many have not reported a position since the cutoff.
+   * Of those inside, how many have not reported a position within
+   * `CONFIRMED_WINDOW_MINUTES` (SCRUM-1232): the complement of the phone's
+   * `hereConfirmed`.
    *
    * Not subtracted from the counts above — they are still in the room until
    * something says otherwise. This is what lets a screen admit how much of its
    * own figure is inference rather than observation.
    */
-  stale: number
+  unconfirmed: number
   /** Distinct people who arrived at all, whether or not they are still here. */
   arrived: number
   /** Distinct people whose first arrival was inside the recent window. */
@@ -383,7 +382,7 @@ export async function headcount(
   opts: { now?: Date; recentMinutes?: number } = {}
 ): Promise<Headcount> {
   const now = opts.now ?? new Date()
-  const cutoff = cutoffFrom(now)
+  const cutoff = new Date(now.getTime() - CONFIRMED_WINDOW_MINUTES * 60_000)
   const since = new Date(now.getTime() - (opts.recentMinutes ?? 10) * 60_000)
 
   /*
@@ -423,7 +422,7 @@ export async function headcount(
    * readings spanning ten minutes, then an allowance), or the occurrence
    * closes. Never because a packet did not arrive.
    *
-   * `last_seen_at` keeps its job and loses its veto: `stale` counts people
+   * `last_seen_at` keeps its job and loses its veto: `unconfirmed` counts people
    * inside whose position is older than the cutoff, so a screen can say how
    * much of its own number is inference. That is the honest form of the
    * liveness concern — report the doubt, do not silently resolve it by
@@ -433,7 +432,7 @@ export async function headcount(
     {
       inside_guests: bigint
       inside_staff: bigint
-      stale: bigint
+      unconfirmed: bigint
       arrived: bigint
       arrived_recently: bigint
     }[]
@@ -448,7 +447,7 @@ export async function headcount(
       COUNT(DISTINCT user_id) FILTER (
         WHERE departed_at IS NULL
           AND (last_seen_at IS NULL OR last_seen_at <= ${cutoff})
-      ) AS stale,
+      ) AS unconfirmed,
       COUNT(DISTINCT user_id) AS arrived,
       COUNT(DISTINCT user_id) FILTER (WHERE arrived_at >= ${since}) AS arrived_recently
     FROM presence_sessions
@@ -458,7 +457,7 @@ export async function headcount(
   return {
     insideGuests: Number(row?.inside_guests ?? 0),
     insideStaff: Number(row?.inside_staff ?? 0),
-    stale: Number(row?.stale ?? 0),
+    unconfirmed: Number(row?.unconfirmed ?? 0),
     arrived: Number(row?.arrived ?? 0),
     arrivedRecently: Number(row?.arrived_recently ?? 0),
   }

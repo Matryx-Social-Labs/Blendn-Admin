@@ -27,14 +27,15 @@ export interface LiveFigures {
   checkedInTotal: number
   checkedOutTotal: number
   /**
-   * Of those inside, how many have not reported a position recently.
+   * Of those inside, how many have not reported a position within
+   * `CONFIRMED_WINDOW_MINUTES` (30): the complement of the phone's `hereConfirmed`.
    *
    * Not subtracted from `inside`: silence is not evidence of leaving, because
    * the client polls in the foreground only and a pocketed phone goes quiet
    * within minutes. This is what lets the screen say which part of the figure
    * is inferred rather than observed.
    */
-  staleInside: number
+  unconfirmed: number
   capacity: number | null
   /**
    * Guests as a percent of capacity, or null when no capacity is set.
@@ -136,7 +137,7 @@ export interface VenueLiveSnapshot {
   staffInside: LiveCountBucket
   checkedInTotal: LiveCountBucket
   checkedOutTotal: LiveCountBucket
-  staleInside: LiveCountBucket
+  unconfirmed: LiveCountBucket
   /** `occupancyMostlyInferred`, on the exact figures. */
   mostlyInferred: boolean
   capacity: number | null
@@ -205,10 +206,10 @@ export const MOSTLY_INFERRED_SHARE = 0.5
  */
 export function occupancyMostlyInferred(snapshot: {
   inside: number
-  staleInside: number
+  unconfirmed: number
 }): boolean {
   if (snapshot.inside <= 0) return false
-  return snapshot.staleInside / snapshot.inside > MOSTLY_INFERRED_SHARE
+  return snapshot.unconfirmed / snapshot.inside > MOSTLY_INFERRED_SHARE
 }
 
 export function deriveAlerts(
@@ -388,7 +389,7 @@ export function forVenue(s: LiveSnapshot): VenueLiveSnapshot {
     staffInside: liveCountBucket(s.staffInside),
     checkedInTotal: liveCountBucket(s.checkedInTotal),
     checkedOutTotal: liveCountBucket(s.checkedOutTotal),
-    staleInside: liveCountBucket(s.staleInside),
+    unconfirmed: liveCountBucket(s.unconfirmed),
     mostlyInferred: occupancyMostlyInferred(s),
     capacity: s.capacity,
     overCapacity: s.overCapacity,

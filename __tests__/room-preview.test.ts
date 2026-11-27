@@ -7,14 +7,15 @@ process.env.MOBILE_JWT_SECRET = "test-secret-at-least-32-characters-long!!"
  * that matter are the ones that keep an aggregate from naming someone: the
  * floor, and the roster's exclusions (blocks, "show online" off, suspended).
  *
- * The headcount is `event_check_ins.count` (`hereCountFor`); the visible pool
+ * The headcount is one raw read (`hereNowFor`); the visible pool
  * is `event_check_ins.findMany`.
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
 const mockDb = {
   user_interests: { findMany: jest.fn() },
-  event_check_ins: { findMany: jest.fn(), count: jest.fn() },
+  event_check_ins: { findMany: jest.fn() },
+  $queryRaw: jest.fn(),
   categories: { findMany: jest.fn() },
   // Friends leave the count (lib/room-people.ts); none here.
   friendships: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
@@ -74,7 +75,7 @@ beforeEach(() => {
     person("p3", ["running"]),
     person("p4", []),
   ]
-  mockDb.event_check_ins.count.mockImplementation(async () => here)
+  mockDb.$queryRaw.mockImplementation(async () => [{ event_id: EVENT, here, confirmed: Math.min(here, 2) }])
   mockDb.event_check_ins.findMany.mockImplementation(async () => pool)
 })
 
@@ -84,12 +85,12 @@ it("returns hereCount and the bucket of how many inside share an interest", asyn
   const res = await call()
   expect(res.status).toBe(200)
   // Five share (techno, house under Music, techno x3): the bucket's floor, 3, never 5.
-  expect(await res.json()).toEqual({ success: true, data: { hereCount: 7, tasteMatchCount: 3 } })
+  expect(await res.json()).toEqual({ success: true, data: { hereCount: 7, hereConfirmed: 2, tasteMatchCount: 3 } })
 })
 
 it("says nothing under three who share, even with a crowd inside (the figure is a bucket's floor, never one or two)", async () => {
   const body = await (await call()).json() // p1 and p2 share: two
-  expect(body.data).toEqual({ hereCount: 6, tasteMatchCount: null })
+  expect(body.data).toEqual({ hereCount: 6, hereConfirmed: 2, tasteMatchCount: null })
 })
 
 it("uses the roster's exclusions: not me, attendees inside now, show_online on, not suspended", async () => {
@@ -118,7 +119,7 @@ it("leaves out anyone in a block relationship either way", async () => {
 it("is null when fewer than three are inside now, and does not even look", async () => {
   here = 2
   const body = await (await call()).json()
-  expect(body.data).toEqual({ hereCount: 2, tasteMatchCount: null })
+  expect(body.data).toEqual({ hereCount: 2, hereConfirmed: 2, tasteMatchCount: null })
   expect(poolCalls()).toHaveLength(0)
 })
 
@@ -133,7 +134,7 @@ it("is null when hidden people make up the floor and one visible person is left"
   here = 3
   pool = [person("p1", ["techno"])]
   const body = await (await call()).json()
-  expect(body.data).toEqual({ hereCount: 3, tasteMatchCount: null })
+  expect(body.data).toEqual({ hereCount: 3, hereConfirmed: 2, tasteMatchCount: null })
 })
 
 it("is null when the viewer's blocks leave one visible person in a room of three", async () => {
@@ -141,7 +142,7 @@ it("is null when the viewer's blocks leave one visible person in a room of three
   pool = [person("p1", ["techno"]), person("p2", ["techno"])]
   mockBlocks.mockResolvedValue(["p2"])
   const body = await (await call()).json()
-  expect(body.data).toEqual({ hereCount: 3, tasteMatchCount: null })
+  expect(body.data).toEqual({ hereCount: 3, hereConfirmed: 2, tasteMatchCount: null })
 })
 
 it("counts a person once however many rows they have", async () => {

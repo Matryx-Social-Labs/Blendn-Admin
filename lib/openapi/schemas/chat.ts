@@ -157,8 +157,13 @@ export const ChatGroupSchema = z
       .int()
       .nullable()
       .describe(
-        "In the room now: checked in to its event (attendees, not suspended), the Room's own number (`hereCountFor`). Never the room's members, whose rows outlive the check-in. Null for a venue day's room: an exact count there is a differencing channel (D-19)."
+        "In the room now: checked in to its event (attendees, not suspended), the Room's own number (`hereNowFor`). Never the room's members, whose rows outlive the check-in. Null for a venue day's room: an exact count there is a differencing channel (D-19)."
       ),
+    hereConfirmed: z
+      .number()
+      .int()
+      .nullable()
+      .describe("Of `hereCount`, how many were seen (a ping) or checked in within the last 30 minutes; never more than `hereCount`, same people (attendees, not suspended). Pings stop when the app is in the background, so the rest are probably still here, not gone (SCRUM-1232). Null for a venue day's room, with `hereCount`."),
     memberCount: z
       .number()
       .nullable()
