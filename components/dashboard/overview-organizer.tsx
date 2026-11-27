@@ -7,7 +7,7 @@ import { KpiStrip, LiveDot, Panel } from "@/components/dashboard/kit"
 import { HeroMetric, RatingBars } from "@/components/dashboard/primitives"
 import { Button } from "@/components/ui/button"
 import type { LiveEvent, OrganizerOverview } from "@/lib/dashboard-types"
-import { formatNumber, formatPct } from "@/lib/dashboard-format"
+import { formatNumber, formatPct, hereRange } from "@/lib/dashboard-format"
 import { tileDelta } from "@/lib/metric-delta"
 import { setupChecklist } from "@/lib/setup-checklist"
 import { cn } from "@/lib/utils"
@@ -261,6 +261,7 @@ export function OverviewOrganizer({ data, canCreate = true }: { data: OrganizerO
  * there only while it runs; the flagged-message count is the one red sentence.
  */
 function LiveBanner({ live }: { live: LiveEvent }) {
+  const room = hereRange(live.inside, live.unconfirmed)
   return (
     <section
       aria-label={`${live.title} is live`}
@@ -284,14 +285,21 @@ function LiveBanner({ live }: { live: LiveEvent }) {
       <dl className="flex gap-7">
         {(
           [
-            [live.inside, "in the room"],
-            [live.checkedIn, "checked in"],
-            [live.messages, "messages"],
+            // The Live hero's range, through the same formatter, so the two never disagree (SCRUM-1328).
+            [
+              <>
+                <span className="sr-only">{room.spoken}</span>
+                <span aria-hidden="true">{room.label}</span>
+              </>,
+              "in the room",
+            ],
+            [formatNumber(live.checkedIn), "checked in"],
+            [formatNumber(live.messages), "messages"],
           ] as const
         ).map(([value, label]) => (
           <div key={label} className="flex flex-col-reverse">
             <dt className="text-[0.75rem] text-faint-foreground">{label}</dt>
-            <dd className="text-[1.375rem] font-bold leading-[1.1] tabular-nums">{formatNumber(value)}</dd>
+            <dd className="text-[1.375rem] font-bold leading-[1.1] tabular-nums">{value}</dd>
           </div>
         ))}
       </dl>

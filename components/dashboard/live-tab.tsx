@@ -16,12 +16,7 @@ import { Callout } from "@/components/dashboard/kit"
 import { OccupancyHero } from "@/components/dashboard/occupancy-hero"
 import { EmptyState, MetricTile } from "@/components/dashboard/primitives"
 import { Button } from "@/components/ui/button"
-import {
-  occupancyMostlyInferred,
-  type LiveAlert,
-  type LiveSnapshot,
-  type VenueLiveSnapshot,
-} from "@/lib/live-metrics"
+import type { LiveAlert, LiveSnapshot, VenueLiveSnapshot } from "@/lib/live-metrics"
 import type { IssueRow } from "@/lib/event-issues"
 import { earlierIssues } from "@/lib/issue-timestamp"
 import { IssueLog } from "@/components/dashboard/issue-log"
@@ -29,9 +24,8 @@ import { CrewsTonightPanel } from "@/components/dashboard/crews-tonight-panel"
 import { MeetingTonightPanel } from "@/components/dashboard/meeting-tonight-panel"
 import { TalkingAbout } from "@/components/dashboard/talking-about"
 import { useOpsSnapshot } from "@/lib/use-ops-snapshot"
-import { formatNumber, formatPct } from "@/lib/dashboard-format"
+import { formatNumber, formatPct, hereSentence } from "@/lib/dashboard-format"
 import { liveCountLabel } from "@/lib/disclosure"
-import { CONFIRMED_WINDOW_MINUTES } from "@/lib/presence"
 import { cn } from "@/lib/utils"
 import { eventClock, livePhaseFor } from "@/lib/event-phase"
 
@@ -204,7 +198,6 @@ export function LiveTab({
         <div className="flex flex-col gap-4">
           <OccupancyHero
             occupancy={snapshot}
-            unreliable={snapshot.view === "host" ? occupancyMostlyInferred(snapshot) : snapshot.mostlyInferred}
             time={at}
             stale={stale}
             description={snapshot.view === "host" ? hostDescription(snapshot) : venueDescription(snapshot)}
@@ -319,24 +312,18 @@ export function LiveTab({
 }
 
 function hostDescription(s: LiveSnapshot): string {
-  return `${formatNumber(s.checkedInTotal)} checked in, ${formatNumber(s.checkedOutTotal)} left${
-    s.unconfirmed > 0
-      ? `. ${formatNumber(s.unconfirmed)} not seen in the last ${CONFIRMED_WINDOW_MINUTES} minutes — phones sleep, so they are still counted`
-      : ""
-  }${
+  // What the range's low end is (SCRUM-1328), then who came and went.
+  const lowEnd = hereSentence(s.inside, s.unconfirmed)
+  return `${lowEnd ? `${lowEnd} ` : ""}${formatNumber(s.checkedInTotal)} checked in, ${formatNumber(s.checkedOutTotal)} left${
     s.medianRate10m > 0
       ? `. Arrival rate ${s.checkInRate10m}/10min — ×${(s.checkInRate10m / s.medianRate10m).toFixed(1)} tonight's median.`
       : "."
   }`
 }
 
+/** No low end and nothing about the unconfirmed: a bucket of them beside the room's narrows the seen figure (SCRUM-1328). */
 function venueDescription(s: VenueLiveSnapshot): string {
-  return `${liveCountLabel(s.checkedInTotal)} checked in, ${liveCountLabel(s.checkedOutTotal)} left${
-    // "Under 5" here could be nobody: said only when it is some.
-    s.unconfirmed !== "quiet"
-      ? `. ${liveCountLabel(s.unconfirmed)} not seen in the last ${CONFIRMED_WINDOW_MINUTES} minutes — phones sleep, so they are still counted`
-      : ""
-  }. Shown as ranges, so one person arriving or leaving does not show.`
+  return `${liveCountLabel(s.checkedInTotal)} checked in, ${liveCountLabel(s.checkedOutTotal)} left. Shown as ranges, so one person arriving or leaving does not show.`
 }
 
 /** The mood and the complaints as ranges: bars would draw the counts back. */

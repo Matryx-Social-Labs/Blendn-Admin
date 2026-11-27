@@ -5,6 +5,7 @@
 
 import type { FewCount, HeldTotal } from "./disclosure"
 import { eventClock } from "./event-phase"
+import { CONFIRMED_WINDOW_MINUTES } from "./presence"
 
 const numberFormat = new Intl.NumberFormat("en-US")
 const compactFormat = new Intl.NumberFormat("en-US", {
@@ -48,6 +49,48 @@ export function splitShares(parts: readonly FewCount[]): number[] | null {
 
 export function formatCompact(value: number | null) {
   return value === null ? "—" : compactFormat.format(value)
+}
+
+/**
+ * A count that can grow, for the eye (owner 2026-11-05): exact to 999, then
+ * "1.2k", "12k", "1.2M", rounded down so it never says more than there is. The
+ * app's `compactCount` (lib/format.ts), the same rule. The caller says the full
+ * number to a screen reader.
+ */
+export function compactCount(n: number): string {
+  if (n < 1000) return String(n)
+  const [unit, size] = n < 1_000_000 ? (["k", 1000] as const) : (["M", 1_000_000] as const)
+  const whole = n / size
+  return `${whole < 10 ? Math.floor(whole * 10) / 10 : Math.floor(whole)}${unit}`
+}
+
+/**
+ * How many are in the room, as a host reads it (SCRUM-1328): who was seen, or
+ * checked in, within `CONFIRMED_WINDOW_MINUTES` to everyone checked in and not
+ * seen leaving. Pings are foreground only, so the high end alone is "arrived
+ * and not seen leaving"; the range says how much of it a phone confirmed. One
+ * number when both ends read alike. Capacity and every alert read the high end.
+ */
+export function hereRange(inside: number, unconfirmed: number): { label: string; spoken: string } {
+  const seen = inside - unconfirmed
+  const label = compactCount(seen) === compactCount(inside) ? compactCount(inside) : `${compactCount(seen)}–${compactCount(inside)}`
+  const spoken = seen === inside ? `${formatNumber(inside)} people here` : `${formatNumber(seen)} to ${formatNumber(inside)} people here`
+  return { label, spoken }
+}
+
+/** The one sentence under the range: what its low end is. Nothing for an empty room. */
+export function hereSentence(inside: number, unconfirmed: number): string {
+  if (inside === 0) return ""
+  const seen = inside - unconfirmed
+  const window = `in the last ${CONFIRMED_WINDOW_MINUTES} minutes`
+  if (unconfirmed === 0) return `Everyone here was seen ${window}.`
+  const quiet = "as phones in pockets do."
+  if (seen === 0) return `Nobody was seen ${window}; all ${formatNumber(inside)} are still checked in, but their phones have gone quiet, ${quiet}`
+  const rest =
+    unconfirmed === 1
+      ? "the other one is still checked in, but their phone has gone quiet"
+      : `the other ${formatNumber(unconfirmed)} are still checked in, but their phones have gone quiet`
+  return `${formatNumber(seen)} ${seen === 1 ? "was" : "were"} seen ${window}; ${rest}, ${quiet}`
 }
 
 export function formatDay(iso: string) {
