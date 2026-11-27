@@ -10,7 +10,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 import { randomUUID } from "crypto"
 
 import { conversationPair } from "@/lib/conversations"
-import { inviteTokenFor } from "@/lib/friends"
+import { connectablePairs, inviteTokenFor } from "@/lib/friends"
 import { roomHandle } from "@/lib/room-handle"
 
 import { arrive, befriend, call, cleanupCrewWorld, crewOf, liveEvent, person, routes, world, type Person, api } from "./crew-world"
@@ -120,6 +120,9 @@ describe("a stamped account answers as an unknown id, and nothing is written", (
     expect(toMinor.status).toBe(404)
     expect(toMinor).toEqual(toNobody)
     expect(await db.friend_requests.count({ where: { sender_id: viewer.id, recipient_id: minor.id } })).toBe(0)
+    // The batched form (a release of held requests) says the same.
+    const pairs = await connectablePairs(db, [[viewer.id, adult.id], [viewer.id, minor.id]])
+    expect([...pairs]).toEqual([conversationPair(viewer.id, adult.id).join("|")])
   })
 
   it("opening a DM with a friend", async () => {
