@@ -103,9 +103,17 @@ describe("turning ticketing on", () => {
 
   it("a colleague who did not create the event may: access is the organisation's", async () => {
     const { orgId, owner } = await org()
-    const colleague = await member(orgId, "staff")
+    const colleague = await member(orgId, "admin")
     const eventId = await eventOf(orgId, owner)
     expect((await enableTicketing(eventId, asOrganizer(colleague))).ok).toBe(true)
+  })
+
+  it("is not a staff member's: they run the night and edit none of it (SCRUM-1244)", async () => {
+    const { orgId, owner } = await org()
+    const volunteer = await member(orgId, "staff")
+    const eventId = await eventOf(orgId, owner)
+    expect((await enableTicketing(eventId, asOrganizer(volunteer))).ok).toBe(false)
+    expect((await db.events.findUniqueOrThrow({ where: { id: eventId } })).ticketing_enabled_at).toBeNull()
   })
 
   it("the founding offer is the first three events; the fourth is standard", async () => {

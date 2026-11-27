@@ -1,4 +1,4 @@
-import type { user_role } from "@prisma/client"
+import type { org_role, user_role } from "@prisma/client"
 
 import { db } from "./db"
 import { canCreateEvents } from "./rbac"
@@ -53,13 +53,36 @@ import { HOME_ORG_ORDER, activeMembership } from "./org-membership"
  * is stated on the org page.
  */
 export async function homeOrgIdFor(user: { id: string; role: user_role }): Promise<string | null> {
+  return (await homeMembershipFor(user))?.org_id ?? null
+}
+
+/** `homeOrgIdFor`'s membership, with this person's role in it. */
+async function homeMembershipFor(user: { id: string; role: user_role }): Promise<{ org_id: string; role: org_role } | null> {
   if (user.role === "app_admin") return null
-  const membership = await db.organisation_members.findFirst({
+  return db.organisation_members.findFirst({
     where: { user_id: user.id, ...activeMembership },
     orderBy: HOME_ORG_ORDER,
-    select: { org_id: true },
+    select: { org_id: true, role: true },
   })
-  return membership?.org_id ?? null
+}
+
+/**
+ * A `staff` member operates the org's nights and edits none of them
+ * (SCRUM-1244), so an event they created would refuse them at its own edit
+ * screen: the bug `owningOrgFor` exists to prevent. Creating is an owner's or
+ * an admin's.
+ *
+ * ponytail: decided on the home membership only, like the org a new event
+ * belongs to; staff at the home org and owner elsewhere is refused until the
+ * form has an org picker.
+ */
+const mayCreateIn = (role: org_role) => role !== "staff"
+
+/** `owningOrgFor`'s refusal of a staff member: its own type, so a caller can tell it from "no organisation". */
+export class StaffMayNotCreate extends Error {
+  constructor() {
+    super("Only an owner or admin of your organization can create its events. Ask one of them to create it, or to make you an admin.")
+  }
 }
 
 export async function owningOrgFor(user: {
@@ -68,9 +91,9 @@ export async function owningOrgFor(user: {
 }): Promise<string | null> {
   if (user.role === "app_admin") return null
 
-  const orgId = await homeOrgIdFor(user)
+  const membership = await homeMembershipFor(user)
 
-  if (!orgId) {
+  if (!membership) {
     /*
      * Loud, not null.
      *
@@ -85,7 +108,9 @@ export async function owningOrgFor(user: {
     )
   }
 
-  return orgId
+  if (!mayCreateIn(membership.role)) throw new StaffMayNotCreate()
+
+  return membership.org_id
 }
 
 /**
@@ -97,17 +122,17 @@ export async function owningOrgFor(user: {
  * one, was offered the whole form and refused at the end of it.
  */
 export async function mayCreateEvents(user: { id: string; role: user_role }): Promise<boolean> {
-  return mayCreateEventsWith(user.role, user.role !== "app_admin" && (await homeOrgIdFor(user)) !== null)
+  return mayCreateEventsWith(user.role, (await homeMembershipFor(user))?.role ?? null)
 }
 
 /**
- * The same answer from facts already loaded: the role, and whether this person
- * has a live home organisation. The dashboard layout has the memberships in
- * hand (for the sidebar's card) and asks this rather than querying again; the
- * rule itself stays here, in one place (SCRUM-145).
+ * The same answer from facts already loaded: the role, and this person's role
+ * in their live home organisation (null for none). The dashboard layout has
+ * the memberships in hand (for the sidebar's card) and asks this rather than
+ * querying again; the rule itself stays here, in one place (SCRUM-145).
  */
-export function mayCreateEventsWith(role: user_role, hasLiveOrg: boolean): boolean {
+export function mayCreateEventsWith(role: user_role, homeOrgRole: org_role | null): boolean {
   if (!canCreateEvents(role)) return false
   if (role === "app_admin") return true
-  return hasLiveOrg
+  return homeOrgRole !== null && mayCreateIn(homeOrgRole)
 }

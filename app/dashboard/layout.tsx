@@ -6,7 +6,7 @@ import { OrgSuspendedNotice } from "@/components/org-suspended-notice"
 import { SiteHeader } from "@/components/site-header"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { attentionQueues } from "@/lib/attention-queues-query"
-import { planBadgeFor } from "@/lib/billing"
+import { mayBuyHereThisRequest, planBadgeFor } from "@/lib/billing"
 import { queueBadges } from "@/lib/attention-queues"
 import { getAuth } from "@/lib/auth"
 import { mayCreateEventsWith } from "@/lib/event-ownership"
@@ -71,20 +71,24 @@ export default async function DashboardLayout({
   ])
   // The top bar's Create event pill asks what every other door to the event
   // form asks (SCRUM-145), from the memberships already loaded: the first live
-  // one is `homeOrgIdFor`'s answer, by the same order.
-  const canCreate = mayCreateEventsWith(user.role, orgs.length > 0)
+  // one is `homeOrgIdFor`'s answer, by the same order, and its staff create nothing (SCRUM-1244).
+  const canCreate = mayCreateEventsWith(user.role, orgs[0]?.role ?? null)
   // Who this person acts for, said once for the card and the first crumb. A
   // member only of a suspended organisation still belongs to it — the notice
   // below says why the controls are gone — and someone in none is told so.
   // The sidebar's plan card: organisers only, for the home organisation the
   // card above it names (venue plans are step 17's).
   // Decoration like the badges: a failure logs and drops the card, never the shell.
+  // Where plans are not sold (`mayBuyHere`, SCRUM-1277) there is nothing to see plans for and Analytics is open:
+  // no card. Asked only without a live plan, and once per request: the page's billingOrgFor reuses the answer.
+  const home = orgs[0]
   const plan =
-    user.role === "organizer" && orgs[0]
-      ? await planBadgeFor(orgs[0].id)
-          .then((b) => ({ analytics: b.analytics, date: b.date ? { word: b.date.word, at: b.date.at.toISOString() } : null }))
+    user.role === "organizer" && home
+      ? await planBadgeFor(home.id)
+          .then(async (b) => (b.analytics || (await mayBuyHereThisRequest(home.id)) ? b : null))
+          .then((b) => b && { analytics: b.analytics, date: b.date ? { word: b.date.word, at: b.date.at.toISOString() } : null })
           .catch((error: unknown) => {
-            logger.error("plan badge failed; rendering the nav without the plan card", {
+            logger.error("plan badge or market check failed; rendering the nav without the plan card", {
               error: error instanceof Error ? error.message : String(error),
             })
             return null

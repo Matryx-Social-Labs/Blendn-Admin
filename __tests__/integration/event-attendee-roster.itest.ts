@@ -175,11 +175,11 @@ describe("an event's attendee roster", () => {
     await db.organisation_members.createMany({
       data: [
         { org_id: orgA, user_id: hostA, role: "owner" },
-        // Staff work the door and the room; they see the roster too (R1).
-        { org_id: orgA, user_id: colleague, role: "staff" },
+        // Owners and admins read the roster; staff work the door and the room and do not (SCRUM-1244).
+        { org_id: orgA, user_id: colleague, role: "admin" },
         { org_id: orgA, user_id: dual, role: "admin" },
         { org_id: orgB, user_id: dual, role: "owner" },
-        { org_id: orgA, user_id: leaver, role: "staff" },
+        { org_id: orgA, user_id: leaver, role: "admin" },
         { org_id: orgB, user_id: hostB, role: "owner" },
         { org_id: orgV, user_id: venueOwner, role: "owner" },
       ],
@@ -343,9 +343,17 @@ describe("an event's attendee roster", () => {
   })
 
   describe("labels", () => {
-    it("are the same for every member of the organisation, staff included", async () => {
+    it("are the same for every owner and admin of the organisation", async () => {
       const mine = statusOf(await roster("organizer", hostA, past.id))
       expect(statusOf(await roster("organizer", colleague, past.id))).toEqual(mine)
+    })
+
+    it("are never a staff member's: they run the night, not the list (SCRUM-1244)", async () => {
+      const volunteer = await makeUser("volunteer", "organizer")
+      users.push(volunteer)
+      await db.organisation_members.create({ data: { org_id: orgA, user_id: volunteer, role: "staff" } })
+      expect(await seen("organizer", volunteer, past.id)).toBeNull()
+      expect((await attendeeRoster("organizer", volunteer)).rows).toHaveLength(0)
     })
 
     it("follow the event's organisation, not the viewer's other memberships", async () => {

@@ -14,10 +14,12 @@ export const dynamic = "force-dynamic"
 /**
  * What each placement costs and whether it has been paid.
  *
- * A ledger, not a checkout. No payment provider is integrated — the money moves
- * by invoice outside this system, and what is recorded here is what was agreed,
- * so six months later there is one answer instead of a thread in somebody's
- * inbox.
+ * An admin prices a placement, marks it agreed and sends the sponsor a Razorpay
+ * Payment Link (`sendPaymentLink`); `payment_link.paid` settles the charge
+ * (`lib/razorpay-webhook.ts`). Money that arrives another way is settled here by
+ * hand, with its bank reference. Not an invoice: a charge has no number and no
+ * tax lines. What is recorded is what was agreed, so six months later there is
+ * one answer instead of a thread in somebody's inbox.
  */
 export default async function ChargesPage() {
   const session = await getAuth()

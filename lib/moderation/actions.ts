@@ -81,14 +81,17 @@ export async function flagForReview(
 
 /**
  * Hidden messages in the mute window that count toward a mute: abuse, not
- * contact details (SCRUM-485).
+ * contact details (SCRUM-485), and not a swear word the keyword list hid
+ * (D-052a): a flag whose only category is `profanity` (`checkKeywords`; a slur
+ * is `slur`) is left out the same way. The model's own `hide` on such a line is
+ * a flag of its own and counts (`recordHide` in `index.ts`).
  *
  * `preSaveCheck` says sharing your own number is not a reason to silence
  * somebody (`autoMute: false`), but the count that decides the NEXT mute read
  * every hidden flag, so three shared numbers and then one abusive message muted
  * a person on their first abusive message. A flag whose categories are all
- * `contact_*` (`checkContactInfo`) is left out; a hide that carries a contact
- * detail AND anything else counts. Raw SQL because a JSON key-prefix test is
+ * `contact_*` (`checkContactInfo`) or `profanity` is left out; a hide that
+ * carries one of those AND anything else counts. Raw SQL because a JSON key-prefix test is
  * not a Prisma filter, and `categories` is NOT NULL so the negation cannot lose
  * a row to NULL.
  */
@@ -102,7 +105,7 @@ async function abuseHiddenCount(userId: string, chatGroupId: string, since: Date
        AND f.created_at >= ${since}
        AND NOT COALESCE(
          CASE WHEN jsonb_typeof(f.categories) = 'object' AND f.categories <> '{}'::jsonb
-           THEN NOT EXISTS (SELECT 1 FROM jsonb_object_keys(f.categories) k WHERE left(k, 8) <> 'contact_')
+           THEN NOT EXISTS (SELECT 1 FROM jsonb_object_keys(f.categories) k WHERE left(k, 8) <> 'contact_' AND k <> 'profanity')
          END,
          false
        )`
@@ -123,10 +126,12 @@ export async function checkAndAutoMute(
     const hiddenCount = await abuseHiddenCount(userId, chatGroupId, windowStart)
 
     if (hiddenCount >= AUTO_MUTE_HIDDEN_COUNT) {
-      await db.chat_group_members.updateMany({
+      const { count } = await db.chat_group_members.updateMany({
         where: {
           chat_group_id: chatGroupId,
           user_id: userId,
+          // Only an active member: a host's mute or ban that landed first stays the host's.
+          status: "active",
         },
         data: {
           status: "muted",
@@ -136,6 +141,10 @@ export async function checkAndAutoMute(
           muted_by: null,
         },
       })
+      if (count === 0) {
+        logger.info("Auto-mute skipped: member not active", { userId, chatGroupId, hiddenCount })
+        return
+      }
 
       emitChatMemberMuted(
         chatGroupId,

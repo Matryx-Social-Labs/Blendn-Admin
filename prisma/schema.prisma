@@ -1509,6 +1509,8 @@ model notifications {
   @@index([user_id, created_at])
   // The unread count, which the bell asks for on every screen.
   @@index([user_id, read_at])
+  // The retention sweep's unread rule (SCRUM-1224). Its read rule has a partial `read_at` index, in migration SQL only.
+  @@index([created_at])
 }
 
 // Private Messaging
@@ -1843,7 +1845,7 @@ model venues {
   /// map's height. Set by the venue's owner or an admin; CHECK 1–200 in SQL.
   floors            Int?         @db.SmallInt
   /// Opening hours as the venue page shows them: `[{ day: 0-6 (Sun-Sat), open: "HH:MM", close: "HH:MM" }]`
-  /// in the venue's own timezone (`lib/venue-hours.ts`). Null: not given. No writer yet.
+  /// in the venue's own timezone (`lib/venue-hours.ts`). Null: not given. Written by `setVenueHours` (venue page, SCRUM-1154).
   hours             Json?
   /// A few lines about the place, shown on the venue page. Null: not given.
   description       String?
@@ -1920,7 +1922,8 @@ model organisations {
   /// log has it too. Both null on reinstatement, which flips the events back.
   suspended_at                    DateTime?               @db.Timestamptz(6)
   suspension_reason               String?
-  /// May this organisation mark a broadcast as `sponsored`?
+  /// Half of the grant to post `sponsored`; an approved placement at the event,
+  /// held by this same organisation, is the other half (`resolveSponsorGrant`).
   ///
   /// An organisation-level flag rather than a role, because the permission
   /// belongs to the company with the commercial agreement -- not to whichever
@@ -1934,14 +1937,18 @@ model organisations {
   /// end of its first event with at least 8 people checked in, and that event
   /// (SCRUM-1269, lib/analytics-access.ts). Written ONCE, by the first read that
   /// finds such an event, and never re-derived: soft-deleting the event, or a
-  /// later re-count, cannot restart the window. Moved once, by 60 days, when
-  /// the window went from 30 to 90 (migration 20261126100000). A plain id, no foreign key:
+  /// later re-count, cannot restart the window. A window written under the old
+  /// 30-day rule is moved by 60 days in a data migration that lands after the
+  /// pilot (Sun 2026-11-29 14:00 IST; SCRUM-1269). A plain id, no foreign key:
   /// it is a record of a decision, kept if the event goes.
   analytics_free_until            DateTime?               @db.Timestamptz(6)
   first_free_event_id             String?                 @db.Uuid
   /// When the one mail 14 days before `analytics_free_until` was claimed (SCRUM-1275,
   /// lib/free-window-mail.ts): set before the send, never cleared, so it goes once per window.
   analytics_free_ending_mailed_at DateTime?               @db.Timestamptz(6)
+  /// When the "list your next" nudge was last claimed (SCRUM-1284, lib/next-night-nudge.ts): set before the send, so
+  /// an organisation gets at most one in 30 days. 09a's first-event nudge shares it.
+  next_event_nudged_at            DateTime?               @db.Timestamptz(6)
   verified_at                     DateTime?               @db.Timestamptz(6)
   verified_by                     String?
   /// The Razorpay Route linked account (`acc_` + 14) the organizer's share of a ticket sale is
@@ -2403,7 +2410,7 @@ model sponsor_claims {
 ///        └───────────────────┴──void──> [void] <──┘
 ///
 /// `amount_minor` and `currency` are IMMUTABLE once status leaves `draft`, and
-/// no transition returns to draft. Enforced in `lib/sponsor-actions.ts` with a
+/// no transition returns to draft. Enforced in `lib/charge-actions.ts` with a
 /// test per illegal pair.
 model placement_charges {
   id           String        @id @default(uuid()) @db.Uuid
@@ -2434,9 +2441,9 @@ model placement_charges {
   voided_at    DateTime?     @db.Timestamptz(6)
   voided_by    String?
   void_reason  String?
-  /// External reference: the pricing note while a draft, then the Razorpay
-  /// Payment Link's id once one is sent (step 17), or the payment reference an
-  /// admin typed when settling by hand.
+  /// External reference: the pricing note until the charge settles, then the
+  /// id of the Razorpay Payment Link that paid it (step 17), or the payment
+  /// reference an admin typed when settling by hand. Sending a link leaves it.
   external_ref String?
   created_at   DateTime      @default(now()) @db.Timestamptz(6)
   updated_at   DateTime      @default(now()) @updatedAt @db.Timestamptz(6)
@@ -2448,7 +2455,7 @@ model placement_charges {
   /// "Who priced this" must stay answerable. A bare String id pointing at a
   /// deleted user is an audit trail that cannot be resolved.
   pricer        User                @relation("ChargePricer", fields: [priced_by], references: [id], onDelete: Restrict)
-  /// Razorpay Payment Links sent for this charge (step 17); `external_ref` names the latest.
+  /// Razorpay Payment Links sent for this charge (step 17); once one pays, `external_ref` names it.
   payment_links billing_checkouts[]
 
   @@index([placement_id])
@@ -2723,6 +2730,8 @@ model event_feedback_tallies {
   contributors Json
   /// `{ [topic]: distinct people }` over the positive messages; null on a tally frozen before topics (2026-11-24).
   topics       Json?
+  /// `{ [category]: the largest single person's messages }`, the dominance rule's numerator (SCRUM-1285); null on a tally frozen before 2026-11-26, which then reads without it.
+  top_messages Json?
   frozen_at    DateTime @default(now()) @db.Timestamptz(6)
 
   event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
@@ -4247,6 +4256,9 @@ model event_issues {
   /// one worth asking about afterwards.
   acknowledged_at DateTime? @db.Timestamptz(6)
   acknowledged_by String?
+  /// The organizer's owners and admins were mailed about this opening (SCRUM-1286, `lib/live-alert-mail.ts`): claimed
+  /// before the send, given back if nobody got it. A critical kind mails again only 30 minutes after the last of these.
+  mailed_at DateTime? @db.Timestamptz(6)
 
   event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
   ///

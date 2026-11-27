@@ -36,7 +36,7 @@ import {
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { answerRoomRetry, findRoomSend, replayRoomRetry } from "@/lib/room-retry"
 import { claimAnonymousName } from "@/lib/anonymous-names"
-import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
+import { moderateMessage, checkSpam, preSaveCheck, inlineFlags, recordHide } from "@/lib/moderation"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { idForViewer } from "@/lib/room-handle"
 import { roomMuteState } from "@/lib/room-mute"
@@ -47,6 +47,7 @@ import { discardAndRefuse, refuseBigRoomWhileDown, verdictForBigRoom } from "@/l
 import { readJson, isUuid } from "@/lib/api-input"
 import { createRoom } from "@/lib/check-in-core"
 import { paginationMeta } from "@/lib/pagination"
+import { markRoomRead } from "@/lib/chat-list"
 import { replyCounts } from "@/lib/reply-counts"
 
 interface RouteParams {
@@ -437,21 +438,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * message on the platform; they are taken for the page's ids now.
      */
     const [, pageMembers, repliesByParent] = await Promise.all([
-      // Update last read message for user
-      messages.length > 0
-        ? db.chat_group_members.update({
-            where: {
-              chat_group_id_user_id: {
-                chat_group_id: chatGroup.id,
-                user_id: authUser.userId,
-              },
-            },
-            data: {
-              last_read_message_id: messages[0].id,
-              updated_at: new Date(),
-            },
-          })
-        : null,
+      messages.length > 0 ? markRoomRead(chatGroup.id, authUser.userId, messages[0].id) : null,
       pseudonymFor.size
         ? db.chat_group_members.findMany({
             where: { chat_group_id: chatGroup.id, user_id: { in: [...pseudonymFor] } },
@@ -797,7 +784,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // --- Pre-save moderation: keywords and contact details (sync, <1ms) ---
-    const preSave = preSaveCheck(content)
+    const { hide: preSave, keyword } = preSaveCheck(content)
     if (preSave) {
       // Save but immediately mark as hidden — never emitted to other users
       let message
@@ -822,9 +809,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }
       // The flag before the count, still off the response path: the count reads
       // flags, and run side by side it missed this message's own (SCRUM-483).
-      void flagForReview(message.id, chatGroup.id, authUser.userId, preSave.result).then(() =>
-        preSave.autoMute ? checkAndAutoMute(authUser.userId, chatGroup.id) : undefined
-      )
+      void recordHide(message.id, chatGroup.id, authUser.userId, content, preSave)
       return successResponse({
         message: {
           id: message.id,
@@ -899,6 +884,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * found nothing. A room message is words only (R9, SCRUM-626).
      */
     let examinedInline = false
+    let flaggedInline = false
 
     // --- Pre-emit moderation: OpenAI check with 1s timeout ---
     try {
@@ -953,9 +939,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           },
         })
       }
-      if (openaiResult && openaiResult.action === "flag") {
-        void flagForReview(message.id, chatGroup.id, authUser.userId, openaiResult)
-      }
+      // Delivered, and recorded for review: the model's flag and a keyword one.
+      const flags = examinedInline ? inlineFlags(openaiResult, keyword) : []
+      flaggedInline = flags.length > 0
+      for (const flag of flags) void flagForReview(message.id, chatGroup.id, authUser.userId, flag)
       /*
        * Anything the inline check did not examine goes to the full pipeline,
        * which owns the verdict and will record `unchecked` if it cannot get
@@ -989,6 +976,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      */
     if (
       examinedInline &&
+      !flaggedInline &&
       (!message.moderation_status || message.moderation_status === "pending")
     ) {
       void db.chat_messages

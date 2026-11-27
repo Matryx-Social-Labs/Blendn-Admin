@@ -114,9 +114,9 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
   const chatGroupIds = allRooms.map((m) => m.chat_group_id)
   const eventIds = memberships.map((m) => m.chat_group.event.id)
   const lobbyIds = others.flatMap((m) => (m.chat_group.kind === "board_post" ? [m.chat_group_id] : []))
-  const [totals, lastMessagesRaw, unread, activeCheckIns, here, lobbyOthers] = await Promise.all([
-    // Every visible message per room that is not an advert: what is unread for a member who has read nothing.
-    unreadTotalsOf(chatGroupIds, notUnread, hiddenLineIds),
+  const [totals, lastMessagesRaw, unreadAfterMarker, activeCheckIns, here, lobbyOthers] = await Promise.all([
+    // A room with no read marker: every line that can be unread, capped. A room with one is counted from it alone.
+    unreadTotalsOf(allRooms.flatMap((m) => (m.last_read_message_id ? [] : [m.chat_group_id])), notUnread, hiddenLineIds),
     lastMessagesOf(chatGroupIds, blockedIds, hiddenLineIds),
     unreadAfterMarkers(allRooms, notUnread, hiddenLineIds),
     /*
@@ -158,8 +158,9 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
     // Who else is in each Lobby room, by room pseudonym (Flow 5 C5): one statement for all of them.
     lobbyOthersOf(lobbyIds, userId, blockedIds),
   ])
-  const { lastReadMessageMap, unreadCountMap } = unread
-  const totalOf = totals
+  // Both counts stop at `UNREAD_ROOM_CAP` (SCRUM-1223).
+  const unreadOf = (m: { chat_group_id: string; last_read_message_id: string | null }) =>
+    (m.last_read_message_id ? unreadAfterMarker : totals).get(m.chat_group_id) ?? 0
   const lastMessageMap = new Map(lastMessagesRaw.map((m) => [m.chat_group_id, m]))
   const checkedInEventIds = new Set(activeCheckIns.map((c) => c.event_id))
 
@@ -195,19 +196,6 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
   for (const r of blendRooms) roomSenderNames.set(r.id, pseudonymIn.get(`${r.eventId}|${r.sender}`) ?? "Attendee")
 
   const groupsWithUnread = memberships.map((membership) => {
-    const lastReadAt = membership.last_read_message_id
-      ? lastReadMessageMap.get(membership.last_read_message_id)
-      : null
-
-    // Calculate unread count
-    let unreadCount: number
-    if (lastReadAt) {
-      unreadCount = unreadCountMap.get(membership.chat_group_id) || 0
-    } else {
-      // User hasn't read any messages, count all
-      unreadCount = totalOf.get(membership.chat_group_id) ?? 0
-    }
-
     const lastMessage = lastMessageMap.get(membership.chat_group_id)
     const venueDay = membership.chat_group.event.kind === "venue_day"
     // The member's own room's place, never an owner's view of events.
@@ -227,7 +215,7 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
       hereCount: venueDay ? null : here.get(membership.chat_group.event.id) ?? 0,
       /** `hereCount` under its old name, for the apps installed before it: every one of them prints it as "N in the room". */
       memberCount: venueDay ? null : here.get(membership.chat_group.event.id) ?? 0,
-      unreadCount,
+      unreadCount: unreadOf(membership),
       /** Whether you silenced this room's pushes, and until when (`lib/room-mute.ts`). */
       mute: roomMuteState(membership.notification_preferences),
       lastMessageAt: membership.chat_group.last_message_at,
@@ -293,7 +281,6 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
     const kind = room.kind as "crew" | "blend" | "board_post"
     const post = room.board_post
     const lastMessage = lastMessageMap.get(room.id)
-    const lastReadAt = m.last_read_message_id ? lastReadMessageMap.get(m.last_read_message_id) : null
     const scope = { kind, groupId: room.id }
     return {
       id: room.id,
@@ -315,7 +302,7 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
             others: lobbyOthers.get(room.id) ?? { names: [], count: 0 },
           }
         : {}),
-      unreadCount: lastReadAt ? unreadCountMap.get(room.id) || 0 : (totalOf.get(room.id) ?? 0),
+      unreadCount: unreadOf(m),
       mute: roomMuteState(m.notification_preferences),
       // The newest message this viewer can see — a blocked person's later
       // line moves the room's own `last_message_at`, not this.

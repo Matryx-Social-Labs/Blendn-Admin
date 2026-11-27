@@ -93,6 +93,24 @@ describe("letting a ticket in", () => {
     expect(await admitAtDoor(eventId, { id: stranger, role: "organizer" }, { code: tickets[0].door_code })).toMatchObject({ kind: "not_authorized" })
     expect((await db.tickets.findUniqueOrThrow({ where: { id: tickets[0].id } })).redeemed_at).toBeNull()
   })
+
+  it("is the org's staff member's door too, and not another org's staff (SCRUM-1244)", async () => {
+    const { eventId, orgId, typeIds } = await ticketedEvent(w, [{ quantity: 10 }])
+    const { tickets } = await paidTickets(eventId, typeIds[0], 1)
+    const volunteer = await makeUser(testId("tix-door-staff"), "organizer")
+    const outsider = await makeUser(testId("tix-door-outsider"), "organizer")
+    w.users.push(volunteer, outsider)
+    await db.organisation_members.create({ data: { org_id: orgId, user_id: volunteer, role: "staff" } })
+    const otherOrg = await db.organisations.create({ data: { kind: "company", display_name: testId("tix-other-org"), status: "verified" } })
+    w.orgs.push(otherOrg.id)
+    await db.organisation_members.create({ data: { org_id: otherOrg.id, user_id: outsider, role: "staff" } })
+
+    expect(await admitAtDoor(eventId, { id: outsider, role: "organizer" }, { code: tickets[0].door_code })).toMatchObject({ kind: "not_authorized" })
+    expect(await admitAtDoor(eventId, { id: volunteer, role: "organizer" }, { code: tickets[0].door_code })).toMatchObject({ kind: "let_in" })
+    const row = await db.tickets.findUniqueOrThrow({ where: { id: tickets[0].id } })
+    expect(row.redeemed_by).toBe(volunteer)
+    expect(row.redeemed_at).not.toBeNull()
+  })
 })
 
 describe("the door's limits", () => {

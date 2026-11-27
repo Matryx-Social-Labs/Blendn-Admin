@@ -1,4 +1,6 @@
 // Relative imports: reached from server.ts through lib/reminder-sweeper.ts, and build:server emits `@/` verbatim.
+import type { Prisma } from "@prisma/client"
+
 import { distinctAttendees } from "./counting"
 import { db } from "./db"
 import { discloseHeadcount, discloseStars, spreadsByEventId } from "./disclosure"
@@ -21,6 +23,16 @@ const BATCH = 50
 
 type MailedEvent = { id: string; title: string; end_time: Date; timezone: string; organizer_org_id: string | null }
 
+/** A night an organization held: published or completed, not deleted. Spread with `realEventsWhere` (04b, 04c). */
+export const HELD = { status: { in: ["published", "completed"] }, deleted_at: null } satisfies Prisma.eventsWhereInput
+
+/** The Overview's "Checked in" for an ended event: people, not rows, staff left out (`distinctAttendees`). */
+export async function nightHeadcount(eventId: string): Promise<number> {
+  return distinctAttendees(
+    await db.event_check_ins.findMany({ where: { event_id: eventId, check_in_time: { not: null } }, select: { user_id: true, kind: true } })
+  )
+}
+
 /**
  * Rides the reminder loop's pass. Never throws: it runs on a timer in the server process. Returns mails sent.
  *
@@ -34,8 +46,7 @@ export async function sendResultsMails(now: Date = new Date()): Promise<number> 
       where: {
         ...realEventsWhere,
         organizer_org_id: { not: null },
-        status: { in: ["published", "completed"] },
-        deleted_at: null,
+        ...HELD,
         results_mailed_at: null,
         end_time: { lte: now, gt: new Date(now.getTime() - RATING_REQUEST_ENDED_WITHIN_MS) },
       },
@@ -72,21 +83,14 @@ export async function sendResultsMails(now: Date = new Date()): Promise<number> 
 async function mailResults(event: MailedEvent): Promise<{ sent: number; failed: number }> {
   const orgId = event.organizer_org_id
   if (!orgId) return { sent: 0, failed: 0 }
-  const [members, checkIns, ratingGroups, mood] = await Promise.all([
-    // Organization membership, never `events.organizer_id`: a member who left gets nothing (CLAUDE.md RBAC).
-    db.organisation_members.findMany({
-      where: { org_id: orgId, role: { in: ["owner", "admin"] }, user: { deletedAt: null, suspended_at: null } },
-      select: { user: { select: { id: true, email: true } } },
-    }),
-    // The Overview's "Checked in" for an ended event: people, not rows, staff left out (`distinctAttendees`).
-    db.event_check_ins.findMany({ where: { event_id: event.id, check_in_time: { not: null } }, select: { user_id: true, kind: true } }),
+  const [attended, ratingGroups, mood] = await Promise.all([
+    nightHeadcount(event.id),
     publishedRatingGroups({ id: event.id }),
     // The Overview's "Mood — whole night" panel, built by the same call the event page makes (host view, no quotes),
     // so the mail's count is the panel's "classified msgs" and can never show what the panel holds back.
     buildFeedbackDigest(event, "host", null),
   ])
 
-  const attended = distinctAttendees(checkIns)
   // The org's first mailed night only (Fable advisor, 2026-11-26); this event is already claimed, so it is excluded.
   // ponytail: two zero nights of one org claimed in the same instant by two replicas each see the other and both stay
   // silent; the help mail is a nicety, so the race is accepted.
@@ -97,39 +101,65 @@ async function mailResults(event: MailedEvent): Promise<{ sent: number; failed: 
   const stars = discloseStars(spreadsByEventId(ratingGroups).get(event.id) ?? [0, 0, 0, 0, 0])
   const base = dashboardUrl()
   const nextUrl = `${base}/dashboard/events/new`
-  const replyTo = emailReplyTo()
+  const result = await mailOwnersAndAdmins(orgId, "results", (unsubscribe) =>
+    attended === 0
+      ? noCheckInsEmail({ title: event.title, nextUrl, unsubscribeUrl: unsubscribe })
+      : resultsEmail({
+          title: event.title,
+          checkedIn: discloseHeadcount(attended),
+          averageRating: stars.averageRating,
+          ratingCount: stars.ratingCount,
+          moodMessages: typeof mood.total === "number" ? mood.total : 0,
+          overviewUrl: `${base}/dashboard/events/${event.id}`,
+          nextUrl,
+          unsubscribeUrl: unsubscribe,
+        })
+  )
+  logger[result.failed ? "warn" : "info"]("Results mail sent", { eventId: event.id, ...result })
+  return result
+}
 
+type LifecycleMail = { subject: string; text: string; html: string }
+
+/**
+ * One mail to an organization's owners and admins. Lifecycle (04b results, 04c next night, 09a first event): each with
+ * their own unsubscribe link. `live_alert` (09) is transactional: no List-Unsubscribe and no stream, so only a bounce or
+ * a complaint stops it, and `build` is handed "". Organization membership, never `events.organizer_id`: a member who
+ * left gets nothing (CLAUDE.md RBAC). Counts a provider failure apart from a suppression, so a caller can give its
+ * claim back.
+ */
+export async function mailOwnersAndAdmins(
+  orgId: string,
+  kind: "results" | "next_night" | "first_night" | "live_alert",
+  build: (unsubscribeUrl: string) => LifecycleMail
+): Promise<{ recipients: number; sent: number; failed: number }> {
+  const members = await db.organisation_members.findMany({
+    where: { org_id: orgId, role: { in: ["owner", "admin"] }, user: { deletedAt: null, suspended_at: null } },
+    select: { user: { select: { id: true, email: true } } },
+  })
+  const replyTo = emailReplyTo()
   let sent = 0
   let failed = 0
+  const lifecycle = kind !== "live_alert"
   for (const { user } of members) {
-    const unsubscribe = unsubscribeUrl(user)
-    const mail =
-      attended === 0
-        ? noCheckInsEmail({ title: event.title, nextUrl, unsubscribeUrl: unsubscribe })
-        : resultsEmail({
-            title: event.title,
-            checkedIn: discloseHeadcount(attended),
-            averageRating: stars.averageRating,
-            ratingCount: stars.ratingCount,
-            moodMessages: typeof mood.total === "number" ? mood.total : 0,
-            overviewUrl: `${base}/dashboard/events/${event.id}`,
-            nextUrl,
-            unsubscribeUrl: unsubscribe,
-          })
+    const unsubscribe = lifecycle ? unsubscribeUrl(user) : ""
     // sendEmail never throws, checks the suppression list (an unsubscribe stops `lifecycle`), and logs its own failure.
     const result = await sendEmail({
       to: canonicalEmail(user.email),
-      ...mail,
-      stream: "lifecycle",
-      tags: [{ name: "kind", value: "results" }],
-      headers: {
-        "List-Unsubscribe": `<${unsubscribe}>${replyTo ? `, <mailto:${replyTo}?subject=unsubscribe>` : ""}`,
-        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-      },
+      ...build(unsubscribe),
+      tags: [{ name: "kind", value: kind }],
+      ...(lifecycle
+        ? {
+            stream: "lifecycle" as const,
+            headers: {
+              "List-Unsubscribe": `<${unsubscribe}>${replyTo ? `, <mailto:${replyTo}?subject=unsubscribe>` : ""}`,
+              "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            },
+          }
+        : {}),
     })
     if (result.sent) sent++
     else if (result.reason === "provider_error") failed++
   }
-  logger[failed ? "warn" : "info"]("Results mail sent", { eventId: event.id, recipients: members.length, sent, failed })
-  return { sent, failed }
+  return { recipients: members.length, sent, failed }
 }

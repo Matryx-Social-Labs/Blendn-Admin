@@ -243,9 +243,10 @@ describe("a venue owner's view starts at the claim", () => {
    * these can.
    */
   it.each([
-    ["lib/event-visibility.ts", /\.\.\.\(user\.role === "venue_owner" \? await claimedVenueEventsWhere\(actor\.orgIds\)/],
-    ["lib/reports.ts", /role === "venue_owner" \? await claimedVenueEventsWhere\(orgIds\)/],
-    ["lib/venue-link-actions.ts", /OR: await claimedVenueEventsWhere\(actor\.orgIds\)/],
+    // Any member of the venue's org, not only a venue_owner (SCRUM-1246); still only through the claim window.
+    ["lib/event-visibility.ts", /\.\.\.\(await claimedVenueEventsWhere\(actor\.orgIds\)\)/],
+    ["lib/reports.ts", /const venueArms = await claimedVenueEventsWhere\(orgIds\)/],
+    ["lib/venue-link-actions.ts", /actor\.role === "app_admin" \? null : await claimedVenueEventsWhere\(actor\.orgIds\)/],
     ["lib/venue-link-actions.ts", /startsAfterClaim\(event\.venue, event\.start_time\)/],
     ["lib/building-occupancy.ts", /opts\.asOwner && venue \? claimedWindow\(venue\)/],
     ["app/dashboard/venues/[id]/page.tsx", /isAdmin \? undefined : claimedWindow\(venue\)/],

@@ -57,8 +57,9 @@ export default async function AnalyticsPage({
   }
 
   const params = await searchParams
-  const view = await analyticsPage(org.orgId, { range: parseRange(params.range), eventId: params.event })
-  const pass = rupees(grossRupees(BILLING_PLANS.event_pass))
+  const view = await analyticsPage(org, { range: parseRange(params.range), eventId: params.event })
+  // No price where plans are not sold (SCRUM-1151): the Plan page says why.
+  const pass = org.mayBuyHere ? rupees(grossRupees(BILLING_PLANS.event_pass)) : null
 
   return (
     <>
@@ -129,7 +130,7 @@ function AccessLine({ view }: { view: AnalyticsPageView }) {
   )
 }
 
-function EventSection({ view, pass }: { view: AnalyticsPageView; pass: string }) {
+function EventSection({ view, pass }: { view: AnalyticsPageView; pass: string | null }) {
   const selected = view.selected
   if (!selected) {
     return (
@@ -192,7 +193,7 @@ function EventSection({ view, pass }: { view: AnalyticsPageView; pass: string })
       <Locked
         height={280}
         title="See how this night went"
-        body={`How long people stayed, when they arrived, first-time vs returning, and app views → RSVPs. ${pass} for this event, or Analytics for every event.`}
+        body={`How long people stayed, when they arrived, first-time vs returning, and app views → RSVPs.${pass ? ` ${pass} for this event, or Analytics for every event.` : ""}`}
         sample={<EventPassPanels data={SAMPLE_EVENT_ANALYTICS} />}
         action={
           <Button asChild size="sm">

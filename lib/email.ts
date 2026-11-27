@@ -1,5 +1,7 @@
 import { randomUUID } from "crypto"
 
+import type { user_role } from "@prisma/client"
+
 import { db } from "./db"
 import { logger } from "./logger"
 import { BILLING_PLANS, grossRupees, gstSplit, planDay, rupees } from "./billing-plans"
@@ -15,6 +17,7 @@ import {
   applyAgainHtml,
   resultsHtml,
   inviteHtml,
+  liveAlertHtml,
   onboardingVerifyHtml,
   ticketOrderHtml,
 } from "./email-html"
@@ -329,12 +332,31 @@ export function inviteEmail(
 }
 
 /**
+ * The account's one next step, after the password (SCRUM-1342): an organizer's first event, a venue owner's venue (added
+ * or claimed: `/dashboard/venues`, where their first step is). Anyone else (a sponsor creates no events and holds no
+ * venue) keeps the Members line.
+ */
+function approvedNextStep(role: user_role) {
+  if (role === "organizer") return { line: "Next, create your first event:", href: `${dashboardUrl()}/dashboard/events/new`, label: "Create your first event" }
+  if (role === "venue_owner")
+    return { line: "Next, add your venue, or claim it if it’s already listed:", href: `${dashboardUrl()}/dashboard/venues`, label: "Add or claim your venue" }
+  return null
+}
+
+/**
  * `setPasswordLink` is null for an account that already existed and keeps its
  * password. Never a password: see SCRUM-134.
  */
-export function approvedEmail(name: string, orgName: string, email: string, setPasswordLink: string | null) {
+export function approvedEmail(
+  name: string,
+  orgName: string,
+  email: string,
+  setPasswordLink: string | null,
+  role: user_role
+) {
+  const next = approvedNextStep(role)
   return {
-    html: approvedHtml(name, orgName, email, setPasswordLink),
+    html: approvedHtml(name, orgName, email, setPasswordLink, next),
     subject: "Your Blend’n host account is ready",
     text: [
       `Hi ${name},`,
@@ -353,7 +375,7 @@ export function approvedEmail(name: string, orgName: string, email: string, setP
           ]
         : ["", "Sign in with your existing password."]),
       "",
-      "You can invite colleagues from Organisation → Members.",
+      ...(next ? [next.line, next.href] : ["You can invite colleagues from Organisation → Members."]),
     ].join("\n"),
   }
 }
@@ -489,9 +511,12 @@ export interface NightResults {
 }
 
 const NEXT_LABEL = "List your next night"
-const footer = (unsubscribeUrl: string) => [
+/** Why each lifecycle mail came: its footer, in the text part and the HTML. */
+const MORNING_WHY = "You get this the morning after each night your organization runs on Blend’n."
+const NEXT_NIGHT_WHY = "You get this a week after a night with nothing listed next, at most once a month."
+const footer = (why: string, unsubscribeUrl: string) => [
   "—",
-  "You get this the morning after each night your organization runs on Blend’n. Invites and account mail still come.",
+  `${why} Invites and account mail still come.`,
   `Unsubscribe from these mails: ${unsubscribeUrl}`,
 ]
 const count = (n: number) => n.toLocaleString("en-US")
@@ -520,7 +545,7 @@ export function resultsEmail(r: NightResults) {
       r.nextUrl,
       ...(note ? ["", note] : []),
       "",
-      ...footer(r.unsubscribeUrl),
+      ...footer(MORNING_WHY, r.unsubscribeUrl),
     ].join("\n"),
     html: resultsHtml({
       title: subject,
@@ -530,6 +555,7 @@ export function resultsEmail(r: NightResults) {
       button: { href: r.overviewUrl, label: "Open the night’s results" },
       next: { href: r.nextUrl, label: NEXT_LABEL },
       note,
+      why: MORNING_WHY,
       unsubscribeUrl: r.unsubscribeUrl,
     }),
   }
@@ -553,7 +579,7 @@ export function noCheckInsEmail(r: { title: string; nextUrl: string; unsubscribe
       `${NEXT_LABEL}:`,
       r.nextUrl,
       "",
-      ...footer(r.unsubscribeUrl),
+      ...footer(MORNING_WHY, r.unsubscribeUrl),
     ].join("\n"),
     html: resultsHtml({
       title: subject,
@@ -563,8 +589,83 @@ export function noCheckInsEmail(r: { title: string; nextUrl: string; unsubscribe
       button: { href: r.nextUrl, label: NEXT_LABEL },
       next: null,
       note: null,
+      why: MORNING_WHY,
       unsubscribeUrl: r.unsubscribeUrl,
     }),
+  }
+}
+
+/**
+ * The "list your next" nudge (SCRUM-1284): a week after an organization's latest night, with nothing coming up. One line
+ * on that night and one button; no second ask. `checkedIn` is through the disclosure floor (null: fewer than 5), and 0
+ * means nobody checked in, so no figure is quoted at all.
+ */
+export function nextNightEmail(r: { title: string; checkedIn: number | null; nextUrl: string; unsubscribeUrl: string }) {
+  const line =
+    r.checkedIn === 0
+      ? `It’s a week since ${r.title}, and nothing is listed after it yet.`
+      : `${r.checkedIn === null ? "Fewer than 5" : count(r.checkedIn)} people checked in on Blend’n at ${r.title} last week. Nothing is listed after it yet.`
+  const subject = `${r.title}: what’s next?`
+  return {
+    subject,
+    text: [line, "", `${NEXT_LABEL}:`, r.nextUrl, "", ...footer(NEXT_NIGHT_WHY, r.unsubscribeUrl)].join("\n"),
+    html: resultsHtml({
+      title: subject,
+      preheader: line,
+      heading: "What’s next?",
+      lines: [line],
+      button: { href: r.nextUrl, label: NEXT_LABEL },
+      next: null,
+      note: null,
+      why: NEXT_NIGHT_WHY,
+      unsubscribeUrl: r.unsubscribeUrl,
+    }),
+  }
+}
+
+/**
+ * The first-night nudge (SCRUM-1342): three days after an organizer was approved, with nothing listed. One button to
+ * a new event, and one line on what the morning results mail shows, only what it really sends (04b).
+ */
+export function firstNightEmail(r: { orgName: string; nextUrl: string; unsubscribeUrl: string }) {
+  const lines = [
+    `${r.orgName} is set up on Blend’n, and nothing is listed yet.`,
+    "The morning after each night, you’ll get an email with how it went: how many people checked in, the average rating once 5 people have rated, and, once people have chatted, the room’s mood on the results page.",
+  ]
+  const label = "Create your first event"
+  const why = "You get this once, three days after your organization was approved, if nothing is listed yet."
+  const subject = "List your first night on Blend’n"
+  return {
+    subject,
+    text: [...lines.flatMap((l) => [l, ""]), `${label}:`, r.nextUrl, "", ...footer(why, r.unsubscribeUrl)].join("\n"),
+    html: resultsHtml({
+      title: subject,
+      preheader: lines[0],
+      heading: "List your first night",
+      lines,
+      button: { href: r.nextUrl, label },
+      next: null,
+      note: null,
+      why,
+      unsubscribeUrl: r.unsubscribeUrl,
+    }),
+  }
+}
+
+/**
+ * A critical live alert, to the organizer's owners and admins (SCRUM-1286). `body` is the alert's own body as the Live
+ * tab shows it (`deriveAlerts`, written down by the issue sweep), never a second version; `openedAt` is already on the
+ * event's clock, with no zone label. Transactional: no unsubscribe, because a safety alert must not be lost with the
+ * morning mail.
+ */
+export function liveAlertEmail(a: { eventTitle: string; alertTitle: string; body: string; openedAt: string; liveUrl: string }) {
+  const subject = `${a.eventTitle}: ${a.alertTitle}`
+  const lines = [a.body, `${a.eventTitle}, opened at ${a.openedAt}.`]
+  const why = "You get this as an owner or admin of the organization running this night, when a critical alert opens on it."
+  return {
+    subject,
+    text: [...lines.flatMap((l) => [l, ""]), "Open the Live tab:", a.liveUrl, "", "—", why].join("\n"),
+    html: liveAlertHtml({ title: subject, heading: a.alertTitle, lines, button: { href: a.liveUrl, label: "Open the Live tab" }, note: why }),
   }
 }
 

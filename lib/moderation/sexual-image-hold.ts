@@ -12,20 +12,14 @@ export type ImagePath = "profile" | "blur" | "lobby"
 /**
  * One page per user per 10 minutes: one account uploading image after image
  * must not bury the next real case. Every pull still writes its audit row.
- *
- * ponytail: in this process only, so a restart or a second replica pages again
- * (one replica at launch). A cooldown in the database wants an audit_logs index
- * on (action, resource_id, created_at), which is a migration.
+ * The cooldown is kept in this process's memory.
  */
 const PAGE_COOLDOWN_MS = 10 * 60 * 1000
 const lastPaged = new Map<string, number>()
 
 /**
- * A sexual image that moderation pulled goes to a person (SCRUM-1163).
- *
- * The vendor does not score minors on images (`sexual/minors` is text-only on
- * omni-moderation), so every sexual image that is pulled goes to a person, who
- * looks for a minor or a non-consensual image.
+ * A sexual image that moderation pulled goes to a person, who looks for a minor
+ * or a non-consensual image (SCRUM-1163).
  *
  * Called by each image path AFTER its own pull (profile and blur photos are
  * withdrawn to the private bucket, a Lobby photo is rejected and stays in it):
@@ -35,12 +29,13 @@ const lastPaged = new Map<string, number>()
  * image, no name. Never throws: nothing here may stop, or undo, the pull.
  */
 export async function holdSexualImage(check: ModerationCheck, path: ImagePath, objectKey: string | null, userId: string): Promise<void> {
+  // The user id and key go in a log line only where the audit row may not hold them: its write failed, or the catch-all, which cannot tell.
   const context = { userId, objectKey }
   try {
     const categories = check.checked && check.result?.action === "hide" && check.result.source === "openai_image" ? check.result.categories : undefined
     const category = (["sexual/minors", "sexual"] as const).find((c) => categories?.[c] !== undefined)
     if (!category) return
-    if (!objectKey) logger.error("Sexual image hold: the object key could not be resolved", context)
+    if (!objectKey) logger.error("Sexual image hold: the object key could not be resolved", { path })
     // No actor: the platform did this (lib/audit-log.ts `actsFor`). Awaited, so a lost row is logged here, with whose it was.
     const audited = await db
       .$transaction((tx) => auditInTx(tx, { action: "moderation.sexual_image_hold", resource: "user", resourceId: userId, details: { objectKey, path, category } }))
@@ -53,7 +48,7 @@ export async function holdSexualImage(check: ModerationCheck, path: ImagePath, o
     for (const [id, at] of lastPaged) if (now - at >= PAGE_COOLDOWN_MS) lastPaged.delete(id)
     // The cooldown leaves a pull to its audit row; one whose row was lost is paged regardless.
     if (audited && lastPaged.has(userId)) {
-      logger.info("Sexual image page held back by the 10-minute cooldown", { ...context, path })
+      logger.info("Sexual image page held back by the 10-minute cooldown", { path })
       return
     }
     // Taken before the send, so a second pull arriving during it waits out the window too; given back unless a page went.
@@ -67,7 +62,7 @@ export async function holdSexualImage(check: ModerationCheck, path: ImagePath, o
     } finally {
       if (result !== "sent") lastPaged.delete(userId)
     }
-    if (result !== "sent") logger.error("Sexual image hold: staff were not paged", { ...context, result })
+    if (result !== "sent") logger.error("Sexual image hold: staff were not paged", { path, result })
   } catch (error) {
     logger.error("Sexual image hold failed", { ...context, error: error instanceof Error ? error.message : String(error) })
   }

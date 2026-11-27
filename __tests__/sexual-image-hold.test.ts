@@ -1,11 +1,7 @@
 /**
  * A sexual image that moderation pulls goes to a person (SCRUM-1163, launch gate 9).
  *
- * OpenAI's omni-moderation scores `sexual/minors` on text only: an image alone
- * scores 0 on it (developers.openai.com/api/docs/guides/moderation, read
- * 2026-11-26). Nothing here can tell a minor or a non-consensual image from
- * any other sexual image, so every IMAGE hide naming `sexual` (or
- * `sexual/minors`, should the vendor ever score it on images) pages staff once
+ * Every IMAGE hide naming `sexual` or `sexual/minors` pages staff once
  * and leaves a `moderation.sexual_image_hold` audit row, on every path that
  * acts on an image verdict: the profile photo, its blurred copy, a Lobby photo.
  *
@@ -156,6 +152,9 @@ beforeEach(() => {
 
 const message = (path: string, key: string) =>
   `Sexual image pulled (${path}). A person must check it for a minor or a non-consensual image. key ${key} user ${USER}\nMore from this user in the next 10 minutes go to the audit log only.\nhttps://dash.test/dashboard/moderation`
+/** Every line the hold logged so far, at any level, as one string. */
+const logged = () =>
+  JSON.stringify(Object.values(logger).flatMap((f) => (f as jest.Mock).mock.calls.filter(([m]) => String(m).startsWith("Sexual image"))))
 const auditEntry = (path: string, key: string, category = "sexual") => ({
   action: "moderation.sexual_image_hold",
   resource: "user",
@@ -200,7 +199,10 @@ describe.each(PATHS)("an image hide naming sexual on the $name", (path) => {
 
     path.expectPulled()
     expect(audit).toHaveBeenCalledTimes(1)
-    expect(logger.error).toHaveBeenCalledWith("Sexual image hold: staff were not paged", { userId: USER, objectKey: path.key, result })
+    expect(logger.error).toHaveBeenCalledWith("Sexual image hold: staff were not paged", { path: path.path, result })
+    // The audit row holds the key and the user id, so the log carries neither.
+    expect(logged()).not.toContain(path.key)
+    expect(logged()).not.toContain(USER)
   })
 
   it("an audit write that fails leaves the photo pulled, still pages, and logs an error naming the user and key", async () => {
@@ -211,6 +213,15 @@ describe.each(PATHS)("an image hide naming sexual on the $name", (path) => {
     expect(page).toHaveBeenCalledTimes(1)
     expect(logger.error).toHaveBeenCalledWith("Sexual image hold: audit row not written", { userId: USER, objectKey: path.key, error: "audit down" })
   })
+
+  it("an audit write that fails and a page that is not sent: only the audit line carries the user and key", async () => {
+    audit.mockRejectedValue(new Error("audit down"))
+    page.mockResolvedValue("unconfigured")
+    await path.run(SEXUAL_HIDE)
+
+    expect(logger.error).toHaveBeenCalledWith("Sexual image hold: audit row not written", { userId: USER, objectKey: path.key, error: "audit down" })
+    expect(logger.error).toHaveBeenCalledWith("Sexual image hold: staff were not paged", { path: path.path, result: "unconfigured" })
+  })
 })
 
 describe("holdSexualImage", () => {
@@ -220,7 +231,7 @@ describe("holdSexualImage", () => {
     expect(audit).not.toHaveBeenCalled()
   })
 
-  it("runs for sexual/minors too, should the vendor ever score it on images", async () => {
+  it("runs for sexual/minors too", async () => {
     await holdSexualImage({ checked: true, result: { action: "hide", source: "openai_image", categories: { "sexual/minors": 0.8 }, confidence: 0.8 } }, "lobby", LOBBY_KEY, USER)
     expect(page).toHaveBeenCalledTimes(1)
     expect(audit).toHaveBeenCalledWith(expect.anything(), auditEntry("lobby", LOBBY_KEY, "sexual/minors"))
@@ -256,7 +267,8 @@ describe("holdSexualImage, the edges", () => {
     await holdSexualImage(SEXUAL_HIDE, "lobby", null, USER)
     expect(page).toHaveBeenCalledTimes(1)
     expect(audit).toHaveBeenCalledWith(expect.anything(), auditEntry("lobby", null as unknown as string))
-    expect(logger.error).toHaveBeenCalledWith("Sexual image hold: the object key could not be resolved", { userId: USER, objectKey: null })
+    expect(logger.error).toHaveBeenCalledWith("Sexual image hold: the object key could not be resolved", { path: "lobby" })
+    expect(logged()).not.toContain(USER)
   })
 
   it("the real audit writer stores the platform's row: no actor, no address, no organisation", async () => {
@@ -320,14 +332,15 @@ describe("one page per user per 10 minutes", () => {
     expect(page).toHaveBeenCalledTimes(2)
   })
 
-  it("a send that throws gives the slot back, and a held-back page is logged with its key", async () => {
+  it("a send that throws gives the slot back, and a held-back page is logged by its path", async () => {
     page.mockRejectedValueOnce(new Error("channel exploded"))
     await holdSexualImage(SEXUAL_HIDE, "profile", PROFILE_KEY, USER)
     await holdSexualImage(SEXUAL_HIDE, "blur", BLUR_KEY, USER)
     await holdSexualImage(SEXUAL_HIDE, "lobby", LOBBY_KEY, USER)
 
     expect(page).toHaveBeenCalledTimes(2)
-    expect(logger.info).toHaveBeenCalledWith("Sexual image page held back by the 10-minute cooldown", { userId: USER, objectKey: LOBBY_KEY, path: "lobby" })
+    expect(logger.info).toHaveBeenCalledWith("Sexual image page held back by the 10-minute cooldown", { path: "lobby" })
+    expect(JSON.stringify((logger.info as jest.Mock).mock.calls)).not.toContain(LOBBY_KEY)
   })
 
   it("a page that failed does not start the cooldown", async () => {

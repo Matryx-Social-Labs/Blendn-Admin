@@ -10,7 +10,7 @@ import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { idForViewer } from "@/lib/room-handle"
 import { crewMemberImages, namesInRoom } from "@/lib/identity"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
+import { moderateMessage, checkSpam, preSaveCheck, inlineFlags, recordHide } from "@/lib/moderation"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
 import { notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 import { textCheckFor } from "@/lib/moderation/staging-override"
@@ -30,6 +30,7 @@ import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { answerRoomRetry, findRoomSend, replayRoomRetry } from "@/lib/room-retry"
 import { chatClosedMessage, LEFT_ROOM_MESSAGE, NOT_LIVE_MESSAGE } from "@/lib/chat-window"
 import { withOwnerDoor, mayWriteToRoomFor, roomOwnerDenial, roomReadDenialFor, roomScope } from "@/lib/room-kind"
+import { markRoomRead } from "@/lib/chat-list"
 import { replyCounts } from "@/lib/reply-counts"
 import { roomMessageWords } from "@/lib/validations/chat"
 import { readJson, isUuid } from "@/lib/api-input"
@@ -203,12 +204,7 @@ export async function GET(
      * in `GET /chat/groups` counted everything as unread for ever without it.
      */
     const markRead =
-      !before && membership && messagesToReturn.length > 0
-        ? db.chat_group_members.update({
-            where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: user.userId } },
-            data: { last_read_message_id: messagesToReturn[0].id, updated_at: new Date() },
-          })
-        : null
+      !before && membership && messagesToReturn.length > 0 ? markRoomRead(chatGroupId, user.userId, messagesToReturn[0].id) : null
 
     // Reverse to get chronological order (oldest first within the batch)
     messagesToReturn.reverse()
@@ -504,7 +500,7 @@ export async function POST(
     }
 
     // --- Pre-save moderation: keywords and contact details (sync, <1ms) ---
-    const preSave = preSaveCheck(content)
+    const { hide: preSave, keyword } = preSaveCheck(content)
     if (preSave) {
       // Save the message but immediately mark it as hidden
       let message
@@ -527,13 +523,11 @@ export async function POST(
         if (!raced) throw error
         return answerRoomRetry(raced, chatGroupId)
       }
-      // Flag for review and, for abuse rather than a phone number, count
-      // toward an auto-mute (fire-and-forget). The flag first: the count reads
+      // Flag for review and, for a slur or a line the model judges abusive,
+      // count toward an auto-mute (`recordHide`, fire-and-forget). The flag first: the count reads
       // flags, and run side by side it missed this message's own, so the mute
       // landed on the fourth hidden message instead of the third (SCRUM-483).
-      void flagForReview(message.id, chatGroupId, user.userId, preSave.result).then(() =>
-        preSave.autoMute ? checkAndAutoMute(user.userId, chatGroupId) : undefined
-      )
+      void recordHide(message.id, chatGroupId, user.userId, content, preSave)
       // Return success to sender but message is already hidden — never emitted to others
       return successResponse({
         id: message.id,
@@ -643,10 +637,14 @@ export async function POST(
      * found nothing. A room message is words only (R9, SCRUM-626).
      */
     let examinedInline = false
+    let flaggedInline = false
 
     // --- Pre-emit moderation: OpenAI check with 1s timeout ---
-    // Run OpenAI moderation before broadcasting. If it takes >1s, emit anyway
-    // and fall back to the post-emit hide behavior for safety.
+    // Race the OpenAI text check (started beside the write) against 1 s. Without a
+    // verdict by then, an event room with more than `BIG_ROOM_HERE_COUNT` people
+    // here waits for it or refuses (`verdictForBigRoom`; a missing key never
+    // waits); any other room emits now, and `moderateMessage` finishes the check,
+    // removing the message if it must (`hideMessage`).
     try {
       /*
        * The loser of this race used to keep its timer alive: `Promise.race`
@@ -702,10 +700,10 @@ export async function POST(
           createdAt: message.created_at.toISOString(),
         })
       }
-      // If flagged (not hidden), let it through but flag for review
-      if (openaiResult && openaiResult.action === "flag") {
-        void flagForReview(message.id, chatGroupId, user.userId, openaiResult)
-      }
+      // Delivered, and recorded for review: the model's flag and a keyword one.
+      const flags = examinedInline ? inlineFlags(openaiResult, keyword) : []
+      flaggedInline = flags.length > 0
+      for (const flag of flags) void flagForReview(message.id, chatGroupId, user.userId, flag)
       /*
        * Anything the inline check did not examine goes to the full pipeline,
        * which owns the verdict and will record `unchecked` if it cannot get
@@ -739,6 +737,7 @@ export async function POST(
      */
     if (
       examinedInline &&
+      !flaggedInline &&
       (!message.moderation_status || message.moderation_status === "pending")
     ) {
       void db.chat_messages

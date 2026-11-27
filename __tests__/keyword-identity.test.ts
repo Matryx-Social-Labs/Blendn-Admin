@@ -12,8 +12,8 @@ it("the identity list is a subset of the chat list", () => {
   expect([...IDENTITY_SLURS].filter((k) => !CHAT_KEYWORDS.has(k))).toEqual([])
 })
 
-it.each(REAL_PEOPLE)("%s is allowed on identity text, though the chat list would hide it", (text) => {
-  expect(checkKeywords(text)?.action).toBe("hide")
+it.each(REAL_PEOPLE)("%s is allowed on identity text, and only flagged in chat (SCRUM-1167)", (text) => {
+  expect(checkKeywords(text)?.action).toBe("flag")
   expect(identityTextVerdict(text)?.action).not.toBe("refuse")
 })
 

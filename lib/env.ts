@@ -34,8 +34,10 @@ const envSchema = z.object({
   MEDIA_WORKER_SECRET: z.string().min(32, "MEDIA_WORKER_SECRET must be at least 32 characters").optional(),
 
   // OpenAI: the moderation model. Required on Railway production (`openaiKeyProblem`);
-  // elsewhere optional, and without it moderation is the keyword list alone.
+  // optional elsewhere.
   OPENAI_API_KEY: z.string().optional(),
+  /** The mood classifier's chat model (lib/sentiment/classify.ts). Unset or blank: `DEFAULT_SENTIMENT_MODEL`. */
+  SENTIMENT_MODEL: z.string().optional(),
 
   // Landing-page lead ingest. Optional because an environment that does not
   // serve organizers.blendn.app is a valid environment — but validated when
@@ -56,8 +58,9 @@ const envSchema = z.object({
   /// secret: anyone holding the URL can post to that channel.
   LEADS_SLACK_WEBHOOK_URL: z.string().url().optional(),
   /// Where staff hear about new reports and severe flags (`lib/staff-alert.ts`,
-  /// every minute; counts and a link only). Same two free channels as the lead
-  /// alert, both optional: unset means an info log, never a throw. The webhook
+  /// every minute: counts and a link; a pulled sexual image's page adds its storage
+  /// key and user id). Same two free channels as the lead alert, both optional:
+  /// unset means a log line (an error in production), never a throw. The webhook
   /// URL is a bearer secret and is never logged.
   STAFF_ALERT_SLACK_WEBHOOK_URL: z.string().url().optional(),
   STAFF_ALERT_EMAIL: z.string().email().optional(),
@@ -272,9 +275,7 @@ export function razorpayKeyModeProblem(
 /**
  * Why this environment may not run without OPENAI_API_KEY, or null.
  *
- * Without the key every model check is skipped: big rooms proceed, crew text
- * skips its fail-closed, the Lobby and both re-check sweepers stop, and
- * moderation is the keyword list alone, with nothing failing. Gated on the
+ * Production runs the model checks, so it refuses to boot without the key. Gated on the
  * Railway name, not NODE_ENV: CI's e2e lane boots NODE_ENV=production with no
  * key and must keep booting.
  */
@@ -283,7 +284,7 @@ export function openaiKeyProblem(
   environmentName: string | undefined
 ): string | null {
   if (environmentName !== "production" || key?.trim()) return null
-  return "OPENAI_API_KEY is required in production: without it moderation is the keyword list alone"
+  return "OPENAI_API_KEY is required in production: set it on the Railway production service"
 }
 
 const DEFAULT_SITE_ORIGIN = "https://www.blendn.app"
@@ -548,6 +549,18 @@ export function revenuecatSecretKey(): string | null {
 export function revenuecatWebhookSecret(): string | null {
   const secret = process.env.REVENUECAT_WEBHOOK_SECRET?.trim()
   return secret && secret.length >= 32 ? secret : null
+}
+
+/**
+ * The mood classifier's default model: OpenAI's current small chat model, per
+ * https://developers.openai.com/api/docs/deprecations (read 2026-11-26, SCRUM-1226). It was a hard-coded
+ * gpt-4o-mini, which OpenAI shuts down on 2027-01-14. When OpenAI retires this one, set `SENTIMENT_MODEL`.
+ */
+const DEFAULT_SENTIMENT_MODEL = "gpt-6-luna"
+
+/** The mood classifier's model: `SENTIMENT_MODEL`, or the default when unset or blank. */
+export function sentimentModel(): string {
+  return process.env.SENTIMENT_MODEL?.trim() || DEFAULT_SENTIMENT_MODEL
 }
 
 /** Where replies to Blend'n mail go, or null for no Reply-To. */

@@ -240,6 +240,15 @@ describe("what", () => {
     expect(sent[0].html).not.toContain("transactional email")
   })
 
+  it.each([42, 0])("says why it came, in both parts: the morning after each night (%i checked in)", async (attendees) => {
+    world({ attendees })
+    await sendResultsMails(TEN_IST)
+    for (const part of [sent[0].text, sent[0].html]) {
+      expect(part).toContain("You get this the morning after each night your organization runs on Blend’n.")
+      expect(part).not.toContain("a week after")
+    }
+  })
+
   it("12,480 checked in, a long title, the rating once 5 rated, the mood count; one button to the Overview", async () => {
     const title = "Thiruvananthapuram Indie Night: Third Edition Rooftop Session"
     world({ attendees: 12480, raters: [0, 1, 2, 4, 5], feedback: 318 })

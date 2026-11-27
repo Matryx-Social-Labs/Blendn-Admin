@@ -316,12 +316,14 @@ export function approvedHtml(
   name: string,
   orgName: string,
   email: string,
-  setPasswordLink: string | null
+  setPasswordLink: string | null,
+  /** The account's first step (SCRUM-1342); null keeps the Members line, for an account with none to point at. */
+  next: { href: string; label: string } | null
 ): string {
   const signIn = `${appUrl()}/login`
   // The sign-in address is monospaced: it is the one thing in this email the
   // reader has to type exactly. No password travels here (SCRUM-134).
-  const account = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="dm-codebox dm-border" style="margin:22px 0 6px;background-color:#F7F4F3;border:1px solid #E2DAD7;border-radius:10px;"><tr><td style="padding:16px 18px;font-family:'SF Mono',Consolas,Menlo,monospace;font-size:13px;line-height:22px;color:${INK};" class="dm-text"><span style="color:${MUTED};">Email</span><br>${esc(email)}</td></tr></table>`
+  const account = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="dm-codebox dm-border" style="margin:22px 0 6px;background-color:#F7F4F3;border:1px solid #E2DAD7;border-radius:10px;"><tr><td style="padding:16px 18px;font-family:'SF Mono',Consolas,Menlo,monospace;font-size:13px;line-height:22px;color:${INK};word-break:break-all;" class="dm-text"><span style="color:${MUTED};">Email</span><br>${esc(email)}</td></tr></table>`
 
   return shell({
     title: "Your Blend’n host account is ready",
@@ -345,9 +347,9 @@ export function approvedHtml(
             ),
           ]
         : [button(signIn, "Sign in to the dashboard"), fallbackLink(signIn)]),
-      note(
-        "Once you&rsquo;re in, invite your colleagues from Your organisation &rarr; Members."
-      ),
+      next
+        ? `<p style="margin:18px 0 0;font-family:${FONT};font-size:14px;line-height:22px;color:${INK};" class="dm-text">Next: <a class="dm-text" href="${esc(next.href)}" target="_blank" style="color:${INK};font-weight:bold;text-decoration:underline;">${esc(next.label)}</a></p>`
+        : note("Once you&rsquo;re in, invite your colleagues from Your organisation &rarr; Members."),
     ].join("\n"),
   })
 }
@@ -489,7 +491,8 @@ export function ticketOrderHtml(opts: { heading: string; paragraphs: string[]; l
 }
 
 /**
- * The host's morning results mail and its zero-check-in twin (SCRUM-1282). `lines` are plain text, written once in
+ * The host's morning results mail, its zero-check-in twin (SCRUM-1282) and the "list your next" nudge (SCRUM-1284),
+ * each with its own `why` in the footer. `lines` are plain text, written once in
  * ./email.ts for both parts; escaped here. One button; "List your next night" is a plain link under it, never a
  * second button (lane advisor, 2026-11-26). The footer replaces "transactional" with the unsubscribe, because this
  * mail is not one.
@@ -502,6 +505,8 @@ export function resultsHtml(opts: {
   button: { href: string; label: string }
   next: { href: string; label: string } | null
   note: string | null
+  /** Why this mail came, plain text: the footer's first sentence. */
+  why: string
   unsubscribeUrl: string
 }): string {
   const link = (href: string, label: string) =>
@@ -517,7 +522,31 @@ export function resultsHtml(opts: {
       ...(opts.next ? [`<p style="margin:18px 0 0;font-family:${FONT};font-size:14px;line-height:22px;">${link(opts.next.href, opts.next.label)}</p>`] : []),
       ...(opts.note ? [note(esc(opts.note))] : []),
     ].join("\n"),
-    footer: `You get this the morning after each night your organization runs on Blend&rsquo;n. <a href="${esc(opts.unsubscribeUrl)}" target="_blank" style="color:${MUTED};text-decoration:underline;">Unsubscribe from these mails</a>. Invites and account mail still come.`,
+    footer: `${esc(opts.why)} <a href="${esc(opts.unsubscribeUrl)}" target="_blank" style="color:${MUTED};text-decoration:underline;">Unsubscribe from these mails</a>. Invites and account mail still come.`,
+  })
+}
+
+/**
+ * A critical live alert (SCRUM-1286): the alert's own words, one button to the Live tab. Transactional, so the shell's
+ * own footer; nothing here can be unsubscribed from. `lines` are plain text from `liveAlertEmail`, escaped here.
+ */
+export function liveAlertHtml(opts: {
+  title: string
+  heading: string
+  lines: string[]
+  button: { href: string; label: string }
+  note: string
+}): string {
+  return shell({
+    title: opts.title,
+    preheader: opts.lines[0] ?? opts.heading,
+    body: [
+      heading(opts.heading),
+      ...opts.lines.map((line) => para(esc(line))),
+      button(opts.button.href, opts.button.label),
+      fallbackLink(opts.button.href),
+      note(esc(opts.note)),
+    ].join("\n"),
   })
 }
 
