@@ -102,6 +102,9 @@ beforeAll(async () => {
   await report(msg.pending)
   msg.upheldRecently = await write(conv.past)
   await report(msg.upheldRecently, { status: "resolved", reviewed_at: ago(10) })
+  // Upheld with no decision date (a hand-edited or older row): fails closed, held.
+  msg.upheldUndated = await write(conv.past)
+  await report(msg.upheldUndated, { status: "resolved", reviewed_at: null })
   msg.upheldLongAgo = await write(conv.past)
   await report(msg.upheldLongAgo, { status: "resolved", reviewed_at: ago(181) })
   msg.dismissed = await write(conv.past)
@@ -175,7 +178,7 @@ describe("the DM purge", () => {
   })
 
   it("holds a message under a pending report, and one upheld within 180 days", async () => {
-    expect((await left([msg.pending, msg.upheldRecently, msg.reportedOnly])).sort()).toEqual([msg.pending, msg.upheldRecently, msg.reportedOnly].sort())
+    expect((await left([msg.pending, msg.upheldRecently, msg.upheldUndated, msg.reportedOnly])).sort()).toEqual([msg.pending, msg.upheldRecently, msg.upheldUndated, msg.reportedOnly].sort())
   })
 
   it("takes a message whose report was upheld more than 180 days ago, or dismissed, and ignores a room report", async () => {
@@ -286,6 +289,30 @@ describe("the DM purge, its bounds", () => {
     await db.event_insight_tallies.create({ data: { event_id: event, counts: {} } })
     await purgeClosedConversations()
     expect(await left([m])).toEqual([])
+  })
+
+  it("does not wait for an event or a Lobby ask that no longer exists", async () => {
+    const [a, b] = await Promise.all(["gone-a", "gone-b"].map((l) => makeUser(testId(`dmr-${l}`))))
+    users.push(a, b)
+    const id = await conversation(a, b, 200)
+    // The Lobby purge deletes the post and its asks; a hard-deleted event takes its tally with it.
+    await db.private_conversations.update({ where: { id }, data: { origin_event_id: randomUUID(), origin_board_request_id: randomUUID() } })
+    const m = await write(id, {}, a)
+    await purgeClosedConversations()
+    expect(await left([m])).toEqual([])
+  })
+
+  it("keeps a message reported while its photo was being deleted", async () => {
+    const [a, b] = await Promise.all(["race-a", "race-b"].map((l) => makeUser(testId(`dmr-${l}`))))
+    users.push(a, b)
+    const id = await conversation(a, b, 200)
+    const m = await write(id, { message_text: null, media_url: `${BUCKET}/chat/${a}/1758000000000-${randomUUID().slice(0, 6)}-race.jpg`, media_type: "image" }, a)
+    mockDeleteFile.mockImplementationOnce(async () => {
+      await db.message_reports.create({ data: { reporter_id: b, message_id: m, message_type: "private", reason: "harassment" } })
+    })
+    await purgeClosedConversations()
+    expect(await left([m])).toEqual([m])
+    await db.message_reports.deleteMany({ where: { message_id: m } })
   })
 
   it("deletes at most a batch a pass, says there is more, and drains on the next", async () => {

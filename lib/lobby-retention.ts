@@ -91,8 +91,9 @@ export interface PurgePass {
 /** When a room closes, in SQL: a venue day's at its reset, any other a day after it ends (`chatClosesAt`). */
 const closesAt = Prisma.sql`(CASE WHEN e.kind = 'venue_day' THEN e.end_time ELSE e.end_time + make_interval(hours => ${CHAT_WINDOW_HOURS}) END)`
 
-/** A report that holds what it names: still pending, or upheld within the window. */
-export const holdingReport = (since: Date) => Prisma.sql`(r.status = 'pending' OR (r.status = 'resolved' AND r.reviewed_at > ${since}))`
+/** A report that holds what it names: still pending, or upheld within the window (an upheld one with no decision date holds: fail closed). */
+export const holdingReport = (since: Date) =>
+  Prisma.sql`(r.status = 'pending' OR (r.status = 'resolved' AND (r.reviewed_at IS NULL OR r.reviewed_at > ${since})))`
 
 async function messagesPastTheirTime(since: Date) {
   return db.$queryRaw<PastTheirTime[]>`

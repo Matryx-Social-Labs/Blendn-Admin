@@ -187,20 +187,23 @@ request that opened the conversation (`message_requests.message`) go in the same
 pass; the request row stays. An open conversation is never touched, however old.
 
 **Held:** a message under a report still `pending` (until it is decided), or
-upheld (`resolved`) within 180 days of the decision; and the whole conversation,
+upheld (`resolved`) within 180 days of the decision (an upheld report with no
+decision date holds); and the whole conversation,
 both sides, while one of its two people has such a report on the other (a person
 report, which "unmatch and report" files when no message is named). A sender's
 report of their own message holds nothing. A dismissed report's words
 go 180 days after the dismissal, as above. A direct message is removed by
 moderation only when it is sent (stored hidden), before its conversation
 closed, so its 180 days from removal are always over by then. A storage delete
-that fails keeps its message for the next pass.
+that fails keeps its message for the next pass, and a report filed while the
+pass runs keeps its message (the hold is asked again at the delete).
 
 **Kept:** the conversation row, empty: who the two people were, when it opened
 and closed, and why. A closed pair stays apart on every surface, and those rules
 read it. The host's "kept talking" count is frozen with the event's insight
 counts (`event_insight_tallies`), and the purge waits for that row before it
-takes the messages of a conversation opened at the event; the admin funnel's "conversed" counts people
+takes the messages of a conversation opened at the event, for as long as the
+event exists; the admin funnel's "conversed" counts people
 with a message still stored, so a person whose only messages were purged leaves
 that stage.
 

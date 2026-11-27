@@ -50,12 +50,19 @@ export interface DmPurgePass {
   hasMore: boolean
 }
 
+/** A report on message `m` that holds it (not its sender's own). */
+const messageHeld = (since: Date) => Prisma.sql`
+  EXISTS (SELECT 1 FROM message_reports r
+           WHERE r.message_id = m.id AND r.message_type = 'private' AND r.reporter_id <> m.sender_id
+             AND ${holdingReport(since)})`
+
 /**
  * A conversation `c` past its time: closed more than 180 days ago, no person
  * report between its two people still holding it, and, when it was opened at
- * an event (in its room or from a Lobby ask), that event's insight counts
- * frozen first (`event_insight_tallies`), as the Lobby purge waits: its "kept
- * talking" reads these messages.
+ * an event (in its room or from a Lobby ask, both set `origin_event_id`) that
+ * still exists, that event's insight counts frozen first
+ * (`event_insight_tallies`), as the Lobby purge waits: its "kept talking"
+ * reads these messages. An event that is gone has no counts to wait for.
  */
 const conversationPastItsTime = (since: Date) => Prisma.sql`
        c.closed_at < ${since}
@@ -63,18 +70,20 @@ const conversationPastItsTime = (since: Date) => Prisma.sql`
                     WHERE ((r.reporter_id = c.user1_id AND r.reported_id = c.user2_id)
                         OR (r.reporter_id = c.user2_id AND r.reported_id = c.user1_id))
                       AND ${holdingReport(since)})
-   AND (c.origin_event_id IS NULL OR EXISTS (SELECT 1 FROM event_insight_tallies t WHERE t.event_id = c.origin_event_id))
-   AND (c.origin_board_request_id IS NULL
-        OR EXISTS (SELECT 1 FROM board_requests q JOIN event_insight_tallies t ON t.event_id = q.event_id
-                    WHERE q.id = c.origin_board_request_id))`
+   -- any-kind: a venue day's counts are frozen like any event's, so a conversation opened there waits for them too.
+   AND NOT EXISTS (SELECT 1 FROM events e
+                    WHERE e.id = c.origin_event_id
+                      AND NOT EXISTS (SELECT 1 FROM event_insight_tallies t WHERE t.event_id = e.id))`
 
 /*
  * A lookup per closed conversation, not a join: the planner reads the inner
  * LIMIT as a per-conversation index probe on `(conversation_id)`, so a pass
  * with nothing due never scans `private_messages`, whatever its statistics say.
- * ponytail: every conversation closed past the window is probed each pass
- * (one empty index probe each); mark emptied conversations if that count ever
- * reaches the hundreds of thousands.
+ * ponytail: every conversation closed past the window is probed each pass,
+ * emptied ones too (about 140 ms warm, 730 ms cold at 20,000 closed with
+ * 100,000 person reports, locally; the pool's statement timeout is 8 s). Mark
+ * emptied conversations (`messages_purged_at` and a partial index) before
+ * that count nears 100,000.
  */
 async function messagesPastTheirTime(since: Date) {
   return db.$queryRaw<PastTheirTime[]>`
@@ -84,9 +93,7 @@ async function messagesPastTheirTime(since: Date) {
        SELECT m.id, m.media_url, m.sender_id
          FROM private_messages m
         WHERE m.conversation_id = c.id
-          AND NOT EXISTS (SELECT 1 FROM message_reports r
-                           WHERE r.message_id = m.id AND r.message_type = 'private' AND r.reporter_id <> m.sender_id
-                             AND ${holdingReport(since)})
+          AND NOT ${messageHeld(since)}
         LIMIT ${DM_BATCH}
      ) p
      WHERE ${conversationPastItsTime(since)}
@@ -120,7 +127,10 @@ export async function purgeClosedConversations(now: Date = new Date()): Promise<
   const since = new Date(now.getTime() - RETENTION_DAYS * DAY_MS)
   const due = await messagesPastTheirTime(since)
   const gone = await deleteObjects(due, "DM purge")
-  const messages = gone.ids.length ? (await db.private_messages.deleteMany({ where: { id: { in: gone.ids } } })).count : 0
+  // The hold asked again: a report filed while storage was being deleted keeps its message (its photo is gone, its words stay).
+  const messages = gone.ids.length
+    ? await db.$executeRaw`DELETE FROM private_messages m WHERE m.id = ANY(${gone.ids}::uuid[]) AND NOT ${messageHeld(since)}`
+    : 0
   warnRefused("DM purge", gone.refused)
   const openers = await blankOpeners(since)
   return { messages, photos: gone.photos, kept: gone.kept, openers, hasMore: due.length === DM_BATCH || openers === DM_BATCH }
