@@ -243,6 +243,20 @@ const envSchema = z.object({
   /** Bearer token for /api/health's pool, loop-delay and socket numbers (SCRUM-1221). Same rule as above: set means 32+. */
   HEALTH_METRICS_TOKEN: z.string().min(32, "HEALTH_METRICS_TOKEN must be at least 32 characters").optional(),
 
+  /**
+   * The dashboard's own Google OAuth web client: platform staff (`app_admin`) sign in with the company Google account
+   * (SCRUM-1241). Not the mobile app's `GOOGLE_*_CLIENT_ID`, which is another audience. Both or neither: unset, the
+   * provider is not registered and /login has no Google button (`dashboardGoogleClient`).
+   */
+  DASHBOARD_GOOGLE_CLIENT_ID: z.string().optional(),
+  DASHBOARD_GOOGLE_CLIENT_SECRET: z.string().optional(),
+  /**
+   * `true`: an `app_admin` may not sign in to the dashboard with a password, and is sent no reset mail; they use
+   * Google. Needs the client above, or boot refuses (it would lock every admin out). Unsetting it is the way back in
+   * if Google sign-in is ever unavailable.
+   */
+  ADMIN_SSO_REQUIRED: z.enum(["true", "false"]).optional(),
+
   /** The public site links are built on (door QR, friend and crew links, mail). Unset = www. `publicSiteOrigin()` below. */
   PUBLIC_SITE_ORIGIN: z.string().optional(),
 
@@ -339,6 +353,14 @@ const refinedEnvSchema = envSchema.superRefine((env, ctx) => {
   if (env.TICKETING === "true" && !env.TICKET_PAY_KEY) {
     ctx.addIssue({ code: "custom", path: ["TICKET_PAY_KEY"], message: "TICKET_PAY_KEY is required once TICKETING is on" })
   }
+  // Half a client is a mistake, not a policy; the flag without one refuses every admin a way in.
+  const google = [env.DASHBOARD_GOOGLE_CLIENT_ID, env.DASHBOARD_GOOGLE_CLIENT_SECRET].filter((v) => v?.trim()).length
+  if (google === 1) {
+    ctx.addIssue({ code: "custom", path: ["DASHBOARD_GOOGLE_CLIENT_SECRET"], message: "set DASHBOARD_GOOGLE_CLIENT_ID and DASHBOARD_GOOGLE_CLIENT_SECRET together, or neither" })
+  }
+  if (env.ADMIN_SSO_REQUIRED === "true" && google !== 2) {
+    ctx.addIssue({ code: "custom", path: ["ADMIN_SSO_REQUIRED"], message: "ADMIN_SSO_REQUIRED=true needs DASHBOARD_GOOGLE_CLIENT_ID and DASHBOARD_GOOGLE_CLIENT_SECRET: admins would have no way in" })
+  }
   const mode = razorpayKeyModeProblem(env.RAZORPAY_KEY_ID, env.RAILWAY_ENVIRONMENT_NAME)
   if (mode) ctx.addIssue({ code: "custom", path: ["RAZORPAY_KEY_ID"], message: mode })
   // Half a key pair is a mistake, not a policy: checkout would fail on the
@@ -386,6 +408,16 @@ export function razorpayWebhookSecret(): string | null {
   const secret = process.env.RAZORPAY_WEBHOOK_SECRET?.trim()
   return secret && secret.length >= 32 ? secret : null
 }
+
+/** The dashboard's Google client, or null when staff Google sign-in is off here (unset, or only half set). */
+export function dashboardGoogleClient(): { clientId: string; clientSecret: string } | null {
+  const clientId = process.env.DASHBOARD_GOOGLE_CLIENT_ID?.trim()
+  const clientSecret = process.env.DASHBOARD_GOOGLE_CLIENT_SECRET?.trim()
+  return clientId && clientSecret ? { clientId, clientSecret } : null
+}
+
+/** Whether an `app_admin` must sign in with Google: no dashboard password, no reset mail. */
+export const adminSsoRequired = (): boolean => process.env.ADMIN_SSO_REQUIRED === "true"
 
 export type Env = z.infer<typeof envSchema>
 
