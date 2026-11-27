@@ -79,7 +79,7 @@ describe("getReportQueue", () => {
     expect(mockDb.user_reports.findMany).not.toHaveBeenCalled()
   })
 
-  it("returns both kinds in one queue, oldest first", async () => {
+  it("returns both kinds in one queue, oldest first inside a severity", async () => {
     mockDb.user_reports.findMany.mockResolvedValue([
       {
         id: "ur1",
@@ -95,7 +95,8 @@ describe("getReportQueue", () => {
       {
         id: "mr1",
         created_at: new Date(T0.getTime() - 10 * 60 * 60 * 1000),
-        reason: "abuse",
+        // The same severity as ur1's harassment: across severities, S1 leads.
+        reason: "hate_speech",
         description: "said something vile",
         message_id: "m1",
         message_type: "group",

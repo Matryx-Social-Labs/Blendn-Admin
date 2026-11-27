@@ -74,7 +74,7 @@ it("keeps a new threat on the page when a full page of older spam is waiting", a
       created_at: new Date(Date.now() - (200 + i) * HOUR),
     })),
   })
-  const threat = await report("threat", 0)
+  const threat = await report(" Threat ", 0)
 
   const { rows } = await getReportQueue()
 

@@ -3,7 +3,10 @@
  *
  * `severity` is the order a reviewer takes reports in (S1 first). `urgent`
  * marks the four reasons D-032 names: an intimate image shared without consent,
- * impersonation, somebody under 18, and child safety.
+ * impersonation, somebody under 18, and child safety. `suspension` is what a
+ * person suspended on a report of this reason reads after "Reason:"
+ * (`SUSPENSION_CATEGORIES`, lib/suspension.ts); null reads as breaking our
+ * community guidelines.
  *
  * The routes store a report's `reason` as the app sent it, so a free string from
  * an older app keeps its words; `reportReason` reads any stored value as one of
@@ -18,30 +21,30 @@
  * offer (offensive, misleading, spam, unsafe, other).
  */
 export const REPORT_REASONS = {
-  child_safety: { severity: "S1", urgent: true },
-  intimate_image: { severity: "S1", urgent: true },
-  under_18: { severity: "S1", urgent: true },
-  impersonation: { severity: "S1", urgent: true },
-  threat: { severity: "S1", urgent: false },
-  unsafe: { severity: "S1", urgent: false },
-  harassment: { severity: "S2", urgent: false },
-  hate_speech: { severity: "S2", urgent: false },
-  pile_on: { severity: "S2", urgent: false },
-  inappropriate_content: { severity: "S2", urgent: false },
-  inappropriate_messages: { severity: "S2", urgent: false },
-  inappropriate_photos: { severity: "S2", urgent: false },
-  offensive: { severity: "S2", urgent: false },
-  fake_profile: { severity: "S2", urgent: false },
-  host_conduct: { severity: "S2", urgent: false },
-  organiser_conduct: { severity: "S2", urgent: false },
-  unsafe_venue: { severity: "S2", urgent: false },
-  spam: { severity: "S3", urgent: false },
-  contact_details: { severity: "S3", urgent: false },
-  misleading: { severity: "S3", urgent: false },
-  misleading_listing: { severity: "S3", urgent: false },
-  not_real: { severity: "S3", urgent: false },
-  other: { severity: "S3", urgent: false },
-} as const satisfies Record<string, { severity: "S1" | "S2" | "S3"; urgent: boolean }>
+  child_safety: { severity: "S1", urgent: true, suspension: null },
+  intimate_image: { severity: "S1", urgent: true, suspension: null },
+  under_18: { severity: "S1", urgent: true, suspension: null },
+  impersonation: { severity: "S1", urgent: true, suspension: null },
+  threat: { severity: "S1", urgent: false, suspension: null },
+  unsafe: { severity: "S1", urgent: false, suspension: null },
+  harassment: { severity: "S2", urgent: false, suspension: "harassment" },
+  hate_speech: { severity: "S2", urgent: false, suspension: "hate speech" },
+  pile_on: { severity: "S2", urgent: false, suspension: null },
+  inappropriate_content: { severity: "S2", urgent: false, suspension: "inappropriate content" },
+  inappropriate_messages: { severity: "S2", urgent: false, suspension: "inappropriate messages" },
+  inappropriate_photos: { severity: "S2", urgent: false, suspension: "inappropriate photos" },
+  offensive: { severity: "S2", urgent: false, suspension: null },
+  fake_profile: { severity: "S2", urgent: false, suspension: "a fake profile" },
+  host_conduct: { severity: "S2", urgent: false, suspension: null },
+  organiser_conduct: { severity: "S2", urgent: false, suspension: null },
+  unsafe_venue: { severity: "S2", urgent: false, suspension: null },
+  spam: { severity: "S3", urgent: false, suspension: "spam" },
+  contact_details: { severity: "S3", urgent: false, suspension: null },
+  misleading: { severity: "S3", urgent: false, suspension: null },
+  misleading_listing: { severity: "S3", urgent: false, suspension: null },
+  not_real: { severity: "S3", urgent: false, suspension: null },
+  other: { severity: "S3", urgent: false, suspension: null },
+} as const satisfies Record<string, { severity: "S1" | "S2" | "S3"; urgent: boolean; suspension: string | null }>
 
 export type ReportReason = keyof typeof REPORT_REASONS
 
