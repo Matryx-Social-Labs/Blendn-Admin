@@ -6,7 +6,7 @@ import { db } from "./db"
 import { tallyFeedback } from "./feedback-digest"
 import { FREEZE_BATCH, freezeInsightTallies } from "./insight-tallies"
 import { logger } from "./logger"
-import { deleteFile, isConfigured, sealedChatKey } from "./tigris"
+import { chatMediaKey, chatMediaRefusal, deleteFile, isConfigured, type ChatMediaRefusal } from "./tigris"
 
 /**
  * What the Lobby, the room and the posts' rooms held, 180 days after they
@@ -64,7 +64,7 @@ import { deleteFile, isConfigured, sealedChatKey } from "./tigris"
 export const RETENTION_DAYS = 180
 
 const DAY_MS = 24 * 60 * 60 * 1000
-const MESSAGE_BATCH = 5_000
+export const MESSAGE_BATCH = 5_000
 const POST_BATCH = 500
 const MEMBER_BATCH = 5_000
 
@@ -94,8 +94,8 @@ const closesAt = Prisma.sql`(CASE WHEN e.kind = 'venue_day' THEN e.end_time ELSE
 const holdingReport = (since: Date) => Prisma.sql`(r.status = 'pending' OR (r.status = 'resolved' AND r.reviewed_at > ${since}))`
 
 async function messagesPastTheirTime(since: Date) {
-  return db.$queryRaw<{ id: string; media_url: string | null }[]>`
-    SELECT m.id, m.metadata->>'mediaUrl' AS media_url
+  return db.$queryRaw<PastTheirTime[]>`
+    SELECT m.id, m.metadata->>'mediaUrl' AS url, m.user_id AS owner_id
       FROM chat_messages m
       JOIN chat_groups g ON g.id = m.chat_group_id
       LEFT JOIN board_posts bp ON bp.id = g.board_post_id
@@ -113,8 +113,8 @@ async function messagesPastTheirTime(since: Date) {
 }
 
 async function postsPastTheirTime(since: Date) {
-  return db.$queryRaw<{ id: string; photo_url: string | null }[]>`
-    SELECT p.id, p.photo_url
+  return db.$queryRaw<PastTheirTime[]>`
+    SELECT p.id, p.photo_url AS url, p.author_id AS owner_id
       FROM board_posts p
       JOIN events e ON e.id = p.event_id
      WHERE ${closesAt} < ${since}
@@ -133,15 +133,26 @@ async function postsPastTheirTime(since: Date) {
   `
 }
 
-/** Storage first, then the row: an object whose delete failed keeps its row, so the next pass finds it again. */
-async function deleteObjects<T extends { id: string }>(rows: T[], urlOf: (row: T) => string | null): Promise<{ ids: string[]; photos: number; kept: number }> {
+/** A message or post past its time, with its photo's stored URL and whose row it is. */
+type PastTheirTime = { id: string; url: string | null; owner_id: string }
+
+type Refused = { id: string; why: ChatMediaRefusal }
+
+/**
+ * Storage first, then the row: an object whose delete failed keeps its row, so
+ * the next pass finds it again. A URL that names no object of the row's own
+ * (`chatMediaKey`) deletes nothing in storage and its row still goes: kept, it
+ * would never become deletable, and enough of them would fill every batch.
+ */
+async function deleteObjects(rows: PastTheirTime[]): Promise<{ ids: string[]; photos: number; kept: number; refused: Refused[] }> {
   const ids: string[] = []
+  const refused: Refused[] = []
   let photos = 0
   let kept = 0
   for (const row of rows) {
-    const url = urlOf(row)
-    const key = url ? sealedChatKey(url) : null
+    const key = row.url ? chatMediaKey(row.url, row.owner_id) : null
     if (!key) {
+      if (row.url) refused.push({ id: row.id, why: chatMediaRefusal(row.url, row.owner_id) })
       ids.push(row.id)
       continue
     }
@@ -158,7 +169,7 @@ async function deleteObjects<T extends { id: string }>(rows: T[], urlOf: (row: T
       })
     }
   }
-  return { ids, photos, kept }
+  return { ids, photos, kept, refused }
 }
 
 /**
@@ -190,7 +201,7 @@ export async function purgeClosedLobbies(now: Date = new Date()): Promise<PurgeP
   const posts = await postsPastTheirTime(since)
   pass.hasMore = messages.length === MESSAGE_BATCH || posts.length === POST_BATCH
 
-  const gone = await deleteObjects(messages, (m) => m.media_url)
+  const gone = await deleteObjects(messages)
   if (gone.ids.length) {
     await freezeFeedbackTallies(gone.ids)
     const [detached, deleted] = await db.$transaction([
@@ -205,7 +216,7 @@ export async function purgeClosedLobbies(now: Date = new Date()): Promise<PurgeP
   pass.pseudonyms = await db.$executeRaw`UPDATE chat_group_members SET anonymous_name = NULL, updated_at = now() WHERE id IN (${membersToBlank(since)})`
   if (pass.pseudonyms === MEMBER_BATCH) pass.hasMore = true
 
-  const postsGone = await deleteObjects(posts, (p) => p.photo_url)
+  const postsGone = await deleteObjects(posts)
   if (postsGone.ids.length) {
     const [, deleted] = await db.$transaction([
       // The post's room first: `board_post_id` is ON DELETE RESTRICT. Its messages are gone (the select required it); members cascade.
@@ -216,6 +227,11 @@ export async function purgeClosedLobbies(now: Date = new Date()): Promise<PurgeP
   }
   pass.photos = gone.photos + postsGone.photos
   pass.kept = gone.kept + postsGone.kept
+  const refused = [...gone.refused, ...postsGone.refused]
+  // Never the URL: one stored before SCRUM-426 is whatever a client sent.
+  if (refused.length) {
+    logger.warn("Lobby purge: photo URLs naming no object of the row's own; rows deleted, storage untouched", { count: refused.length, rows: refused.slice(0, 5) })
+  }
 
   pass.hostPosts = await db.$executeRaw`DELETE FROM board_host_posts h USING events e WHERE e.id = h.event_id AND ${closesAt} < ${since}`
   pass.alertPreferences = await db.$executeRaw`DELETE FROM board_alert_preferences a USING events e WHERE e.id = a.event_id AND ${closesAt} < ${now}`
