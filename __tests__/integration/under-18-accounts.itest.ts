@@ -2,9 +2,18 @@
  * Accounts known to be under 18 (SCRUM-1169, D-026), on a real database:
  * `--apply` stamps each one once, the 14-day list reads the stamp, and a
  * staff correction sets the birth date, clears the stamp and leaves an audit
- * row. Ids only: the script prints nothing else.
+ * row. `--apply` then erases each account due through `eraseAccount`, the
+ * erasure DELETE /api/mobile/account runs. Ids only: the script prints nothing else.
  */
-import { correctBirthDate, DELETE_AFTER_DAYS, dueForDeletion, knownMinorsUnstamped, stampKnownMinors } from "@/scripts/under-18-accounts"
+import type { EraseAccountOptions } from "@/lib/account-erasure"
+import {
+  correctBirthDate,
+  DELETE_AFTER_DAYS,
+  deleteDue,
+  dueForDeletion,
+  knownMinorsUnstamped,
+  stampKnownMinors,
+} from "@/scripts/under-18-accounts"
 import { cleanup, closeDb, db, makeUser } from "./helpers"
 
 const DAY_MS = 86_400_000
@@ -18,6 +27,7 @@ beforeAll(async () => {
   await db.user.update({ where: { id: ADMIN_ID }, data: { email: ADMIN } })
 })
 afterAll(async () => {
+  await db.deleted_account_records.deleteMany({ where: { user_id: { in: users } } })
   await db.audit_logs.deleteMany({ where: { OR: [{ resource_id: { in: users } }, { user_id: { in: users } }] } })
   await db.profiles.deleteMany({ where: { id: { in: users } } })
   await cleanup(users, [])
@@ -137,5 +147,53 @@ describe("a staff correction", () => {
     await expect(
       correctBirthDate(db, { userId: "00000000-0000-4000-8000-000000001169", dateOfBirth: "1995-06-15", by: ADMIN }, new Date())
     ).rejects.toThrow(/No live account/)
+  })
+})
+
+describe("deleting the accounts due", () => {
+  it(`erases an account stamped ${DELETE_AFTER_DAYS} or more days ago, as the account deletion does, and not one stamped yesterday`, async () => {
+    const now = new Date()
+    const due = await person("u18-erase-due", { age: 16, under_18_since: new Date(now.getTime() - 15 * DAY_MS) })
+    const recent = await person("u18-erase-recent", { age: 16, under_18_since: new Date(now.getTime() - DAY_MS) })
+
+    const erased = await deleteDue(db, now)
+    expect(erased).toContain(due)
+    expect(erased).not.toContain(recent)
+
+    const deletedAt = async (id: string) => (await db.user.findUniqueOrThrow({ where: { id }, select: { deletedAt: true } })).deletedAt
+    expect(await deletedAt(due)).not.toBeNull()
+    expect(await deletedAt(recent)).toBeNull()
+    // The IT Rules r.3(1)(h) record the account deletion writes, and no age fact left on the erased row.
+    expect(await db.deleted_account_records.count({ where: { user_id: due } })).toBe(1)
+    expect(await db.deleted_account_records.count({ where: { user_id: recent } })).toBe(0)
+    expect(await stampOf(due)).toBeNull()
+    expect(await stampOf(recent)).not.toBeNull()
+    expect(await dueForDeletion(db, now)).not.toContain(due)
+  })
+
+  it("awaits each erasure's deferred work, and stops at the first failure naming the id", async () => {
+    const now = new Date()
+    await person("u18-fail-a", { age: 16, under_18_since: new Date(now.getTime() - 20 * DAY_MS) })
+    await person("u18-fail-b", { age: 16, under_18_since: new Date(now.getTime() - 20 * DAY_MS) })
+    const calls: string[] = []
+    let deferredDone = false
+    const erase = async (id: string, { defer }: EraseAccountOptions) => {
+      calls.push(id)
+      if (calls.length === 1) {
+        defer(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10))
+          deferredDone = true
+        })
+        return
+      }
+      throw new Error("database down")
+    }
+
+    const failure = deleteDue(db, now, erase)
+    await expect(failure).rejects.toThrow("database down")
+    // The first erasure's deferred work finished before the next began; nothing after the failure ran.
+    expect(deferredDone).toBe(true)
+    expect(calls).toHaveLength(2)
+    await expect(failure).rejects.toThrow(calls[1])
   })
 })
