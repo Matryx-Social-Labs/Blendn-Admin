@@ -40,7 +40,11 @@ export function Overview({
   overview,
   eventId,
   canEdit,
+  canViewAttendees,
+  throughVenue,
+  venueDay,
   venueName,
+  orgName,
   attendance,
   insights,
   mood,
@@ -51,7 +55,15 @@ export function Overview({
   overview: EventOverview
   eventId: string
   canEdit: boolean
+  /** The resolver's `canViewAttendees`: the Attendees tab exists for this viewer. */
+  canViewAttendees: boolean
+  /** `operatesThroughVenue`: the access comes from the venue, not the organizing org (SCRUM-1446). */
+  throughVenue: boolean
+  /** The venue's own daily room: nobody runs it and nobody is shown who was in it. */
+  venueDay: boolean
   venueName: string | null
+  /** The organizing org's name, for its staff. */
+  orgName: string | null
   /** Null before the event has run — there is nothing to count yet. */
   attendance: EventAttendance | null
   /** Post A: the organiser's, once the event has run; never a venue's. */
@@ -175,20 +187,22 @@ export function Overview({
         </Panel>
       ) : null}
 
+      {/* Whoever may operate but not edit: why, in the words of the
+          relationship that grants it, and only buttons to tabs they have. */}
       {!canEdit ? (
         <Panel title="Your access to this event">
           <p className="max-w-prose text-[0.8125rem] text-muted-foreground">
-            It is running at {venueName ? <b>{venueName}</b> : "your venue"}, so you get the live
-            view, the attendee count and the chatroom. Editing, publishing and cancelling belong
-            to whoever runs the event — that is the relationship, not a missing button.
+            <AccessSentence throughVenue={throughVenue} venueDay={venueDay} venueName={venueName} orgName={orgName} />
           </p>
           <div className="flex flex-wrap gap-2">
-            <Button asChild variant="outline" size="sm" className="pointer-coarse:h-11">
-              <Link href={`/dashboard/events/${eventId}?tab=attendees`}>
-                <IconUsers aria-hidden className="size-4" />
-                Attendees
-              </Link>
-            </Button>
+            {canViewAttendees ? (
+              <Button asChild variant="outline" size="sm" className="pointer-coarse:h-11">
+                <Link href={`/dashboard/events/${eventId}?tab=attendees`}>
+                  <IconUsers aria-hidden className="size-4" />
+                  Attendees
+                </Link>
+              </Button>
+            ) : null}
             <Button asChild variant="outline" size="sm" className="pointer-coarse:h-11">
               <Link href={`/dashboard/events/${eventId}/messaging`}>
                 <IconMessage2 aria-hidden className="size-4" />
@@ -199,5 +213,42 @@ export function Overview({
         </Panel>
       ) : null}
     </div>
+  )
+}
+
+/** The access panel's sentence, one per relationship (SCRUM-1446). */
+function AccessSentence({
+  throughVenue,
+  venueDay,
+  venueName,
+  orgName,
+}: {
+  throughVenue: boolean
+  venueDay: boolean
+  venueName: string | null
+  orgName: string | null
+}) {
+  const venue = venueName ? <b>{venueName}</b> : "your venue"
+  if (throughVenue && venueDay) {
+    return (
+      <>
+        This is the room for the day at {venue}, so you get the live view and the room chat to moderate it. The
+        venue is never shown who was in it.
+      </>
+    )
+  }
+  if (throughVenue) {
+    return (
+      <>
+        It is running at {venue}, so you get the live view, the attendee count and the room chat. Editing,
+        publishing and cancelling belong to whoever runs the event — that is the relationship, not a missing button.
+      </>
+    )
+  }
+  return (
+    <>
+      You are on {orgName ? <>the team at <b>{orgName}</b></> : "the organizer's team"}, so you get the live view
+      and the room chat. Editing, publishing and cancelling, and the attendee list, belong to its owners and admins.
+    </>
   )
 }

@@ -3,6 +3,7 @@ const mockHide = jest.fn()
 const mockRecord = jest.fn()
 const mockFlag = jest.fn()
 const mockMute = jest.fn()
+const mockJudged = jest.fn()
 jest.mock("@/lib/moderation/openai-moderation", () => ({
   checkTextContent: (...a: unknown[]) => mockCheck(...a),
   checkImageContent: jest.fn(),
@@ -12,6 +13,7 @@ jest.mock("@/lib/moderation/actions", () => ({
   flagForReview: (...a: unknown[]) => mockFlag(...a),
   checkAndAutoMute: (...a: unknown[]) => mockMute(...a),
   recordExamined: (...a: unknown[]) => mockRecord(...a),
+  markJudged: (...a: unknown[]) => mockJudged(...a),
 }))
 jest.mock("@/lib/tigris", () => ({ readableUrl: jest.fn() }))
 
@@ -28,7 +30,10 @@ const HIDE = { checked: true, result: { action: "hide", source: "openai_text", c
 const CLEAN: ModerationCheck = { checked: true, result: null }
 const run = (textCheck?: Promise<ModerationCheck>) => moderateMessage("m1", "see you at nine", "text", "u1", "g1", undefined, textCheck)
 
-beforeEach(() => jest.resetAllMocks())
+beforeEach(() => {
+  jest.resetAllMocks()
+  mockFlag.mockResolvedValue(true)
+})
 
 describe("moderateMessage with the send route's in-flight check", () => {
   it("asks again when the in-flight check failed outright, and hides on the second answer", async () => {
@@ -81,8 +86,30 @@ describe("a keyword hide on the async path (D-052a)", () => {
     await send("tu chutiya hai", Promise.resolve(CLEAN))
     expect(mockHide).toHaveBeenCalledTimes(1)
     expect(mockFlag).toHaveBeenCalledTimes(1)
-    expect(mockFlag).toHaveBeenCalledWith("m1", "g1", "u1", expect.objectContaining({ source: "keyword", categories: { profanity: expect.any(Number) } }))
+    // The flag is written marked not judged, and the mark removed once the model answered.
+    expect(mockFlag).toHaveBeenCalledWith(
+      "m1", "g1", "u1",
+      expect.objectContaining({ source: "keyword", categories: { profanity: expect.any(Number), unjudged: expect.any(Number) } })
+    )
+    expect(mockJudged).toHaveBeenCalledWith("m1")
     expect(mockMute).not.toHaveBeenCalled()
+  })
+
+  it("records a threat the model flagged below its hide line as its own flag, leaves the line's status, and does not count it", async () => {
+    const threat = { action: "flag", source: "openai_text", categories: { "harassment/threatening": 0.55 }, confidence: 0.55 } as const
+    await send("tu chutiya hai", Promise.resolve({ checked: true, result: threat }))
+    expect(mockFlag).toHaveBeenNthCalledWith(2, "m1", "g1", "u1", threat, { messageStatus: false })
+    expect(mockJudged).toHaveBeenCalledWith("m1")
+    // The key goes only once the flag that replaces it is written.
+    expect(mockFlag.mock.invocationCallOrder[1]).toBeLessThan(mockJudged.mock.invocationCallOrder[0])
+    expect(mockMute).not.toHaveBeenCalled()
+  })
+
+  it("does not record a model flag with no severe category on a hidden swear word", async () => {
+    const rude = { action: "flag", source: "openai_text", categories: { harassment: 0.55 }, confidence: 0.55 } as const
+    await send("tu chutiya hai", Promise.resolve({ checked: true, result: rude }))
+    expect(mockFlag).toHaveBeenCalledTimes(1)
+    expect(mockJudged).toHaveBeenCalledWith("m1")
   })
 
   it("records the model's hide on a line that also carries a swear word, and counts it", async () => {
@@ -99,15 +126,41 @@ describe("a keyword hide on the async path (D-052a)", () => {
     expect(mockMute).toHaveBeenCalledWith("u1", "g1")
   })
 
-  it("does not count the line when the model could not judge it", async () => {
+  it("does not count the line when the model could not judge it, and leaves it marked not judged", async () => {
     await send("tu chutiya hai", Promise.resolve({ checked: false, reason: "timeout" }))
     expect(mockFlag).toHaveBeenCalledTimes(1)
+    expect(mockJudged).not.toHaveBeenCalled()
     expect(mockMute).not.toHaveBeenCalled()
   })
 
-  it("counts a slur without asking the model", async () => {
+  it.each([
+    ["no key", [{ checked: false, reason: "no_key" }]],
+    ["an error, then an error again", [{ checked: false, reason: "error" }, { checked: false, reason: "error" }]],
+  ] as const)("leaves the line marked not judged after %s", async (_name, answers) => {
+    mockCheck.mockResolvedValue(answers[answers.length - 1])
+    await send("tu chutiya hai", Promise.resolve(answers[0]))
+    expect(mockJudged).not.toHaveBeenCalled()
+    expect(mockMute).not.toHaveBeenCalled()
+  })
+
+  it("keeps the line marked not judged when the model's own flag could not be written", async () => {
+    mockFlag.mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+    await send("tu chutiya hai", Promise.resolve(HIDE))
+    expect(mockFlag).toHaveBeenCalledTimes(2)
+    expect(mockJudged).not.toHaveBeenCalled()
+    expect(mockMute).not.toHaveBeenCalled()
+  })
+
+  it("marks the line judged when the model hid it, after writing the model's flag", async () => {
+    await send("tu chutiya hai", Promise.resolve(HIDE))
+    expect(mockJudged).toHaveBeenCalledWith("m1")
+    expect(mockFlag.mock.invocationCallOrder[1]).toBeLessThan(mockJudged.mock.invocationCallOrder[0])
+  })
+
+  it("counts a slur without asking the model, and does not mark its flag", async () => {
     await send("you are a retard")
     expect(mockCheck).not.toHaveBeenCalled()
+    expect(mockFlag).toHaveBeenCalledWith("m1", "g1", "u1", expect.objectContaining({ categories: { slur: expect.any(Number) } }))
     expect(mockMute).toHaveBeenCalledWith("u1", "g1")
   })
 })

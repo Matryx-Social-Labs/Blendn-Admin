@@ -4,7 +4,6 @@ import type { Prisma, user_role } from "@prisma/client"
 
 import { db } from "./db"
 import { realEventsWhere } from "./event-kind"
-import { hostNotSuspended } from "./event-access"
 import { actorFor } from "./org-membership"
 
 /**
@@ -12,7 +11,7 @@ import { actorFor } from "./org-membership"
  *
  * ## Why it is a module
  *
- * The three clauses mirror `eventPermissions.canOperate` exactly, and getting
+ * The clauses mirror `eventPermissions.canOperate` exactly, and getting
  * them slightly wrong has a signature that nobody reports as a bug: a colleague
  * at the same organisation opens the list and it is **empty**, because they
  * personally created nothing. That is H2 in the register, and `GET /api/events`
@@ -59,36 +58,21 @@ export async function visibleEventsScope(user: {
    * organising org saw none of its events, because the resolver refused them
    * row by row. The resolver now grants them by membership, so the list shows
    * them; a list and a resolver that disagree is H2 either way round.
+   *
+   * Never who created the row (SCRUM-942, SCRUM-1250): every non-admin create
+   * writes an organisation, so a creator arm only re-opened rows the resolver
+   * refuses. No organisation, no events: an empty `id IN`, never `OR: []`,
+   * which Prisma reads as no filter at all (every event on the platform).
    */
-  where.OR = [
-    ...(actor.orgIds.length
-      ? [
-          { organizer_org_id: { in: actor.orgIds } },
-          // A venue's org operates every event in its building, whoever
-          // created it, from the claim on — `eventPermissions` grants exactly
-          // that, so the list shows exactly that.
-          ...(await claimedVenueEventsWhere(actor.orgIds)),
-        ]
-      : []),
-    /*
-     * Kept so an event created before organisations existed, or by somebody
-     * whose org link is missing, stays visible to its creator.
-     *
-     * This is the legacy fallback A1/A2 describe, and it is deliberately NOT in
-     * `eventPermissions` — seeing a row you cannot open is a smaller failure
-     * than a row you created vanishing. Delete it when `organizer_org_id` has
-     * been backfilled everywhere, not before.
-     *
-     * Gated on the host not being suspended (SCRUM-8): the org clause above
-     * already drops a suspended org's events because `actorFor` no longer
-     * loads that membership, and this arm would put them straight back for
-     * whoever created them — a list full of rows that do not open.
-     *
-     * Only for an event with no organisation (SCRUM-942, owner row A-16, decided by lean on 2026-10-31): an event that
-     * has one is its members', and a creator who left that org must lose it, as `eventPermissions` already says.
-     */
-    { organizer_id: user.id, organizer_org_id: null, ...hostNotSuspended },
-  ]
+  where.OR = actor.orgIds.length
+    ? [
+        { organizer_org_id: { in: actor.orgIds } },
+        // A venue's org operates every event in its building, whoever
+        // created it, from the claim on — `eventPermissions` grants exactly
+        // that, so the list shows exactly that.
+        ...(await claimedVenueEventsWhere(actor.orgIds)),
+      ]
+    : [{ id: { in: [] } }]
   return { where, actor: { id: user.id, orgIds: actor.orgIds } }
 }
 
@@ -160,8 +144,8 @@ export async function claimedVenueEventsWhere(
  */
 export function reachedThroughBuilding(
   role: user_role,
-  actor: { id: string; orgIds: readonly string[] },
-  event: { organizer_id: string; organizer_org_id: string | null }
+  actor: { orgIds: readonly string[] },
+  event: { organizer_org_id: string | null }
 ): boolean {
   return role !== "app_admin" && !hostsEvent(actor, event)
 }
@@ -169,17 +153,14 @@ export function reachedThroughBuilding(
 /**
  * Does this actor run the event, rather than reach it through the building?
  *
- * The organising org, or — the floor `visibleEventsWhere` keeps — its creator.
- * A venue owner whose organisation hosts its own events (SCRUM-320) sees those
- * as their organiser does; everything else they reach as the venue, and gets
- * counts held back under the floor (SCRUM-501).
+ * Its organising org, never who created the row (SCRUM-1250), as in
+ * `visibleEventsWhere`. A venue owner whose organisation hosts its own events
+ * (SCRUM-320) sees those as their organiser does; everything else they reach
+ * as the venue, and gets counts held back under the floor (SCRUM-501).
  */
 export function hostsEvent(
-  actor: { id: string; orgIds: readonly string[] },
-  event: { organizer_id: string; organizer_org_id: string | null }
+  actor: { orgIds: readonly string[] },
+  event: { organizer_org_id: string | null }
 ): boolean {
-  return (
-    event.organizer_id === actor.id ||
-    (event.organizer_org_id !== null && actor.orgIds.includes(event.organizer_org_id))
-  )
+  return event.organizer_org_id !== null && actor.orgIds.includes(event.organizer_org_id)
 }

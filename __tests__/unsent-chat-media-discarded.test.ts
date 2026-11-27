@@ -45,16 +45,10 @@ describe("discardSealedChatMedia", () => {
   })
 })
 
-// The DM route only: a room takes no media since R9 (SCRUM-626), so seals nothing to discard.
-describe.each([
-  "app/api/mobile/conversations/[conversationId]/messages/route.ts",
-])("%s", (file) => {
-  it("discards the sealed copy in every write that can fail after sealing", () => {
-    const src = readFileSync(join(__dirname, "..", file), "utf8")
-    const races = src.match(/"P2002"/g)?.length ?? 0
-    const discards = src.match(/await discardSealedChatMedia\(media\)/g)?.length ?? 0
-    expect(src).toContain("sealChatMedia(")
-    expect(races).toBeGreaterThan(0)
-    expect(discards).toBe(races)
-  })
+// The Lobby post route is the one sender that seals: a room takes no media (R9, SCRUM-626), nor a DM (SCRUM-1165).
+it("the Lobby post route discards its sealed copy when the write fails", () => {
+  const src = readFileSync(join(__dirname, "..", "app/api/mobile/events/[eventId]/board/route.ts"), "utf8")
+  expect(src).toContain("await sealChatMedia(")
+  expect(src).toMatch(/catch \(error\) \{\s*await discardSealedChatMedia\(sealed\)/)
 })
+

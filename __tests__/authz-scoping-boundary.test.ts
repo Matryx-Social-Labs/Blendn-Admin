@@ -37,15 +37,13 @@ import { stripComments } from "./support/strip-comments"
 const ROOT = join(__dirname, "..")
 const SEARCH_DIRS = ["app", "lib", "components"]
 
-/** The resolver itself, and the one place the fallback clause is legitimate. */
+/** The resolver itself, and the create path. */
 const ALLOWED = new Set([
   "lib/rbac.ts",
-  // `organizer_id` survives as a documented floor in these: an event created
-  // before organisations existed stays visible to its creator. The first also
-  // WRITES it on create, which is the column's legitimate job -- recording who
-  // made the row -- and is indistinguishable from a scope filter by grep.
+  // WRITES `organizer_id` on create, which is the column's legitimate job --
+  // recording who made the row -- and is indistinguishable from a scope filter
+  // by grep. No read scopes on it any more (SCRUM-1250).
   "app/api/events/route.ts",
-  "app/dashboard/actions.ts",
 ])
 
 function sourceFiles(dir: string, acc: string[] = []): string[] {
@@ -91,12 +89,12 @@ const BANNED: Array<{ pattern: RegExp; why: string; unlessFileMentions?: string 
     /*
      * Only when the file has no notion of an organisation at all.
      *
-     * `organizer_id: <caller>` is legitimate twice: written into a `data:`
-     * block on create, where recording who made the row is the column's job,
-     * and as one arm of an OR beside `organizer_org_id`, where it is the
-     * documented floor for events that predate organisations.
+     * `organizer_id: <caller>` is legitimate once: written into a `data:`
+     * block on create, where recording who made the row is the column's job.
+     * (It was also an OR arm beside `organizer_org_id` for events that
+     * predated organisations; that floor is gone, SCRUM-1250.)
      *
-     * Both of those mention `organizer_org_id` in the same file. A scope that
+     * A create mentions `organizer_org_id` in the same file. A scope that
      * knows only about the creator does not -- which is exactly what
      * `app/dashboard/attendees/page.tsx` was, and what let it keep H2's bug for
      * months after the API twin was fixed.
