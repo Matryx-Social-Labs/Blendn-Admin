@@ -67,7 +67,7 @@ test("a pub with no outline gets a circle at the default buffer; Custom moves th
   await page.getByRole("button", { name: "Draw it yourself" }).click()
   await expect(cite).toHaveCount(0)
   const box = (await map.boundingBox())!
-  // Away from the zoom control, the layer toggle and the legend.
+  // Away from the zoom control and the legend.
   await map.click({ position: { x: box.width * 0.75, y: box.height * 0.4 } })
   await expect(handles).toHaveCount(1)
   await expect(pin).toHaveAttribute("data-lat", lat!)

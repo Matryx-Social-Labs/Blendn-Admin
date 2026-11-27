@@ -141,8 +141,9 @@ export function LocationPicker({
       mapInstanceRef.current = map
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        // A new tab: the picker sits inside an unsaved form (SCRUM-1147).
         attribution:
-          '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+          '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" aria-label="OpenStreetMap copyright (opens in a new tab)">OpenStreetMap</a> contributors',
         maxZoom: 19,
       }).addTo(map)
 

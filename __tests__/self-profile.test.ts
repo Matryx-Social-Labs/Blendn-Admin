@@ -39,6 +39,10 @@ describe("profileForSelfResponse", () => {
     expect(shaped).not.toHaveProperty("date_of_birth")
   })
 
+  it("removes the under-18 stamp: the refusals carry what the person reads (SCRUM-1169)", () => {
+    expect(profileForSelfResponse({ ...row, under_18_since: new Date() })).not.toHaveProperty("under_18_since")
+  })
+
   it("keeps everything else, because this is the owner's own profile", () => {
     // Not an allow-list on purpose. These responses are self-scoped, so a new
     // column reaching its own owner is right by default — the withholding is

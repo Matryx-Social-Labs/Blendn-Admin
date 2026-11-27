@@ -11,7 +11,7 @@ import { resolveUserRef, userIdFromRef } from "@/lib/room-handle"
 import { knownToEachOther, LISTED_IN_ROSTER } from "@/lib/room-people"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { participationRefusal } from "@/lib/event-access"
+import { messagingRefusalResponse, participationRefusal } from "@/lib/event-access"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { countSilentRequest, requestSenderRefusal } from "@/lib/message-request-caps"
 import { sendPushNotification } from "@/lib/push-notifications"
@@ -23,7 +23,6 @@ import {
   notFoundResponse,
   conflictResponse,
   serverErrorResponse,
-  forbiddenResponse,
 } from "@/lib/api-response"
 import { readJson } from "@/lib/api-input"
 import { preSaveCheck } from "@/lib/moderation"
@@ -64,9 +63,9 @@ export async function POST(request: NextRequest) {
       (await rateLimit(request, userLimit("requestDay", "message-request-day", authUser.userId)))
     if (limited) return limited
 
-    // Not onboarded and no adult age on file: may not take part yet (SCRUM-331).
+    // Known to be under 18, or not onboarded with no adult age on file: may not take part (SCRUM-331, SCRUM-1169).
     const unfinished = await participationRefusal(authUser.userId)
-    if (unfinished) return forbiddenResponse(unfinished)
+    if (unfinished) return messagingRefusalResponse(unfinished)
 
     // The sender's own caps (new account, unanswered), before anything about the recipient is read.
     const capped = await requestSenderRefusal(request, authUser.userId)

@@ -8,7 +8,8 @@ import { NextRequest } from "next/server"
  * an abusive line that also carries a listed word counts.
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
-// The model, by what the line says: "[abuse]" is what it judges abusive, "[down]" is a failed call.
+// The model, by what the line says: "[abuse]" is what it judges abusive, "[threat]" a threat below its hide
+// line, "[down]" a failed call.
 jest.mock("@/lib/moderation/openai-moderation", () => {
   const actual = jest.requireActual("@/lib/moderation/openai-moderation")
   return {
@@ -18,7 +19,9 @@ jest.mock("@/lib/moderation/openai-moderation", () => {
         ? { checked: false, reason: "error" }
         : content.includes("[abuse]")
           ? { checked: true, result: { action: "hide", source: "openai_text", categories: { harassment: 0.97 }, confidence: 0.97 } }
-          : { checked: true, result: null }
+          : content.includes("[threat]")
+            ? { checked: true, result: { action: "flag", source: "openai_text", categories: { "harassment/threatening": 0.55 }, confidence: 0.55 } }
+            : { checked: true, result: null }
     ),
   }
 })
@@ -173,6 +176,9 @@ describe.each(ROUTES)("the %s", (_name, send) => {
     })
     expect(counted).toHaveLength(3)
     expect(counted.every((f) => f.auto_action === "hidden" && "harassment" in (f.categories as object))).toBe(true)
+    // The model answered every line: no flag still says it was not judged.
+    const flags = await db.moderation_flags.findMany({ where: { chat_group_id: r.groupId, user_id: r.memberId }, select: { categories: true } })
+    expect(flags.some((f) => "unjudged" in (f.categories as object))).toBe(false)
   })
 
   it("counts a line hidden for a contact detail when the model judged it abusive", async () => {
@@ -182,11 +188,57 @@ describe.each(ROUTES)("the %s", (_name, send) => {
     expect(await stateOf(r, (s) => s.status === "muted")).toMatchObject({ status: "muted", muted_by: null })
   })
 
-  it("does not count a keyword-hidden line the model could not judge", async () => {
+  it("does not count a keyword-hidden line the model could not judge, and its flag says it was not judged", async () => {
     const r = await liveRoom()
     for (let i = 1; i <= AUTO_MUTE_HIDDEN_COUNT; i++) await sendHidden(r, send, `${i} [down] chutiya`, i)
     await settle()
     expect(await stateOf(r, () => true)).toEqual({ flags: AUTO_MUTE_HIDDEN_COUNT, status: "active", muted_at: null, muted_by: null })
+    const flags = await db.moderation_flags.findMany({ where: { chat_group_id: r.groupId, user_id: r.memberId }, select: { categories: true } })
+    expect(flags.map((f) => Object.keys(f.categories as object).sort().join())).toEqual(Array(AUTO_MUTE_HIDDEN_COUNT).fill("profanity,unjudged"))
+  })
+
+  it("does not count lines the model could not judge toward a mute a later line checks", async () => {
+    const r = await liveRoom()
+    await sendHidden(r, send, "1 [down] chutiya", 1)
+    await sendHidden(r, send, "2 [down] chutiya", 2)
+    // Each: the keyword's hide (not counted) and the model's (counted): two counted in all.
+    await sendHidden(r, send, "3 [abuse] chutiya I know where you live", 4)
+    await sendHidden(r, send, "4 [abuse] chutiya I know where you live", 6)
+    await settle()
+    expect((await stateOf(r, () => true)).status).toBe("active")
+  })
+
+  it("records a threat the model flagged below its hide line as its own flag, keeps the line hidden, and does not mute", async () => {
+    const r = await liveRoom()
+    for (let i = 1; i <= AUTO_MUTE_HIDDEN_COUNT; i++) await sendHidden(r, send, `${i} [threat] chutiya`, i)
+    const model = async () =>
+      db.moderation_flags.findMany({
+        where: { chat_group_id: r.groupId, user_id: r.memberId, source: "auto_text" },
+        select: { auto_action: true, categories: true, message: { select: { moderation_status: true } } },
+      })
+    for (let i = 0; i < 80 && (await model()).length < AUTO_MUTE_HIDDEN_COUNT; i++) await settle()
+    await settle()
+    const flags = await model()
+    expect(flags).toHaveLength(AUTO_MUTE_HIDDEN_COUNT)
+    for (const f of flags) {
+      expect(f).toMatchObject({ auto_action: "none", categories: { "harassment/threatening": 0.55 }, message: { moderation_status: "hidden" } })
+    }
+    expect(await stateOf(r, () => true)).toMatchObject({ flags: AUTO_MUTE_HIDDEN_COUNT, status: "active", muted_at: null })
+  })
+
+  it(`does not mute for ${AUTO_MUTE_HIDDEN_COUNT} lines with "cunt" in them (D-057)`, async () => {
+    const r = await liveRoom()
+    for (let i = 1; i <= AUTO_MUTE_HIDDEN_COUNT; i++) await sendHidden(r, send, `${i} you cunt`, i)
+    await settle()
+    expect(await stateOf(r, () => true)).toEqual({ flags: AUTO_MUTE_HIDDEN_COUNT, status: "active", muted_at: null, muted_by: null })
+    const flags = await db.moderation_flags.findMany({ where: { chat_group_id: r.groupId, user_id: r.memberId }, select: { categories: true } })
+    expect(flags.every((f) => Object.keys(f.categories as object).join() === "profanity")).toBe(true)
+  })
+
+  it(`mutes for ${AUTO_MUTE_HIDDEN_COUNT} lines calling a person a "retard"`, async () => {
+    const r = await liveRoom()
+    for (let i = 1; i <= AUTO_MUTE_HIDDEN_COUNT; i++) await sendHidden(r, send, `${i} you retard`, i)
+    expect(await stateOf(r, (s) => s.status === "muted")).toMatchObject({ status: "muted", muted_by: null })
   })
 
   it("leaves a host's mute alone", async () => {

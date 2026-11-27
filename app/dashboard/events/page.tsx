@@ -68,7 +68,6 @@ export default async function EventsPage() {
       max_capacity: true,
       curated_at: true,
       claimed_at: true,
-      organizer_id: true,
       organizer_org_id: true,
       /*
        * Whose night it is: for an admin and for a venue, never for an

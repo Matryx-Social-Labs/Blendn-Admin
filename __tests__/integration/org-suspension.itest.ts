@@ -78,7 +78,7 @@ async function fixture() {
   await db.organisation_members.create({ data: { org_id: org.id, user_id: host, role: "owner" } })
 
   // Two published events of the org (one upcoming with an RSVP, one live with
-  // someone in the room), one the host created before organisations existed,
+  // someone in the room), one the host created with no organisation (listed to nobody but an admin),
   // one cancelled by an admin.
   const upcoming = await makeEvent(host)
   const live = await makeEvent(host)
@@ -164,7 +164,7 @@ describe("suspending an organisation", () => {
     const visible = await db.events.findMany({ where: await visibleEventsWhere({ id: f.host, role: "organizer" }), select: { id: true } })
     const visibleIds = new Set(visible.map((e) => e.id))
     expect(visibleIds.has(f.upcoming)).toBe(false)
-    expect(visibleIds.has(f.legacy)).toBe(true) // the creator floor keeps a legacy event
+    expect(visibleIds.has(f.legacy)).toBe(false) // no creator floor any more (SCRUM-1250): org-less is nobody's
 
     // ⌘K: the host's own search lists nothing of the org either, and — the leak
     // the review found on the way — an organiser at ANOTHER org never sees it.

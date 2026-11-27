@@ -61,6 +61,8 @@ const orgs: string[] = []
 
 let venueId: string
 let ownerOrg: string
+/** The organisation `orgOrganiser` runs their nights in: hosting is an organisation's, never the creator's (SCRUM-1250). */
+let hostOrg: string
 let venueOwner: string
 let orgOrganiser: string
 let admin: string
@@ -85,6 +87,7 @@ async function realEvent(data: { start: Date; end: Date; title?: string; venue?:
       status: "published",
       visibility: "public",
       organizer_id: orgOrganiser,
+      organizer_org_id: hostOrg,
     },
   })
   events.push(row.id)
@@ -133,6 +136,10 @@ beforeAll(async () => {
       { org_id: ownerOrg, user_id: orgOrganiser, role: "staff" },
     ],
   })
+  const host = await db.organisations.create({ data: { display_name: testId("vdh_host"), kind: "company", status: "verified" } })
+  hostOrg = host.id
+  orgs.push(host.id)
+  await db.organisation_members.create({ data: { org_id: hostOrg, user_id: orgOrganiser, role: "owner" } })
 
   const viewerId = await makeUser("vdh_viewer")
   users.push(viewerId)

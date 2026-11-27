@@ -267,13 +267,8 @@ describe("creating a poll", () => {
     ).rejects.toThrow(/not open/i)
   })
 
-  it("gates a sponsored poll on the sponsor grant, not on canOperate", async () => {
-    /*
-     * A poll from a brand carries that brand's name into the room and takes the
-     * same attention as any sponsored message. Gating it more weakly because the
-     * payload happens to be a question is how the label stops meaning anything.
-     */
-    mockDb.organisations.findFirst.mockResolvedValue(null)
+  it("refuses a sponsored poll even with the sponsor grant: sponsored content goes out through a campaign", async () => {
+    mockDb.organisations.findFirst.mockResolvedValue({ id: ORG })
 
     await expect(
       createPoll(EVENT, {
@@ -281,21 +276,17 @@ describe("creating a poll", () => {
         options: ["Original", "Sugarfree"],
         kind: "sponsored",
       })
-    ).rejects.toThrow(/forbidden/i)
+    ).rejects.toThrow(/campaign/i)
 
     expect(mockDb.chat_polls.create).not.toHaveBeenCalled()
+    expect(mockDb.chat_messages.create).not.toHaveBeenCalled()
   })
 
-  it("allows a sponsored poll once the grant resolves", async () => {
-    mockDb.organisations.findFirst.mockResolvedValue({ id: ORG })
-
-    await createPoll(EVENT, {
-      question: "Which flavour?",
-      options: ["Original", "Sugarfree"],
-      kind: "sponsored",
-    })
-
-    expect(mockDb.chat_polls.create).toHaveBeenCalledTimes(1)
+  it("refuses any other kind as not an announcement", async () => {
+    await expect(
+      createPoll(EVENT, { question: "Which flavour?", options: ["Original", "Sugarfree"], kind: "system" })
+    ).rejects.toThrow("A poll is an announcement")
+    expect(mockDb.chat_polls.create).not.toHaveBeenCalled()
   })
 })
 

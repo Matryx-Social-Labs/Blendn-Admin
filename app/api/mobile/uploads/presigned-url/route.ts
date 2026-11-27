@@ -3,13 +3,11 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { db } from "@/lib/db"
 import {
   getPresignedUploadUrl,
   validateContentType,
   getMaxFileSize,
   isConfigured,
-  UploadFolder,
   UPLOADS_UNAVAILABLE,
 } from "@/lib/tigris"
 import {
@@ -25,7 +23,8 @@ import { sendsUploadSize } from "@/lib/mobile-gate"
 const presignedUrlSchema = z.object({
   filename: z.string().min(1, "Filename is required").max(255),
   contentType: z.string().min(1, "Content type is required"),
-  folder: z.enum(["profile", "chat", "events"]).default("profile"),
+  // The app uploads profile photos and chat media; event media is the dashboard's (/api/uploads/presigned-url).
+  folder: z.enum(["profile", "chat"]).default("profile"),
   /** Byte length of the file about to be PUT. Signed into the URL when sent (API M6). */
   size: z.number().int().min(1).optional(),
 })
@@ -60,34 +59,23 @@ export async function POST(request: NextRequest) {
       return errorResponse("size is required", 400)
     }
 
-    // Restrict event uploads to organizers and admins
-    if (folder === "events") {
-      const dbUser = await db.user.findUnique({
-        where: { id: user.userId },
-        select: { role: true },
-      })
-      if (!dbUser || !["app_admin", "organizer", "venue_owner"].includes(dbUser.role)) {
-        return errorResponse("You do not have permission to upload event files", 403)
-      }
-    }
-
     // Validate content type for the folder
-    if (!validateContentType(contentType, folder as UploadFolder)) {
+    if (!validateContentType(contentType, folder)) {
       return errorResponse(
         `Content type "${contentType}" is not allowed for ${folder} uploads`,
         400
       )
     }
 
-    if (size !== undefined && size > getMaxFileSize(folder as UploadFolder)) {
-      return errorResponse(`File is larger than the ${getMaxFileSize(folder as UploadFolder)} byte limit for ${folder} uploads`, 400)
+    if (size !== undefined && size > getMaxFileSize(folder)) {
+      return errorResponse(`File is larger than the ${getMaxFileSize(folder)} byte limit for ${folder} uploads`, 400)
     }
 
     // Get the presigned URL
     const { uploadUrl, publicUrl, key } = await getPresignedUploadUrl(
       filename,
       contentType,
-      folder as UploadFolder,
+      folder,
       user.userId,
       { size }
     )
@@ -96,7 +84,7 @@ export async function POST(request: NextRequest) {
       uploadUrl,
       publicUrl,
       key,
-      maxSize: getMaxFileSize(folder as UploadFolder),
+      maxSize: getMaxFileSize(folder),
       expiresIn: 900, // 15 minutes
     })
   } catch (error) {

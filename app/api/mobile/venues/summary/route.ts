@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server"
 import { z } from "zod"
 
-import { ageFrom, isAdult, mayParticipate } from "@/lib/age"
+import { ageFrom, isAdult, mayParticipate, participationSelect } from "@/lib/age"
 import {
   serverErrorResponse,
   successResponse,
@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
 
     const viewer = await db.profiles.findUnique({
       where: { id: authUser.userId },
-      select: { age: true, date_of_birth: true, onboarded: true },
+      select: participationSelect,
     })
     const viewerAge = ageFrom(viewer)
     const summary = await venueSummary(
