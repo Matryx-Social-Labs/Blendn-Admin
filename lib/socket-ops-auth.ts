@@ -10,7 +10,7 @@ import type { user_role } from "@prisma/client"
 import { db } from "./db"
 import { logger } from "./logger"
 import { eventPermissions } from "./rbac"
-import { actorFor } from "./org-membership"
+import { actorFor, sessionAccount } from "./org-membership"
 import { isRevoked } from "./session-revocation"
 
 /**
@@ -78,10 +78,7 @@ export async function authenticateDashboardSocket(
      * the old role until it expires. For a long-lived socket that outlives the
      * request that opened it, that window is the whole connection.
      */
-    const user = await db.user.findUnique({
-      where: { id: token.sub },
-      select: { id: true, email: true, role: true, suspended_at: true, deletedAt: true, password_changed_at: true, sessions_revoked_at: true },
-    })
+    const user = await sessionAccount(token.sub)
     // The pages' rule (lib/session-revocation.ts): suspended, deleted — an
     // erased account's cookie can outlive it; deletion evicts the socket and
     // this keeps the reconnect out (SCRUM-449) — or signed in before the
@@ -89,9 +86,11 @@ export async function authenticateDashboardSocket(
     // re-minted, so a session from before `signedInAt` is judged by its iat.
     if (!user || isRevoked(token, user)) return null
     // A session held only to accept an invite is no dashboard session (SCRUM-984).
-    if (!canAccessDashboard(user.role)) return null
+    // The pages' role too: from the memberships, in this same read (SCRUM-1247).
+    const role = user.dashboardRole
+    if (!canAccessDashboard(role)) return null
 
-    return { userId: user.id, email: user.email, role: user.role }
+    return { userId: user.id, email: user.email, role }
   } catch (error) {
     // A malformed or foreign cookie is an ordinary rejection, not an incident.
     logger.debug("Dashboard socket auth failed", {

@@ -34,6 +34,7 @@ const mockDb = {
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
+jest.mock("@/lib/org-membership", () => ({ ...jest.requireActual("@/lib/org-membership"), sessionAccount: () => mockSessionAccount(mockDb.user.findUnique()) }))
 // As getAuth() returns it: the jwt callback always writes `signedInAt` (lib/session-revocation.ts).
 jest.mock("@/lib/auth", () => ({
   getAuth: async () => {
@@ -49,6 +50,7 @@ jest.mock("@/lib/audit-log", () => ({
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { advanceCharge, getChargeLedger, pricePlacement } from "@/lib/charge-actions"
+import { mockSessionAccount } from "./support/session-account"
 
 const PLACEMENT = "11111111-1111-4111-8111-111111111111"
 const CHARGE = "22222222-2222-4222-8222-222222222222"
