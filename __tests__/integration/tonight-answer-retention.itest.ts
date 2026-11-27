@@ -38,10 +38,12 @@ beforeAll(async () => {
   reporter = await makeUser(testId("tq-reporter"))
   users.push(host, person, reporter)
   old = await endedEvent(host, TONIGHT_ANSWER_DAYS + 1)
+  events.push(old)
   recent = await endedEvent(host, TONIGHT_ANSWER_DAYS - 1)
+  events.push(recent)
   // A run whose first night is long gone but whose latest night ended yesterday.
   liveSeries = await endedEvent(host, TONIGHT_ANSWER_DAYS + 10)
-  events.push(old, recent, liveSeries)
+  events.push(liveSeries)
   await addPastNight(liveSeries, 1)
   for (const event_id of [old, recent, liveSeries]) {
     await db.event_match_preferences.create({
