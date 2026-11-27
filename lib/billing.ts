@@ -1,6 +1,7 @@
 import "server-only"
 
 import type { org_role, user_role } from "@prisma/client"
+import { cache } from "react"
 
 import { analyticsAccess, mayOpenEvent, worthAPass, type AccessReason } from "./analytics-access"
 import { BILLING_PLANS, isBillingPlanKey, rupees } from "./billing-plans"
@@ -10,6 +11,7 @@ import { razorpayKeys } from "./env"
 import { realEventsWhere } from "./event-kind"
 import { logger } from "./logger"
 import { activeMembership, HOME_ORG_ORDER } from "./org-membership"
+import { mayBuyHere } from "./plan-market"
 import { mayManageBilling } from "./rbac"
 
 /**
@@ -24,13 +26,26 @@ import { mayManageBilling } from "./rbac"
  * ## Who may buy
  *
  * `mayManageBilling` (lib/rbac.ts): the organisation's owners and admins.
+ *
+ * ## Where
+ *
+ * `mayBuyHere` (lib/plan-market.ts): plans are sold only where their prices
+ * are. Elsewhere nothing is for sale, whoever is asking.
  */
+
+/**
+ * `mayBuyHere` once per request (React `cache`, as lib/dashboard-record-titles.ts): the dashboard layout's plan card
+ * and the page's `billingOrgFor` ask it for the same home organisation. The same rule, not a second one; outside a
+ * request (jest, the sweeper) it simply runs.
+ */
+export const mayBuyHereThisRequest = cache(mayBuyHere)
 
 export interface BillingOrg {
   orgId: string
   orgName: string
   memberRole: org_role
   mayBuy: boolean
+  mayBuyHere: boolean
 }
 
 export async function billingOrgFor(user: { id: string; role: user_role }): Promise<BillingOrg | null> {
@@ -46,6 +61,7 @@ export async function billingOrgFor(user: { id: string; role: user_role }): Prom
     orgName: membership.org.display_name,
     memberRole: membership.role,
     mayBuy: mayManageBilling(membership.role),
+    mayBuyHere: await mayBuyHereThisRequest(membership.org.id),
   }
 }
 
@@ -193,7 +209,7 @@ function subscriptionState(s: {
 
 export async function planPageData(org: BillingOrg, now: Date = new Date()): Promise<PlanPageData> {
   const [access, analytics, subscriptionRows, events, paid] = await Promise.all([
-    analyticsAccess(org.orgId, now),
+    analyticsAccess(org, now),
     liveEntitlement({ kind: "org", id: org.orgId }, "analytics", now),
     db.billing_checkouts.findMany({
       where: { org_id: org.orgId, venue_id: null, kind: "subscription", status: { in: [...OPEN_SUBSCRIPTION_STATUSES] } },

@@ -9,7 +9,7 @@ import { FREE_WINDOW_DAYS } from "@/lib/analytics-access"
 import { MIN_ATTENDEES } from "@/lib/connection-metrics"
 import { getAuth } from "@/lib/auth"
 import { billingOrgFor, planPageData, type PlanDate, type PlanPageData } from "@/lib/billing"
-import { BILLING_PLANS, grossRupees, gstSplit, planDay as day, rupees } from "@/lib/billing-plans"
+import { BILLING_PLANS, FREE_WHILE_LAUNCHING, grossRupees, gstSplit, planDay as day, rupees } from "@/lib/billing-plans"
 import { mayReachRoute } from "@/lib/dashboard-nav"
 import { routeMetadata } from "@/lib/dashboard-route-content"
 import { venuePlanPage } from "@/lib/venue-plan"
@@ -34,6 +34,11 @@ export const dynamic = "force-dynamic"
  *
  * Every price is the GST-inclusive figure with its split beneath it, the same
  * number the statement will show (the screen's one memorable detail).
+ *
+ * Where plans are not sold (`mayBuyHere`, SCRUM-1151: an organisation running
+ * anything outside India), each paid card says "Free while we launch in your
+ * city." in its price's place: no price, no Buy, nobody asked to change a
+ * plan. What it already pays for keeps its status and its Cancel.
  */
 
 const dated = (d: PlanDate | null) => (d ? `${d.word} ${day(d.at)}` : null)
@@ -106,26 +111,32 @@ export default async function PlanPage({
   // the "still locked" list, which the page cannot tie to the one bought, so
   // it waits on the time-out instead.
   const pending = params.status === "pending" && !(pendingFor === "analytics" && view.analytics)
-  const canBuy = view.paymentsOn && org.mayBuy
+  const soldHere = org.mayBuyHere
+  const canBuy = view.paymentsOn && org.mayBuy && soldHere
+  const launching = () => <p className="text-[0.9375rem] font-medium">{FREE_WHILE_LAUNCHING}</p>
 
   const cards = (
     <div className="grid grid-cols-1 gap-5 @3xl/main:grid-cols-3">
       <PlanCard name="Free" current={!view.analytics} items={FREE}>
-        <p className="text-[1.625rem] font-bold tabular-nums">₹0</p>
+        {soldHere ? <p className="text-[1.625rem] font-bold tabular-nums">₹0</p> : null}
       </PlanCard>
 
       <PlanCard name="Event Insights" tag={<ProTag />} items={PASS}>
-        <div className="flex flex-col gap-1">
-          <p className="text-[1.625rem] font-bold tabular-nums">
-            {rupees(grossRupees(BILLING_PLANS.event_pass))}{" "}
-            <span className="text-[0.8125rem] font-normal text-muted-foreground">per event</span>
-          </p>
-          <p className="text-[0.75rem] tabular-nums text-faint-foreground">
-            {gstSplit(BILLING_PLANS.event_pass)} · one payment, that event for good
-          </p>
-        </div>
+        {soldHere ? (
+          <div className="flex flex-col gap-1">
+            <p className="text-[1.625rem] font-bold tabular-nums">
+              {rupees(grossRupees(BILLING_PLANS.event_pass))}{" "}
+              <span className="text-[0.8125rem] font-normal text-muted-foreground">per event</span>
+            </p>
+            <p className="text-[0.75rem] tabular-nums text-faint-foreground">
+              {gstSplit(BILLING_PLANS.event_pass)} · one payment, that event for good
+            </p>
+          </div>
+        ) : null}
         {view.analytics ? (
           <p className="text-[0.8125rem] text-muted-foreground">Analytics already covers every event.</p>
+        ) : !soldHere ? (
+          launching()
         ) : view.free.reason === "free_window" ? (
           <p className="text-[0.8125rem] text-muted-foreground">Every event is open while Analytics is free.</p>
         ) : (
@@ -142,6 +153,8 @@ export default async function PlanPage({
           <p className="text-[0.8125rem] text-muted-foreground">
             {view.date ? `On, ${dated(view.date)}.` : "On."}
           </p>
+        ) : !soldHere ? (
+          launching()
         ) : (
           <AnalyticsBuy enabled={canBuy} pending={pending} />
         )}
@@ -157,7 +170,7 @@ export default async function PlanPage({
 
       {canBuy ? <CheckoutProvider>{cards}</CheckoutProvider> : cards}
 
-      {!org.mayBuy ? (
+      {!soldHere ? null : !org.mayBuy ? (
         <p className="text-[0.8125rem] text-muted-foreground">
           Only an owner or admin of {org.orgName} can change its plan.
         </p>
@@ -205,7 +218,14 @@ function StatusPanel({ view, pending, pendingFor }: { view: PlanPageData; pendin
   } else if (view.free.reason === "free_window") {
     headline = "Free · Analytics open for now"
     detail = `Every Analytics view is open until ${FREE_WINDOW_DAYS} days after ${FIRST_EVENT_RULE}.`
+  } else if (view.free.reason === "market") {
+    // Where plans are not sold (SCRUM-1277), design/05's board: every view is open, so no event is named as the one
+    // that stays open, and no date; each paid card already says "Free while we launch in your city."
+    headline = "Free"
+    detail = "Every event you run, and the numbers you see for each one, cost nothing."
   } else {
+    // Analytics and a grant are answered above by `view.analytics`; a new reason must get its own branch.
+    void (view.free.reason satisfies "free" | "analytics" | "grant")
     headline = "Free"
     detail = view.free.firstEventTitle
       ? `Every event you run, and its own numbers, cost nothing. ${view.free.firstEventTitle}'s analytics stay open for good.`

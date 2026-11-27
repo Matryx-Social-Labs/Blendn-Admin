@@ -23,6 +23,7 @@ import { ArrivalBars } from "@/components/dashboard/analytics-panels"
 import { Panel } from "@/components/dashboard/kit"
 import { Button } from "@/components/ui/button"
 import { analyticsAccessLine, FIRST_EVENT_RULE } from "@/lib/access-line-copy"
+import { FREE_WHILE_LAUNCHING } from "@/lib/billing-plans"
 import { loadScript } from "@/lib/load-script"
 
 /** The few parts of a script element and a document the loader touches. */
@@ -164,6 +165,13 @@ describe("analyticsAccessLine", () => {
     expect(analyticsAccessLine({ ...base, org: true, reason: "analytics", date }, day)).toEqual({ headline: "Analytics, renews D(2026-11-12)", detail: "Every view, for every event." })
     expect(analyticsAccessLine({ ...base, firstFreeEvent: first }, day).detail).toContain("Sunday Soul Sante stays open for good.")
     expect(analyticsAccessLine(base, day).headline).toBe("Free plan")
+  })
+
+  // SCRUM-1277: where plans are not sold, the line says so and nothing else: no date, no price, no plan to buy.
+  it("says the launch line where plans are not sold, with no end date and nothing to buy", () => {
+    const line = analyticsAccessLine({ ...base, org: true, reason: "market", firstFreeEvent: first }, day)
+    expect(line).toEqual({ headline: FREE_WHILE_LAUNCHING, detail: "Every view, for every event." })
+    expect(`${line.headline} ${line.detail}`).not.toMatch(/D\(|₹|Event Insights|Analytics opens|plan|upgrade|until/i)
   })
 })
 

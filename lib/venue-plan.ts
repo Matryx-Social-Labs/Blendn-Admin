@@ -7,6 +7,7 @@ import { BILLING_PLANS, isBillingPlanKey } from "./billing-plans"
 import { db } from "./db"
 import { liveEntitlement, type LiveEntitlement } from "./entitlements"
 import { activeMembership } from "./org-membership"
+import { mayBuyHere } from "./plan-market"
 import { mayManageVenueBilling } from "./rbac"
 
 /**
@@ -89,6 +90,8 @@ export interface VenuePlanRow {
    * closes. A yes or no, never whose, which plan or how much.
    */
   openElsewhere: boolean
+  /** Plans are sold where the owning organisation is (`mayBuyHere`, SCRUM-1151); elsewhere, no Buy and no charge date. */
+  mayBuyHere: boolean
 }
 
 /** A venue's mandate as its row needs it; the plan key may be one the price table has retired. */
@@ -128,7 +131,8 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
     select: { id: true, name: true, city: true, owner_org_id: true, owner_org: { select: { display_name: true } } },
   })
   const ids = venues.map((v) => v.id)
-  const [since, subs, paid, pros] = await Promise.all([
+  const owners = [...new Set(venues.map((v) => v.owner_org_id).filter((id): id is string => id !== null && roleIn.has(id)))]
+  const [since, subs, paid, pros, sold] = await Promise.all([
     venueDataSince(ids),
     ids.length
       ? db.billing_checkouts.findMany({
@@ -155,6 +159,7 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
         })
       : [],
     Promise.all(ids.map((id) => liveEntitlement({ kind: "venue", id }, "venue_pro", now))),
+    Promise.all(owners.map(async (id) => [id, await mayBuyHere(id)] as const)).then((pairs) => new Map(pairs)),
   ])
 
   return {
@@ -187,6 +192,8 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
         readiness: owned ? readinessFrom(since.get(v.id) ?? null, now) : readinessFrom(null, now),
         subscriptions,
         openElsewhere: here.some((s) => !roleIn.has(s.org_id)),
+        // Only an owned venue is offered anything; one merely still paid for asks nothing.
+        mayBuyHere: v.owner_org_id ? (sold.get(v.owner_org_id) ?? true) : true,
       }
     }),
     payments: paid.map((p) => ({

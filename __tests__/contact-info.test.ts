@@ -160,10 +160,10 @@ describe("the verdict, per surface", () => {
       "app/api/mobile/events/[eventId]/chat/route.ts",
     ]) {
       const src = readFileSync(join(process.cwd(), route), "utf8")
-      expect(src).toMatch(/const preSave = preSaveCheck\(content\)/)
+      expect(src).toMatch(/const \{ hide: preSave, keyword \} = preSaveCheck\(content\)/)
       expect(src).not.toMatch(/checkKeywords\(content\)/)
-      // Counted only for abuse, and only once its flag is written (SCRUM-483).
-      expect(src).toMatch(/\.then\(\(\) =>\s+preSave\.autoMute \? checkAndAutoMute\(/)
+      // Recorded off the response path; counted only for abuse, once its flag is written (`recordHide`, SCRUM-483).
+      expect(src).toMatch(/void recordHide\(message\.id, [\w.]+, [\w.]+, content, preSave\)/)
     }
   })
 

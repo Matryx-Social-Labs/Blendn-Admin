@@ -39,7 +39,6 @@ describe("Hindi words that merely share consonants with a banned one", () => {
 describe("Hindi words that are the banned word", () => {
   it.each([
     ["तू एक चूतिया है", "चूतिया"],
-    ["तुम हरामी हो", "हरामी"],
     ["ये लौड़ा क्या कर रहा है", "लौड़ा"],
     ["वो रंडी है", "रंडी"],
     ["अबे गांड मत दिखा", "गांड"],
@@ -58,13 +57,13 @@ describe("Hindi words that are the banned word", () => {
 
   it("sees through zero-width joiners: one inside a banned word does not hide it, one inside a harmless word does not split it", () => {
     expect(hidden("तू चूति\u200dया है")).toBe(true)
-    expect(hidden("हरा\u200cमी")).toBe(true)
+    expect(hidden("रं\u200cडी")).toBe(true)
     expect(hidden("मेरा लड़\u200cका आया")).toBe(false)
   })
 
   it("matches a banned word followed by punctuation or inside quotes", () => {
-    expect(hidden("हरामी!")).toBe(true)
-    expect(hidden("“हरामी”, बोला")).toBe(true)
+    expect(hidden("रंडी!")).toBe(true)
+    expect(hidden("“रंडी”, बोला")).toBe(true)
   })
 })
 
@@ -74,9 +73,9 @@ describe("the other Indic lists keep their words whole", () => {
     expect(hidden("లంక వెళ్ళాను")).toBe(false) // Lanka (Sri Lanka) shares the first consonant of లంజ
   })
 
-  it("Bengali: শালা is the keyword, শালিক (a bird) is not", () => {
-    expect(hidden("তুই শালা")).toBe(true)
-    expect(hidden("একটি শালিক পাখি")).toBe(false)
+  it("Bengali: শালা is the keyword (for review, SCRUM-1167), শালিক (a bird) is not", () => {
+    expect(checkKeywords("তুই শালা")?.matched).toEqual(["শালা"])
+    expect(checkKeywords("একটি শালিক পাখি")).toBeNull()
   })
 
   it("Tamil: the keyword matches as a word, not inside a longer unrelated one", () => {
@@ -86,7 +85,7 @@ describe("the other Indic lists keep their words whole", () => {
 })
 
 describe("Hinglish (Latin script)", () => {
-  it.each(["tu harami hai", "oye madarchod", "kya chutiya banda hai", "bsdk", "bhosdi wale"])("hides %p", (text) => {
+  it.each(["tu bhenchod hai", "oye madarchod", "kya chutiya banda hai", "bsdk", "bhosdi wale"])("hides %p", (text) => {
     expect(hidden(text)).toBe(true)
   })
 
@@ -110,18 +109,8 @@ describe("punctuation after a word is punctuation, not a letter", () => {
   })
 })
 
-describe("multi-word entries", () => {
-  it("matches 'mc bc' as a phrase and as its words", () => {
-    expect(checkKeywords("oye mc bc")?.matched).toContain("mc bc")
-    expect(hidden("oye mc bc")).toBe(true)
-    expect(hidden("mc")).toBe(true)
-    expect(hidden("bc")).toBe(true)
-  })
-
-  it("does not match the words in the wrong order or apart, as a phrase", () => {
-    // "bc" alone is itself an abbreviation keyword, so this stays a hit; the phrase must not add a second one.
-    const result = checkKeywords("bc phir mc")
-    expect(result?.matched).toEqual(expect.arrayContaining(["bc", "mc"]))
-    expect(result?.matched).not.toContain("mc bc")
+describe("mc and bc are not keywords (because, British Columbia, the host; SCRUM-1167)", () => {
+  it.each(["oye mc bc", "mc", "bc", "bc phir mc"])("says nothing about %p", (text) => {
+    expect(checkKeywords(text)).toBeNull()
   })
 })

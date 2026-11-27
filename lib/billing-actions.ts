@@ -26,6 +26,7 @@ import {
   RazorpayError,
 } from "@/lib/razorpay"
 import { activeMembership } from "@/lib/org-membership"
+import { mayBuyHere } from "@/lib/plan-market"
 import { mayManageVenueBilling } from "@/lib/rbac"
 import { Refusal } from "@/lib/refusal"
 import { cancelThenRecord } from "@/lib/subscription-cancel"
@@ -59,6 +60,7 @@ import { venueReadiness } from "@/lib/venue-plan"
  */
 
 const PAYMENTS_OFF = "Payments aren’t switched on here yet."
+const NOT_SOLD_HERE = "Plans aren’t sold in your city yet. Free while we launch there."
 const STARTS = { max: 5, windowMs: 60_000 }
 /** The lock is held across up to two Razorpay calls (≤15 s each: a previous owner's checkout cancelled, then ours made), so the transaction may run that long and a little more. */
 const TX = { maxWait: 10_000, timeout: 40_000 }
@@ -132,6 +134,17 @@ async function requireVenueBuyer(venueId: string) {
     throw new Refusal("Only an owner or admin of the venue’s organisation can change its plan.")
   }
   return { user, orgId: venue.owner_org_id, keyId: await payable(`venue:${venue.id}`) }
+}
+
+/**
+ * Plans are sold only where their prices are (`mayBuyHere`, SCRUM-1151): the
+ * server's gate, not the page's. Asked by each of the three starts (Analytics,
+ * Event Insights, Venue Pro) once the buyer and payments are checked, before
+ * any of the start's own refusals, a lock, a row or a Razorpay call; never by
+ * a cancel, so an organisation that already pays can always stop it.
+ */
+async function requireSoldHere(orgId: string): Promise<void> {
+  if (!(await mayBuyHere(orgId))) throw new Refusal(NOT_SOLD_HERE)
 }
 
 /** The organisation's purchases, one at a time, until the transaction ends. */
@@ -309,6 +322,7 @@ async function startSubscription(
 export async function startAnalyticsCheckout(period: "monthly" | "yearly"): Promise<SubscriptionCheckout> {
   const chosen = parse(periodSchema, period, "Choose monthly or yearly.")
   const { user, org, keyId } = await requireBuyer()
+  await requireSoldHere(org.orgId)
   const plan = BILLING_PLANS[chosen === "monthly" ? "analytics_monthly" : "analytics_yearly"]
   return startSubscription(
     { orgId: org.orgId, venueId: null, already: "Your organisation already has an Analytics subscription. Manage it below." },
@@ -330,6 +344,7 @@ export async function startVenueProCheckout(venueId: string, period: "monthly" |
   const id = parse(idSchema, venueId, NOT_YOUR_VENUE)
   const chosen = parse(periodSchema, period, "Choose monthly or yearly.")
   const { user, orgId, keyId } = await requireVenueBuyer(id)
+  await requireSoldHere(orgId)
   const ready = await venueReadiness(id)
   if (!ready.chargeable) {
     throw new Refusal(
@@ -360,6 +375,7 @@ export interface OrderCheckout {
 export async function startEventPassCheckout(eventId: string): Promise<OrderCheckout> {
   const id = parse(idSchema, eventId, "That event isn’t one of your organisation’s.")
   const { user, org, keyId } = await requireBuyer()
+  await requireSoldHere(org.orgId)
   const subject = { kind: "org" as const, id: org.orgId }
   const plan = BILLING_PLANS.event_pass
   const now = new Date()
@@ -382,7 +398,7 @@ export async function startEventPassCheckout(eventId: string): Promise<OrderChec
       }
       // Nothing to sell while it is open anyway: the free window, or the first
       // event that cleared the floor (lib/analytics-access.ts).
-      const access = await analyticsAccess(org.orgId, now)
+      const access = await analyticsAccess(org, now)
       if (access.org) throw new Refusal("Every event’s analytics are free for now, so there’s nothing to buy yet.")
       if (mayOpenEvent(access, id)) throw new Refusal("That event’s analytics are already open to you.")
       // Never a deliverable the buyer cannot receive (SCRUM-1363): the list

@@ -189,24 +189,11 @@ export async function actorFor(user: {
 }
 
 /**
- * Whether any organisation this actor belongs to may sell placement.
- *
- * A separate query rather than a field on `PermissionActor`, because the flag
- * is only ever needed on the one route that writes a sponsored message —
- * loading it for every permission check would put a join on the hot path of
- * every event read to answer a question almost nobody asks.
- *
- * `app_admin` short-circuits to true and never queries: `actorFor` gives them
- * an empty `orgIds`, so the `some` below would be vacuously false and an admin
- * would be refused their own platform's placement.
- */
-
-/**
  * Resolve the ONE organisation acting, with both of its entitlements together.
  *
  * ## The bug this exists to make unrepresentable
  *
- * `maySponsorFor` above answers "does **any** org you belong to hold the flag".
+ * The deleted `maySponsorFor` answered "does **any** org you belong to hold the flag".
  * A `placesAtEvent` written the same way answers "does **any** org you belong to
  * have a placement". Pass both to `canBroadcast` as separate booleans and a
  * person who is staff at Org A (flag, no placement) and Org B (placement, no
