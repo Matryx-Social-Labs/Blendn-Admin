@@ -70,7 +70,7 @@ const venue = (over: Partial<VenueLiveSnapshot> = {}): VenueLiveSnapshot => ({
   activeChatters30m: "10-19",
   openFlags: 0,
   sentiment: { positive: "quiet", neutral: "quiet", negative: "quiet" },
-  categories: [],
+  raised: [],
   alerts: [],
   ...over,
 })

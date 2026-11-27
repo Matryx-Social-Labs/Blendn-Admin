@@ -20,7 +20,8 @@ jest.mock("@/lib/socket-ops-auth", () => ({
   ...jest.requireActual("@/lib/socket-ops-auth"),
   eventOpsView: (...args: unknown[]) => mockEventOpsView(...args),
 }))
-jest.mock("@/lib/live-snapshot", () => ({ buildLiveSnapshot: jest.fn().mockResolvedValue(null) }))
+const mockReadLiveSnapshot = jest.fn().mockResolvedValue(null)
+jest.mock("@/lib/live-snapshot", () => ({ readLiveSnapshot: (...a: unknown[]) => mockReadLiveSnapshot(...a) }))
 
 import { startSponsoredScheduler, stopSponsoredScheduler } from "@/lib/sponsored-scheduler"
 import {
@@ -226,6 +227,32 @@ describe("joinEventOps (the Live tab's join)", () => {
 
     expect(raw.join).toHaveBeenCalledWith(opsRoom(EVENT_ID, "host"))
     expect(raw.emit).not.toHaveBeenCalled()
+  })
+
+  it("sends a venue its copy, bucketed from the window's exact negatives, and the host the snapshot alone (SCRUM-1500)", async () => {
+    // The host's band is 23–27 (midpoint 25, "20+" either way); the exact 19 is "10-19". Only the exact one is the venue's.
+    const snapshot = {
+      view: "host", eventId: EVENT_ID, at: "2026-11-27T20:00:00.000Z", inside: 30, guestsInside: 28, staffInside: 2, checkedInTotal: 36,
+      checkedOutTotal: 6, unconfirmed: 0, capacity: 80, fillPct: 38, overCapacity: false, checkInRate10m: 4, medianRate10m: 4,
+      messagesPerMinute: 2, activeChatters30m: 12, openFlags: 0, social: null, topics: [], alerts: [],
+      sentiment: { positive: 25, neutral: 9, negative: { min: 23, max: 27 } },
+      categories: [{ category: "crowding", count: 7, suppressed: false }, { category: "entry_queue", count: null, suppressed: true }],
+    }
+    mockReadLiveSnapshot.mockResolvedValue({ snapshot, negatives: 19 })
+    for (const view of ["venue", "host"] as const) {
+      const { socket, raw } = dashboard()
+      mockEventOpsView.mockResolvedValue(view)
+      await joinEventOps(socket, EVENT_ID)
+      const sent = raw.emit.mock.calls.find(([name]: [string]) => name === "ops:snapshot")?.[1]
+      if (view === "venue") {
+        expect(sent).toMatchObject({ view: "venue", sentiment: { negative: "10-19" }, raised: ["entry_queue", "crowding"] })
+        expect(sent).not.toHaveProperty("categories")
+      } else {
+        expect(sent).toBe(snapshot)
+        expect(JSON.stringify(sent)).not.toContain("19")
+      }
+    }
+    mockReadLiveSnapshot.mockResolvedValue(null)
   })
 
   it("never asks for a phone socket", async () => {

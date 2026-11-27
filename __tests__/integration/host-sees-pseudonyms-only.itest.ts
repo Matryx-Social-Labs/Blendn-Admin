@@ -14,7 +14,7 @@ import { GET as flagQueue } from "@/app/api/events/[id]/chat/moderation/route"
 import { attendeeRoster, eventAttendees } from "@/lib/attendee-roster"
 import { buildFeedbackDigest } from "@/lib/feedback-digest"
 import { maySeeIdentityFor, visibleInRoom } from "@/lib/identity"
-import { buildLiveSnapshot } from "@/lib/live-snapshot"
+import { readLiveSnapshot } from "@/lib/live-snapshot"
 import { actorFor } from "@/lib/org-membership"
 import { attendeeLabel } from "@/lib/pseudonym"
 import { buildReport } from "@/lib/reports"
@@ -194,7 +194,7 @@ describe.each(HOSTS)("%s sees pseudonyms only", (_who, role, id) => {
     expectNoIdentity("attendees tab", await eventAttendees(actor, eventA))
     const event = await db.events.findUniqueOrThrow({ where: { id: eventA }, select: { id: true, title: true, end_time: true, timezone: true } })
     expectNoIdentity("feedback digest", await buildFeedbackDigest(event, role === "venue_owner" ? "venue" : "host"))
-    expectNoIdentity("live snapshot", await buildLiveSnapshot(eventA))
+    expectNoIdentity("live snapshot", await readLiveSnapshot(eventA, undefined, { social: true }).then((r) => r?.snapshot ?? null))
   })
 
   it("in every export it may run", async () => {

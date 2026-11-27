@@ -1,7 +1,7 @@
 // Relative, not `@/`: `lib/push-notifications.ts` throttles bursts with `hit`,
 // and it is reachable from `server.ts`, which `build:server` compiles with
 // plain tsc. `__tests__/server-import-boundary.test.ts` enforces it.
-import { randomUUID } from "crypto"
+import { createHash, randomUUID } from "crypto"
 
 import { logger } from "./logger"
 import { RATE_LIMIT_MAX_ENTRIES } from "./constants"
@@ -195,11 +195,24 @@ export interface StoreOptions {
 
 export class StoreUnavailable extends Error {}
 
+/**
+ * A key as a log line may hold it (SCRUM-1512): its leading lower-case words,
+ * then a 12-character sha256 of the rest, so an email, a phone or a network
+ * never reaches the log and lines about one key still match. A pseudonym:
+ * anyone holding the address can compute it.
+ */
+const keyForLog = (key: string): string => {
+  const parts = key.split(":")
+  const at = parts.findIndex((part) => !/^[a-z][a-z-]*$/.test(part))
+  if (at === -1) return key
+  return [...parts.slice(0, at), createHash("sha256").update(parts.slice(at).join(":")).digest("hex").slice(0, 12)].join(":")
+}
+
 /** Redis for a fail-closed key, or the reason it cannot be had. */
 async function redisFor(key: string, opts: StoreOptions): Promise<RedisLike | null> {
   const redis = await getRedis()
   if (!redis && opts.failClosed && process.env.REDIS_URL) {
-    logger.warn("Fail-closed limiter refused: rate limit store unavailable", { key })
+    logger.warn("Fail-closed limiter refused: rate limit store unavailable", { key: keyForLog(key) })
     throw new StoreUnavailable("rate limit store unavailable")
   }
   return redis
@@ -233,7 +246,7 @@ export async function hit(key: string, windowMs: number, opts: StoreOptions = {}
     return { count, resetAt: now + (ttl > 0 ? ttl : windowMs) }
   } catch (error) {
     if (opts.failClosed) {
-      logger.warn("Fail-closed limiter refused: Redis hit failed", { key, error: error instanceof Error ? error.message : String(error) })
+      logger.warn("Fail-closed limiter refused: Redis hit failed", { key: keyForLog(key), error: error instanceof Error ? error.message : String(error) })
       throw new StoreUnavailable("rate limit store unavailable")
     }
     logger.warn("Rate limit Redis hit failed, falling back to memory", {
@@ -321,7 +334,7 @@ export async function peek(key: string, opts: StoreOptions = {}): Promise<number
       return value ? Number(value) || 0 : 0
     } catch (error) {
       if (opts.failClosed) {
-        logger.warn("Fail-closed limiter refused: Redis read failed", { key, error: error instanceof Error ? error.message : String(error) })
+        logger.warn("Fail-closed limiter refused: Redis read failed", { key: keyForLog(key), error: error instanceof Error ? error.message : String(error) })
         throw new StoreUnavailable("rate limit store unavailable")
       }
       logger.warn("Rate limit Redis peek failed, falling back to memory", {

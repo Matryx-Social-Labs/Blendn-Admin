@@ -66,7 +66,7 @@ const venue = (): VenueLiveSnapshot => ({
   activeChatters30m: "20-49",
   openFlags: 0,
   sentiment: { positive: "20-49", neutral: "10-19", negative: "quiet" },
-  categories: [],
+  raised: [],
   alerts: [],
 } as unknown as VenueLiveSnapshot)
 
@@ -124,5 +124,23 @@ describe("the Live tab after its connection drops", () => {
     const html = render(null, "error")
     expect(html).toContain("Live connection lost")
     expect(html).not.toContain(LINE)
+  })
+})
+
+describe("a venue's complaints on the Live tab (SCRUM-1500)", () => {
+  const HEADING = "Complaints — last 30 min"
+  const complaints = (html: string) => html.slice(html.indexOf(HEADING) + HEADING.length, html.indexOf("This channel carries"))
+
+  it("names them in the order it is sent, safety in red, with no count", () => {
+    const html = complaints(render({ ...venue(), raised: ["safety_conduct", "crowding"] } as VenueLiveSnapshot, "live"))
+    expect(html).toMatch(/safety conduct → mod[\s\S]*crowding/)
+    expect(html).toContain("text-destructive")
+    expect(html.replace(/<[^>]*>/g, " ")).not.toMatch(/\d/)
+  })
+
+  it("points to the Room chat when none is named, and never says nothing negative was said", () => {
+    const html = complaints(render({ ...venue(), sentiment: { positive: "quiet", neutral: "quiet", negative: "20+" }, raised: [] } as VenueLiveSnapshot, "live"))
+    expect(html).toContain("Read what is said in the Room chat you moderate.")
+    expect(html).not.toContain("Nothing negative")
   })
 })

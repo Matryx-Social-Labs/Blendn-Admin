@@ -101,6 +101,6 @@ describe("what a host is shown", () => {
     const s = {
       sentiment: { positive: 9, neutral: 0, negative: 0 }, categories: [], alerts: [], topics: [{ topic: "music", people: 9 }],
     } as unknown as LiveSnapshot
-    expect(JSON.stringify(forVenue(s))).not.toContain("music")
+    expect(JSON.stringify(forVenue(s, 0))).not.toContain("music")
   })
 })

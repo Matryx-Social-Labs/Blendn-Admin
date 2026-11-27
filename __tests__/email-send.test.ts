@@ -1,7 +1,14 @@
+const mockInfo = jest.fn()
 const mockWarn = jest.fn()
+const mockError = jest.fn()
 const mockFindSuppression = jest.fn()
 jest.mock("@/lib/logger", () => ({
-  logger: { info: jest.fn(), warn: (...a: unknown[]) => mockWarn(...a), error: jest.fn(), debug: jest.fn() },
+  logger: {
+    info: (...a: unknown[]) => mockInfo(...a),
+    warn: (...a: unknown[]) => mockWarn(...a),
+    error: (...a: unknown[]) => mockError(...a),
+    debug: jest.fn(),
+  },
 }))
 jest.mock("@/lib/db", () => ({
   db: { email_suppressions: { findUnique: (...a: unknown[]) => mockFindSuppression(...a) } },
@@ -197,6 +204,30 @@ describe("suppressed addresses", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(mockWarn).toHaveBeenCalledTimes(1)
     expect(JSON.stringify(mockWarn.mock.calls)).not.toContain("priya.rao")
+  })
+})
+
+describe("a mail log line holds no address (SCRUM-1512)", () => {
+  it("names only the domain when the provider is not configured: not the address, not the subject", async () => {
+    delete process.env.RESEND_API_KEY
+    const r = await send({ to: "priya.sharma@example.com", subject: "Priya, your invite to Blend'n" })
+    expect(r).toMatchObject({ sent: false, reason: "not_configured" })
+    expect(mockInfo).toHaveBeenCalledWith(expect.any(String), { domain: "example.com" })
+    expect(JSON.stringify(mockInfo.mock.calls)).not.toMatch(/priya|@/i)
+  })
+
+  it("keeps Resend's error but not an address it quotes", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 422,
+      json: async () => ({}),
+      text: async () => '{"statusCode":422,"name":"validation_error","message":"Invalid `to` field: priya.sharma@example.com"}',
+    })
+    const r = await send({ to: "priya.sharma@example.com" })
+    expect(r).toMatchObject({ sent: false, reason: "provider_error" })
+    const lines = JSON.stringify(mockError.mock.calls)
+    expect(lines).toContain("validation_error")
+    expect(lines).not.toMatch(/priya|@/i)
   })
 })
 

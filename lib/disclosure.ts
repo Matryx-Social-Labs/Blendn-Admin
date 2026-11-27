@@ -1,6 +1,7 @@
 // Relative: the live tick reaches this from server.ts, which `build:server`
 // compiles with plain tsc (see __tests__/server-import-boundary.test.ts).
 import { SPONSORSHIP } from "./constants"
+import { ESCALATING_CATEGORIES, ISSUE_CATEGORIES } from "./sentiment/taxonomy"
 
 /**
  * When an aggregate stops being an aggregate.
@@ -330,6 +331,32 @@ export function discloseCategories(
       return { category, count: disclosure.value, suppressed: disclosure.suppressed }
     })
     .sort((a, b) => (b.count ?? 0) - (a.count ?? 0))
+}
+
+/**
+ * The complaint categories a venue is shown for another host's night: their names, no count (SCRUM-1500, register
+ * D-012). Beside the negatives the venue reads exactly from five up (its split, the "Nights here" row), any one
+ * category's count, or bucket, gives a held one back by subtraction; the names alone hold only their sum.
+ *
+ * In one fixed order, the escalating ones first, then the taxonomy's: an order by count would rank the counts and
+ * name the held one (it sorts last). A category the taxonomy does not know goes last, by name.
+ *
+ * A listed category is at least one message, so with `negative` known exactly the names still pin a held count when
+ * the held one is the only one raised (it is all of them), or when the others leave it fewer than five values (each
+ * of k names is 1 to negative − k + 1). Then none is named (advisor pick, 2026-11-27). A held category raised alone is
+ * then not named to the venue, safety included: the venue still has the safety alert, and the room it moderates.
+ * Accepted: an empty list beside negatives tells the venue they sit in categories it is not told, not which or how many.
+ */
+export function raisedCategories(
+  categories: readonly DisclosedCategory[],
+  /** The negatives as the venue can know them: "few" when it reads only "a few", so it has nothing to subtract from. */
+  negative: FewCount
+): string[] {
+  const k = categories.length
+  if (negative !== "few" && categories.some((c) => c.suppressed) && (k === 1 || negative - k + 1 < MIN_CELL)) return []
+  const order: readonly string[] = [...ESCALATING_CATEGORIES, ...ISSUE_CATEGORIES.filter((c) => !ESCALATING_CATEGORIES.includes(c))]
+  const rank = (c: string) => (order.includes(c) ? order.indexOf(c) : order.length)
+  return categories.map((c) => c.category).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
 }
 
 /** A count told only as a band of `MIN_CELL` values (D-012): what it hides is never fewer than five possibilities. */

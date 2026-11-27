@@ -140,6 +140,6 @@ describe("discloseGroup: a total and its parts (every grouped figure on the pane
 describe("a venue's copy of the snapshot", () => {
   it("is not sent the meeting figures: how people met stays the host's", () => {
     const host = { social: discloseSocial(counts()) } as unknown as LiveSnapshot
-    expect(forVenue({ ...host, sentiment: { positive: 0, neutral: 0, negative: 0 }, categories: [], alerts: [] } as LiveSnapshot)).not.toHaveProperty("social")
+    expect(forVenue({ ...host, sentiment: { positive: 0, neutral: 0, negative: 0 }, categories: [], alerts: [] } as LiveSnapshot, 0)).not.toHaveProperty("social")
   })
 })

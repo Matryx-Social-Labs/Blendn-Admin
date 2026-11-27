@@ -1,6 +1,8 @@
 jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
 jest.mock("@/lib/rate-limit-store", () => ({ hit: jest.fn(), forget: jest.fn() }))
+jest.mock("@/lib/logger", () => ({ logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }))
 import { auditLog } from "@/lib/audit-log"
+import { logger } from "@/lib/logger"
 import { objectionableText, screenUserText, textNotAllowedResponse } from "@/lib/moderation/user-text"
 
 /*
@@ -75,5 +77,19 @@ it("answers 400 VALIDATION_FAILED with reasonCode TEXT_NOT_ALLOWED and the field
     reasonCode: "TEXT_NOT_ALLOWED",
     field: "bio",
     errors: [{ field: "bio", message: "That can’t go on your profile." }],
+  })
+})
+
+describe("the log line (SCRUM-1512)", () => {
+  it("counts the matched words beside the user id and leaves the words to the audit row", () => {
+    screenUserText("u1", "profile", { bio: "you retard" })
+    expect(logger.info).toHaveBeenCalledWith("User text refused", {
+      userId: "u1",
+      surface: "profile",
+      field: "bio",
+      source: "keyword",
+      matchedCount: 1,
+    })
+    expect(JSON.stringify((logger.info as jest.Mock).mock.calls)).not.toContain("retard")
   })
 })

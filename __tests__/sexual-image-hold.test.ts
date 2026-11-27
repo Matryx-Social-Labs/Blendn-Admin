@@ -375,8 +375,10 @@ describe("the page is never lost to a pull that fails", () => {
     expect(page).toHaveBeenCalledTimes(1)
     expect(logger.error).toHaveBeenCalledWith(
       "Blurred photo moderation failed; left in place",
-      expect.objectContaining({ userId: USER, error: "deadlock detected" })
+      expect.objectContaining({ userId: USER, key: BLUR_KEY, error: "deadlock detected" })
     )
+    // Which photo, never the link to it (SCRUM-1512).
+    expect(JSON.stringify((logger.error as jest.Mock).mock.calls)).not.toContain(BLUR_URL)
   })
 
   it("a Lobby photo another pass already decided pages nobody: that pass did", async () => {

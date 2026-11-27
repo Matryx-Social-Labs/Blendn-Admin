@@ -79,8 +79,8 @@ beforeAll(async () => {
 /** What the Feedback tab shows, less the quotes (they are words, and the words go). */
 const figures = async (view: "host" | "venue") => {
   const event = await db.events.findUniqueOrThrow({ where: { id: eventId }, select: { id: true, title: true, end_time: true, timezone: true } })
-  const { counts, total, categories, topics, ratingCount, averageRating, messages } = await buildFeedbackDigest(event, view)
-  return { figures: { counts, total, categories, topics, ratingCount, averageRating }, quotes: messages.length }
+  const { counts, total, categories, raised, topics, ratingCount, averageRating, messages } = await buildFeedbackDigest(event, view)
+  return { figures: { counts, total, categories, raised, topics, ratingCount, averageRating }, quotes: messages.length }
 }
 
 describe("feedback through the 180-day purge", () => {
