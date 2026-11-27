@@ -177,7 +177,7 @@ describe("version is the deployed commit", () => {
   })
 
   it("is the first 7 characters of RAILWAY_GIT_COMMIT_SHA", async () => {
-    process.env.RAILWAY_GIT_COMMIT_SHA = "abcdef1234"
+    process.env.RAILWAY_GIT_COMMIT_SHA = "abcdef1234567890abcdef1234567890abcdef12" // Railway sets all 40
     expect((await (await health()).json()).version).toBe("abcdef1")
   })
 
@@ -188,6 +188,12 @@ describe("version is the deployed commit", () => {
     restore("RAILWAY_GIT_COMMIT_SHA", sha)
     process.env.npm_package_version = "9.8.7"
     expect((await (await health()).json()).version).toBe("9.8.7")
+  })
+
+  it("is 0.1.0 when neither is set, never missing from the body", async () => {
+    delete process.env.RAILWAY_GIT_COMMIT_SHA
+    delete process.env.npm_package_version
+    expect((await (await health()).json()).version).toBe("0.1.0")
   })
 })
 
