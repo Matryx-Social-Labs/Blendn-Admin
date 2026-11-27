@@ -13,7 +13,8 @@ import { join } from "path"
  */
 const ROOT = join(__dirname, "..")
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8")
-const REFERENCES = /\b(notStrangersTo|knownToEachOther|strangersApartBetween)\b/
+// `hiddenInRooms` and `viewersHiddenFromMany` carry `notStrangersTo` inside them.
+const REFERENCES = /\b(notStrangersTo|knownToEachOther|strangersApartBetween|hiddenInRooms|viewersHiddenFromMany)\b/
 
 export const PEOPLE_SURFACES = [
   "lib/matches.ts",
@@ -82,5 +83,43 @@ describe("no people surface reads friends without the 24 h of an ended friendshi
 
   it("lists no file outside the friend code and the crews that calls friendIdsOf", () => {
     expect(offenders()).toEqual([])
+  })
+})
+
+/**
+ * Who a viewer never sees in a room is ONE list (SCRUM-1386): blocks either way,
+ * closed pairs, friends and the people they reported, `hiddenInRooms` (and its
+ * reverse for a pushed arrival or departure, `viewersHiddenFromMany`). A room
+ * list that hides fewer people than the deck lets the viewer diff the two and
+ * single out the handle of somebody they unmatched or reported. Each of these
+ * lists people in a room to a viewer; each must ask the one helper.
+ */
+const ROOM_LISTS = [
+  "lib/matches.ts",
+  "lib/waves.ts",
+  "lib/night-people.ts",
+  "lib/room-preview.ts",
+  "app/api/mobile/events/[eventId]/checkins/route.ts",
+  "app/api/mobile/chat/groups/[chatGroupId]/participants/route.ts",
+  "lib/socket-server.ts",
+]
+const ASKS_THE_LIST = /\b(hiddenInRooms|viewersHiddenFromMany)\(/
+
+describe("every room people list hides who the deck hides, through one helper", () => {
+  it("rejects a source that builds its own list (the control)", () => {
+    expect(ASKS_THE_LIST.test("const hidden = [...(await blockCounterparties(me)), ...(await notStrangersTo(me))]")).toBe(false)
+    expect(ASKS_THE_LIST.test("const hidden = await hiddenInRooms(me)")).toBe(true)
+  })
+
+  it("has every room list call it", () => {
+    expect(ROOM_LISTS.filter((file) => !ASKS_THE_LIST.test(read(file)))).toEqual([])
+  })
+
+  it("leaves no second copy of the deck's reported-people read outside lib/room-people.ts", () => {
+    const copies = [...sources(join(ROOT, "app")), ...sources(join(ROOT, "lib"))]
+      .map((f) => ({ file: f.slice(ROOT.length + 1), src: readFileSync(f, "utf8") }))
+      .filter(({ file, src }) => file !== "lib/room-people.ts" && !file.startsWith("app/dashboard/") && /user_reports\.findMany\(\{\s*where:\s*\{\s*reporter_id/.test(src))
+      .map((r) => r.file)
+    expect(copies).toEqual([])
   })
 })
