@@ -1,0 +1,214 @@
+/**
+ * The log archive (SCRUM-1497, register D-041): an hourly job copies the web
+ * service's stdout from Railway into gzipped NDJSON in the PRIVATE bucket
+ * (kept 180 days, CERT-In) and then into Axiom (searchable 30 days).
+ *
+ * It runs as its own cron service, outside the web process, so a sink that is
+ * down can fail the job's run but never a request (last test).
+ */
+import { readFileSync, readdirSync, statSync } from "fs"
+import { join } from "path"
+import { gunzipSync } from "zlib"
+
+process.env.TIGRIS_ENDPOINT = "https://t3.storage.dev"
+process.env.TIGRIS_ACCESS_KEY = "test"
+process.env.TIGRIS_SECRET_KEY = "test"
+process.env.TIGRIS_BUCKET = "blendn-media-test"
+const PRIVATE = "blendn-media-test-private"
+
+type Sent = { name: string; input: Record<string, unknown> }
+const sent: Sent[] = []
+let existing: string[] = []
+
+jest.mock("@aws-sdk/s3-request-presigner", () => ({ getSignedUrl: jest.fn() }))
+jest.mock("@aws-sdk/client-s3", () => {
+  const cmd = (name: string) =>
+    class {
+      readonly name = name
+      constructor(public readonly input: Record<string, unknown>) {}
+    }
+  return {
+    S3Client: class {
+      async send(command: Sent) {
+        sent.push(command)
+        if (command.name === "ListObjectsV2") {
+          const prefix = command.input.Prefix as string
+          return { Contents: existing.filter((k) => k.startsWith(prefix)).map((Key) => ({ Key })), IsTruncated: false }
+        }
+        return {}
+      }
+    },
+    ...Object.fromEntries(
+      ["CopyObject", "GetObject", "HeadObject", "PutObject", "DeleteObject", "DeleteObjects", "ListObjectsV2", "CreateBucket", "HeadBucket", "PutBucketCors", "PutBucketPolicy"].map(
+        (n) => [`${n}Command`, cmd(n)]
+      )
+    ),
+  }
+})
+
+import { archiveLogs } from "../scripts/log-archive"
+
+const NOW = new Date("2026-11-27T10:07:00Z")
+const HOUR = "2026-11-27T09:00:00.000Z"
+
+type Row = { timestamp: string; message: string; severity: string; attributes: { key: string; value: string }[] }
+const row = (timestamp: string, message: string, attrs: Record<string, unknown> = {}): Row => ({
+  timestamp,
+  message,
+  severity: "info",
+  attributes: [
+    { key: "level", value: '"info"' },
+    { key: "timestamp", value: JSON.stringify(timestamp) },
+    ...Object.entries(attrs).map(([key, v]) => ({ key, value: JSON.stringify(v) })),
+  ],
+})
+
+let logs: Record<string, Row[]> = {}
+let deployments: { id: string; status: string; createdAt: string }[] = []
+let axiom: "up" | "down" = "up"
+const calls: { url: string; body: string; headers: Record<string, string>; signal: unknown }[] = []
+const PAGE = 5000
+
+beforeEach(() => {
+  sent.length = 0
+  calls.length = 0
+  existing = []
+  axiom = "up"
+  deployments = [
+    { id: "dep-new", status: "SUCCESS", createdAt: "2026-11-27T09:30:00Z" },
+    { id: "dep-old", status: "REMOVED", createdAt: "2026-11-20T00:00:00Z" },
+    { id: "dep-failed", status: "FAILED", createdAt: "2026-11-27T09:20:00Z" },
+  ]
+  logs = {
+    "dep-old": [row("2026-11-27T08:59:59.999Z", "before the hour"), row("2026-11-27T09:10:00.5Z", "old one", { userId: "u1" }), row("2026-11-27T09:31:00Z", "old draining")],
+    "dep-new": [row("2026-11-27T09:30:30.123456789Z", "new one", { eventsCount: 3 }), row("2026-11-27T10:00:00Z", "next hour")],
+    "dep-failed": [row("2026-11-27T09:21:00Z", "never served")],
+  }
+  process.env.RAILWAY_ENVIRONMENT_NAME = "staging"
+  process.env.RAILWAY_PROJECT_ID = "proj"
+  process.env.RAILWAY_ENVIRONMENT_ID = "envid"
+  process.env.LOGS_SERVICE_ID = "svc"
+  process.env.RAILWAY_LOGS_PROJECT_TOKEN = "rw-test"
+  process.env.AXIOM_TOKEN = "ax-test"
+  process.env.AXIOM_DATASET = "blendn-logs"
+  global.fetch = jest.fn(async (url: string | URL, init?: RequestInit) => {
+    const body = String(init?.body ?? "")
+    calls.push({ url: String(url), body, headers: init?.headers as Record<string, string>, signal: init?.signal })
+    if (String(url).includes("axiom")) {
+      if (axiom === "down") return new Response("unavailable", { status: 503 })
+      return Response.json({ ingested: body.split("\n").filter(Boolean).length, failed: 0 })
+    }
+    const { query, variables } = JSON.parse(body)
+    if (query.includes("deployments(")) return Response.json({ data: { deployments: { edges: deployments.map((node) => ({ node })) } } })
+    const from = Date.parse(variables.startDate)
+    const to = Date.parse(variables.endDate)
+    // Railway's endDate is inclusive, and a full page is the newest `limit` lines of the window (measured on staging).
+    const inWindow = (logs[variables.deploymentId] ?? []).filter((r) => Date.parse(r.timestamp) >= from && Date.parse(r.timestamp) <= to)
+    return Response.json({ data: { deploymentLogs: inWindow.slice(-variables.limit) } })
+  }) as unknown as typeof fetch
+})
+
+const puts = () => sent.filter((c) => c.name === "PutObject")
+const archived = (key: string) =>
+  gunzipSync(puts().find((c) => c.input.Key === key)!.input.Body as Buffer)
+    .toString()
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => JSON.parse(l))
+const axiomBodies = () => calls.filter((c) => c.url.includes("axiom"))
+
+describe("archiveLogs", () => {
+  it("writes one whole UTC hour, from every deployment that served in it, to the private bucket, then to Axiom", async () => {
+    existing = Array.from({ length: 48 }, (_, i) => new Date(Date.parse(HOUR) - i * 3_600_000).toISOString())
+      .filter((h) => h !== HOUR)
+      .map((h) => `logs/staging/${h.slice(0, 10)}/${h.slice(11, 13)}.ndjson.gz`)
+
+    const result = await archiveLogs(NOW)
+
+    expect(result).toEqual({ written: [{ key: "logs/staging/2026-11-27/09.ndjson.gz", lines: 3 }], failures: [] })
+    expect(puts()).toHaveLength(1)
+    expect(puts()[0].input).toMatchObject({ Bucket: PRIVATE, Key: "logs/staging/2026-11-27/09.ndjson.gz" })
+    const lines = archived("logs/staging/2026-11-27/09.ndjson.gz")
+    // In time order across deployments; the hour is half-open, so 08:59:59.999 and 10:00:00 are not in it.
+    expect(lines.map((l) => l.message)).toEqual(["old one", "new one", "old draining"])
+    expect(lines[0]).toEqual({
+      _time: "2026-11-27T09:10:00.5Z",
+      env: "staging",
+      level: "info",
+      message: "old one",
+      deploymentId: "dep-old",
+      attributes: JSON.stringify({ userId: "u1" }),
+    })
+    // The FAILED deployment never served, so its lines are not asked for.
+    expect(calls.some((c) => c.body.includes("dep-failed"))).toBe(false)
+    // Railway is asked with the project token, and every call carries a deadline.
+    expect(calls[0].headers["Project-Access-Token"]).toBe("rw-test")
+    expect(calls.every((c) => c.signal instanceof AbortSignal)).toBe(true)
+    // Axiom gets the same lines, after the archive.
+    const [ax] = axiomBodies()
+    expect(ax.url).toBe("https://us-east-1.aws.edge.axiom.co/v1/ingest/blendn-logs")
+    expect(ax.headers.authorization).toBe("Bearer ax-test")
+    expect(ax.body.split("\n").filter(Boolean).map((l) => JSON.parse(l))).toEqual(lines)
+  })
+
+  it("fills every missing hour of the last 48, and sends Axiom only the hours it wrote", async () => {
+    existing = ["logs/staging/2026-11-27/08.ndjson.gz"]
+
+    const result = await archiveLogs(NOW)
+
+    expect(result.failures).toEqual([])
+    expect(result.written).toHaveLength(47)
+    expect(puts().map((c) => c.input.Key)).not.toContain("logs/staging/2026-11-27/08.ndjson.gz")
+    // An empty hour is written too, so it is not fetched again on every run.
+    expect(result.written).toContainEqual({ key: "logs/staging/2026-11-25/10.ndjson.gz", lines: 0 })
+    // Only hours with lines reach Axiom.
+    expect(axiomBodies()).toHaveLength(1)
+  })
+
+  it("halves a window whose page came back full, so nothing is cut off", async () => {
+    existing = []
+    logs["dep-new"] = Array.from({ length: PAGE + 10 }, (_, i) => row(new Date(Date.parse("2026-11-27T09:30:00Z") + i * 100).toISOString(), `line ${i}`))
+    deployments = [deployments[0]]
+
+    const result = await archiveLogs(NOW, HOUR)
+
+    expect(result.written).toEqual([{ key: "logs/staging/2026-11-27/09.ndjson.gz", lines: PAGE + 10 }])
+    const lines = archived("logs/staging/2026-11-27/09.ndjson.gz")
+    expect(new Set(lines.map((l) => l.message)).size).toBe(PAGE + 10)
+  })
+
+  it("keeps the archive when Axiom is down, and fails the run instead of saying nothing", async () => {
+    axiom = "down"
+
+    const result = await archiveLogs(NOW, HOUR)
+
+    expect(puts().map((c) => c.input.Key)).toEqual(["logs/staging/2026-11-27/09.ndjson.gz"])
+    expect(result.failures).toEqual([expect.stringMatching(/^2026-11-27T09.*Axiom 503/)])
+  })
+
+  it("fails the hour, and writes nothing for it, when Railway refuses", async () => {
+    ;(global.fetch as jest.Mock).mockImplementation(async () => Response.json({ errors: [{ message: "Not Authorized" }] }))
+
+    const result = await archiveLogs(NOW, HOUR)
+
+    expect(puts()).toHaveLength(0)
+    expect(result.failures).toEqual([expect.stringMatching(/Not Authorized/)])
+  })
+
+  it("never writes to the public bucket", async () => {
+    await archiveLogs(NOW)
+    expect(puts().length).toBeGreaterThan(0)
+    expect(puts().every((c) => c.input.Bucket === PRIVATE)).toBe(true)
+  })
+
+  it("is not imported by the web service, so a sink that is down cannot touch a request", () => {
+    const root = join(__dirname, "..")
+    const files = (dir: string): string[] =>
+      readdirSync(dir).flatMap((f) => {
+        const p = join(dir, f)
+        return statSync(p).isDirectory() ? files(p) : /\.(ts|tsx)$/.test(f) ? [p] : []
+      })
+    const web = [...files(join(root, "app")), ...files(join(root, "lib")), join(root, "server.ts"), join(root, "middleware.ts")]
+    expect(web.filter((f) => readFileSync(f, "utf8").includes("log-archive"))).toEqual([])
+  })
+})
