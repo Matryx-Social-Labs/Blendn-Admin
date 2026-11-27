@@ -10,6 +10,7 @@ import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { httpsUrl } from "@/lib/https-url"
 import { actorFor } from "@/lib/org-membership"
+import { homeOrgIdFor } from "@/lib/event-ownership"
 import { violatedConstraint } from "@/lib/prisma-errors"
 import { eventPermissionSelect, eventPermissions } from "@/lib/rbac"
 import { refuseMixedScript } from "@/lib/name-script"
@@ -792,11 +793,12 @@ export async function saveMyBrand(input: unknown) {
 
   const actor = await actorFor(session.user)
   /*
-   * Sorted, not `[0]`. `actorFor` makes no ordering promise, so a multi-org
-   * user's brand could attach to a different organisation between calls — and
-   * nothing on the screen would say which one it had chosen.
+   * The home organisation, the one that makes them a sponsor (SCRUM-1247).
+   * Since a brand makes its organisation a sponsor's for everyone in it, the
+   * lowest of their org ids was a way for a sponsor who is also staff of an
+   * events org to turn that org into a brand's, taking its event creation.
    */
-  const orgId = [...actor.orgIds].sort()[0]
+  const orgId = await homeOrgIdFor(session.user)
   if (!orgId) throw new Refusal("You are not a member of an organisation")
 
   const { name, website, logo_url } = parsed.data

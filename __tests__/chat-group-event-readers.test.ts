@@ -38,6 +38,7 @@ const NAMES = new Set(["event", "event_id"])
 
 /** `file#function` → why a read of a room's event there is right for a room of any kind. */
 const READERS: Record<string, string> = {
+  "lib/public-profile.ts#latestRoom": "the event room joined last (kind: 'event' in its where), for the preview's band (D-030); no event reads as no room, so no band",
   "lib/audit-log.ts#resolve": "a flagged message's room → its event's host organisation, for whose log the row is; a room with no event belongs to no organisation's log (step 18, M3)",
   "lib/met-in.ts#lobbyMetInFor": "a Lobby post's own event (typed as metInFor's nullable one), never a room's: the night's name for \"Met in the Lobby\"; none, gone or hidden reads as no room (Flow 5 C5)",
   "lib/room-kind.ts#roomOwnerDenial": "the door: switches on kind, and an event room without its event is refused",

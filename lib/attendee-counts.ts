@@ -262,6 +262,25 @@ export async function distinctEventsAttended(
   return Number(row?.events ?? 0)
 }
 
+/**
+ * Which of these people "came back": 2+ distinct real events, by `distinctEventsAttended`'s predicate, in one grouped
+ * read. A room row's new / regular chip (D-030) — two values, so nobody can count anybody's nights from it.
+ */
+export async function regularsAmong(userIds: string[]): Promise<Set<string>> {
+  if (userIds.length === 0) return new Set()
+  const rows = await db.$queryRaw<{ user_id: string }[]>`
+    SELECT user_id
+    FROM event_check_ins
+    WHERE user_id = ANY(${userIds}::text[])
+      AND status::text IN (${Prisma.join(ATTENDED)})
+      AND kind = 'attendee'
+      ${LIVE_REAL_EVENT}
+    GROUP BY user_id
+    HAVING COUNT(DISTINCT event_id) >= 2
+  `
+  return new Set(rows.map((r) => r.user_id))
+}
+
 
 /**
  * *Which* events this person has attended, most recent first.
