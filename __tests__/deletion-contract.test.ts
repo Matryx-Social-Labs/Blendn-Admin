@@ -214,7 +214,7 @@ describe("the deletion contract", () => {
      * A `SCRUBBED` entry with no `updateMany` is a decision that was recorded
      * and never implemented, which reads exactly like one that was.
      */
-    const route = readFileSync(join(ROOT, "app/api/mobile/account/route.ts"), "utf8")
+    const route = readFileSync(join(ROOT, "lib/account-erasure.ts"), "utf8")
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/\/\/.*$/gm, "")
 

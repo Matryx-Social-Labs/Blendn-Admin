@@ -2,9 +2,27 @@
  * Accounts known to be under 18 (SCRUM-1169, D-026), on a real database:
  * `--apply` stamps each one once, the 14-day list reads the stamp, and a
  * staff correction sets the birth date, clears the stamp and leaves an audit
- * row. Ids only: the script prints nothing else.
+ * row. `--apply` then erases each account due through `eraseAccount`, the
+ * erasure DELETE /api/mobile/account runs. Ids only: the script prints nothing else.
  */
-import { correctBirthDate, DELETE_AFTER_DAYS, dueForDeletion, knownMinorsUnstamped, stampKnownMinors } from "@/scripts/under-18-accounts"
+// Storage answers here as it does when configured; one test makes it fail.
+jest.mock("@/lib/tigris", () => ({
+  ...jest.requireActual("@/lib/tigris"),
+  deleteFile: jest.fn(async () => undefined),
+  deletePrefix: jest.fn(async () => 0),
+  withdrawFromPublic: jest.fn(async () => undefined),
+}))
+
+import type { EraseAccountOptions } from "@/lib/account-erasure"
+import { deletePrefix } from "@/lib/tigris"
+import {
+  correctBirthDate,
+  DELETE_AFTER_DAYS,
+  deleteDue,
+  dueForDeletion,
+  knownMinorsUnstamped,
+  stampKnownMinors,
+} from "@/scripts/under-18-accounts"
 import { cleanup, closeDb, db, makeUser } from "./helpers"
 
 const DAY_MS = 86_400_000
@@ -18,6 +36,7 @@ beforeAll(async () => {
   await db.user.update({ where: { id: ADMIN_ID }, data: { email: ADMIN } })
 })
 afterAll(async () => {
+  await db.deleted_account_records.deleteMany({ where: { user_id: { in: users } } })
   await db.audit_logs.deleteMany({ where: { OR: [{ resource_id: { in: users } }, { user_id: { in: users } }] } })
   await db.profiles.deleteMany({ where: { id: { in: users } } })
   await cleanup(users, [])
@@ -137,5 +156,126 @@ describe("a staff correction", () => {
     await expect(
       correctBirthDate(db, { userId: "00000000-0000-4000-8000-000000001169", dateOfBirth: "1995-06-15", by: ADMIN }, new Date())
     ).rejects.toThrow(/No live account/)
+  })
+})
+
+describe("deleting the accounts due", () => {
+  // A fake `erase` erases nothing: what a test left due must not be due in the next one.
+  afterEach(async () => {
+    await db.user.updateMany({ where: { id: { in: users.filter((id) => id !== ADMIN_ID) }, deletedAt: null }, data: { deletedAt: new Date() } })
+  })
+
+  it(`erases an account stamped ${DELETE_AFTER_DAYS} or more days ago, as the account deletion does, and not one stamped yesterday`, async () => {
+    const now = new Date()
+    const due = await person("u18-erase-due", { age: 16, under_18_since: new Date(now.getTime() - 15 * DAY_MS) })
+    const recent = await person("u18-erase-recent", { age: 16, under_18_since: new Date(now.getTime() - DAY_MS) })
+
+    const { erased } = await deleteDue(db, now)
+    expect(erased).toContain(due)
+    expect(erased).not.toContain(recent)
+
+    const deletedAt = async (id: string) => (await db.user.findUniqueOrThrow({ where: { id }, select: { deletedAt: true } })).deletedAt
+    expect(await deletedAt(due)).not.toBeNull()
+    expect(await deletedAt(recent)).toBeNull()
+    // The IT Rules r.3(1)(h) record the account deletion writes, and no age fact left on the erased row.
+    expect(await db.deleted_account_records.count({ where: { user_id: due } })).toBe(1)
+    expect(await db.deleted_account_records.count({ where: { user_id: recent } })).toBe(0)
+    expect(await stampOf(due)).toBeNull()
+    expect(await stampOf(recent)).not.toBeNull()
+    expect(await dueForDeletion(db, now)).not.toContain(due)
+  })
+
+  it("an Apple-linked account's revoke is recorded by the time the run returns (no code in a script: not revoked)", async () => {
+    const now = new Date()
+    const id = await person("u18-apple", { age: 16, under_18_since: new Date(now.getTime() - 15 * DAY_MS) })
+    await db.user_oauth_accounts.create({ data: { user_id: id, provider: "apple", provider_id: `apple-${id}` } })
+
+    expect((await deleteDue(db, now)).erased).toContain(id)
+    const audit = await db.audit_logs.findFirst({ where: { resource_id: id, action: "account.apple_revoke" } })
+    expect(audit?.details).toMatchObject({ outcome: "skipped", reason: "no_code" })
+  })
+
+  it("erases oldest stamp first, skips a deleted account, awaits each one's deferred work, and stops at the first failure with the count", async () => {
+    const now = new Date()
+    const older = await person("u18-order-old", { age: 16, under_18_since: new Date(now.getTime() - 30 * DAY_MS) })
+    const newer = await person("u18-order-new", { age: 16, under_18_since: new Date(now.getTime() - 20 * DAY_MS) })
+    const gone = await person("u18-order-gone", { age: 16, under_18_since: new Date(now.getTime() - 40 * DAY_MS) })
+    await db.user.update({ where: { id: gone }, data: { deletedAt: now } })
+    const calls: string[] = []
+    let deferredDone = false
+    let deferredDoneWhenNewerStarted: boolean | null = null
+    const erase = async (id: string, { defer }: EraseAccountOptions) => {
+      calls.push(id)
+      if (id === newer) {
+        deferredDoneWhenNewerStarted = deferredDone
+        throw new Error("database down")
+      }
+      if (id === older) {
+        defer(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10))
+          deferredDone = true
+        })
+      }
+      return []
+    }
+
+    const failure = deleteDue(db, now, erase)
+    await expect(failure).rejects.toThrow("database down")
+    expect(calls).not.toContain(gone)
+    expect(calls.indexOf(older)).toBeLessThan(calls.indexOf(newer))
+    expect(deferredDoneWhenNewerStarted).toBe(true)
+    // Nothing after the failure ran, and the message says how far the run got.
+    expect(calls[calls.length - 1]).toBe(newer)
+    await expect(failure).rejects.toThrow(`Erasing ${newer} failed (erased before it: ${calls.slice(0, -1).join(", ")}`)
+  })
+
+  it("skips an account whose stamp a staff correction cleared after the run listed it", async () => {
+    const now = new Date()
+    const first = await person("u18-mid-first", { age: 16, under_18_since: new Date(now.getTime() - 60 * DAY_MS) })
+    const corrected = await person("u18-mid-corrected", { age: 16, under_18_since: new Date(now.getTime() - 59 * DAY_MS) })
+    const calls: string[] = []
+    const erase = async (id: string) => {
+      calls.push(id)
+      // While the first is erased, staff correct the second's birth date.
+      if (id === first) await correctBirthDate(db, { userId: corrected, dateOfBirth: "1995-06-15", by: ADMIN }, new Date())
+      return []
+    }
+
+    const { erased, skipped } = await deleteDue(db, now, erase)
+    expect(calls).toContain(first)
+    expect(calls).not.toContain(corrected)
+    expect(erased).not.toContain(corrected)
+    expect(skipped).toEqual([corrected])
+  })
+
+  it("stops when a part of the person's data was not erased, naming the id and the part, and that the account row is erased", async () => {
+    const now = new Date()
+    const id = await person("u18-storage-fails", { age: 16, under_18_since: new Date(now.getTime() - 70 * DAY_MS) })
+    jest.mocked(deletePrefix).mockRejectedValueOnce(new Error("storage down"))
+
+    const failure = deleteDue(db, now)
+    await expect(failure).rejects.toThrow(`Erasing ${id} failed`)
+    await expect(failure).rejects.toThrow("the account row is erased")
+    await expect(failure).rejects.toThrow("not erased: storage profile/")
+    expect((await db.user.findUniqueOrThrow({ where: { id }, select: { deletedAt: true } })).deletedAt).not.toBeNull()
+  })
+
+  it("stops when an erasure's deferred work fails, naming that id", async () => {
+    const now = new Date()
+    const id = await person("u18-defer-fails", { age: 16, under_18_since: new Date(now.getTime() - 50 * DAY_MS) })
+    const calls: string[] = []
+    const erase = async (each: string, { defer }: EraseAccountOptions) => {
+      calls.push(each)
+      defer(async () => {
+        throw new Error("revoke failed")
+      })
+      return []
+    }
+
+    // This fake erases nothing, so the row is not erased and a run after retries it.
+    await expect(deleteDue(db, now, erase)).rejects.toThrow(
+      `Erasing ${id} failed (erased before it: none; the account row is not erased, a run after retries it): revoke failed`
+    )
+    expect(calls).toEqual([id])
   })
 })

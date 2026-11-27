@@ -1626,6 +1626,18 @@
       "observed": "2 failing (page renamed): the path exists check and the POST check. 1 failing (path changed): expected \"/verify-domain\", got \"/verify\".",
       "date": "2026-09-21"
     },
+    "under-18-accounts.itest.ts": {
+      "guards": "SCRUM-1477, D-026: scripts/under-18-accounts.ts --apply erases each account stamped 14 or more days ago through eraseAccount (lib/account-erasure.ts, the erasure DELETE /api/mobile/account runs), and none stamped since: deletedAt set, the deleted-account record written, under_18_since null on the erased row. One at a time, each erasure's deferred work awaited before the next, stopping at the first failure with the id named.",
+      "mutation": "M1: dueForDeletion's `under_18_since: { lte: ... }` made `gte` (the 14-day comparison flipped). M2: revokeAppleAfterErasure's audit row written fire-and-forget (`auditLog`) instead of awaited. M3: deleteDue's per-id re-read before each erasure removed. M4: eraseAccount's not-erased parts ignored by deleteDue (RED before the change: the storage failure test and the message tests). RED before the change: deleteDue not exported.",
+      "observed": "M1: 3 of 9 failing (the deletion list, and both deleteDue tests). M2: 1 of 11 failing (no account.apple_revoke row when deleteDue returns). M3: 1 of 12 failing (the account a staff correction cleared mid-run is erased). M4: 6 of 13 failing before the change (storage failure not reported, the skipped list and the messages); 13 of 13 after. RED: 2 of 9 failing (deleteDue is not a function). Restored; 9 of 9.",
+      "date": "2026-11-27"
+    },
+    "rsc-boundary.test.ts": {
+      "guards": "SCRUM-1477: lib/revenuecat-api.ts and lib/account-erasure.ts carry no server-only (a script process loads them), so no \"use client\" module under app/ or components/ may reach either through its imports, at any depth; type-only imports are erased and do not count. With server-boot-imports.test.ts, which walks scripts/under-18-accounts.ts's graph for server-only as it walks server.ts's.",
+      "mutation": "C1: components/zz-nc-direct.tsx (\"use client\") importing eraseAccount from @/lib/account-erasure. C2: components/zz-nc-hop.tsx (\"use client\") importing a plain lib/zz-nc-hop.ts that imports @/lib/revenuecat-api. C3: a \"use client\" file with only `import type { EraseAccountOptions }`. C4: `import \"server-only\"` left in lib/revenuecat-api.ts. C5 (the file's older rule, until now grandfathered): components/zz-nc-server.tsx, no directive, importing DataTable. C6: components/zz-nc-dyn.tsx (\"use client\") with `import(\"@/lib/account-erasure\")`. C7: lib/zz-nc-libclient.ts (\"use client\", under lib/) importing eraseAccount.",
+      "observed": "C1: 2 of 7 failing (both modules, naming the file). C2: 1 of 7 failing (revenuecat-api reached from the hop's client file). C3: 7 of 7 pass (type-only). C4: server-boot-imports.test.ts 1 of 4 failing (lib/revenuecat-api.ts in the script's graph). C5: 1 of 7 failing (components/zz-nc-server.tsx named). C6: 2 of 7 failing. C7: 2 of 7 failing. Temporary files removed by exact path.",
+      "date": "2026-11-27"
+    },
     "editor-save-after-session-ends.test.ts": {
       "guards": "components/event-editor.tsx answers a 401 on save with a sentence about the session and keeps the form, before the generic \"Failed to save event\" throw (SCRUM-163)",
       "mutation": "Delete the `if (response.status === 401) { ... return }` block in handleSubmit (or neuter it with `&& false`).",
@@ -3212,7 +3224,6 @@
     "reveal-state.test.ts",
     "room-write-access.test.ts",
     "roster-age.test.ts",
-    "rsc-boundary.test.ts",
     "server-action-authz.test.ts",
     "server-import-boundary.test.ts",
     "socket-handler-registration.test.ts",

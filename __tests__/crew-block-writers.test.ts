@@ -65,12 +65,12 @@ describe("crew invites do not outlive a block or an unfriend", () => {
 
   it("has every route that closes a conversation withdraw them and take the pair out of their Blends (C6)", () => {
     // A closed conversation keeps two people apart like a block. The erasure
-    // closes every conversation of a person who leaves every crew anyway.
+    // (lib/account-erasure.ts, outside this walk) closes every conversation of
+    // a person who leaves every crew anyway.
     // An unmatch and a leave close through `leaveConversationIn` (lib/leave-conversation.ts);
     // the block route closes inline.
     const closers = sources(join(ROOT, "app"))
       .filter((file) => /closeConversation\(|closed_reason:|leaveConversationIn\(|blockPairIn\(/.test(readFileSync(file, "utf8")))
-      .filter((file) => !file.endsWith(join("account", "route.ts")))
     expect(closers.map((f) => relative(ROOT, f)).sort()).toEqual([
       "app/api/mobile/conversations/[conversationId]/leave/route.ts",
       "app/api/mobile/conversations/[conversationId]/route.ts",

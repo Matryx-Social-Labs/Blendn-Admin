@@ -51,3 +51,20 @@ describe("the custom server boots without a server-only module", () => {
     expect(serverOnly).toEqual([])
   })
 })
+
+/*
+ * The under-18 script erases through `eraseAccount` under plain `tsx`, which
+ * cannot load "server-only" either (SCRUM-1477): the same walk, from the script.
+ */
+describe("the under-18 script loads its erasure outside Next", () => {
+  const { files, serverOnly } = closure(join(ROOT, "scripts/under-18-accounts.ts"))
+
+  it("walks the erasure's import graph", () => {
+    const rel = [...files].map((f) => f.slice(ROOT.length + 1))
+    expect(rel).toEqual(expect.arrayContaining(["lib/account-erasure.ts", "lib/revenuecat-api.ts"]))
+  })
+
+  it("imports \"server-only\" nowhere in that graph", () => {
+    expect(serverOnly).toEqual([])
+  })
+})

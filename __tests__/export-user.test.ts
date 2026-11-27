@@ -10,12 +10,15 @@ import { EXPORT_CHECKLIST, runRefusal } from "@/scripts/export-user"
  * or in raw SQL, must be on the export's checklist: exported, or "not
  * exported" with the reason.
  */
-const route = readFileSync(join(__dirname, "..", "app/api/mobile/account/route.ts"), "utf8")
+const route = ["app/api/mobile/account/route.ts", "lib/account-erasure.ts"]
+  .map((file) => readFileSync(join(__dirname, "..", file), "utf8"))
+  .join("\n")
 
 /*
- * The erasure also runs through helpers. Every module the route imports is
- * listed with the tables it erases or rewrites for this person, so a new
- * import fails here until somebody has looked at it.
+ * The erasure also runs through helpers. Every module the route and
+ * lib/account-erasure.ts import is listed with the tables it erases or
+ * rewrites for this person, so a new import fails here until somebody has
+ * looked at it.
  */
 const ROUTE_HELPERS: Record<string, string[]> = {
   "@/lib/ticket-holds": ["ticket_orders", "ticket_order_lines"],
@@ -25,6 +28,7 @@ const ROUTE_HELPERS: Record<string, string[]> = {
   "@/lib/checkout": ["event_check_ins", "presence_sessions", "chat_group_members"],
   "@/lib/audit-log": ["audit_logs"],
   // Storage, other people's rows (the waitlist moves), or reads only:
+  "@/lib/account-erasure": [],
   "@/lib/retained-media": [],
   "@/lib/waitlist": [],
   "@/lib/logger": [],

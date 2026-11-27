@@ -1,5 +1,5 @@
-import "server-only"
-
+// No "server-only": scripts/under-18-accounts.ts loads this module through lib/account-erasure.ts
+// under plain tsx. No client module imports it (__tests__/rsc-boundary.test.ts).
 import { z } from "zod"
 
 /**

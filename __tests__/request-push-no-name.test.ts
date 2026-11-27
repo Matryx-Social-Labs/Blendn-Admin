@@ -15,7 +15,7 @@ import { join } from "path"
 const read = (...p: string[]) => readFileSync(join(__dirname, "..", ...p), "utf8")
 const REQUEST = () => read("app", "api", "mobile", "message-requests", "route.ts")
 const RESPOND = () => read("app", "api", "mobile", "message-requests", "[requestId]", "respond", "route.ts")
-const ACCOUNT = () => read("app", "api", "mobile", "account", "route.ts")
+const ACCOUNT = () => read("lib", "account-erasure.ts")
 
 /** Every `sendPushNotification({ ... })` call's argument, as source. */
 const pushCalls = (src: string): string[] =>

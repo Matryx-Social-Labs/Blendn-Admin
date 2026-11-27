@@ -39,7 +39,7 @@ describe("a face does not survive account deletion, even at 40 pixels", () => {
   it("scrubs blur_photo with the photos it came from", () => {
     // A surviving blur is still a surviving photograph of a person who asked to
     // be gone.
-    const account = read("app", "api", "mobile", "account", "route.ts")
+    const account = read("lib", "account-erasure.ts")
     const block = account.slice(account.indexOf("photos: []"))
     expect(block.slice(0, block.indexOf("goals:"))).toContain("blur_photo: null")
   })

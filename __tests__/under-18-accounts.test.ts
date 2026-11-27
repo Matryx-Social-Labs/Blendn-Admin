@@ -4,6 +4,9 @@
  * twice: by `railway run` and by `--environment`. Refused before a query.
  * The writes themselves are `integration/under-18-accounts.itest.ts`.
  */
+// The erasure (sockets, auth, storage) is not this file's subject; the itest runs it for real.
+jest.mock("@/lib/account-erasure", () => ({ eraseAccount: jest.fn() }))
+
 import { environmentRefusal, parseArgs } from "../scripts/under-18-accounts"
 
 const LOCAL = { DATABASE_URL: "postgresql://postgres:postgres@localhost:55433/blendn_test" }

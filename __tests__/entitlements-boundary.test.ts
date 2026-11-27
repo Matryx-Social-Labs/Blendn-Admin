@@ -159,7 +159,7 @@ describe("entitlements are read and written in one place", () => {
 
   it("Blendn+'s own grants come only from lib/plus.ts, and a person's rows go only with their account", () => {
     expect(naming("grantPlusOnce")).toEqual(["lib/plus.ts"])
-    expect(naming("eraseUserEntitlements")).toEqual(["app/api/mobile/account/route.ts"])
+    expect(naming("eraseUserEntitlements")).toEqual(["lib/account-erasure.ts"])
   })
 
   it("grants, their ending and an admin's revocation come only from the admin's actions; a transfer's end only from the transfer", () => {

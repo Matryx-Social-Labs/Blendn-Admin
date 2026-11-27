@@ -16,7 +16,7 @@ import { evictUserSockets } from "./socket-server"
  * Suspension and deletion are not here: they end the whole account, not the
  * sessions from before a moment, and each writes all of this and more itself
  * (lib/suspension.ts, pinned by suspension-blast-radius.test.ts; the erasure
- * in app/api/mobile/account/route.ts, by deletion-evicts-sockets.itest.ts).
+ * in lib/account-erasure.ts, by deletion-evicts-sockets.itest.ts).
  */
 
 /**
