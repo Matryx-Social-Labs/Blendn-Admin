@@ -91,9 +91,11 @@ describe("the feedback digest, as a venue reads another host's night (step 15)",
     expect(venue).toMatchObject({ view: "venue", total: { atLeast: 2 }, counts: { positive: "few", neutral: 0, negative: "few" } })
     expect(venue.categories.every((c) => c.count === null && c.suppressed)).toBe(true)
     expect(venue.messages).toEqual([])
-    // The organiser reads the same night's counts exactly. No rows: three people cannot be quoted (SCRUM-890).
+    // The organiser reads positive and neutral exactly. The negatives' one category is held with nothing shown beside it,
+    // so the negatives are a band of five and the total with them (SCRUM-1441, D-012). No rows: three people cannot be
+    // quoted (SCRUM-890).
     const host = await digest(eventId, "host")
-    expect(host).toMatchObject({ view: "host", total: 3, counts: { positive: 1, neutral: 0, negative: 2 } })
+    expect(host).toMatchObject({ view: "host", total: { min: 2, max: 6 }, counts: { positive: 1, neutral: 0, negative: { min: 1, max: 5 } } })
     expect(host.messages).toEqual([])
   })
 

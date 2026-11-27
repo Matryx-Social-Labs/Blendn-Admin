@@ -1,5 +1,5 @@
 import { db } from "@/lib/db"
-import { liveCountBucket, liveCountLabel } from "@/lib/disclosure"
+import { liveCountBucket, liveCountLabel, midpoint } from "@/lib/disclosure"
 import { claimedWindow, hostsEvent } from "@/lib/event-visibility"
 import { buildLiveSnapshot, type Held } from "@/lib/live-snapshot"
 import { redeemedByNight } from "@/lib/offers/venue"
@@ -97,7 +97,7 @@ export async function venueTonight(
     label: room.kind === "venue_day" ? "venue day" : (room.organizer_org?.display_name ?? room.organizer?.name ?? "another host"),
     inRoom: liveCountLabel(liveCountBucket(snapshot.guestsInside)),
     arriving: liveCountLabel(liveCountBucket(snapshot.checkInRate10m)),
-    mood: venueMood(snapshot.sentiment)?.word ?? "quiet",
+    mood: venueMood({ ...snapshot.sentiment, negative: midpoint(snapshot.sentiment.negative) })?.word ?? "quiet",
     met: !own ? "hosts" : !social ? null : social.met.held ? "held" : metRange(social.met.connected, social.attendees),
     crews: !own ? "hosts" : social?.crews ? crewsCell(social.crews.here) : null,
     offers: redeemed === null ? null : offersBand(redeemed),
