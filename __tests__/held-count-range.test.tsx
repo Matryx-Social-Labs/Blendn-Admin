@@ -1,4 +1,7 @@
-jest.mock("@/lib/db", () => ({ db: {} }))
+// A db the frozen-tally case fills in; nothing else here reads it.
+const mockDb: Record<string, Record<string, jest.Mock>> = {}
+jest.mock("@/lib/db", () => ({ db: mockDb }))
+jest.mock("@/lib/rating-batches", () => ({ publishedRatingGroups: async () => [] }))
 
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
@@ -6,7 +9,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { NightMoodPanel } from "@/components/dashboard/event-insights-panels"
 import { countLabel, splitShares } from "@/lib/dashboard-format"
 import { discloseCategories, discloseNegatives, type CountRange, type DisclosedCategory } from "@/lib/disclosure"
-import { moodSplit, tallyFeedback, type TallyRow } from "@/lib/feedback-digest"
+import { buildFeedbackDigest, moodSplit, tallyFeedback, type TallyRow } from "@/lib/feedback-digest"
 import { deriveAlerts, type LiveFigures } from "@/lib/live-metrics"
 
 /*
@@ -120,6 +123,38 @@ describe("the night in the ticket (negative 27, crowding 7 shown, entry_queue he
     expect(moodAlert({ positive: 25, neutral: 9, negative: view.negative })).toEqual(
       expect.objectContaining({ body: "23–27 of 57–61 classified messages in the last 30 minutes are negative." })
     )
+  })
+})
+
+describe("after the 180-day purge (a frozen tally)", () => {
+  /*
+   * The purge keeps every feedback row and nulls its message (`lib/lobby-retention.ts`), so the negatives per category
+   * still come from the rows; who raised them comes from the frozen tally. The band is the one the live rows gave.
+   */
+  const digestOf = async (rowsRead: object[], frozen: object | null) => {
+    Object.assign(mockDb, {
+      event_ratings: { count: jest.fn().mockResolvedValue(0) },
+      event_feedback: { findMany: jest.fn().mockResolvedValue(rowsRead) },
+      chat_group_members: { count: jest.fn().mockResolvedValue(ROOM) },
+      event_feedback_tallies: { findUnique: jest.fn().mockResolvedValue(frozen) },
+    })
+    const d = await buildFeedbackDigest({ id: "evt", title: "night", end_time: new Date("2026-05-01T22:00:00Z"), timezone: "UTC" }, "host", null)
+    return { counts: d.counts, total: d.total, categories: d.categories }
+  }
+
+  it("gives the same band as the live rows did", async () => {
+    const live = ticketNight.map((r) => ({ sentiment: r.sentiment, category: r.category, topic: r.topic, message: { user_id: r.userId } }))
+    const t = tallyFeedback(ticketNight)
+    const frozen = {
+      population: ROOM,
+      contributors: Object.fromEntries(t.contributors),
+      topics: Object.fromEntries(t.topics),
+      top_messages: Object.fromEntries(t.topMessages),
+    }
+    const before = await digestOf(live, null)
+    const after = await digestOf(live.map((r) => ({ ...r, message: null })), frozen)
+    expect(before.counts.negative).toEqual({ min: 23, max: 27 })
+    expect(after).toEqual(before)
   })
 })
 
