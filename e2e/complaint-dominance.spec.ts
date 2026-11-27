@@ -1,5 +1,5 @@
 import { test, expect, chromium, type Browser, type Page } from "@playwright/test"
-import { PrismaClient } from "@prisma/client"
+import { PrismaClient, type user_role } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { encode } from "next-auth/jwt"
 import { randomUUID } from "node:crypto"
@@ -84,7 +84,7 @@ async function night(title: string) {
   return { event, room, members }
 }
 
-async function sessionFor(baseURL: string, as: { sub: string; role: string } = { sub: owner, role: "organizer" }) {
+async function sessionFor(baseURL: string, as: { sub: string; role: user_role } = { sub: owner, role: "organizer" }) {
   const { hostname, protocol } = new URL(baseURL)
   const token = await encode({ token: as, secret: process.env.NEXTAUTH_SECRET!, maxAge: 3600 })
   return {
