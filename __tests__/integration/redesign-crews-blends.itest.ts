@@ -193,8 +193,12 @@ describe("reporting a person in a crew’s or Blend’s room by handle", () => {
     // A crew's room: a crewmate by the crew's handle.
     const crew = (await api.detail(a1, w.A.crewId)).body.data
     const mate = crew.members.find((m: { userId: string }) => m.userId !== a1.id)
+    const others = await db.chat_group_members.findMany({ where: { chat_group_id: crew.chatGroupId, user_id: { not: a1.id } }, select: { user_id: true } })
+    await db.chat_messages.createMany({ data: others.map((m) => ({ chat_group_id: crew.chatGroupId, user_id: m.user_id, content: "crew line" })) })
     expect((await report(a1, crew.chatGroupId, mate.userId)).status).toBe(201)
     expect(await db.user_reports.count({ where: { reporter_id: a1.id } })).toBe(1)
+    // Their words in that room, kept for the review (SCRUM-1176).
+    expect((await db.user_reports.findFirstOrThrow({ where: { reporter_id: a1.id } })).excerpt).toBe("crew line")
 
     // Not a member of the Blend's room: the one 404, and nothing written.
     expect((await report(a3, w.roomId, handleOfA1[0])).status).toBe(404)
