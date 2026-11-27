@@ -1,0 +1,12 @@
+-- The read behind sign-up's "already registered" and the Google/Apple suspended refusal (SCRUM-1172,
+-- lib/suspended-identity.ts): identity_email("email") = identity_email($1), an index scan rather than a scan of "User".
+-- An expression index, so it lives in migration SQL and not in schema.prisma (CLAUDE.md, db push).
+--
+-- CONCURRENTLY, alone in its file and not wrapped: it cannot run inside a transaction, and a plain CREATE INDEX would
+-- hold every sign-up and profile write for the length of a scan of the whole table (__tests__/migration-tx.test.ts).
+-- If it fails, Prisma records the migration as failed and every later deploy stops (P3009) until it is resolved, and
+-- the failed build can leave an INVALID "User_identity_email_idx" that IF NOT EXISTS would skip on a retry. Recovery is
+-- an ops step, not a new migration (no later migration runs while this one is failed): `DROP INDEX CONCURRENTLY IF
+-- EXISTS "User_identity_email_idx";`, then `prisma migrate resolve --rolled-back` for this folder, then redeploy.
+-- Afterwards `SELECT indisvalid FROM pg_index WHERE indexrelid = '"User_identity_email_idx"'::regclass` reads true.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "User_identity_email_idx" ON "User" (identity_email("email"));

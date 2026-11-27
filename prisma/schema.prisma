@@ -44,6 +44,8 @@ enum user_role {
 model User {
   id            String    @id @default(cuid())
   name          String?
+  /// Also indexed as `identity_email(email)` ("User_identity_email_idx", SCRUM-1172): one key per inbox, read by
+  /// lib/suspended-identity.ts. Migration SQL only — this file cannot express an expression index.
   email         String    @unique
   emailVerified DateTime?
   password      String? // hashed password for credentials
@@ -273,6 +275,13 @@ model profiles {
   /// here, and storing one invites timezone drift across a birthday, which is
   /// exactly the boundary the gate turns on.
   date_of_birth DateTime? @db.Date
+  /// Since when this account is known to be under 18 (SCRUM-1169, D-026).
+  ///
+  /// Set by `scripts/under-18-accounts.ts --apply` on a known age under 18.
+  /// A stamped account takes part nowhere (`participationDenial` in
+  /// `lib/age.ts`) and is listed for deletion 14 days on. Staff clear it
+  /// with `--correct` when the birth date was entered wrong.
+  under_18_since DateTime? @db.Timestamptz(6)
   location      String?
   bio           String?
   occupation    String?
@@ -547,6 +556,10 @@ model events {
   /// anywhere (the geofence is skipped, logged and audited). Does nothing while
   /// that list is empty. Set by `npm run seed:review`. See lib/review-accounts.ts.
   review_demo           Boolean              @default(false)
+  /// When the host's door code was last paused (gate 13, lib/entry-code.ts): by the host, or by the
+  /// system on a wave of wrong codes. In force only from the current occurrence's doors and for 10
+  /// minutes; a resume sets it back to null.
+  door_code_paused_at   DateTime?            @db.Timestamptz(6)
   /// How the door works, as the organiser describes it.
   ///
   /// **Informational, not enforced by us.** The same reasoning as `min_age`:
@@ -909,6 +922,8 @@ model event_check_ins {
   /// Occupancy counts both (fire safety counts bodies); attendance, turn-up and
   /// new-vs-returning count guests only.
   kind           check_in_kind   @default(attendee)
+  /// How the person got in: their GPS, the host's door code (gate 13), or the App Review bypass.
+  method         check_in_method @default(gps)
   user_id        String
   status         check_in_status @default(pending)
   check_in_time  DateTime?       @db.Timestamptz(6)
@@ -1213,6 +1228,10 @@ model user_reports {
   reported_id String
   reason      String
   description String?
+  /// The reported person's last lines in the room or conversation the report
+  /// was filed from (`lib/report-evidence.ts`), copied when it was filed. For
+  /// staff review; dismissed reports lose it at 180 days.
+  excerpt     String?
   status      report_status @default(pending)
   created_at  DateTime      @default(now()) @db.Timestamptz(6)
   updated_at  DateTime      @default(now()) @db.Timestamptz(6)
@@ -1243,8 +1262,8 @@ model message_reports {
   message_type String // 'group' | 'private' | 'board_post' | 'board_request' | 'crew' (message_id = the crew's id)
   reason       String
   description  String?
-  /// What the reported words said when the report was filed — board reports
-  /// only, for now. The words can change or go (an author withdraws a post,
+  /// What the reported words said when the report was filed: the message, the
+  /// post or the ask. The words can change or go (an author withdraws a post,
   /// an erased account's ask loses its message) between the report and the
   /// review; the evidence should not.
   excerpt      String?
@@ -2617,6 +2636,13 @@ enum refusal_reason {
   too_late
   day_cancelled
   under_age
+  /// A fix too vague to judge (over 150 m accuracy) without a door code.
+  weak_fix
+  /// The door code path (gate 13, lib/entry-code-gate.ts).
+  door_code_wrong
+  door_code_far
+  door_code_locked
+  door_code_paused
 }
 
 enum event_claim_status {
@@ -3074,6 +3100,13 @@ enum work_intent {
 enum check_in_kind {
   attendee
   staff
+}
+
+/// How a check-in was made (gate 13). `review` is the App Review bypass (lib/review-accounts.ts).
+enum check_in_method {
+  gps
+  door_code
+  review
 }
 
 /// Presence as sessions, not as a status.

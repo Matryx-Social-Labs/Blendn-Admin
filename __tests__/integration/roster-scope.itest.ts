@@ -22,7 +22,7 @@ afterAll(async () => {
 
 const coordinatesFor = (n: number, base: number) => Array.from({ length: n }, (_, i) => `${base + i}.5,${70 + i}.25`)
 
-async function world(coordinates: string[]) {
+async function world(coordinates: string[], revealedLocation = "Bengaluru") {
   const viewer = await person("rs-viewer", "Vee Viewer Rao")
   const host = await person("rs-host")
   const { eventId, occurrenceId } = await liveEvent(host.id)
@@ -41,7 +41,7 @@ async function world(coordinates: string[]) {
       where: { id: p.id },
       data: {
         photos: [`https://img.invalid/${l}.jpg`],
-        location: l.startsWith("plain") ? coordinates[Number(l.slice(6)) - 1] ?? "Pune" : "Bengaluru",
+        location: l.startsWith("plain") ? coordinates[Number(l.slice(6)) - 1] ?? "Pune" : l === "revealed" ? revealedLocation : "Bengaluru",
         ...(l === "offline" && { show_online: false }),
       },
     })
@@ -82,16 +82,20 @@ describe("the room roster", () => {
   })
 
   it("reverse-geocodes nothing: coordinates read as no city (SCRUM-1229)", async () => {
-    const { viewer, eventId } = await world(coordinatesFor(6, 40))
+    const { viewer, eventId } = await world(coordinatesFor(6, 40), "12.5,77.25")
     const fetchSpy = jest.spyOn(global, "fetch").mockImplementation(async () => new Response(JSON.stringify({ address: { city: "Testville" } })))
     try {
       const res = await api.checkins(viewer, eventId)
       expect(res.status).toBe(200)
       // Six parallel Nominatim calls on a user-facing read once (a 1 req/s courtesy limit), then three; now none.
       expect(fetchSpy).not.toHaveBeenCalled()
-      // The six coordinate rows (and the viewer, who has none) read as no city, never as the coordinates.
+      // The six coordinate rows sit beside a pseudonym, so D-030 sends them no city at all.
       const locations = res.body.data.attendees.map((a: { location: string | null }) => a.location)
       expect(locations.filter((l: string | null) => l === null).length).toBeGreaterThanOrEqual(6)
+      // The revealed row is shown by name, so it does carry a city: its coordinates read as none (storedCity).
+      const revealed = res.body.data.attendees.find((a: { image?: string }) => a.image === "https://img.invalid/revealed.jpg")
+      expect(revealed).toBeDefined()
+      expect(revealed.location).toBeNull()
       expect(JSON.stringify(res.body)).not.toMatch(/\d+\.5,\d+\.25/)
     } finally {
       fetchSpy.mockRestore()

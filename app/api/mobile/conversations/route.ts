@@ -11,7 +11,7 @@ import { idInConversation } from "@/lib/conversation-ref"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { userIdFromRefIfIdentified } from "@/lib/identity"
 import { userIdFromDmRef } from "@/lib/conversation-ref"
-import { participationRefusal } from "@/lib/event-access"
+import { messagingRefusalResponse, participationRefusal } from "@/lib/event-access"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -21,7 +21,6 @@ import {
   notFoundResponse,
   serverErrorResponse,
   conflictResponse,
-  forbiddenResponse,
 } from "@/lib/api-response"
 import { z } from "zod"
 import { readJson } from "@/lib/api-input"
@@ -233,9 +232,9 @@ export async function POST(request: NextRequest) {
     const limited = await rateLimit(request, userLimit("heavy", "conversation-create", authUser.userId))
     if (limited) return limited
 
-    // Not onboarded and no adult age on file: may not take part yet (SCRUM-331).
+    // Known to be under 18, or not onboarded with no adult age on file: may not take part (SCRUM-331, SCRUM-1169).
     const unfinished = await participationRefusal(authUser.userId)
-    if (unfinished) return forbiddenResponse(unfinished)
+    if (unfinished) return messagingRefusalResponse(unfinished)
 
     const body = await readJson(request)
     const parsed = createConversationSchema.safeParse(body)

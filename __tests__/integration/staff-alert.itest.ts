@@ -175,3 +175,132 @@ describe("profanity-only flags", () => {
     expect(text).not.toContain("severe")
   })
 })
+
+/**
+ * A swear-word hide the model could not judge (`{"profanity", "unjudged"}`,
+ * written by `recordHide`) is not a severe flag. It is said on its own line,
+ * at most once per `UNJUDGED_REPEAT_MS`, and the count then is every such
+ * pending flag since the line was last sent. A slur, a model flag and a report
+ * still alert every minute.
+ */
+describe("hides the model could not judge", () => {
+  let reporter: string
+  let reported: string
+  let groupId: string
+  let sweepAt = 1_000
+  const UNJUDGED = { profanity: 0.9, unjudged: 0.9 }
+
+  beforeAll(async () => {
+    reporter = await makeUser(testId("sa_u_reporter"))
+    reported = await makeUser(testId("sa_u_reported"))
+    const host = await makeUser(testId("sa_u_host"), "organizer")
+    users.push(reporter, reported, host)
+    const eventId = await makeEvent(host)
+    events.push(eventId)
+    groupId = (await db.chat_groups.create({ data: { event_id: eventId, name: "room", status: "active" } })).id
+  })
+
+  /** The window `seconds` on from the last: rows written now land in it, and `sweep` closes it. */
+  function windowAfter(seconds: number) {
+    sweepAt += seconds
+    const flag = async (
+      categories: object,
+      confidence: number,
+      source: "auto_keyword" | "auto_text" = "auto_keyword",
+      rowAt = sec(sweepAt - 50)
+    ) => {
+      const message = await db.chat_messages.create({ data: { chat_group_id: groupId, user_id: reported, content: "x" } })
+      await db.moderation_flags.create({
+        data: { message_id: message.id, chat_group_id: groupId, user_id: reported, source, categories, confidence, auto_action: "hidden", created_at: rowAt },
+      })
+    }
+    const report = () => db.user_reports.create({ data: { reporter_id: reporter, reported_id: reported, reason: "x", created_at: sec(sweepAt - 50) } })
+    const sweep = async (): Promise<string | null> => {
+      fetchMock.mockClear()
+      await runStaffAlertSweep(sec(sweepAt))
+      return fetchMock.mock.calls.length ? (JSON.parse(fetchMock.mock.calls[0][1].body).text as string) : null
+    }
+    return { flag, report, sweep }
+  }
+
+  it("says an unjudged hide on its own line, not as a severe flag", async () => {
+    const w = windowAfter(60)
+    await w.flag(UNJUDGED, 0.9)
+    const text = await w.sweep()
+    expect(text).toContain("1 hidden line the model could not judge.")
+    expect(text).not.toContain("severe")
+  })
+
+  it("holds that line for the next minutes, while a slur, a model flag and a report still alert each minute", async () => {
+    let w = windowAfter(60)
+    await w.flag(UNJUDGED, 0.9)
+    await w.flag({ slur: 0.9 }, 0.9)
+    let text = await w.sweep()
+    expect(text).toContain("1 severe flag;")
+    expect(text).not.toContain("could not judge")
+
+    w = windowAfter(60)
+    await w.flag(UNJUDGED, 0.95)
+    await w.flag({ "harassment/threatening": 0.55 }, 0.55, "auto_text")
+    text = await w.sweep()
+    expect(text).toContain("1 severe flag;")
+    expect(text).not.toContain("could not judge")
+
+    w = windowAfter(60)
+    await w.flag(UNJUDGED, 0.9)
+    await w.report()
+    text = await w.sweep()
+    expect(text).toContain("1 new report;")
+    expect(text).not.toContain("could not judge")
+
+    w = windowAfter(60)
+    await w.flag(UNJUDGED, 0.9)
+    expect(await w.sweep()).toBeNull()
+  })
+
+  it("after the hold, counts every unjudged hide since the line was last sent, not only this minute's", async () => {
+    const w = windowAfter(15 * 60)
+    await w.flag(UNJUDGED, 0.9)
+    const text = await w.sweep()
+    expect(text).toContain("5 hidden lines the model could not judge.")
+    expect(text).not.toContain("severe")
+  })
+
+  it("repeats the line next minute when the send failed, and holds it only once it went out", async () => {
+    let w = windowAfter(15 * 60)
+    await w.flag(UNJUDGED, 0.9)
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 500, text: async () => "no" })
+    expect(await w.sweep()).toContain("1 hidden line the model could not judge.")
+
+    w = windowAfter(60)
+    expect(await w.sweep()).toContain("1 hidden line the model could not judge.")
+
+    w = windowAfter(60)
+    await w.flag(UNJUDGED, 0.9)
+    expect(await w.sweep()).toBeNull()
+  })
+
+  it("leaves a hide whose model answer may still be on its way (two calls) for a later line, and never loses it", async () => {
+    let w = windowAfter(15 * 60)
+    // 15 s before the sweep: past the 10 s grace, inside two model calls.
+    await w.flag(UNJUDGED, 0.9, "auto_keyword", sec(sweepAt - 15))
+    // The one held over from the last test, not this one.
+    expect(await w.sweep()).toContain("1 hidden line the model could not judge.")
+
+    w = windowAfter(15 * 60)
+    expect(await w.sweep()).toContain("1 hidden line the model could not judge.")
+  })
+
+  it("after a restart, counts only the last 15 minutes' unjudged hides", async () => {
+    const w = windowAfter(60 * 60)
+    await w.flag(UNJUDGED, 0.9, "auto_keyword", sec(sweepAt - 20 * 60))
+    let fresh!: typeof import("@/lib/staff-alert")
+    jest.isolateModules(() => {
+      fresh = require("@/lib/staff-alert") // eslint-disable-line @typescript-eslint/no-require-imports
+    })
+    fetchMock.mockClear()
+    await fresh.runStaffAlertSweep(sec(sweepAt))
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+

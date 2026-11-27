@@ -74,7 +74,8 @@ Returns **201**: `{ accessToken, refreshToken, user: { id, email, name, profile 
 and no account is written. Google and Apple create profiles without an age;
 those accounts cannot finish onboarding until a date of birth of 18+ is on file
 (see `PUT /profiles/:userId`). Accounts made before the ruling keep whatever age
-they have. Prefer
+they have; one known to be under 18 takes part nowhere (see *Taking part* under
+`PUT /profiles/:userId`). Prefer
 `dateOfBirth` on `PUT /profiles/:userId` over this `age` — see *The age is
 derived, never remembered* below for why the number alone is not enough.
 
@@ -86,6 +87,15 @@ case: `Priya@Example.com` is saved as `priya@example.com`, and `user.email` in
 the response is the lowercase form. A second signup in another case gets the
 same **409** as any taken address. `signin`, Google, Apple, the dashboard and
 password reset all lowercase what they are given too (SCRUM-328).
+
+**One inbox, one account, and a suspended person cannot sign up again**
+(SCRUM-1172). An address is compared as one inbox: lower case, without a
+`+tag`, and for Gmail without dots (`googlemail.com` is `gmail.com`), by the
+SQL function `identity_email`. One that any account already holds gets the
+same **409** `CONFLICT` "Email already registered" as the exact address, and no
+account is written, whoever holds it. Google and Apple, which prove the inbox,
+answer a new account for an inbox a suspended account holds with the suspended
+**403** below.
 
 **Password rules.** At least **12 characters**, and rejected if it is an obvious
 choice (`password1234` is twelve characters and fails) or built from the local
@@ -138,16 +148,26 @@ most one access-token lifetime (15 minutes) after deploy.
 ### A suspended account
 
 Every route that issues a token — `signin`, `google`, `apple`, `refresh` and
-`session` — returns **403** with a message naming the suspension and an address
-to appeal to. The client should show it rather than treating 403 as a generic
-failure: a silent refusal to sign in is indistinguishable from a bug.
+`session` — returns **403** with a message naming the suspension, its category
+and the address to appeal to. The client should show it rather than treating 403
+as a generic failure: a silent refusal to sign in is indistinguishable from a bug.
 
 ```json
-{ "success": false, "error": "This account has been suspended. Contact support@blendn.app if you think that's a mistake." }
+{ "success": false, "error": "This account has been suspended. Reason: harassment. To appeal, write to grievance@blendn.app.", "errorCode": "FORBIDDEN", "reasonCode": "ACCOUNT_SUSPENDED" }
 ```
 
+The category is one of a fixed list (`SUSPENSION_CATEGORIES`, `lib/suspension.ts`):
+the reason of the report the account was suspended from, else "breaking our
+community guidelines". It is only sent to the account's owner — after the
+password, a verified Google or Apple token, that account's refresh token, or an
+authenticated request. `accountRefusal("suspended")` with no owner sends the
+generic sentence: "This account has been suspended. Contact support@blendn.app
+if you think that's a mistake."
+
 On `signin` it is checked **after** the password, so the response cannot be used
-to discover which addresses are suspended.
+to discover which addresses are suspended. `google` and `apple` also answer it
+when they would create an account for the same inbox as a suspended one (see
+`POST /auth/signup`).
 
 On `refresh` it is answered even for the token the suspension **revoked** — which
 is every live token, since suspending revokes them all. A token we signed, not
@@ -182,7 +202,7 @@ the new code in `errorCode` as well, and `reasonCode` repeats it.
 
 | Where | Status | `errorCode` | `reasonCode` | Sentence (unchanged) |
 |---|---|---|---|---|
-| `signin`, `google`, `apple`, `refresh`, `session` | 403 | `FORBIDDEN` | `ACCOUNT_SUSPENDED` | "This account has been suspended. Contact support@blendn.app if you think that's a mistake." |
+| `signin`, `google`, `apple`, `refresh`, `session` | 403 | `FORBIDDEN` | `ACCOUNT_SUSPENDED` | "This account has been suspended. Reason: <category>. To appeal, write to grievance@blendn.app." (starts as before) |
 | the same five | 403 | `FORBIDDEN` | `ACCOUNT_STAFF` | "This app is for attendees. Organizers, venue owners and sponsors sign in at the dashboard." |
 | `google`, `apple` | 401 | `ACCOUNT_DELETED` | `ACCOUNT_DELETED` | "Account not found" |
 | `session` | 404 | `NOT_FOUND` | `ACCOUNT_DELETED` | "User not found" |
@@ -293,7 +313,9 @@ below the line has no `reasonCode`. **`reasonCode` is on the event doors only**:
 messaging and friend routes (conversations, message requests, friend requests and
 invites) answer the same unfinished-profile 403 with `FORBIDDEN` and no
 `reasonCode`, and the regulars opt-in answers `AGE_RESTRICTED` with none; nothing
-has been rolled out to them.
+has been rolled out to them. An account **known to be under 18** (SCRUM-1169) is
+the exception on every route that takes part, the messaging ones included:
+`errorCode` and `reasonCode` both `AGE_RESTRICTED`, sentence “Blend’n is for people 18 and over. If your date of birth is wrong, write to grievance@blendn.app.”.
 
 
 ### Password reset
@@ -357,8 +379,9 @@ person they were blocked.
 
 **A `location` or event `city` can be null, and is never coordinates.** No read
 looks a city up (SCRUM-1229): sign-in, session, a profile, a friend, the roster,
-event detail, the feed and favourites return the stored value, and so does the
-`PUT /profiles/:userId` response. A profile location still stored as
+event detail, the feed and favourites return the stored value wherever they show a
+city at all (D-030 decides that: beside a pseudonym there is none), never coordinates,
+and so does the `PUT /profiles/:userId` response. A profile location still stored as
 coordinates (from old builds) reads as `null` until the person sets a city.
 `PUT /profiles/:userId` with `location` as `lat,lon` stores the city at those
 coordinates (one lookup); if that lookup fails it keeps the stored location and
@@ -724,6 +747,7 @@ it in the old kind and shape (`kind` and `data.type` `event_update`, the rest of
 | Event is age-restricted and the viewer's known age is below it | 403 | `AGE_RESTRICTED` | `AGE_RESTRICTED` |
 | Taking part (RSVP, save, Lobby, check-in) in one with no age on file | 403 | `AGE_RESTRICTED` | `AGE_UNKNOWN` |
 | Taking part with an unfinished profile | 403 | `FORBIDDEN` | `PROFILE_INCOMPLETE` |
+| Taking part as an account known to be under 18 (a derived age under 18, or `profiles.under_18_since` set; SCRUM-1169), onboarded or not | 403 | `AGE_RESTRICTED` | `AGE_RESTRICTED` |
 | A new `going` or `maybe` RSVP on a cancelled event (`POST /events/:id/rsvp`; SCRUM-892) | 409 | `CONFLICT` | `EVENT_CANCELLED` |
 | The event was live and its organisation was suspended, and you are going (or maybe, or waitlisted) or are of the organisation | 404 | `NOT_FOUND` | `ORGANISER_SUSPENDED` |
 | The same event, and you are a stranger or said `not_going` (public or private alike) | 404 | `NOT_FOUND` | none |
@@ -903,6 +927,7 @@ each other still answer the same body.
 | Where | Status | `errorCode` | `reasonCode` |
 |---|---|---|---|
 | Any friends or DM route, unfinished profile | 403 | `FORBIDDEN` | `PROFILE_INCOMPLETE` |
+| Any friends or DM route, an account known to be under 18 (SCRUM-1169) | 403 | `AGE_RESTRICTED` | `AGE_RESTRICTED` |
 | `POST /friends/requests` `{ userId }`, out of reach | 404 | `NOT_FOUND` | `PERSON_UNAVAILABLE` |
 | `POST /friends/requests` `{ token }`, link does not work | 404 | `NOT_FOUND` | `INVITE_UNAVAILABLE` |
 | `POST /friends/requests` to yourself | 400 | none | `CANNOT_ADD_SELF` |
@@ -998,7 +1023,7 @@ and `/event/<id>` and their link-preview cards. No auth, no CORS; `lib/share-pub
 |--------|----------|-------------|
 | GET | `/events` | List events (paginated, filterable) |
 | GET | `/events/:eventId` | Get event details. Also carries `area` (the confirmed venue's area, else the city; null when neither is known), `doorPolicy`, `details` (or null) and `amenities`, none of which the list has. `chatGroup` is `{ id, name, status, member_count }` — snake_case — or null; `member_count` is `stats.hereCount`, in the room now (the column of that name only ever went up, and is not read). `categories[]` are the leaves as stored, `{ id, name, slug, description, icon }`, with no `parent`. `distance` is kilometres from `lat`/`lon`, and `null` (never absent) without them. `organizer` is `{ id, name, image, kind }` and never the user who created the row (SCRUM-1146): `organizer.id` is the organisation's id for `org` and null otherwise, `image` is always null. `organizer.kind` (SCRUM-1095) says what the name is: `org` (an organisation), `venue` (a venue day, its venue), `platform` (Blendn standing in), or `person` (an event with no organisation; `name` is null, the creating user's name is not sent). Draw a "Host" only for `org`; `GET /events` rows and `GET /users/:userId/favorites` rows carry the same. Also `changedAt`, `changedFields`, `changedFrom`, `days`, `dayCount` and `dayNumber` ([Flow 3](#the-event-what-changed-the-days-and-why-a-link-is-refused-flow-3)) |
-| POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`). On a native ticketed event (`TICKETING` on), 403 `tickets_required` unless the caller holds a ticket whose order is paid or is the event's staff (SCRUM-1014). `left` names the rooms it took you out of (see "One room at a time, and the switch"). Optional `withCrewId` tells that crew you're in ("With {crew}", answered by `crewTold`) |
+| POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`). On a native ticketed event (`TICKETING` on), 403 `tickets_required` unless the caller holds a ticket whose order is paid or is the event's staff (SCRUM-1014). `left` names the rooms it took you out of (see "One room at a time, and the switch"). Optional `withCrewId` tells that crew you're in ("With {crew}", answered by `crewTold`). Optional `doorCode` is the host's door code for a guest GPS could not place: see "The door code" |
 | GET | `/events/:eventId/people` | People from a night you attended, for the Recap — see below |
 | POST | `/events/:eventId/checkout` | Check out of event |
 | POST | `/events/:eventId/presence` | "Am I still counted as here?", every few minutes while checked in. `status` is `inside`, `outside`, `unknown` (a fix worse than the door's 150 m that reads outside: it neither starts nor advances the departure clock, SCRUM-1326), `checked_out` or `not_checked_in`. Checked out after 20 minutes outside, and on silence only after two outside readings at least 10 minutes apart; see `docs/CHECKIN.md` |
@@ -1796,6 +1821,41 @@ feature is worth. Rows cascade on account deletion.
 { "pagination": { "page": 1, "limit": 20, "totalCount": 100, "totalPages": 5, "hasMore": true } }
 ```
 
+### The door code (gate 13)
+
+A guest whose GPS cannot place them types the code on the host’s screen. The
+code changes every 30 seconds, is per event occurrence, and is never returned
+by any mobile endpoint: only the host's dashboard Door shows it.
+
+- **When it exists:** `GET /events/:eventId` carries `doorCode: { available }`,
+  true while the door is open (doors, start − 90 min, to the end), the event is
+  published and the code is not paused. Never the code.
+- **When to offer it:** a refusal of `POST /events/:eventId/checkin` with
+  `reasonCode: DOOR_CODE_OFFERED`: an `OUT_OF_RANGE` within 1 km of the fence,
+  or a fix over 150 m accuracy (now recorded as `weak_fix`), while the code is
+  live. The server decides; the app does no distance maths.
+- **The request:** the usual body plus `doorCode` (string, at most 12; lower
+  case, spaces and dashes accepted; 8/B, 5/S, 2/Z read as one) and
+  `deviceInfo.gpsAccuracy` (required with a code), optionally
+  `deviceInfo.mocked`. Every other gate runs first, unchanged.
+- **The answers, in order** (`errorCode`, status, sentence):
+
+| `errorCode` | Status | Sentence |
+|---|---|---|
+| `DOOR_CODE_PAUSED` | 400 | The door code is paused. Ask the host. |
+| `DOOR_CODE_LOCKED` | 429 | Too many tries. Try again at 10:52 PM, or step outside and use GPS. (5 wrong in 10 minutes; the time is on the event's clock) |
+| `DOOR_CODE_LOCKED` | 429 | Too many tries tonight. Step outside and use GPS. (10 wrong in the night, or removed from the room by the host) |
+| `DOOR_CODE_FAR` | 400 | You need to be at the venue to use the door code. (no accuracy, over 1000 m, a mocked fix, or more than 1 km short) |
+| `DOOR_CODE_CHANGED` | 400 | That code just changed. Read the new one on the host’s screen. (not counted as a guess) |
+| `DOOR_CODE_WRONG` | 400 | That code didn’t match. Check the host’s screen; it may have just changed. |
+| `DOOR_CODE_UNAVAILABLE` | 503 | The door code isn’t available right now. Try GPS. (the counters cannot be read; GPS is unaffected) |
+
+A valid code checks in exactly as GPS does, same response; the row records
+`method: door_code`. An App Review account at a `review_demo` event ignores the
+code (`method: review`). Wrong codes count per person and per event; 30 wrong
+in 10 minutes with more wrong than right pauses the code for 10 minutes and
+tells the host's Door.
+
 ### A venue day's id is not an event's
 
 A venue's live room hangs off a hidden `events` row (`kind = venue_day`,
@@ -1847,7 +1907,8 @@ holds the seats for 10 minutes and answers 201
 
 First the RSVP's door, with exactly the answers `POST /events/:eventId/rsvp`
 gives: 404 for a draft or a stranger's private event, 403 `AGE_RESTRICTED`
-(`reasonCode` `AGE_RESTRICTED` / `AGE_UNKNOWN`) under the event's minimum age,
+(`reasonCode` `AGE_RESTRICTED` / `AGE_UNKNOWN`) under the event's minimum age or
+for an account known to be under 18,
 403 `FORBIDDEN` + `PROFILE_INCOMPLETE` for an account not set up: whoever may
 not say "going" may not buy their way in. Then refusals are 409 with the code in
 `errorCode`: `sold_out`, `not_on_sale`, `over_order_limit`, `over_buyer_limit`
@@ -2059,7 +2120,7 @@ per person, then 429.
 
 One venue, as the Go Live screen needs it. 404 for an unknown, archived or
 deleted venue; 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) for a profile not onboarded, `AGE_RESTRICTED`
-(`reasonCode` `AGE_UNKNOWN` when no age is on file) for one without a known adult age (as at its door). 60 a minute per person, then
+(`reasonCode` `AGE_UNKNOWN` when no age is on file, `AGE_RESTRICTED` for an account known to be under 18) for one without a known adult age (as at its door). 60 a minute per person, then
 429.
 
 ```json
@@ -2173,7 +2234,7 @@ today (choosing it again does not restart the four hours). Anything else is
 | Refusal | When |
 |---|---|
 | 404 | Unknown, archived or deleted venue, or today's room there was deleted |
-| 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) / `AGE_RESTRICTED` (`reasonCode` `AGE_UNKNOWN` when no age is on file) | Not onboarded / no adult age (an unknown age is refused here) |
+| 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) / `AGE_RESTRICTED` (`reasonCode` `AGE_UNKNOWN` when no age is on file, `AGE_RESTRICTED` for an account known to be under 18) | Not onboarded / no adult age (an unknown age is refused here) |
 | 409 `EVENT_LIVE_HERE` | A public event at this venue (link confirmed, or its own area at the venue) is on, or starts within the hour. The body carries `eventId`: hand off to that event's check-in. Checked before the fence |
 | 400 `GPS_TOO_VAGUE` | A fix worse than 150 m (`deviceInfo.gpsAccuracy`): a better fix where you stand, not directions |
 | 400 `VALIDATION_FAILED` | `deviceInfo.gpsAccuracy` below 0 (a platform's "no fix"): leave the field out instead. Also on `POST /checkins/inside` |
@@ -2608,7 +2669,7 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 ```json
 { "content": "string", "type": "text", "parentId": "uuid?", "clientId": "uuid?" }
 ```
-**Words only (R9, SCRUM-626).** A room takes no media: `type` other than `text`, or any `metadata` at all, is `400 VALIDATION_FAILED` with `errors[].message` "Photos can only be sent in a direct message". Photos go in a DM (`POST /conversations/:id/messages`). `metadata` was `{ mediaUrl }` (SCRUM-426), and before that a free record an attendee could use to draw a message as a sponsored card; the server's own writers (sponsored messages, broadcasts) still set a message's `metadata` and `type`, and older image messages are still read back as they were. The same rules apply to `POST /events/:eventId/chat`.
+**Words only (R9, SCRUM-626).** A room takes no media: `type` other than `text`, or any `metadata` at all, is `400 VALIDATION_FAILED` with `errors[].message` "Photos can’t be sent in a room". `metadata` was `{ mediaUrl }` (SCRUM-426), and before that a free record an attendee could use to draw a message as a sponsored card; the server's own writers (sponsored messages, broadcasts) still set a message's `metadata` and `type`, and older image messages are still read back as they were. The same rules apply to `POST /events/:eventId/chat`.
 
 **Moderation (pre-emit):** Messages go through a 3-layer pipeline **before** being broadcast to other users:
 1. **Spam check** (sync) — burst rate, duplicate, link density → blocks with 429. A resend with a `clientId` that already landed is answered with the first write before this check, on both room write paths, so it never counts toward the burst (SCRUM-1050)
@@ -2696,7 +2757,7 @@ does not offer Delist.
 | POST | `/conversations` | Open a conversation — **requires an accepted request**; a closed pair gets 409 "This conversation was closed and cannot be reopened", as the respond route answers (SCRUM-300) |
 | GET | `/conversations/:id` | Get conversation |
 | GET | `/conversations/:id/messages` | Get messages |
-| POST | `/conversations/:id/messages` | Send message. See **Photos in a DM** below |
+| POST | `/conversations/:id/messages` | Send message. Words only: see **Words only** below |
 | DELETE | `/conversations/:id` | **Leave — closes it for both people, permanently** |
 
 #### Opening a thread, delivery, replies and retries (SCRUM-406, 408, 409, 410)
@@ -2710,10 +2771,7 @@ does not offer Delist.
 - **Replies.** `POST` takes `replyToId`, which must be a message in the same conversation, otherwise `400`. Every message carries `replyTo: { id, senderName, text, mediaType, unavailable }`. `senderName` resolves through the reveal rules (a pseudonym until revealed). A quote of a hidden message is `unavailable: true` with no text.
 - **Retries.** `POST` takes `clientId` (a uuid the app makes per message). A repeat with the same `clientId` returns the first write instead of writing a second; a `clientId` already used in another conversation gets `409`. Both room write paths accept `clientId` the same way.
 - **Rate limit.** 30 sends a minute per person → `429 RATE_LIMITED`, counted before the conversation is looked up, so sends refused with `404`/`403`/`400` count too (SCRUM-451). A retry of a send that landed is answered over the limit and does not count.
-- **Photos in a DM (R9, SCRUM-626).** `{ "text?": "…", "mediaUrl?": "url", "mediaType?": "image" }`, text or a photo or both. A photo only, so `mediaType` is `image` or left out (`video` is `400`) and the row's `mediaType` is always `image`.
-  - **Whose:** `mediaUrl` must be the sender's own chat upload (`POST /uploads/presigned-url` with `folder: "chat"`, so `chat/<yourId>/…` on our bucket), or `400` "Send photos through the app rather than linking to them" (SCRUM-426).
-  - **When:** once both people are named to each other (both revealed, or a conversation that never had pseudonyms, such as an accepted message request) or are friends. Before that, `403` "You can send photos once you have both revealed who you are", and nothing is stored. Text is not gated.
-  - **What is stored:** a copy of the upload nobody can write to (SCRUM-425), under `chat/sealed/<uuid>`, which names nobody (SCRUM-448), so `mediaUrl` comes back different from the one you sent. The copy is the picture with its metadata removed: EXIF (with its GPS position), XMP, comments and anything after the image's end. An upload that never arrived, is over 10 MB, or is not a JPEG, PNG or WebP (by its bytes, whatever it was uploaded as) is `400`.
+- **Words only (SCRUM-1165).** `{ "text": "…", "replyToId?": "uuid", "clientId?": "uuid" }`; `text` is required, 1–5000 characters. A send carrying `mediaUrl` (any value, with or without `text`, a `clientId` retry included) is `403 FORBIDDEN` "Photos can’t be sent in messages yet.", a sentence the app shows as it is, and nothing is stored. Photos sent before are still returned in `mediaUrl` and `mediaType` on `GET`, signed (SCRUM-427).
 
 `POST /conversations` does not create a channel out of nothing. It requires an
 accepted message request between the two people, or a conversation that already
@@ -3225,7 +3283,8 @@ racing a block never leaves a blocked person on the list. Refusals cost the
 same work as a link that never existed, so timing tells a caller nothing either.
 
 **Why a send, an accept or an invite open was refused.** An unfinished profile
-is `403` `errorCode: "FORBIDDEN"` with `reasonCode: "PROFILE_INCOMPLETE"`; a
+is `403` `errorCode: "FORBIDDEN"` with `reasonCode: "PROFILE_INCOMPLETE"`; an
+account known to be under 18 is `403` with both codes `"AGE_RESTRICTED"`; a
 rate limit is `429` `errorCode: "RATE_LIMITED"` with `reasonCode:
 "RATE_LIMITED"` and `retryAfter` (seconds; also the `Retry-After` header) —
 on `POST /friends/requests`, `POST /friends/requests/:id`, `GET
@@ -3985,13 +4044,20 @@ and only the second is worth blocking.
 
 ### Broadcasting into an event's room
 
-`POST /events/:eventId/announce` takes a `kind`, defaulting to `announcement`:
+`POST /events/:eventId/announce` takes a `kind`, defaulting to `announcement`
+(any other value is a 400 `kind is announcement or system`):
 
 | kind | who | media |
 |---|---|---|
-| `announcement` | `canEdit` — the organising org, or an `app_admin`. **Not** the venue owner | no |
-| `sponsored` | one organisation holding `may_sponsor` **and** an approved placement at this event, or an `app_admin` | not yet: refused with 400 (nothing stores it) |
-| `system` | `app_admin` only — it speaks as Blend'n | no |
+| `announcement` | `canEdit` — the organising org, or an `app_admin`. **Not** the venue owner | no: 400 `Announcements carry text only` |
+| `system` | `app_admin` only — it speaks as Blend'n | no: 400, as above |
+| `sponsored` | nobody: **400** `Sponsored content goes out through a campaign`, nothing written | — |
+
+**Sponsored content reaches a room only through a campaign** (SCRUM-1070,
+D-050): `/api/events/:id/sponsored-messages` on the dashboard, sent by
+`lib/sponsored-scheduler.ts`, where a person reviews the creative, a room has
+at most one sponsored post every 20 minutes and every send is counted. The
+gate below (`may_sponsor` and an approved placement) is that path's.
 
 **This route used to compare two user ids.** `event.organizer_id !== caller.id`,
 which is exactly the mistake `lib/rbac.ts` exists to end: an `app_admin` could
@@ -4023,16 +4089,15 @@ in.
 send one could issue a safety notice, or a "verified by Blend'n" claim, in the
 platform's voice.
 
-**Media rides on `sponsored` alone, and that is a safety rule.** The event room
+**This route carries words only, and that is a safety rule.** The event room
 is pseudonymous, and a photograph is an identity — of whoever is *in* it, who is
 not always the person posting. Attendee media is not built at all. An
 announcement is a host addressing that same room, so it inherits the rule.
-Sponsored artwork depicts nobody in the room, which is what makes it the
-exception.
+Media in a room is a campaign's creative alone (`broadcastMayCarryMedia`):
+artwork that depicts nobody in the room, reviewed before it runs.
 
-**One refusal message for all three.** "Your organisation is not approved for
-sponsored messages" tells an attacker probing the API which flag to go after, and
-tells an organizer about a capability they cannot self-serve anyway.
+**One refusal message for both kinds.** Which rule refused is not the caller's
+to probe: `403 You cannot broadcast to this event`.
 
 **The role is read from the database, not the token.** The mobile JWT carries
 `{ userId, email }` and no role, which is the right call: with a 30-day refresh
@@ -4079,10 +4144,10 @@ member gets `403` with the room's ban sentence, and `muted` and `left` members
 still read. A vote additionally needs an `active` or `muted` membership and an
 open room (`409`). Before SCRUM-298 the read loaded the poll by id alone.
 
-Who may post one is the same table as above: an `announcement` poll needs
-`canEdit`, a `sponsored` poll needs the same grant a sponsored message needs.
-A poll from a brand carries that brand's name into the room and takes the same
-attention, so it does not get a weaker gate because the payload is a question.
+Who may post one is the same table as above: a poll is an `announcement` and
+needs `canEdit`. `createPoll` refuses `kind: "sponsored"` with `Sponsored
+content goes out through a campaign` and writes nothing: a poll from a brand
+would carry its name into the room outside the campaign's review, gap and count.
 
 **Every count is disclosed before it leaves the server.** `null` means WITHHELD.
 It never means zero, and rendering it as zero turns "we are not telling you" into
@@ -4250,15 +4315,23 @@ Five consequences worth knowing about:
   that is not yet onboarded is **403** "Blend'n is for people 18 and over. Add
   your date of birth to finish." unless the age after the request is 18+ — send
   `dateOfBirth` in the same call or before it. Google and Apple accounts start
-  with no age, so this is where they are held. A profile already onboarded
-  (including one under 18 from before the ruling) is not re-checked.
+  with no age, so this is where they are held. A profile already onboarded is
+  not re-checked here; one known to be under 18 takes part nowhere (below).
 - **Taking part needs the same.** RSVP, favourite, the Lobby, check-in,
   starting a conversation, a message request and a DM send answer **403**
   `FORBIDDEN` "Finish setting up your profile first. Blend'n is for people 18
   and over." to a profile that is neither onboarded nor of a known adult age
   (SCRUM-331), so the hold above is not only the app's. Viewing events is not
   gated; neither are replies to a message request (decline and block are
-  safety actions). An onboarded profile with no age keeps taking part.
+  safety actions), except that accepting one is refused for an account known
+  to be under 18 (below). An onboarded profile with no age keeps taking part.
+- **An account known to be under 18 takes part nowhere** (SCRUM-1169, D-026):
+  a derived age under 18, or `profiles.under_18_since` set, onboarded or not.
+  The same routes, and accepting a message request, answer **403** with `errorCode` and `reasonCode` both
+  `AGE_RESTRICTED` and “Blend’n is for people 18 and over. If your date of birth is wrong, write to grievance@blendn.app.” The
+  stamp is set by `scripts/under-18-accounts.ts --apply`, which lists stamped
+  accounts for deletion 14 days on; staff clear it with `--correct` on a
+  corrected birth date. Viewing events is unchanged.
 - **Check-in filters rather than refuses.** A profile written before this rule
   can still carry `dating`; copying it onto a check-in row drops it silently,
   because nobody should be kept out of a room over a stale profile field.
@@ -4449,13 +4522,14 @@ Chat is unaffected: posting a message is its own choice to be seen.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/uploads/presigned-url` | Get S3 presigned upload URL |
-| DELETE | `/uploads/delete` | Delete uploaded file |
+| DELETE | `/uploads/delete` | Delete your own `profile` or `chat` upload; any other URL is `403` |
 
 ### POST /uploads/presigned-url
 ```json
-{ "filename": "photo.jpg", "contentType": "image/jpeg", "folder": "profile|chat|events", "size": 183422 }
+{ "filename": "photo.jpg", "contentType": "image/jpeg", "folder": "profile|chat", "size": 183422 }
 ```
-Note: `events` folder requires organizer/admin role.
+`folder` is `profile` or `chat`; anything else is `400`. Event media is uploaded
+from the dashboard (`POST /api/uploads/presigned-url`), never from the app.
 
 `size` is the file's byte length. When sent it is signed into the URL as
 `content-length`, so storage refuses a PUT of any other size; a `size` above the
@@ -4472,7 +4546,7 @@ The type is signed into the URL, so any other type, or none, is refused by
 storage with `403 SignatureDoesNotMatch` (SCRUM-425). The URL can write its
 key for 15 minutes, so a profile or a message never stores it: attaching the
 upload stores a **copy** under a new key nobody can upload to, and the URL you
-get back (`photos`, a DM's `mediaUrl`) is the copy's,
+get back (`photos`, a Lobby post's `photo.url`) is the copy's,
 not the `publicUrl` you sent.
 
 **`profile` and `chat` take photos only: JPEG, PNG or WebP, up to 10 MB**
@@ -4482,8 +4556,9 @@ never says where it was taken; the app also re-encodes before uploading.
 
 **Chat media is private (SCRUM-427).** `folder: "chat"` uploads go to the
 private bucket; `publicUrl` is the stored reference, which answers an
-anonymous GET with `403`. Wherever a message's media comes back (the send
-response, history, the `private:message` socket event), `mediaUrl` is a signed
+anonymous GET with `403`. A chat upload is a Lobby post's photo; a room
+message and a DM take none. Wherever stored media comes back (a Lobby post, an
+older message in history or a quote), its URL is a signed
 URL valid for **15 minutes**. Load it when you draw the message, not later;
 refetch the history for a fresh one. Profile photos, event media and sponsored
 creatives stay public.
@@ -4538,6 +4613,31 @@ Requires `OPENAI_API_KEY` env var: Railway production refuses to boot without it
 | POST | `/chat/groups/:chatGroupId/report` | `event_reports` with `chat_group_id` — shown as "Room" |
 | POST | `/events/:eventId/board/:postId/report` | `message_reports` with `message_type: "board_post"` — shown as "Lobby · offer\|seeking\|chat" |
 | POST | `/board/requests/:requestId/report` | `message_reports` with `message_type: "board_request"` — shown as "Lobby ask" |
+
+**Reasons** (`reason`, at most 200 characters) are one list, `lib/report-reasons.ts`,
+each with a severity (S1 first) and an urgent flag. The OpenAPI spec prints it.
+Any other string is still accepted: it is stored as written and read as `other`,
+so an older app's free text keeps working and keeps its words.
+
+| Severity | Reasons |
+|---|---|
+| S1, urgent | `child_safety`, `intimate_image`, `under_18`, `impersonation` |
+| S1 | `threat`, `unsafe` |
+| S2 | `harassment`, `hate_speech`, `pile_on`, `inappropriate_content`, `inappropriate_messages`, `inappropriate_photos`, `offensive`, `fake_profile`, `host_conduct`, `organiser_conduct`, `unsafe_venue` |
+| S3 | `spam`, `contact_details`, `misleading`, `misleading_listing`, `not_real`, `other` |
+
+The crew, offer and Lobby report routes keep their own shorter enums, all from
+this list.
+
+**What a report keeps of the words**, copied when it is filed, in `excerpt`: a
+message report (room or DM, and Unmatch/Block and report with a `messageId`) the
+message itself; a person report the person's last 20 lines (500 characters
+each) in the room or conversation it came from: named by a room's or a
+conversation's handle, from a crew's or Blend's room, or from Unmatch/Block and
+report without a message. Copied only from a room or conversation the reporter
+is in. The copy is for staff review: no mobile response and
+no data export carries it. A dismissed report loses it at 180 days
+(`docs/RETENTION.md`).
 
 ### The Lobby
 

@@ -353,7 +353,7 @@ export async function release(key: string): Promise<void> {
       )
       return
     } catch (error) {
-      logger.warn("Rate limit Redis release failed", { error: error instanceof Error ? error.message : String(error) })
+      logger.warn("Rate limit Redis release failed", { namespace: key.split(":")[0], error: error instanceof Error ? error.message : String(error) })
     }
   }
   const existing = memory.get(key)
@@ -405,16 +405,19 @@ export function resetMemoryStore(): void {
  * Best-effort against Redis. Failing to forget a 10-second window is not worth
  * propagating an error for.
  */
-export async function forget(key: string): Promise<void> {
+export async function forget(key: string, opts: StoreOptions = {}): Promise<void> {
   memory.delete(key)
   rolling.delete(key)
-  const redis = await getRedis()
+  // A fail-closed key's reset must happen or say it did not (the door code's resume would re-pause on the next typo).
+  const redis = await redisFor(key, opts)
   if (!redis) return
   try {
     await bounded((redis as unknown as { del(k: string): Promise<unknown> }).del(key))
   } catch (error) {
     logger.warn("Rate limit Redis delete failed", {
+      namespace: key.split(":")[0],
       error: error instanceof Error ? error.message : String(error),
     })
+    if (opts.failClosed) throw new StoreUnavailable("rate limit store unavailable")
   }
 }

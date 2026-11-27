@@ -18,10 +18,12 @@ jest.mock("jose", () => ({
 }))
 
 const mockDb = {
-  user: { findUnique: jest.fn(), create: jest.fn() },
+  user: { create: jest.fn() },
   profiles: { create: jest.fn() },
   mobile_refresh_tokens: { create: jest.fn() },
   $transaction: jest.fn(),
+  // lib/suspended-identity.ts: the accounts holding the inbox.
+  $queryRaw: jest.fn(),
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -50,7 +52,7 @@ function req(body: Record<string, unknown>) {
 
 beforeEach(() => {
   jest.clearAllMocks()
-  mockDb.user.findUnique.mockResolvedValue(null)
+  mockDb.$queryRaw.mockResolvedValue([])
   mockDb.user.create.mockResolvedValue({ id: "u1", email: "a@b.com", name: "A" })
   mockDb.profiles.create.mockResolvedValue({ id: "u1", name: "A", onboarded: false, location: null })
   mockDb.mobile_refresh_tokens.create.mockResolvedValue({})
@@ -141,7 +143,7 @@ describe("POST /api/mobile/auth/signup — name and age", () => {
 
 describe("POST /api/mobile/auth/signup — account creation", () => {
   it("refuses an email that already exists", async () => {
-    mockDb.user.findUnique.mockResolvedValue({ id: "existing" })
+    mockDb.$queryRaw.mockResolvedValue([{ suspended: false }])
     const res = await POST(req({ email: "a@b.com", password: VALID, name: "A" }))
     expect(res.status).toBe(409)
     expect(mockDb.user.create).not.toHaveBeenCalled()

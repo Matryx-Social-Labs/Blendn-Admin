@@ -196,8 +196,8 @@ For a year it changed a badge (SCRUM-8). Now `setOrganisationStatus(id,
   `lib/org-membership.ts` is spread into every read of a person's memberships
   (`__tests__/membership-reads-are-scoped.test.ts` fails the build on one that
   is not), so `actorFor` returns no org, `eventPermissions` denies, the events
-  list is empty (the creator floor is gated by `hostNotSuspended` so their own
-  rows do not come back), exports, ⌘K, venue management, claim filing and event
+  list is empty (there is no creator arm to bring their own rows back,
+  SCRUM-1250), exports, ⌘K, venue management, claim filing and event
   creation all close. `getMyOrgs` is the documented exception: it lists the
   suspended org so the org page — and the banner on every dashboard page — can
   say why, in the admin's own words (`organisations.suspension_reason`).

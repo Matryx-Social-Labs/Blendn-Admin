@@ -85,9 +85,9 @@ const refusals = (eventId: string, userId: string) =>
     1_500
   ).then((rows) => rows.map((r) => r.reason))
 
+// A fix too vague to mean anything is recorded as `weak_fix` and offers the door code: entry-code.itest.ts (gate 13).
 describe("the event door refuses, and records why", () => {
   it.each([
-    ["a fix too vague to mean anything", {}, { ...INSIDE, deviceInfo: { gpsAccuracy: 400 } }, 400, "OUT_OF_RANGE", null],
     ["an event with no area and no pin", { fenced: false }, INSIDE, 400, "OUT_OF_RANGE", "no_geofence"],
     ["before doors", { startsIn: 3, endsIn: 6 }, INSIDE, 400, "EVENT_NOT_STARTED", "too_early"],
     ["after the window", { startsIn: -8, endsIn: -5 }, INSIDE, 400, "EVENT_ENDED", "too_late"],

@@ -113,6 +113,17 @@ describe("the auto-mute count", () => {
     expect(await statusOf(r)).toBe("active")
   })
 
+  it("does not count, nor keep a mute for, hides the model has not judged (`unjudged` beside a swear word or a contact)", async () => {
+    const r = await room()
+    for (let i = 0; i < 3; i++) await flag(r, { profanity: 0.9, unjudged: 0.9 })
+    await flag(r, { contact_phone: 1, unjudged: 1 })
+    await checkAndAutoMute(r.userId, r.groupId)
+    expect(await statusOf(r)).toBe("active")
+    await db.chat_group_members.updateMany({ where: { chat_group_id: r.groupId, user_id: r.userId }, data: { status: "muted", muted_at: new Date(), muted_by: null } })
+    expect(await checkAndAutoUnmute(r.userId, r.groupId)).toBe(true)
+    expect(await statusOf(r)).toBe("active")
+  })
+
   it("never lifts a host's mute, whatever the count", async () => {
     const r = await room()
     await db.chat_group_members.updateMany({ where: { chat_group_id: r.groupId, user_id: r.userId }, data: { status: "muted", muted_at: new Date(), muted_by: r.host } })

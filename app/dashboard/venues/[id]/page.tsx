@@ -229,7 +229,6 @@ export default async function VenueDetailPage({
         end_time: true,
         status: true,
         max_capacity: true,
-        organizer_id: true,
         organizer_org_id: true,
         organizer_org: { select: { display_name: true } },
         organizer: { select: { name: true } },

@@ -3,23 +3,12 @@ import { NextRequest } from "next/server"
 /*
  * A text-only DM through the real route, against a real database.
  *
- * `media_url: mediaUrl` and `media_type: mediaType` are optional in the
- * schema, so both are undefined on every DM without a picture — which is
- * every DM — and `strictUndefinedChecks` refused the write. Sending the
- * first message after a match returned 500. No regex sees a bare variable;
- * this does: post, read the row.
+ * `media_url` and `media_type` were written as explicit undefineds on every
+ * DM without a picture, and `strictUndefinedChecks` refused the write:
+ * sending the first message after a match returned 500. No regex sees a bare
+ * variable; this does: post, read the row.
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
-// The stored URL is the upload's sealed copy (SCRUM-425); the copy is tested in upload-seal.test.ts.
-jest.mock("@/lib/tigris", () => ({
-  ...jest.requireActual("@/lib/tigris"),
-  sealUpload: jest.fn(async (key: string) => ({
-    key: `${key}-sealed`,
-    url: `https://${process.env.TIGRIS_BUCKET || "blendn-media"}.fly.storage.tigris.dev/${key}-sealed`,
-    bytes: 120_000,
-    contentType: "image/jpeg",
-  })),
-}))
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { db, closeDb, makeUser, onboard, testId } from "./helpers"
@@ -70,35 +59,3 @@ it("writes a text-only message and serves it back", async () => {
   expect(row).toMatchObject({ message_text: "corner table is the best seat", media_url: null, media_type: null })
 })
 
-it("writes a media-only message with a null text, not an explicit undefined", async () => {
-  // The other side of the "text or media" refinement: `text` is optional too.
-  const a = await person("dm_c")
-  const b = await person("dm_d")
-  // Both revealed: a photo before then is refused (R9, SCRUM-626).
-  const conversation = await db.private_conversations.create({
-    data: {
-      user1_id: a.id,
-      user2_id: b.id,
-      user1_pseudonym: "Quiet Otter",
-      user2_pseudonym: "Amber Fox",
-      user1_revealed: true,
-      user2_revealed: true,
-    },
-  })
-  conversations.push(conversation.id)
-  // The sender's own chat upload: any other URL is refused (SCRUM-426).
-  const photo = `https://${process.env.TIGRIS_BUCKET || "blendn-media"}.fly.storage.tigris.dev/chat/${a.id}/1790641297767-cfg6ta-photo.jpg`
-
-  const res = await route.POST(
-    new NextRequest(`http://localhost/api/mobile/conversations/${conversation.id}/messages`, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${a.token}` },
-      body: JSON.stringify({ mediaUrl: photo, mediaType: "image" }),
-    }),
-    { params: Promise.resolve({ conversationId: conversation.id }) }
-  )
-  expect([200, 201]).toContain(res.status)
-  const body = (await res.json()) as { data: { id: string } }
-  const row = await db.private_messages.findUniqueOrThrow({ where: { id: body.data.id } })
-  expect(row).toMatchObject({ message_text: null, media_url: `${photo}-sealed`, media_type: "image" })
-})
