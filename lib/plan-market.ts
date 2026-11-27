@@ -27,7 +27,7 @@ export function mayBuyIn(countries: readonly (string | null)[]): boolean {
   return countries.every((c) => c === null || c === PLAN_MARKET)
 }
 
-type Listing = { city: string | null; latitude: number | null; longitude: number | null }
+export type Listing = { city: string | null; latitude: number | null; longitude: number | null }
 
 /**
  * A listing's market: the country of the catalogued city its label names, only when its pin is inside that city's

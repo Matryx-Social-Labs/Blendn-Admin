@@ -8,7 +8,7 @@ import { currentUser, requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { MIN_CELL } from "@/lib/disclosure"
 import { hasEntitlement } from "@/lib/entitlements"
-import { mayBuyVenueHere } from "@/lib/plan-market"
+import { mayBuyVenueHere, type Listing } from "@/lib/plan-market"
 import { logger } from "@/lib/logger"
 import { findProfileContactInfo } from "@/lib/moderation/contact-info"
 import { checkKeywords } from "@/lib/moderation/keyword-filter"
@@ -194,7 +194,7 @@ async function senderAt(client: Pick<typeof db, "venues" | "organisation_members
  * Why a venue without Venue Pro sends nothing. Where Venue Pro is not sold for the venue (its own city and pin,
  * SCRUM-1448) the refusal names no plan: there is nothing to add there, and offers are switched off everywhere.
  */
-async function noProRefusal(place: { city: string | null; latitude: number | null; longitude: number | null }): Promise<Refusal> {
+async function noProRefusal(place: Listing): Promise<Refusal> {
   return new Refusal(
     (await mayBuyVenueHere(place))
       ? "Offers to regulars are part of Venue Pro. See your plan to add it."
@@ -217,7 +217,9 @@ export async function sendOffer(input: { venueId: string; text: string; days: nu
   if (await overLimit(`offer-send:${gate.place.owner_org_id}:${venueId}`, SENDS_PER_MINUTE, MINUTE_MS)) {
     throw new Refusal("Too many tries. Wait a minute and send again.")
   }
-  if (!(await hasEntitlement({ kind: "venue", id: venueId }, "venue_pro"))) throw await noProRefusal(gate.place)
+  // Built before the transaction, so no catalogue read waits on a held connection.
+  const noPro = await noProRefusal(gate.place)
+  if (!(await hasEntitlement({ kind: "venue", id: venueId }, "venue_pro"))) throw noPro
   /*
    * No offer reaches anybody until regulars is switched on (review M2): only then does the app show "Offers from
    * places", the switch that turns them off, so nobody gets a promotion with no way to stop it. Existing profiles
@@ -241,7 +243,7 @@ export async function sendOffer(input: { venueId: string; text: string; days: nu
     const held = await senderAt(tx, venueId, user.id)
     if (!held || held.place.owner_org_id !== gate.place.owner_org_id) throw new Refusal(NOT_YOUR_VENUE)
     if (!maySendVenueOffers(held.member.role)) throw new Refusal("Only an owner or admin of the venue’s organisation can send offers.")
-    if (!(await hasEntitlement({ kind: "venue", id: venueId }, "venue_pro", {}, now, tx))) throw await noProRefusal(held.place)
+    if (!(await hasEntitlement({ kind: "venue", id: venueId }, "venue_pro", {}, now, tx))) throw noPro
     const week = await sentThisWeek(venueId, now, tx)
     const next = nextOfferAt(week)
     if (next) throw new Refusal(`This venue has sent its ${OFFERS_PER_WEEK} offers this week. The next can go ${DAY.format(next)}.`)

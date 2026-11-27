@@ -10,7 +10,7 @@ import { mkdirSync } from "node:fs"
  * locked out of what it cannot buy. A venue organisation owns a Toronto venue
  * (a CA city in the catalogue's migration rows, its pin inside Toronto) and a
  * Bengaluru venue. The Toronto venue's page at 1280 and 390 shows its 12
- * months (the canary: 23 guests on a Monday morning 60 days ago, outside 30
+ * months (the canary: 23 guests on one night 60 days ago, outside 30
  * days) and its history before the claim, says "free while we launch in your
  * city", and names no plan, no price and no Buy. The Bengaluru venue of the
  * same organisation is unchanged: 30 days, the locked preview and "See Venue

@@ -105,7 +105,7 @@ export interface VenueInsightsView {
   /** "market": Venue Pro is not sold for this venue, so what it adds is open and no plan is named. */
   plan: "listed" | "pro" | "market"
   recent: VenueInsight
-  /** Pro only, and only for a claimed venue. */
+  /** Pro or market (Venue Pro not sold here) only, and only for a claimed venue. */
   preClaim: PreClaimHistory | null
 }
 
@@ -225,7 +225,8 @@ export async function venueInsights(venueId: string, now: Date = new Date()): Pr
     : (await mayBuyVenueHere(v))
       ? "listed"
       : "market"
-  const pro = plan !== "listed"
+  // Spelled out, so a plan added later stays closed until it is named here.
+  const pro = plan === "pro" || plan === "market"
   const to = venueDayBounds(v.timezone, v.day_reset_hour, now).start
   const key = `${venueId}:${plan}:${to.toISOString()}:${v.claimed_at.toISOString()}`
   const hit = cache.get(key)

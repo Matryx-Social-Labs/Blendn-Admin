@@ -138,8 +138,8 @@ async function requireVenueBuyer(venueId: string) {
 
 /**
  * Plans are sold only where their prices are (`mayBuyHere`, SCRUM-1151): the
- * server's gate, not the page's. Asked by each of the three starts (Analytics,
- * Event Insights; Venue Pro asks it of the venue's own row, `mayBuyVenueHere`,
+ * server's gate, not the page's. Asked by the Analytics and Event Insights
+ * starts (Venue Pro asks the same of the venue's own row, `mayBuyVenueHere`,
  * SCRUM-1448) once the buyer and payments are checked, before any of the
  * start's own refusals, a lock, a row or a Razorpay call; never by a cancel,
  * so an organisation that already pays can always stop it.
@@ -345,6 +345,7 @@ export async function startVenueProCheckout(venueId: string, period: "monthly" |
   const id = parse(idSchema, venueId, NOT_YOUR_VENUE)
   const chosen = parse(periodSchema, period, "Choose monthly or yearly.")
   const { user, venue, orgId, keyId } = await requireVenueBuyer(id)
+  // The venue's own market, not its organisation's (SCRUM-1448): a Bengaluru venue beside a Toronto one is sold.
   if (!(await mayBuyVenueHere(venue))) throw new Refusal(NOT_SOLD_HERE)
   const ready = await venueReadiness(id)
   if (!ready.chargeable) {

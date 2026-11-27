@@ -445,8 +445,8 @@ function VenueInsights({
   offers: VenueOffersView | null
   mayCompose: boolean
 }) {
-  const open = insights.plan !== "listed"
   const market = insights.plan === "market"
+  const open = insights.plan === "pro" || market
   const toPlan = isAdmin ? null : (
     <Button asChild size="sm" variant="outline">
       <Link href="/dashboard/plan">See Venue Pro</Link>
