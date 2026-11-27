@@ -7,7 +7,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 import { conversationPair } from "@/lib/conversations"
 import { purgeClosedLobbies } from "@/lib/lobby-retention"
 import { signAccessToken } from "@/lib/mobile-auth"
-import { recentLines } from "@/lib/report-evidence"
+import { dmWords, recentLines } from "@/lib/report-evidence"
 import { reportReason } from "@/lib/report-reasons"
 import { roomHandle } from "@/lib/room-handle"
 import { exportUser } from "@/scripts/export-user"
@@ -165,6 +165,15 @@ describe("a person report from a room or a DM keeps their last lines there", () 
     expect(await recentLines(outsider.id, w.ben.id, { eventId: w.eventId })).toBeNull()
     expect(await recentLines(outsider.id, w.ben.id, { conversationId: w.dm })).toBeNull()
     expect(await recentLines(w.ana.id, w.ben.id, { chatGroupId: w.room })).toBe(ben21to22AndThreat)
+  })
+
+  it("says a DM carried a photo, and skips empty lines", async () => {
+    expect(dmWords({ message_text: null, media_url: "https://x/p.jpg" })).toBe("[photo]")
+    expect(dmWords({ message_text: "look", media_url: "https://x/p.jpg" })).toBe("look [photo]")
+    const w = await world("ur_photo")
+    await db.private_messages.create({ data: { conversation_id: w.dm, sender_id: w.ben.id, message_text: "" } })
+    await db.private_messages.create({ data: { conversation_id: w.dm, sender_id: w.ben.id, message_text: null, media_url: "https://x/p.jpg" } })
+    expect(await recentLines(w.ana.id, w.ben.id, { conversationId: w.dm })).toBe("send me a photo or else\n[photo]")
   })
 
   it("bounds each line", async () => {

@@ -111,7 +111,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         message_id: messageId,
         message_type: messageType,
         reason,
-        // The words as they were, kept for the review after the message goes.
+        // The words as they were when reported, for the review.
         excerpt: messageExcerpt("content" in visible ? visible.content : dmWords(visible)),
         // Optional in the schema, so `undefined` when the phone omits it — and
         // the client always omits it. strictUndefinedChecks refused the write,

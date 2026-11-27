@@ -4507,8 +4507,8 @@ message report (room or DM, and Unmatch/Block and report with a `messageId`) the
 message itself; a person report the person's last 20 lines (500 characters
 each) in the room or conversation it came from: named by a room's or a
 conversation's handle, from a crew's or Blend's room, or from Unmatch/Block and
-report without a message. A raw id names no place and keeps none. Only from a
-room the reporter is in. The copy is for staff review: no mobile response and
+report without a message. Copied only from a room or conversation the reporter
+is in. The copy is for staff review: no mobile response and
 no data export carries it. A dismissed report loses it at 180 days
 (`docs/RETENTION.md`).
 
