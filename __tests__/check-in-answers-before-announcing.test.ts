@@ -48,7 +48,7 @@ const seat = (extending = false) =>
     event: { id: "ev1", kind: "event", title: "T", venue_name: null, organizer_org_id: null, venue: null },
     occurrenceId: "occ1",
     userId: "u1",
-    profile: { onboarded: true, age: 25, date_of_birth: null, intent_default: [], reveal_by_default: false },
+    profile: { onboarded: true, age: 25, date_of_birth: null, under_18_since: null, intent_default: [], reveal_by_default: false },
     point: { lat: 12.9, lng: 77.6 },
     deviceInfo: undefined,
     now: new Date(),

@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, ListPaginationSchema, ListQuerySchema, PageOrCursorQuerySchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, ListPaginationSchema, ListQuerySchema, PageOrCursorQuerySchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth, ROOM_BAN_GATE, ReportReasonSchema } from "@/lib/openapi/schemas/common"
 import {
   UserPublicProfileSchema,
   UserFavoritesResponseSchema,
@@ -723,7 +723,8 @@ registry.registerPath({
   tags: ["Mobile Message Requests"],
   summary: "Respond to message request",
   description:
-    "Recipient only. A request that is not yours to answer is 404, the same as one that does not exist, so a sender cannot check which request ids are real (SCRUM-371). **Only `accept` notifies the sender** (a push and a bell row, naming the accepter). `decline` and `block` send nothing: the product has no declined state, and a no is silent (SCRUM-621).",
+    "Recipient only. A request that is not yours to answer is 404, the same as one that does not exist, so a sender cannot check which request ids are real (SCRUM-371). **Only `accept` notifies the sender** (a push and a bell row, naming the accepter). `decline` and `block` send nothing: the product has no declined state, and a no is silent (SCRUM-621). " +
+    "`accept` from an account known to be under 18 is 403 `AGE_RESTRICTED` with `reasonCode` `AGE_RESTRICTED` and the participation sentence (SCRUM-1169); `decline` and `block` are open to everyone.",
   security: bearerAuth,
   request: {
     params: z.object({ requestId: z.string().uuid() }),
@@ -758,6 +759,7 @@ registry.registerPath({
   path: "/api/mobile/uploads/delete",
   tags: ["Mobile Uploads"],
   summary: "Delete uploaded file",
+  description: "Only your own `profile` or `chat` upload (`<folder>/<yourId>/…` on our bucket); any other URL is 403.",
   security: bearerAuth,
   request: {
     body: { content: { "application/json": { schema: DeleteUploadRequestSchema } } },
@@ -1237,7 +1239,7 @@ registry.registerPath({
         "application/json": {
           schema: z.object({
             messageType: z.enum(["group", "private"]),
-            reason: z.string().min(1).max(200),
+            reason: ReportReasonSchema,
             description: z.string().max(2000).optional(),
           }),
         },
@@ -1263,7 +1265,7 @@ registry.registerPath({
       content: {
         "application/json": {
           schema: z.object({
-            reason: z.string().min(1).max(200),
+            reason: ReportReasonSchema,
             description: z.string().max(2000).optional(),
           }),
         },
@@ -1292,7 +1294,7 @@ registry.registerPath({
       content: {
         "application/json": {
           schema: z.object({
-            reason: z.string().min(1).max(200),
+            reason: ReportReasonSchema,
             description: z.string().max(2000).optional(),
           }),
         },

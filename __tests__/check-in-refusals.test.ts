@@ -19,20 +19,26 @@ const code = (rel: string) =>
 const DOOR = "app/api/mobile/events/[eventId]/checkin/route.ts"
 /** The rules both doors share — the person and the fence (step 4, PL-G03). */
 const CORE = "lib/check-in-core.ts"
+/** The door code's stand-in for the fence (gate 13). */
+const ENTRY = "lib/entry-code-gate.ts"
 
 describe("every refusal at the door is recorded", () => {
-  const src = code(DOOR) + code(CORE)
+  const src = code(DOOR) + code(CORE) + code(ENTRY)
 
-  it("records all six ways to be turned away", () => {
+  it("records every way to be turned away", () => {
     /*
      * A refusal that is not recorded is a person who tried and left, and the
      * organiser never learns they existed. Every `errorResponse` on this path
      * that means "no, you cannot come in" gets one.
      */
     for (const reason of [
-      "under_age", "too_early", "day_cancelled", "too_late", "no_geofence", "out_of_range",
+      "under_age", "too_early", "day_cancelled", "too_late", "no_geofence", "out_of_range", "weak_fix",
     ]) {
       expect(src).toContain(`reason: "${reason}"`)
+    }
+    // The door code's four go through its one `record(reason)`.
+    for (const reason of ["door_code_wrong", "door_code_far", "door_code_locked", "door_code_paused"]) {
+      expect(src).toContain(`record("${reason}"`)
     }
   })
 
@@ -54,7 +60,7 @@ describe("every refusal at the door is recorded", () => {
      * would be absurd.
      */
     const calls = [...src.matchAll(/recordRefusal\(\{[\s\S]*?\}\)/g)].map((m) => m[0])
-    expect(calls.length).toBe(6)
+    expect(calls.length).toBe(8)
     for (const call of calls) {
       /*
        * Word-bounded. The first draft used `/lat|lng|.../` and failed on

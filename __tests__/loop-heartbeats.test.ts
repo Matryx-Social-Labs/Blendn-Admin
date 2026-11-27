@@ -247,7 +247,7 @@ describe("every loop beats (structural)", () => {
     (file, name, interval) => {
       const src = code(file)
       const inTry = src.split(`beat("${name}", ${interval})`).slice(0, -1).filter((before) => {
-        const last = [...before.matchAll(/\btry \{|\bcatch\b|\bfinally\b/g)].pop()
+        const last = [...before.matchAll(/\btry \{|(?<!\.)\bcatch\b|(?<!\.)\bfinally\b/g)].pop()
         return last?.[0] === "try {"
       })
       expect(inTry).toHaveLength(1)

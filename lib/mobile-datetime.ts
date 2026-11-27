@@ -32,3 +32,6 @@ export function mobileWhen(at: Date, timezone: string): string {
   const clock = `${part("hour")}${minute === "00" ? "" : `:${minute}`} ${part("dayPeriod")}`
   return `${part("weekday")} ${part("day")} ${part("month")}, ${clock}`
 }
+
+/** The time alone: "9 PM" / "9:30 PM" in `timezone` ("Try again at 10:52 PM"). */
+export const mobileTime = (at: Date, timezone: string): string => mobileWhen(at, timezone).split(", ")[1]

@@ -398,6 +398,7 @@
       "description",
       "details",
       "distance",
+      "doorCode",
       "doorPolicy",
       "endTime",
       "externalLink",

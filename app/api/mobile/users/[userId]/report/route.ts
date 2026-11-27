@@ -5,6 +5,7 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { userTargetFromRef } from "@/lib/user-ref"
 import { userIdFromDmRef } from "@/lib/conversation-ref"
+import { placeOfRef, recentLines } from "@/lib/report-evidence"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -61,11 +62,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return notFoundResponse("User not found")
     }
 
+    // Named by a room's or a DM's handle: their last lines there, for the review.
+    const place = placeOfRef(ref)
     await db.user_reports.create({
       data: {
         reporter_id: authUser.userId,
         reported_id: reportedId,
         reason: validation.data.reason,
+        excerpt: place && (await recentLines(authUser.userId, reportedId, place)),
         // Same shape and same outage as the event report — see there.
         ...(validation.data.description !== undefined && { description: validation.data.description }),
       },

@@ -3,7 +3,7 @@ import { registry } from "@/lib/openapi/registry"
 import { ErrorResponseSchema, MODERATION_UNAVAILABLE_NOTE, moderationUnavailableError, PARTICIPATION_GATE, RoomPersonFactsFields, standardErrors, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
 import {
   EventQuerySchema,
-  CheckinRequestSchema,
+  EventCheckinRequestSchema,
   RatingRequestSchema,
   RsvpRequestSchema,
   AnnounceRequestSchema,
@@ -210,7 +210,7 @@ registry.registerPath({
   description:
     "Drafts and private events you are not on the list for answer 404. An 18+ event answers " +
     "403 `AGE_RESTRICTED` for a viewer below the line (see lib/event-access.ts), and `reasonCode` says which refusal it is: " +
-    "`AGE_RESTRICTED` (a known age below the line), `AGE_UNKNOWN`, `PROFILE_INCOMPLETE`, and for an event hidden because its " +
+    "`AGE_RESTRICTED` (a known age below the line, or on taking part an account known to be under 18), `AGE_UNKNOWN`, `PROFILE_INCOMPLETE`, and for an event hidden because its " +
     "organisation was suspended a 404 `NOT_FOUND` with `reasonCode` `ORGANISER_SUSPENDED`, which every route that refuses such an event " +
     "says the same way to the same people (RSVP, save, Lobby, room preview, the door, the guest list, crews, chat). " +
     "Also carries `changedAt`/`changedFields`/`changedFrom` (changed while you are going) and `days`/`dayCount`/`dayNumber` (a multi-day run).",
@@ -312,13 +312,25 @@ registry.registerPath({
     "A refusal the person can fix says so in `reasonCode`, with `errorCode` and the sentence unchanged: " +
     "403 `FORBIDDEN` + `PROFILE_INCOMPLETE` before onboarding is finished, 403 `AGE_RESTRICTED` + " +
     "`AGE_UNKNOWN` when an age-restricted event meets no age on file (a known age below the line has none). " +
+    "An account known to be under 18 is 403 `AGE_RESTRICTED` + `AGE_RESTRICTED` with the participation sentence. " +
     "404 for a venue day's id: a venue's room is entered by going live there (`POST /api/mobile/venues/{venueId}/live`). " +
     "While `TICKETING` is on, a native ticketed event answers 403 `tickets_required` to someone who holds no ticket whose order is paid " +
-    "and is not the event's staff; letting a ticket in at the door does not check its holder in.",
+    "and is not the event's staff; letting a ticket in at the door does not check its holder in.\n\n" +
+    "**The door code (gate 13).** A fix over 150 m accuracy is refused (400 `OUT_OF_RANGE`) and recorded as `weak_fix`. While the host's " +
+    "code is live (`doorCode.available` on the event), that refusal and an `OUT_OF_RANGE` within 1 km of the fence carry " +
+    "`reasonCode: DOOR_CODE_OFFERED`: offer \"Enter door code\". With `doorCode` (an App Review account at a `review_demo` event " +
+    "ignores it), the fence is replaced and the answers are, in this order: 400 `DOOR_CODE_PAUSED` (\"The door code is paused. Ask the host.\"); " +
+    "429 `DOOR_CODE_LOCKED` (5 wrong in 10 minutes: \"Too many tries. Try again at 10:52 PM, or step outside and use GPS.\"; 10 wrong in the " +
+    "night or removed from the room by the host: \"Too many tries tonight. Step outside and use GPS.\"); 400 `DOOR_CODE_FAR` (no accuracy, " +
+    "over 1000 m, mocked, or more than 1 km short: \"You need to be at the venue to use the door code.\"); 400 `DOOR_CODE_CHANGED` (the code " +
+    "from just before the last three steps, not counted: \"That code just changed. Read the new one on the host’s screen.\"); 400 " +
+    "`DOOR_CODE_WRONG` (\"That code didn’t match. Check the host’s screen; it may have just changed.\"); 503 `DOOR_CODE_UNAVAILABLE` when " +
+    "the counters cannot be read (\"The door code isn’t available right now. Try GPS.\"; GPS is unaffected). Every other gate runs first, " +
+    "unchanged. A valid code checks in as on GPS; the row records `method: door_code`.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
-    body: { content: { "application/json": { schema: CheckinRequestSchema } } },
+    body: { content: { "application/json": { schema: EventCheckinRequestSchema } } },
   },
   responses: {
     200: { description: "Checked in", content: { "application/json": { schema: wrap(CheckinResponseSchema) } } },
@@ -843,6 +855,9 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/announce",
   tags: ["Mobile Events"],
   summary: "Send announcement (organizer only)",
+  description:
+    "Text only, up to 1000 characters: media is refused with 400. `kind: \"sponsored\"` is refused with 400 " +
+    "`Sponsored content goes out through a campaign` and writes nothing; sponsored content reaches a room only through a campaign.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),

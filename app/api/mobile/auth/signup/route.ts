@@ -22,6 +22,7 @@ import { checkPassword } from "@/lib/password"
 import { storedCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
 import { screenUserText, textNotAllowedResponse } from "@/lib/moderation/user-text"
+import { inboxTaken } from "@/lib/suspended-identity"
 
 export async function POST(request: NextRequest) {
   // Apply rate limiting
@@ -62,12 +63,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check if user already exists
-    const existingUser = await db.user.findUnique({
-      where: { email },
-    })
-
-    if (existingUser) {
+    /*
+     * Taken: any account holding the same inbox, also under another case, a
+     * +tag or moved dots (`identity_email`, SCRUM-1172). One answer whoever
+     * holds it, so sign-up never says which addresses are suspended (sign-in
+     * says so only after the password).
+     */
+    if (await inboxTaken(email)) {
       return conflictResponse("Email already registered")
     }
 

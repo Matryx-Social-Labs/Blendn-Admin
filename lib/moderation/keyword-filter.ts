@@ -58,8 +58,11 @@ function normalizeWords(text: string): string[] {
 // other word on the lists is `profanity` and does not (D-052a, `abuseHiddenCount` in `actions.ts`).
 const ENGLISH_KEYWORDS = new Set([
   "nigger", "nigga", "faggot", "fag", "retard", "kike", "spic",
-  "chink", "wetback", "tranny", "cunt",
+  "chink", "wetback", "tranny",
 ])
+
+// ── English swearing: hidden, `profanity` like every non-slur word (D-057) ──
+const ENGLISH_PROFANITY = new Set(["cunt"])
 
 // ── Hindi (Devanagari) ──
 const HINDI_DEVANAGARI = new Set([
@@ -120,6 +123,7 @@ const GUJARATI_KEYWORDS = new Set([
 // Merge all keyword sets
 const ALL_KEYWORDS: Set<string>[] = [
   ENGLISH_KEYWORDS,
+  ENGLISH_PROFANITY,
   HINDI_DEVANAGARI,
   HINDI_TRANSLITERATED,
   TAMIL_KEYWORDS,

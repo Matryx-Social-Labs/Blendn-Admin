@@ -265,7 +265,11 @@ version is a new row, never an edit), the `tickets_order_must_be_paid` trigger
 (a ticket exists only for a paid order), the
 `events_city_clean` and `venues_city_clean` triggers (`clean_city_text`, the database's half of `cityKey`, so a padded or "Toronto, ON" city cannot pass the city rule), the
 system user `blendn-system` that owns
-every venue day, and the `system_user_is_permanent` trigger that refuses its
+every venue day, the `identity_email` function and its expression index
+`User_identity_email_idx` (one key per inbox: sign-up's "already registered" and
+the Google/Apple suspended refusal read it, `lib/suspended-identity.ts`; on a
+`db push` database every sign-up fails for want of the function), and the
+`system_user_is_permanent` trigger that refuses its
 deletion. On a `db push` database `venueDayFor` fails for want of that user,
 and says so. See `docs/VENUES.md` § Venue days.
 

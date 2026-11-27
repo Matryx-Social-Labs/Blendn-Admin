@@ -13,7 +13,8 @@ const tags = ["Mobile Friends"]
 
 /** The invite landing's reasons, beside the errorCodes installed builds match on (SV10). */
 const REASONS =
-  "A refusal for an unfinished profile is 403 `FORBIDDEN` with `reasonCode` `PROFILE_INCOMPLETE`; a rate limit is 429 `RATE_LIMITED` " +
+  "A refusal for an unfinished profile is 403 `FORBIDDEN` with `reasonCode` `PROFILE_INCOMPLETE`; for an account known to be under 18, " +
+  "403 `AGE_RESTRICTED` with `reasonCode` `AGE_RESTRICTED` (SCRUM-1169); a rate limit is 429 `RATE_LIMITED` " +
   "with `reasonCode` `RATE_LIMITED`, `retryAfter` (seconds, also the `Retry-After` header). The `errorCode`s are unchanged: read `reasonCode ?? errorCode`. "
 
 const SAME_404 =
