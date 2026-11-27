@@ -360,8 +360,9 @@ person they were blocked.
 
 **A `location` or event `city` can be null, and is never coordinates.** No read
 looks a city up (SCRUM-1229): sign-in, session, a profile, a friend, the roster,
-event detail, the feed and favourites return the stored value, and so does the
-`PUT /profiles/:userId` response. A profile location still stored as
+event detail, the feed and favourites return the stored value wherever they show a
+city at all (D-030 decides that: beside a pseudonym there is none), never coordinates,
+and so does the `PUT /profiles/:userId` response. A profile location still stored as
 coordinates (from old builds) reads as `null` until the person sets a city.
 `PUT /profiles/:userId` with `location` as `lat,lon` stores the city at those
 coordinates (one lookup); if that lookup fails it keeps the stored location and
