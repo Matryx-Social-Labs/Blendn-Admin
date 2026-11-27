@@ -54,16 +54,11 @@ function required(name: string): string {
   return value
 }
 
-function railwayAuth(): Record<string, string> {
-  if (process.env.RAILWAY_LOGS_PROJECT_TOKEN) return { "Project-Access-Token": process.env.RAILWAY_LOGS_PROJECT_TOKEN }
-  if (process.env.RAILWAY_LOGS_API_TOKEN) return { authorization: `Bearer ${process.env.RAILWAY_LOGS_API_TOKEN}` }
-  throw new Error("RAILWAY_LOGS_PROJECT_TOKEN (or RAILWAY_LOGS_API_TOKEN) is not set")
-}
-
 async function railway<T>(query: string, variables: Record<string, unknown>): Promise<T> {
   const res = await fetch(RAILWAY_API, {
     method: "POST",
-    headers: { "content-type": "application/json", ...railwayAuth() },
+    // A project token: one environment, made by the owner (DEPLOYMENT.md, Logs). Never a broader one.
+    headers: { "content-type": "application/json", "Project-Access-Token": required("RAILWAY_LOGS_PROJECT_TOKEN") },
     body: JSON.stringify({ query, variables }),
     signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
   })
@@ -197,6 +192,7 @@ async function archiveHour(
 /** Every whole hour of the last `HEAL_HOURS` not yet archived, or the one hour asked for (`YYYY-MM-DDTHH`). */
 export async function archiveLogs(now: Date, onlyHour?: string): Promise<ArchiveResult> {
   const result: ArchiveResult = { written: [], failures: [] }
+  if (!process.env.RAILWAY_LOGS_PROJECT_TOKEN) return { ...result, failures: ["RAILWAY_LOGS_PROJECT_TOKEN is not set: the archive did not run"] }
   try {
     const env = required("RAILWAY_ENVIRONMENT_NAME")
     if (!/^[a-z0-9-]+$/.test(env)) throw new Error(`unexpected environment name ${env}`)

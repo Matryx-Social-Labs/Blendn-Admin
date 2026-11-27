@@ -210,6 +210,19 @@ describe("archiveLogs", () => {
     expect(sent).toHaveLength(0)
   })
 
+  it("refuses with one line, before any call, without the environment's project token", async () => {
+    delete process.env.RAILWAY_LOGS_PROJECT_TOKEN
+    // A broader token under the old fallback name is never used.
+    process.env.RAILWAY_LOGS_API_TOKEN = "account-wide"
+
+    const result = await archiveLogs(NOW)
+
+    delete process.env.RAILWAY_LOGS_API_TOKEN
+    expect(result.failures).toEqual(["RAILWAY_LOGS_PROJECT_TOKEN is not set: the archive did not run"])
+    expect(calls).toHaveLength(0)
+    expect(sent).toHaveLength(0)
+  })
+
   it("fails the hour, and writes nothing for it, when Railway refuses", async () => {
     ;(global.fetch as jest.Mock).mockImplementation(async () => Response.json({ errors: [{ message: "Not Authorized" }] }))
 
