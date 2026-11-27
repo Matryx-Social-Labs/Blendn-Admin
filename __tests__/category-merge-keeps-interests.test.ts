@@ -20,6 +20,7 @@ const tx = {
 }
 
 const mockDb = {
+  $queryRaw: jest.fn((): Promise<Record<string, unknown>[]> => mockSessionRows(mockDb.user.findUnique())),
   categories: { findUniqueOrThrow: jest.fn(), findMany: jest.fn() },
   // requireAdmin reads the role from the database (lib/current-user.ts): here, the session's own.
   user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null })) },
@@ -35,6 +36,7 @@ const mockAuth = jest.fn()
 jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth(); return s?.user ? { ...s, user: { signedInAt: Date.now(), ...s.user } } : s } }))
 
 import { mergeCategory } from "@/lib/category-actions"
+import { mockSessionRows } from "./support/session-account"
 
 const FROM = "11111111-1111-1111-1111-111111111111"
 const INTO = "22222222-2222-2222-2222-222222222222"

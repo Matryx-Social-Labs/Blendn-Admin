@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, MODERATION_UNAVAILABLE_NOTE, moderationUnavailableError, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, MODERATION_UNAVAILABLE_NOTE, moderationUnavailableError, PARTICIPATION_GATE, RoomPersonFactsFields, standardErrors, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
 import {
   EventQuerySchema,
   CheckinRequestSchema,
@@ -210,7 +210,7 @@ registry.registerPath({
   description:
     "Drafts and private events you are not on the list for answer 404. An 18+ event answers " +
     "403 `AGE_RESTRICTED` for a viewer below the line (see lib/event-access.ts), and `reasonCode` says which refusal it is: " +
-    "`AGE_RESTRICTED` (a known age below the line), `AGE_UNKNOWN`, `PROFILE_INCOMPLETE`, and for an event hidden because its " +
+    "`AGE_RESTRICTED` (a known age below the line, or on taking part an account known to be under 18), `AGE_UNKNOWN`, `PROFILE_INCOMPLETE`, and for an event hidden because its " +
     "organisation was suspended a 404 `NOT_FOUND` with `reasonCode` `ORGANISER_SUSPENDED`, which every route that refuses such an event " +
     "says the same way to the same people (RSVP, save, Lobby, room preview, the door, the guest list, crews, chat). " +
     "Also carries `changedAt`/`changedFields`/`changedFrom` (changed while you are going) and `days`/`dayCount`/`dayNumber` (a multi-day run).",
@@ -312,6 +312,7 @@ registry.registerPath({
     "A refusal the person can fix says so in `reasonCode`, with `errorCode` and the sentence unchanged: " +
     "403 `FORBIDDEN` + `PROFILE_INCOMPLETE` before onboarding is finished, 403 `AGE_RESTRICTED` + " +
     "`AGE_UNKNOWN` when an age-restricted event meets no age on file (a known age below the line has none). " +
+    "An account known to be under 18 is 403 `AGE_RESTRICTED` + `AGE_RESTRICTED` with the participation sentence. " +
     "404 for a venue day's id: a venue's room is entered by going live there (`POST /api/mobile/venues/{venueId}/live`). " +
     "While `TICKETING` is on, a native ticketed event answers 403 `tickets_required` to someone who holds no ticket whose order is paid " +
     "and is not the event's staff; letting a ticket in at the door does not check its holder in.",
@@ -332,7 +333,8 @@ const NightPersonSchema = z
     userId: z.string().describe("Their handle in this room (`rh_…`), never an account id. `POST /matches/likes` and message requests take it."),
     displayName: z.string().describe("The room's pseudonym, or their name where they revealed here."),
     photo: z.string().nullable().describe("Only beside a name; null beside a pseudonym."),
-    age: z.number().int().nullable(),
+    age: z.number().int().nullable().describe("Only beside a name; null beside a pseudonym (D-030)."),
+    ...RoomPersonFactsFields,
     insideNow: z.boolean().describe("Still checked in. False reads \"Was here\"."),
     youLiked: z.boolean(),
     overlap: z.string().nullable().describe("One sentence of what you share, or null. Always null on a night under 8 people."),
@@ -701,7 +703,7 @@ registry.registerPath({
     "**Limits, read before anything about the recipient:** 20 per room per hour, 60 a day; 5 per room per hour and 15 a day for an account under 24 h; 5 per room per hour once 20 of your waves in the last 24 h are unanswered. Counted from stored waves, so a refused wave never counts.\n\n" +
     "`toUserId` must be the handle this event's roster gave you (SCRUM-371). A raw user id, another event's handle or a forged one is answered exactly as somebody not in the room (403 `RECIPIENT_NOT_HERE`). Your own id is 400.\n\n" +
     "**For your crew (`asCrewId`, crews 5-A):** a crew → person wave, stored as the crew like with `is_wave` and shown to that person alone (`crewWaves` on `GET` here, `crewRooms` on `GET /waves`, a `room:crew_wave` ping, `wavedAtYou` on the crew's card); never a line in your crew's chat, never a push. The crew like's rules, limits (the 30 a day) and refusals about your own crew apply (403 not checked in, crew not here, no room for one more). Every refusal about THEM — not here, not open to crews, a block across the crew, a friend, banned, a forged handle — is `{ sent: true, mutual: false }`, storing nothing. Their wave back at the crew opens the Mix (`blend`).\n\n" +
-    "**Error codes:** `VALIDATION_FAILED` (400, waving at yourself), `NOT_CHECKED_IN` (403, you: not in the room, staff, a host, or the room closed), `RECIPIENT_NOT_HERE` (403 — not in the room, hidden, banned, a friend, a host, or a block either way; and also when YOU have Show online off, since a hidden person waves at nobody (SCRUM-1056); deliberately indistinguishable), `RATE_LIMITED` (429, a limit above, with `retryAfter`; says nothing about them), `WAVE_TOO_SOON` (429, a new wave at the same person within 10 minutes in another room, with `retryAfter`)",
+    "**Error codes:** `VALIDATION_FAILED` (400, waving at yourself), `NOT_CHECKED_IN` (403, you: not in the room, staff, a host, or the room closed), `RECIPIENT_NOT_HERE` (403 — not in the room, hidden, banned, a friend, a host, or a block either way; and also when YOU have Show online off, since a hidden person waves at nobody (SCRUM-1056); deliberately indistinguishable), `RATE_LIMITED` (429, a limit above, with `retryAfter`; says nothing about them)",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -842,6 +844,9 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/announce",
   tags: ["Mobile Events"],
   summary: "Send announcement (organizer only)",
+  description:
+    "Text only, up to 1000 characters: media is refused with 400. `kind: \"sponsored\"` is refused with 400 " +
+    "`Sponsored content goes out through a campaign` and writes nothing; sponsored content reaches a room only through a campaign.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),

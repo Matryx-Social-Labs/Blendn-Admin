@@ -153,16 +153,20 @@ report upheld (`resolved`) within 180 days. Anything with a report still
 `pending` is held until it is decided. A held message keeps its post and its
 room. A storage delete that fails keeps its row for the next pass.
 
-**Not yet:** the purge is a dry run that logs counts until `LOBBY_PURGE=delete`
-is set on the service. Turn it on once the privacy policy says these windows
-(draft: `.context/plans/privacy-retention-draft.md`).
+**It deletes, on every pass** (SCRUM-1227). There is no dry run and no switch:
+the sweeper's pass hard-deletes what is past its time and logs the counts
+("Lobby purge"). The windows are decided (register D-029, 2026-11-26): room and
+Lobby content 180 days after the room closes, the holds above unchanged. The
+privacy policy's retention section states them (SCRUM-1138), and production
+takes this purge only once that section is live. Owed, not a gate: a lawyer's read on DPDP Rule 8(3)
+before 13 May 2027, which may ask one year for "personal data, traffic data and
+logs"; if it covers message content, `RETENTION_DAYS` goes up.
 
 **Tonight's question answers go at 30 days** (owner, 2026-11-10):
 `event_match_preferences.tonight_answer`, and `work_intent` beside it (why they
 were there, read by the same people), are set NULL 30 days after the event's
 last night ends (`purgeTonightAnswers`, same sweeper). The row and the person's
-other preferences stay. It is not behind `LOBBY_PURGE`: an answer is not held
-content. One refused by moderation is never stored, and no report copies an
+other preferences stay. An answer is not held content. One refused by moderation is never stored, and no report copies an
 answer (a person report keeps only the reporter's reason and description), so
 an open report holds nothing here.
 
@@ -173,7 +177,7 @@ reads them once the room closes; a returned wave already opened its
 conversation, which stays. The host's connection counts come from them, so the
 event's insight counts are frozen first (`event_insight_tallies`) and the delete
 waits for them; the admin funnel's "matched" counts the conversations matches
-opened, never these rows. Not behind `LOBBY_PURGE`: no report copies a wave. Crew likes
+opened, never these rows. No report copies a wave, so nothing holds one. Crew likes
 that made no Blend go 12 hours after their night (`purgeLapsedCrewLikes`), and
 crew invite links once their 7-day week is over, used, revoked or lapsed
 (`purgeLapsedCrewLinks`).

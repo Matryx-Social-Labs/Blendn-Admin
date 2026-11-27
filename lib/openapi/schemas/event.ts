@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { BadgeSchema, OverlapSchema, PaginationMetaSchema, DeviceInfoSchema, RoomUserRefSchema, RoomLensSchema } from "./common"
+import { BadgeSchema, OverlapSchema, PaginationMetaSchema, DeviceInfoSchema, RoomUserRefSchema, RoomLensSchema, RoomPersonFactsFields } from "./common"
 import { EventTicketingSchema } from "./tickets"
 
 /** Likes and waves name somebody only by this event's handle (SCRUM-371). */
@@ -116,19 +116,13 @@ export const RsvpRequestSchema = z
 export const AnnounceRequestSchema = z
   .object({
     content: z.string().max(1000),
-    /**
-     * Which of the three non-user message kinds this is.
-     *
-     * The route has always read `kind` and gated it through `canBroadcast`
-     * (`announce/route.ts`), and the spec documented only `content` — so a
-     * generated client could send an announcement and nothing else, and had no
-     * way to discover that `sponsored` and `system` existed or that they are
-     * gated differently.
-     *
-     * Defaults to `announcement`, matching the route's own fallback for an
-     * unrecognised value.
-     */
-    kind: z.enum(["announcement", "sponsored", "system"]).default("announcement"),
+    kind: z
+      .enum(["announcement", "system"])
+      .default("announcement")
+      .describe(
+        "`announcement` (the organising org, `canEdit`) or `system` (an app_admin); any other value is a 400. `sponsored` is refused: 400 " +
+          "`Sponsored content goes out through a campaign`, nothing written. Sponsored content reaches a room only through a campaign."
+      ),
   })
   .openapi("AnnounceRequest")
 
@@ -712,8 +706,9 @@ export const MatchListResponseSchema = z
           .int()
           .nullable()
           .describe(
-            "Whole years, derived server-side from the birth date. Never a birth date. Already public via `publicProfileFields` on /profiles/{userId}, so this carries no new exposure — and unlike `workField` it is NOT suppressed in a small room, since withholding it would only make the roster disagree with the profile one tap away."
+            "Whole years, derived server-side from the birth date. Never a birth date. Only when `revealed`; null before a reveal (D-030), when `ageBand` and `tenure` say what the row may. The key stays for installed builds."
           ),
+        ...RoomPersonFactsFields,
         insideNow: z
           .boolean()
           .describe("Checked in now. Every `true` card sorts before every `false` one, whatever the score (SCRUM-1055)."),
@@ -919,8 +914,9 @@ export const AttendeeListResponseSchema = z
          */
         name: z.string(),
         image: z.string().nullable().optional(),
-        age: z.number().nullable(),
-        location: z.string().nullable(),
+        age: z.number().nullable().describe("Only beside their name; null beside a pseudonym (D-030)."),
+        location: z.string().nullable().describe("Only beside their name; null beside a pseudonym (D-030)."),
+        ...RoomPersonFactsFields,
         checkInTime: z.string().datetime(),
       })
     ),

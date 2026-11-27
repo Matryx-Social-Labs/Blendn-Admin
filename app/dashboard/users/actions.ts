@@ -11,6 +11,7 @@ import { COMPANY, isStaffEmail } from "@/lib/company"
 import { ageFrom } from "@/lib/age"
 import type { user_role } from "@prisma/client"
 import { SYSTEM_USER_ID } from "@/lib/event-kind"
+import { activeMembership } from "@/lib/org-membership"
 
 export interface UserWithProfile {
   id: string
@@ -402,6 +403,12 @@ export async function updateUserRole(id: string, role: user_role): Promise<{ suc
   }
   if (promoting && before.suspended_at) throw new Refusal("A suspended account can't be made an admin.")
   if (promoting && before.role === "app_admin") throw new Refusal("They're already an admin.")
+  // A host's dashboard is their membership, not this row (SCRUM-1247): `attendee` here would change nothing they can do.
+  if (role === "attendee" && (await db.organisation_members.count({ where: { user_id: id, ...activeMembership } })) > 0) {
+    throw new Refusal(
+      "They're a member of an organisation, and that is what gives them the dashboard. Remove them from it, or suspend the account or the organisation."
+    )
+  }
 
   const pending = await db.$transaction(async (tx) => {
     let approvedBy: string | null = null

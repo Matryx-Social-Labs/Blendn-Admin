@@ -57,9 +57,9 @@ import { deleteFile, isConfigured, sealedChatKey } from "./tigris"
  * keeps its post and its room. Account deletion keeps its own path
  * (`DELETE /api/mobile/account`); this only ever takes what is past its time.
  *
- * Dry run unless `LOBBY_PURGE=delete`: a pass then logs what it would delete.
- * `off` does nothing. The privacy policy names these windows once the owner
- * and the lawyer have signed the wording (`.context/plans/privacy-retention-draft.md`).
+ * Every pass deletes; there is no dry run and no switch (SCRUM-1227). The
+ * windows are decided (register D-029); the privacy policy's retention section
+ * states them (SCRUM-1138).
  */
 export const RETENTION_DAYS = 180
 
@@ -68,16 +68,7 @@ const MESSAGE_BATCH = 5_000
 const POST_BATCH = 500
 const MEMBER_BATCH = 5_000
 
-export type PurgeMode = "off" | "log" | "delete"
-
-/** `LOBBY_PURGE`: unset is a dry run that logs; `delete` deletes; `off` does nothing. */
-export function purgeModeFromEnv(raw: string | undefined = process.env.LOBBY_PURGE): PurgeMode {
-  const v = raw?.trim().toLowerCase()
-  return v === "delete" ? "delete" : v === "off" ? "off" : "log"
-}
-
 export interface PurgePass {
-  mode: PurgeMode
   messages: number
   posts: number
   photos: number
@@ -121,9 +112,7 @@ async function messagesPastTheirTime(since: Date) {
   `
 }
 
-/** `frozenOnly`: in delete mode, only posts whose event's insight counts are frozen (lib/insight-tallies.ts). */
-async function postsPastTheirTime(since: Date, frozenOnly: boolean) {
-  const frozen = frozenOnly ? Prisma.sql`AND EXISTS (SELECT 1 FROM event_insight_tallies t WHERE t.event_id = p.event_id)` : Prisma.empty
+async function postsPastTheirTime(since: Date) {
   return db.$queryRaw<{ id: string; photo_url: string | null }[]>`
     SELECT p.id, p.photo_url
       FROM board_posts p
@@ -138,8 +127,8 @@ async function postsPastTheirTime(since: Date, frozenOnly: boolean) {
                          JOIN message_reports r ON r.message_type = 'board_request' AND r.message_id = q.id
                         WHERE q.post_id = p.id AND ${holdingReport(since)})
        AND NOT EXISTS (SELECT 1 FROM chat_groups g JOIN chat_messages m ON m.chat_group_id = g.id WHERE g.board_post_id = p.id)
-       -- Its event's counts are frozen first: an accepted ask is a connection.
-       ${frozen}
+       -- Its event's counts are frozen first (lib/insight-tallies.ts): an accepted ask is a connection.
+       AND EXISTS (SELECT 1 FROM event_insight_tallies t WHERE t.event_id = p.event_id)
      LIMIT ${POST_BATCH}
   `
 }
@@ -174,10 +163,10 @@ async function deleteObjects<T extends { id: string }>(rows: T[], urlOf: (row: T
 
 /**
  * Member rows of a room past its time that still carry a pseudonym, and whose
- * person has no message left in the room once `going` (this pass's purge) is
- * gone. An event's room, or a post's room still held by a message.
+ * person has no message left in the room. An event's room, or a post's room
+ * still held by a message.
  */
-const membersToBlank = (since: Date, going: string[]) => Prisma.sql`
+const membersToBlank = (since: Date) => Prisma.sql`
   SELECT cm.id
     FROM chat_group_members cm
     JOIN chat_groups g ON g.id = cm.chat_group_id
@@ -187,45 +176,19 @@ const membersToBlank = (since: Date, going: string[]) => Prisma.sql`
      AND ${closesAt} < ${since}
      AND cm.anonymous_name IS NOT NULL
      AND NOT EXISTS (SELECT 1 FROM chat_messages m
-                      WHERE m.chat_group_id = cm.chat_group_id AND m.user_id = cm.user_id
-                        AND NOT (m.id = ANY(${going}::uuid[])))
+                      WHERE m.chat_group_id = cm.chat_group_id AND m.user_id = cm.user_id)
    LIMIT ${MEMBER_BATCH}`
 
 /** One bounded pass. Idempotent: every delete is of rows the selects just found past their time. */
-export async function purgeClosedLobbies(now: Date = new Date(), mode: PurgeMode = purgeModeFromEnv()): Promise<PurgePass> {
-  const pass: PurgePass = { mode, messages: 0, posts: 0, photos: 0, hostPosts: 0, alertPreferences: 0, seenMarkers: 0, feedback: 0, pseudonyms: 0, excerpts: 0, kept: 0, hasMore: false }
-  if (mode === "off") return pass
+export async function purgeClosedLobbies(now: Date = new Date()): Promise<PurgePass> {
+  const pass: PurgePass = { messages: 0, posts: 0, photos: 0, hostPosts: 0, alertPreferences: 0, seenMarkers: 0, feedback: 0, pseudonyms: 0, excerpts: 0, kept: 0, hasMore: false }
   const since = new Date(now.getTime() - RETENTION_DAYS * DAY_MS)
-  // Before anything goes: in delete mode the posts' select waits for this row. A dry run counts as if
-  // frozen, since delete mode freezes first.
-  if (mode === "delete") await freezeInsightTallies(since, { everyNight: false })
+  // Before anything goes: the posts' select waits for this row.
+  await freezeInsightTallies(since, { everyNight: false })
 
   const messages = await messagesPastTheirTime(since)
-  const posts = await postsPastTheirTime(since, mode === "delete")
+  const posts = await postsPastTheirTime(since)
   pass.hasMore = messages.length === MESSAGE_BATCH || posts.length === POST_BATCH
-
-  if (mode === "log") {
-    const [hostPosts, prefs, seen, feedback, pseudonyms, excerpts] = await Promise.all([
-      db.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM board_host_posts h JOIN events e ON e.id = h.event_id WHERE ${closesAt} < ${since}`,
-      db.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM board_alert_preferences a JOIN events e ON e.id = a.event_id WHERE ${closesAt} < ${now}`,
-      db.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM board_seen s JOIN events e ON e.id = s.event_id WHERE ${closesAt} < ${now}`,
-      db.event_feedback.count({ where: { message_id: { in: messages.map((m) => m.id) } } }),
-      db.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM (${membersToBlank(since, messages.map((m) => m.id))}) b`,
-      db.message_reports.count({ where: dismissedPastTheirTime(since) }),
-    ])
-    return {
-      ...pass,
-      messages: messages.length,
-      posts: posts.length,
-      photos: [...messages.map((m) => m.media_url), ...posts.map((p) => p.photo_url)].filter((u) => u && sealedChatKey(u)).length,
-      hostPosts: Number(hostPosts[0]?.n ?? 0),
-      alertPreferences: Number(prefs[0]?.n ?? 0),
-      seenMarkers: Number(seen[0]?.n ?? 0),
-      feedback,
-      pseudonyms: Number(pseudonyms[0]?.n ?? 0),
-      excerpts,
-    }
-  }
 
   const gone = await deleteObjects(messages, (m) => m.media_url)
   if (gone.ids.length) {
@@ -239,7 +202,7 @@ export async function purgeClosedLobbies(now: Date = new Date(), mode: PurgeMode
     pass.messages = deleted.count
   }
   // After the messages, so a person whose messages just went is reached; one whose message is held is not.
-  pass.pseudonyms = await db.$executeRaw`UPDATE chat_group_members SET anonymous_name = NULL, updated_at = now() WHERE id IN (${membersToBlank(since, [])})`
+  pass.pseudonyms = await db.$executeRaw`UPDATE chat_group_members SET anonymous_name = NULL, updated_at = now() WHERE id IN (${membersToBlank(since)})`
   if (pass.pseudonyms === MEMBER_BATCH) pass.hasMore = true
 
   const postsGone = await deleteObjects(posts, (p) => p.photo_url)
@@ -300,8 +263,8 @@ async function freezeFeedbackTallies(messageIds: string[]): Promise<void> {
  * the event's last night ends (owner, 2026-11-10). Both are set NULL; the row
  * and the person's other preferences stay.
  *
- * Not behind `LOBBY_PURGE`: that switch exists for content held for safety and
- * legal requests, and an answer is neither. One refused by moderation is never
+ * No hold applies: holds are for content kept for safety and legal requests,
+ * and an answer is neither. One refused by moderation is never
  * stored (`screenUserText` on write), and no report copies an answer: a person
  * report (`user_reports`) carries only the reporter's reason and description.
  * So an open report holds nothing here.
@@ -338,8 +301,8 @@ export async function purgeTonightAnswers(now: Date = new Date()): Promise<{ ans
  * them: the host's connections, whose event is frozen first
  * (`event_insight_tallies`; the delete waits for it, as the Tonight answers'
  * does), and the admin funnel's "matched", which reads the conversations
- * instead (lib/loop-closure.ts). Not behind `LOBBY_PURGE`: no report copies a
- * wave. Crew likes have their own, shorter rule (`purgeLapsedCrewLikes`).
+ * instead (lib/loop-closure.ts). No report copies a wave, so
+ * nothing holds one. Crew likes have their own, shorter rule (`purgeLapsedCrewLikes`).
  */
 export const GESTURE_DAYS = 30
 const GESTURE_BATCH = 5_000

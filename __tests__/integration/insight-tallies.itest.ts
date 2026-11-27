@@ -104,7 +104,7 @@ describe("connections read the same after the 180-day purge", () => {
     const before = await eventInsights(eventId)
     expect(before.funnel).toMatchObject({ connections: { atLeast: 2 }, met: { count: 4 } })
 
-    for (let i = 0; i < 10 && (await db.board_posts.count({ where: { event_id: eventId } })) > 0; i++) await purgeClosedLobbies(new Date(), "delete")
+    for (let i = 0; i < 10 && (await db.board_posts.count({ where: { event_id: eventId } })) > 0; i++) await purgeClosedLobbies()
 
     // The control: the post and its ask are really gone, so the figure below is the tally's.
     expect(await db.board_requests.count({ where: { event_id: eventId } })).toBe(0)
@@ -119,7 +119,7 @@ describe("connections read the same after the 180-day purge", () => {
     await db.event_insight_tallies.deleteMany({ where: { event_id: eventId } })
     const spy = jest.spyOn(appDb.event_insight_tallies, "createMany").mockRejectedValue(new Error("boom"))
     try {
-      await purgeClosedLobbies(new Date(), "delete")
+      await purgeClosedLobbies()
     } finally {
       spy.mockRestore()
     }

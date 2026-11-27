@@ -350,9 +350,10 @@ function isNotFound(error: unknown): boolean {
 /**
  * Delete a file from Tigris
  */
-export async function deleteFile(key: string): Promise<void> {
+export async function deleteFile(key: string, onlyBucket?: string): Promise<void> {
   const client = getS3Client()
-  for (const Bucket of bucketsHolding(key.split("/")[0] as UploadFolder)) {
+  // `onlyBucket`: a caller that judged the object in one bucket deletes it there and nowhere else.
+  for (const Bucket of onlyBucket ? [onlyBucket] : bucketsHolding(key.split("/")[0] as UploadFolder)) {
     // A deadline, like the prefix sweep's: erasure now deletes one sealed chat
     // copy at a time (SCRUM-448), and one hung call must not stall the purge.
     await client.send(new DeleteObjectCommand({ Bucket, Key: key }), {
@@ -408,13 +409,14 @@ export async function deletePrefix(prefix: string, keep: ReadonlySet<string> = n
   return deleted
 }
 
-/** One page of the public bucket under a prefix: keys and when each was last written (SCRUM-730). */
+/** One page of a bucket (the public one unless named) under a prefix: keys and when each was last written (SCRUM-730). */
 export async function listPublicObjects(
   prefix: string,
-  continuationToken?: string
+  continuationToken?: string,
+  bucket: string = TIGRIS_BUCKET
 ): Promise<{ objects: { key: string; lastModified: Date }[]; next: string | undefined }> {
   const page = await getS3Client().send(
-    new ListObjectsV2Command({ Bucket: TIGRIS_BUCKET, Prefix: prefix, ContinuationToken: continuationToken }),
+    new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: continuationToken }),
     { abortSignal: AbortSignal.timeout(DELETE_CALL_TIMEOUT_MS) }
   )
   const objects = (page.Contents ?? []).flatMap((o) => (o.Key && o.LastModified ? [{ key: o.Key, lastModified: o.LastModified }] : []))

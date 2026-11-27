@@ -23,6 +23,7 @@ Open the queues on the schedule in the on-call sheet as well.
 | Message | Do |
 |---|---|
 | `2 new reports, 1 severe flag; oldest pending 14 min.` and a dashboard link | Work the queues (**Act**) |
+| `3 hidden lines the model could not judge.` (at most every 15 minutes) | Open the queue and read those lines; check `OPENAI_API_KEY` on the service and the provider's status |
 | `Moderation degraded: …` | Check `OPENAI_API_KEY` on the service and the provider's status, or tell the engineer on call |
 | `Sexual image pulled (profile). A person must check it for a minor or a non-consensual image. key profile/… user …` | Go to **Suspected image** below. The pull is listed at `/dashboard/audit?action=moderation.sexual_image_hold`, not in the queues |
 | Mail to `grievance@blendn.app` | **Grievances and orders** below |

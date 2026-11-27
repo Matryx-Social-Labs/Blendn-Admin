@@ -24,6 +24,7 @@ import { identityForRef, nonEventRoomCard } from "@/lib/identity"
 import { roomPseudonymOrNull } from "@/lib/anonymous-names"
 import { citySlugFor, cityCatalogue } from "@/lib/cities"
 import { profileForSelfResponse } from "@/lib/self-profile"
+import { roomPersonFacts } from "@/lib/room-person-facts"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { userIdFromRef } from "@/lib/room-handle"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -88,7 +89,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return notFoundResponse("User not found")
     }
 
-    const normalizedLocation = await normalizeLocationToCity(user.profile?.location)
     const isSelf = authUser.userId === userId
 
     /*
@@ -134,27 +134,32 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     /*
      * A room card for somebody that room keeps anonymous — the same answer as
      * `GET /users/:ref`, for the same reason (see there and `IdentityScope`):
-     * their pseudonym in that room, age and city, and nothing that is the
-     * same in every room. `work_field` and `expertise` go too: the Grid shows
+     * their pseudonym in that room, the roster's age band and new / regular
+     * chip (`roomPersonFacts`), and nothing that is the same in every room. `work_field` and `expertise` go too: the Grid shows
      * a work field only past a small-room floor this route cannot apply, and
      * `blurPhoto` is one stored URL for every room they are in.
      */
     if (card || (room && !identified)) {
       // `pseudonym` only when the name IS a room pseudonym (SCRUM-1046): never for a crew's first name, never "Attendee".
       const pseudonym = card ? (card.pseudonym ? card.name : null) : await roomPseudonymOrNull(room!, userId)
+      // The roster's band and chip, from the one helper; no age or city before a reveal (D-030).
+      const { ageBand, tenure } = (await roomPersonFacts(authUser.userId, room, [userId])).get(userId)!
       return successResponse({
         id: ref,
         name: card ? card.name : (pseudonym ?? "Attendee"),
         ...(pseudonym !== null && { pseudonym }),
-        profile: p
-          ? { id: ref, age: profileAge, onboarded: p.onboarded, location: normalizedLocation }
-          : null,
+        profile: p ? { id: ref, age: null, onboarded: p.onboarded, location: null, ageBand, tenure } : null,
       })
     }
 
     const publicProfileFields = p && {
       id: ref,
-      age: profileAge,
+      /*
+       * No age or city for somebody this raw id does not name (D-030), and no band or chip: a raw id has no room to
+       * count a band over (`personCardBody` on `/users/:id` answers the same). Keys kept, null, for installed builds.
+       */
+      age: identified ? profileAge : null,
+      ...(!identified && { ageBand: null, tenure: null }),
       interests: p.interests,
       onboarded: p.onboarded,
       /*
@@ -223,7 +228,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
        * Languages, home state and sign — labels, and only to somebody who can
        * see who this is. Before that they are Tier B (plan v2 §8.5): a card
        * shows one of them as a shared line in a room big enough to hide in,
-       * never the set beside an age and a city.
+       * never the set beside an age band and a chip.
        */
       ...(identified
         ? {
@@ -243,8 +248,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * is one name long.
      */
     // `tier_b_changes` is the cooldown's ledger (lib/tier-b.ts), withheld with the birth date; `signup_source` is
-    // analytics (SCRUM-1273), withheld so installed builds read the shape they always did.
-    const { date_of_birth: _dob, tier_b_changes: _ledger, home_city_id: homeCityId, signup_source: _source, ...selfProfileFields } = {
+    // analytics (SCRUM-1273), withheld so installed builds read the shape they always did; `under_18_since` is the
+    // staff-side stamp (SCRUM-1169), withheld the same way.
+    const { date_of_birth: _dob, tier_b_changes: _ledger, home_city_id: homeCityId, signup_source: _source, under_18_since: _stamp, ...selfProfileFields } = {
       ...p,
       age: profileAge,
       // The editor's prefill, never stored until they pick it (lib/about-you.ts).
@@ -271,7 +277,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       // A room handle names its person by first name only (SCRUM-493).
       name: identified ? nameForRef(room, user.name) : "Attendee",
       ...(identified ? { image: user.image } : {}),
-      createdAt: user.createdAt,
+      // The join date only to somebody who may see who this is: before that it is a fingerprint (D-030).
+      ...(identified && { createdAt: user.createdAt }),
       ...(friend && { friend }),
       profile: user.profile
         ? {
@@ -287,7 +294,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
              * dating fields the public branch withholds.
              */
             ...(isSelf ? { ...selfProfileFields, homeCitySlug: citySlugFor(await cityCatalogue(), homeCityId) } : publicProfileFields),
-            location: normalizedLocation,
+            location: identified ? await normalizeLocationToCity(user.profile?.location) : null,
             ...(badges && { badges }),
             ...(earnedBadges && { earned_badges: earnedBadges }),
             ...(photoStates && { photo_states: photoStates }),
@@ -534,9 +541,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
      *
      * Google and Apple create accounts with no age. The app holds them at "The
      * basics" until a birth date of 18+ is given; this is the same rule for any
-     * client. Only the step from not-onboarded to onboarded is checked, so an
-     * account onboarded before the ruling — a 16-year-old included — is left
-     * alone, as the owner ruled.
+     * client. Only the step from not-onboarded to onboarded is checked here; an
+     * account known to be under 18 takes part nowhere, onboarded or not
+     * (`participationDenial`, SCRUM-1169).
      */
     if (finishesOnboarding && !existing?.onboarded && !isAdult(effectiveAge)) {
       return forbiddenResponse(`${ADULTS_ONLY} Add your date of birth to finish.`)
