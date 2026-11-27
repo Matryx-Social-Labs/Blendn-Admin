@@ -24,8 +24,8 @@ import { CrewsTonightPanel } from "@/components/dashboard/crews-tonight-panel"
 import { MeetingTonightPanel } from "@/components/dashboard/meeting-tonight-panel"
 import { TalkingAbout } from "@/components/dashboard/talking-about"
 import { useOpsSnapshot } from "@/lib/use-ops-snapshot"
-import { formatNumber, formatPct, hereSentence } from "@/lib/dashboard-format"
-import { liveCountLabel } from "@/lib/disclosure"
+import { countLabel, formatNumber, formatPct, hereSentence } from "@/lib/dashboard-format"
+import { liveCountLabel, midpoint, plus, type CountRange } from "@/lib/disclosure"
 import { cn } from "@/lib/utils"
 import { eventClock, livePhaseFor } from "@/lib/event-phase"
 
@@ -352,17 +352,20 @@ function VenueMood({ snapshot }: { snapshot: VenueLiveSnapshot }) {
   )
 }
 
-function SentimentBar({ snapshot }: { snapshot: { sentiment: { positive: number; neutral: number; negative: number } } }) {
-  const { positive, neutral, negative } = snapshot.sentiment
+/** The host's mood: exact, but a band of negatives beside one held-back category (D-012), drawn and judged at its midpoint. */
+function SentimentBar({ snapshot }: { snapshot: { sentiment: { positive: number; neutral: number; negative: number | CountRange } } }) {
+  const { positive, neutral, negative: told } = snapshot.sentiment
+  const negative = midpoint(told)
   const total = positive + neutral + negative
   const pct = (n: number) => (total === 0 ? 0 : (n / total) * 100)
+  const totalLabel = countLabel(plus(told, positive + neutral))
 
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="text-sm font-bold">Mood — last 30 min</h3>
         <span className="text-[0.75rem] text-faint-foreground">
-          {total} classified msg{total === 1 ? "" : "s"}
+          {totalLabel} classified msg{total === 1 ? "" : "s"}
         </span>
       </div>
       {total === 0 ? (
@@ -377,7 +380,7 @@ function SentimentBar({ snapshot }: { snapshot: { sentiment: { positive: number;
             <div className="bg-destructive" style={{ width: `${pct(negative)}%` }} />
           </div>
           <p className="text-[0.78rem] text-muted-foreground">
-            {positive} positive · {neutral} neutral · {negative} negative
+            {positive} positive · {neutral} neutral · <span className="whitespace-nowrap">{countLabel(told)} negative</span>
             {total >= 10 && negative / total >= 0.3 ? (
               <span className={cn(negative / total >= 0.4 && "text-destructive")}>
                 {" "}

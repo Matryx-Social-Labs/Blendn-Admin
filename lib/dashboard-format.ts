@@ -3,7 +3,7 @@
  * tested without rendering.
  */
 
-import type { FewCount, HeldTotal } from "./disclosure"
+import { midpoint, type CountRange, type FewCount, type HeldTotal } from "./disclosure"
 import { eventClock } from "./event-phase"
 import { CONFIRMED_WINDOW_MINUTES } from "./presence"
 
@@ -29,20 +29,23 @@ export function formatNumber(value: number | null) {
   return value === null ? "—" : numberFormat.format(value)
 }
 
-/** A disclosed count as every surface prints it: a few is words, a held total its floor ("12+"), never the figure (`discloseGroup`). */
-export const countLabel = (c: FewCount | HeldTotal) => (c === "few" ? "a few" : typeof c === "number" ? formatNumber(c) : `${formatNumber(c.atLeast)}+`)
+/**
+ * A disclosed count as every surface prints it: a few is words, a held total its floor ("12+", `discloseGroup`), a band
+ * its two ends ("23–27", `discloseNegatives`), never the figure.
+ */
+export const countLabel = (c: FewCount | HeldTotal | CountRange) =>
+  c === "few" ? "a few" : typeof c === "number" ? formatNumber(c) : "atLeast" in c ? `${formatNumber(c.atLeast)}+` : `${formatNumber(c.min)}–${formatNumber(c.max)}`
 
 /** The width a few is drawn at in a split bar: a nominal step, not its count (the count is not sent). */
 const FEW_WIDTH = 2
 
 /**
- * Each part's share of a split bar, in percent, a few at `FEW_WIDTH`. Null
- * when no part is shown exactly: nominal widths side by side would draw a
- * split nobody measured.
+ * Each part's share of a split bar, in percent, a few at `FEW_WIDTH` and a band at its midpoint (D-012). Null when no
+ * part is shown exactly: nominal widths side by side would draw a split nobody measured.
  */
-export function splitShares(parts: readonly FewCount[]): number[] | null {
-  const widths = parts.map((p) => (p === "few" ? FEW_WIDTH : p))
-  if (!parts.some((p) => p !== "few" && p > 0)) return null
+export function splitShares(parts: readonly (FewCount | CountRange)[]): number[] | null {
+  const widths = parts.map((p) => (p === "few" ? FEW_WIDTH : midpoint(p)))
+  if (!widths.some((w, i) => parts[i] !== "few" && w > 0)) return null
   const sum = widths.reduce((a, b) => a + b, 0)
   return widths.map((w) => (w / sum) * 100)
 }
