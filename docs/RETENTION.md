@@ -112,9 +112,10 @@ reports and legal requests, and 180 days after the close the chat sweeper
   its sealed copy, or one stored before SCRUM-448 under the sender's own
   `chat/<id>/` (SCRUM-1471). A URL that names anything else (another host,
   another person's upload, an avatar or event image), or an older object
-  another row still shows (a DM, a room still in its window, an image held for
-  a report), is not the message's to delete: storage is left alone, the message
-  still goes, and the pass logs one warning with the row ids, never the URL;
+  another row still shows or may show (a DM, a room or post still in its window,
+  an image held for a report, read as the orphan sweep reads them), is not the
+  message's to delete: storage is left alone, the message still goes, and the
+  pass logs one warning with counts by reason and row ids, never the URL;
 - Lobby posts, with their asks (`board_requests` cascades) and their photo in
   storage, and each post's room once it is empty;
 - the host's pinned post.

@@ -270,6 +270,9 @@ describe("the purge, photos stored under the older layout", () => {
   const legacy: Record<string, { id: string; key: string }> = {}
   const refused: Record<string, string> = {}
   const shared: Record<string, { id: string; key: string }> = {}
+  let legacyPost = { id: "", key: "" }
+  let refusedPost = ""
+  let event = ""
   let room = ""
   let other = ""
   let warned: unknown[][] = []
@@ -278,7 +281,9 @@ describe("the purge, photos stored under the older layout", () => {
     (await db.chat_messages.create({ data: { chat_group_id: room, user_id, content: "", metadata: { mediaUrl: url } }, select: { id: true } })).id
 
   beforeAll(async () => {
-    room = (await endedEvent(182, host)).room
+    const closed = await endedEvent(182, host)
+    room = closed.room
+    event = closed.id
     other = await makeUser(testId("ret-other"))
     users.push(other)
     const layouts = {
@@ -319,6 +324,29 @@ describe("the purge, photos stored under the older layout", () => {
     await db.retained_report_media.create({
       data: { user_id: author, object_key: held.key, message_id: randomUUID(), message_type: "private", account_deleted_at: ago(1), erase_by: ago(-30) },
     })
+    // Named elsewhere in a form only a full reader sees: another metadata field, an encoded separator.
+    const otherField = named("field1")
+    shared.otherField = { id: await withPhoto(otherField.url), key: otherField.key }
+    await db.chat_messages.create({ data: { chat_group_id: recent.room, user_id: author, content: "", metadata: { image: otherField.url } } })
+    const encoded = named("enc001")
+    shared.encoded = { id: await withPhoto(encoded.url), key: encoded.key }
+    await db.chat_messages.create({ data: { chat_group_id: recent.room, user_id: author, content: "", metadata: { mediaUrl: encoded.url.replace(`chat/${author}/`, `chat%2F${author}%2F`) } } })
+    // A post inside its window shows it.
+    const onPost = named("post01")
+    shared.onPost = { id: await withPhoto(onPost.url), key: onPost.key }
+    await db.board_posts.create({ data: { event_id: recent.id, author_id: author, kind: "chat", body: "x", photo_url: onPost.url, photo_status: "approved", photo_checked_at: ago(1) } })
+    // A key the reference reader cannot match exactly: left in storage.
+    const unreadable = `chat/${author}/1758000000000-sp0001-my photo.jpg`
+    shared.unreadable = { id: await withPhoto(`https://blendn-media-private.fly.storage.tigris.dev/${unreadable.replace(" ", "%20")}`), key: unreadable }
+    // A DM by another sender whose reference cannot be read: every older key of theirs stays.
+    const opaqueKey = `chat/${other}/1758000000000-op0001-photo.jpg`
+    shared.opaque = { id: await withPhoto(`https://blendn-media-private.fly.storage.tigris.dev/${opaqueKey}`, other), key: opaqueKey }
+    const dmOfOther = await db.private_conversations.create({ data: { user1_id: other, user2_id: author }, select: { id: true } })
+    await db.private_messages.create({ data: { conversation_id: dmOfOther.id, sender_id: other, media_url: `https://blendn-media-private.fly.storage.tigris.dev/chat/${other}/1758000000000-op0002-a%20b.jpg` } })
+    // Lobby posts due: one with an older photo of the author's own, one pointing elsewhere.
+    const postKey = `chat/${author}/1758000000000-pq1234-lobby.jpg`
+    legacyPost = { id: (await db.board_posts.create({ data: { event_id: event, author_id: author, kind: "chat", body: "x", photo_url: `https://blendn-media-private.fly.storage.tigris.dev/${postKey}`, photo_status: "approved", photo_checked_at: ago(183) }, select: { id: true } })).id, key: postKey }
+    refusedPost = (await db.board_posts.create({ data: { event_id: event, author_id: author, kind: "chat", body: "x", photo_url: "https://images.example.com/lobby.jpg", photo_status: "approved", photo_checked_at: ago(183) }, select: { id: true } })).id
     // Two messages due in the same pass: once both go, nothing names it.
     const twice = named("twice1")
     legacy.twiceA = { id: await withPhoto(twice.url), key: twice.key }
@@ -338,11 +366,21 @@ describe("the purge, photos stored under the older layout", () => {
 
   it("deletes nothing in storage for a URL that names anything but the author's own chat/ object", async () => {
     const deleted = mockDeleteFile.mock.calls.map((c) => c[0])
-    expect([...new Set(deleted)].sort()).toEqual([...new Set(Object.values(legacy).map((l) => l.key))].sort())
+    expect([...new Set(deleted)].sort()).toEqual([...new Set([...Object.values(legacy).map((l) => l.key), legacyPost.key])].sort())
+  })
+
+  it("deletes an older Lobby photo of the author's own with its post, and nothing for a post pointing elsewhere", async () => {
+    expect(mockDeleteFile).toHaveBeenCalledWith(legacyPost.key)
+    expect(await exists.post(legacyPost.id)).toBe(false)
+    expect(await exists.post(refusedPost)).toBe(false)
+  })
+
+  it("deletes an object named twice in one pass once", async () => {
+    expect(mockDeleteFile.mock.calls.filter((c) => c[0] === legacy.twiceA.key)).toHaveLength(1)
   })
 
   it("leaves an older object in storage while another row still names it, and still deletes the due row", async () => {
-    for (const name of ["inDm", "inOpenRoom", "held"]) {
+    for (const name of ["inDm", "inOpenRoom", "held", "otherField", "encoded", "onPost", "unreadable", "opaque"]) {
       expect(mockDeleteFile).not.toHaveBeenCalledWith(shared[name].key)
       expect(await exists.message(shared[name].id)).toBe(false)
     }
@@ -362,13 +400,23 @@ describe("the purge, photos stored under the older layout", () => {
 
   it("says so in one warning for the pass, by row id and refusal class, never the URL", async () => {
     expect(warned).toHaveLength(1)
-    const [, detail] = warned[0] as [string, { count: number; rows: { id: string; why: string }[] }]
-    expect(detail.count).toBe(Object.keys(refused).length + 3)
+    const [, detail] = warned[0] as [string, { count: number; byClass: Record<string, number>; rows: { id: string; why: string }[] }]
+    expect(detail.byClass).toEqual({
+      "other host": 4,
+      "our bucket, not as we write it": 1,
+      "not the author's prefix": 1,
+      "another prefix": 2,
+      traversal: 1,
+      empty: 1,
+      "possibly named by another row": 8,
+    })
+    expect(detail.count).toBe(18)
     expect(detail.rows).toHaveLength(5)
-    const ids = [...Object.values(refused), shared.inDm.id, shared.inOpenRoom.id, shared.held.id]
+    const ids = [...Object.values(refused), ...Object.values(shared).map((r) => r.id), refusedPost]
     for (const row of detail.rows) expect(ids).toContain(row.id)
+    // Every class name too: a key in place of a label would name its sender.
     const text = JSON.stringify(warned)
-    for (const fragment of ["http", "example.com", "chat/", "profile/", "events/", "photo.jpg", other]) expect(text).not.toContain(fragment)
+    for (const fragment of ["http", "example.com", "chat/", "profile/", "events/", ".jpg", author, other]) expect(text).not.toContain(fragment)
   })
 
   it("names the refusal class of each shape", async () => {
@@ -376,7 +424,10 @@ describe("the purge, photos stored under the older layout", () => {
     const bucket = "https://blendn-media-private.fly.storage.tigris.dev"
     expect(chatMediaRefusal(`https://images.example.com/chat/${author}/1-x-a.jpg`, author)).toBe("other host")
     expect(chatMediaRefusal(`https://someone-else.fly.storage.tigris.dev/chat/${author}/1-x-a.jpg`, author)).toBe("other host")
-    expect(chatMediaRefusal(`http://blendn-media-private.fly.storage.tigris.dev/chat/${author}/1-x-a.jpg`, author)).toBe("other host")
+    expect(chatMediaRefusal(`http://blendn-media-private.fly.storage.tigris.dev/chat/${author}/1-x-a.jpg`, author)).toBe("our bucket, not as we write it")
+    expect(chatMediaRefusal(`https://blendn-media-private.fly.storage.tigris.dev:443/chat/${author}/1-x-a.jpg`, author)).toBe("our bucket, not as we write it")
+    expect(chatMediaRefusal(`${bucket}/chat/sealed/not-a-uuid`, author)).toBe("our bucket, not as we write it")
+    expect(chatMediaRefusal(`${bucket}/chat/${author}`, author)).toBe("empty")
     expect(chatMediaRefusal(`chat/${author}/1-x-a.jpg`, author)).toBe("other host")
     expect(chatMediaRefusal(`${bucket}/chat/${other}/1-x-a.jpg`, author)).toBe("not the author's prefix")
     expect(chatMediaRefusal(`https://blendn-media.fly.storage.tigris.dev/profile/${author}/1-x-a.jpg`, author)).toBe("another prefix")
