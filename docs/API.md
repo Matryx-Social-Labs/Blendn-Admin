@@ -1418,6 +1418,21 @@ nothing. When nothing maps, `lens` is `null` and the app draws the plain card.
 
 **How long:** 30 days after the event's last night ends the answer and the `workIntent` are cleared; `GET .../preferences` then says `null` for both (`docs/RETENTION.md`).
 
+### Who a room's lists leave out
+
+**One list** (SCRUM-1386, `hiddenInRooms` in
+`lib/room-people.ts`): anybody in a block with you either way, anybody you closed
+a conversation with (an unmatch: both of you), your friends, and anybody you
+reported (any status; the person you reported is told nothing and still sees
+you). The deck (`/matches`), the roster (`/checkins`), an event room's
+`/participants`, `/people`, the wave lists (`/events/:eventId/waves`, `/waves`)
+and the room preview's `tasteMatchCount` all leave out the same people, so no
+list minus another names anybody. Each list's total (`pagination.totalCount`,
+`totalCount`, `total`) is the people it lists, never the room's `hereCount`,
+which stays the one public headcount. The live `event:checkin` /
+`event:room:checkin` / `event:checkout` copies follow the same rule
+(docs/SOCKET_EVENTS.md).
+
 ### A member a host banned from the room
 
 A ban closes the room's people, not only its chat. To a member a host banned
@@ -1462,7 +1477,7 @@ GET /events/:eventId/people?limit=30&cursor=rh_…
   a name; beside a pseudonym `age: null` with `ageBand` and `tenure`, as on the
   deck (*Matches*, D-030).
 - **Never listed:** you; staff; anyone in a block with you, either way; anyone
-  you closed a conversation with; **your friends**, whatever their "friends can
+  you closed a conversation with; anyone you reported; **your friends**, whatever their "friends can
   see me in rooms" setting — friends never meet as stranger cards (owner,
   2026-10-22); Show online status off; a member a host banned from the room; a
   suspended or deleted account. `total` counts who may be listed.
@@ -1693,7 +1708,8 @@ is how many of them were seen or checked in within the last 30 minutes.
 | `10` | ten or more share an interest with you |
 
 "Share" is the match deck's rule, over the people the roster would list (not
-you, no block either way, no friends, "Show online status" off left out). The
+you, no block either way, no closed pair, nobody you reported, no friends,
+"Show online status" off left out). The
 exact figure used to be returned, and two reads around one person's join, or a
 viewer swapping their own interests between reads, read out that person's
 overlap. A bucket cannot be differenced except across an edge (the third sharer,
@@ -2364,9 +2380,10 @@ the Lobby's own routes (by post or by ask): the user routes read a Lobby
 room's handle as an unknown id. In an event's room the roster (`/participants`) lists the
 people **in the room now** — checked in to its event, as `hereCount` counts
 them — and its hosts (`admin`, `moderator`) whether or not they are; a member
-who checked out or whose window expired is not listed. Its `totalCount` is the
-people listed, not the headcount: "show online status" off and friends are
-counted in `hereCount` and listed nowhere here. In a crew's room people are named by **first
+who checked out or whose window expired is not listed, nor anybody the deck
+leaves out (a block, a closed conversation, somebody you reported, a friend).
+Its `totalCount` is the people listed, not the headcount: "show online status"
+off and those people are counted in `hereCount` and listed nowhere here. In a crew's room people are named by **first
 name** (history, live messages, typing, roster, reply push) — they are there
 because a friend invited them and they said yes — and a member who leaves or is
 removed is out of the room at once, their row kept `left` for the history.

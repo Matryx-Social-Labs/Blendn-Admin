@@ -49,6 +49,8 @@ jest.mock("@/lib/conversations", () => ({
   // `matchesForEvent` excludes pairs who left each other. Empty here: these
   // fixtures are about multi-day check-ins, not about leaving.
   closedPairKeys: jest.fn().mockResolvedValue(new Set<string>()),
+  // …and blocks, through `hiddenInRooms` (lib/room-people.ts). None here either.
+  blockCounterparties: jest.fn().mockResolvedValue([]),
   ConversationClosedError: class ConversationClosedError extends Error {},
 }))
 // Friends are left out of the pool. None here: these fixtures are about
