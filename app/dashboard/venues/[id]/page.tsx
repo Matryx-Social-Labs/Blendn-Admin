@@ -424,6 +424,11 @@ const SINCE = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short",
  * is previewed from the static sample, never this venue's figures. Regulars &
  * offers (step 12) is Venue Pro: the real panel with Pro, the sample's preview
  * without it.
+ *
+ * Where Venue Pro is not sold for the venue (plan "market", SCRUM-1448) the
+ * year and the past are open and no plan is named: no tag, no preview, no
+ * "See Venue Pro". Regulars & offers is not shown there: it cannot be bought
+ * there and is switched off everywhere.
  */
 function VenueInsights({
   insights,
@@ -440,7 +445,8 @@ function VenueInsights({
   offers: VenueOffersView | null
   mayCompose: boolean
 }) {
-  const pro = insights.plan === "pro"
+  const open = insights.plan !== "listed"
+  const market = insights.plan === "market"
   const toPlan = isAdmin ? null : (
     <Button asChild size="sm" variant="outline">
       <Link href="/dashboard/plan">See Venue Pro</Link>
@@ -451,17 +457,17 @@ function VenueInsights({
       <Panel
         title="Who comes, and when"
         // Whole nights: the window ends where today began, so the figures move once a day.
-        hint={`${pro ? "last 12 months" : "last 30 days"} · ${SINCE.format(new Date(insights.recent.from))} – ${SINCE.format(new Date(insights.recent.to))} · guests only, never who`}
-        action={pro ? <ProTag plan="Venue Pro" /> : <span className="text-[0.75rem] text-faint-foreground">Listed</span>}
+        hint={`${open ? "last 12 months" : "last 30 days"} · ${SINCE.format(new Date(insights.recent.from))} – ${SINCE.format(new Date(insights.recent.to))} · guests only, never who${market ? " · free while we launch in your city" : ""}`}
+        action={market ? null : open ? <ProTag plan="Venue Pro" /> : <span className="text-[0.75rem] text-faint-foreground">Listed</span>}
       >
         <VenueInsightBody insight={insights.recent} />
       </Panel>
 
-      {pro && insights.preClaim ? (
+      {open && insights.preClaim ? (
         <Panel title="Before you claimed it" hint="totals only: the nights held here before your claim stay closed">
           <PreClaimFigures history={insights.preClaim} />
         </Panel>
-      ) : !pro ? (
+      ) : !open ? (
         <Locked
           plan="Venue Pro"
           title="A year of guests, and the venue's past"
@@ -474,7 +480,7 @@ function VenueInsights({
 
       {offers ? (
         <RegularsOffers offers={offers} venueId={venueId} venueName={venueName} mayCompose={mayCompose} isAdmin={isAdmin} />
-      ) : (
+      ) : market ? null : (
         <Locked
           plan="Venue Pro"
           title="Regulars & offers"

@@ -7,7 +7,7 @@ import { BILLING_PLANS, isBillingPlanKey } from "./billing-plans"
 import { db } from "./db"
 import { liveEntitlement, type LiveEntitlement } from "./entitlements"
 import { activeMembership } from "./org-membership"
-import { mayBuyHere } from "./plan-market"
+import { mayBuyVenueHere } from "./plan-market"
 import { mayManageVenueBilling } from "./rbac"
 
 /**
@@ -90,7 +90,10 @@ export interface VenuePlanRow {
    * closes. A yes or no, never whose, which plan or how much.
    */
   openElsewhere: boolean
-  /** Plans are sold where the owning organisation is (`mayBuyHere`, SCRUM-1151); elsewhere, no Buy and no charge date. */
+  /**
+   * Venue Pro is sold where the venue itself is (`mayBuyVenueHere`, its own city and pin, SCRUM-1448), never by its
+   * organisation's other listings; elsewhere, no Buy and no charge date, and what Pro adds is open (lib/venue-insights.ts).
+   */
   mayBuyHere: boolean
 }
 
@@ -128,10 +131,9 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
       ],
     },
     orderBy: { name: "asc" },
-    select: { id: true, name: true, city: true, owner_org_id: true, owner_org: { select: { display_name: true } } },
+    select: { id: true, name: true, city: true, latitude: true, longitude: true, owner_org_id: true, owner_org: { select: { display_name: true } } },
   })
   const ids = venues.map((v) => v.id)
-  const owners = [...new Set(venues.map((v) => v.owner_org_id).filter((id): id is string => id !== null && roleIn.has(id)))]
   const [since, subs, paid, pros, sold] = await Promise.all([
     venueDataSince(ids),
     ids.length
@@ -159,7 +161,7 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
         })
       : [],
     Promise.all(ids.map((id) => liveEntitlement({ kind: "venue", id }, "venue_pro", now))),
-    Promise.all(owners.map(async (id) => [id, await mayBuyHere(id)] as const)).then((pairs) => new Map(pairs)),
+    Promise.all(venues.map((v) => mayBuyVenueHere(v))),
   ])
 
   return {
@@ -193,7 +195,7 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
         subscriptions,
         openElsewhere: here.some((s) => !roleIn.has(s.org_id)),
         // Only an owned venue is offered anything; one merely still paid for asks nothing.
-        mayBuyHere: v.owner_org_id ? (sold.get(v.owner_org_id) ?? true) : true,
+        mayBuyHere: owned ? sold[i] : true,
       }
     }),
     payments: paid.map((p) => ({

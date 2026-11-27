@@ -17,11 +17,11 @@ import { CancelAnalytics, CheckoutProvider, VenueProBuy } from "./checkout"
  * and the person may buy. The plan itself is read from the server's own rows;
  * `?status=pending` only holds Buy back while the webhook is awaited.
  *
- * Where plans are not sold (`mayBuyHere`, SCRUM-1151), no row offers Buy or
- * counts down to a charge, and "Free while we launch in your city." is said
- * once: in the Venue Pro card's price place when no venue of theirs is sold
- * here, or on each such row when another venue still is (one person in an
- * Indian and a Canadian organisation).
+ * Where Venue Pro is not sold for a venue (its row's `mayBuyHere`: the venue's
+ * own city and pin, SCRUM-1448), its row offers no Buy and no countdown to a
+ * charge, and "Free while we launch in your city." is said once: in the Venue
+ * Pro card's price place when no venue of theirs is sold here, or on each such
+ * row when another venue still is (a Toronto venue beside a Bengaluru one).
  */
 
 const DAY = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })

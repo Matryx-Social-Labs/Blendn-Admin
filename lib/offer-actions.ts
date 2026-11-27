@@ -8,6 +8,7 @@ import { currentUser, requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { MIN_CELL } from "@/lib/disclosure"
 import { hasEntitlement } from "@/lib/entitlements"
+import { mayBuyVenueHere } from "@/lib/plan-market"
 import { logger } from "@/lib/logger"
 import { findProfileContactInfo } from "@/lib/moderation/contact-info"
 import { checkKeywords } from "@/lib/moderation/keyword-filter"
@@ -179,7 +180,7 @@ async function offerTextRefusal(venueId: string, text: string): Promise<{ messag
 async function senderAt(client: Pick<typeof db, "venues" | "organisation_members">, venueId: string, userId: string) {
   const venue = await client.venues.findFirst({
     where: { id: venueId, deleted_at: null },
-    select: { id: true, name: true, timezone: true, day_reset_hour: true, claimed_at: true, owner_org_id: true },
+    select: { id: true, name: true, timezone: true, day_reset_hour: true, claimed_at: true, owner_org_id: true, city: true, latitude: true, longitude: true },
   })
   if (!venue?.owner_org_id || !venue.claimed_at) return null
   const member = await client.organisation_members.findFirst({
@@ -187,6 +188,18 @@ async function senderAt(client: Pick<typeof db, "venues" | "organisation_members
     select: { role: true },
   })
   return member ? { place: { ...venue, owner_org_id: venue.owner_org_id, claimed_at: venue.claimed_at }, member } : null
+}
+
+/**
+ * Why a venue without Venue Pro sends nothing. Where Venue Pro is not sold for the venue (its own city and pin,
+ * SCRUM-1448) the refusal names no plan: there is nothing to add there, and offers are switched off everywhere.
+ */
+async function noProRefusal(place: { city: string | null; latitude: number | null; longitude: number | null }): Promise<Refusal> {
+  return new Refusal(
+    (await mayBuyVenueHere(place))
+      ? "Offers to regulars are part of Venue Pro. See your plan to add it."
+      : "Offers to regulars aren’t switched on for this venue yet, so nothing was sent."
+  )
 }
 
 export async function sendOffer(input: { venueId: string; text: string; days: number }): Promise<{ offerId: string; reached: AudienceBand }> {
@@ -204,9 +217,7 @@ export async function sendOffer(input: { venueId: string; text: string; days: nu
   if (await overLimit(`offer-send:${gate.place.owner_org_id}:${venueId}`, SENDS_PER_MINUTE, MINUTE_MS)) {
     throw new Refusal("Too many tries. Wait a minute and send again.")
   }
-  if (!(await hasEntitlement({ kind: "venue", id: venueId }, "venue_pro"))) {
-    throw new Refusal("Offers to regulars are part of Venue Pro. See your plan to add it.")
-  }
+  if (!(await hasEntitlement({ kind: "venue", id: venueId }, "venue_pro"))) throw await noProRefusal(gate.place)
   /*
    * No offer reaches anybody until regulars is switched on (review M2): only then does the app show "Offers from
    * places", the switch that turns them off, so nobody gets a promotion with no way to stop it. Existing profiles
@@ -230,9 +241,7 @@ export async function sendOffer(input: { venueId: string; text: string; days: nu
     const held = await senderAt(tx, venueId, user.id)
     if (!held || held.place.owner_org_id !== gate.place.owner_org_id) throw new Refusal(NOT_YOUR_VENUE)
     if (!maySendVenueOffers(held.member.role)) throw new Refusal("Only an owner or admin of the venue’s organisation can send offers.")
-    if (!(await hasEntitlement({ kind: "venue", id: venueId }, "venue_pro", {}, now, tx))) {
-      throw new Refusal("Offers to regulars are part of Venue Pro. See your plan to add it.")
-    }
+    if (!(await hasEntitlement({ kind: "venue", id: venueId }, "venue_pro", {}, now, tx))) throw await noProRefusal(held.place)
     const week = await sentThisWeek(venueId, now, tx)
     const next = nextOfferAt(week)
     if (next) throw new Refusal(`This venue has sent its ${OFFERS_PER_WEEK} offers this week. The next can go ${DAY.format(next)}.`)

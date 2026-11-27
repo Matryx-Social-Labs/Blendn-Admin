@@ -267,6 +267,16 @@ describe("the send", () => {
     expect(await db.venue_offers.count({ where: { venue_id: A } })).toBe(0)
   })
 
+  it("SCRUM-1448: where Venue Pro is not sold for the venue, the refusal names no plan, and nothing is written", async () => {
+    const toronto = await venue(await org(owner))
+    await db.venues.update({ where: { id: toronto }, data: { city: "Toronto", latitude: 43.6431, longitude: -79.4246 } })
+    as(owner)
+    const said = await refusal(actions.sendOffer({ venueId: toronto, text: "First drink on the house", days: 7 }))
+    expect(said).toBe("Offers to regulars aren’t switched on for this venue yet, so nothing was sent.")
+    expect(said).not.toMatch(/Venue Pro|plan/)
+    expect(await db.venue_offers.count({ where: { venue_id: toronto } })).toBe(0)
+  })
+
   it("refuses staff, another venue’s owner and an admin", async () => {
     await pro(A)
     as(staff)

@@ -3,6 +3,7 @@ import "server-only"
 import { db } from "./db"
 import { discloseBreakdown, discloseHeadcount, MIN_CELL } from "./disclosure"
 import { hasEntitlement } from "./entitlements"
+import { mayBuyVenueHere } from "./plan-market"
 import { venueDayBounds } from "./venue-day"
 
 /**
@@ -18,6 +19,11 @@ import { venueDayBounds } from "./venue-day"
  * `venueInsights` asks `hasEntitlement` first and runs the 12-month and
  * pre-claim queries only when it answers yes. A locked panel draws
  * `lib/sample-analytics.ts`, never these figures under a blur.
+ *
+ * Except where Venue Pro is not sold for the venue (`mayBuyVenueHere`, its own
+ * city and pin, SCRUM-1448): there what it adds is open, as plan "market", and
+ * the page names no plan. Free in name must not be locked in fact. Asked only
+ * when the venue holds no Venue Pro, so a venue already open asks nothing more.
  *
  * ## Counts, never people
  *
@@ -96,7 +102,8 @@ export interface PreClaimHistory {
 }
 
 export interface VenueInsightsView {
-  plan: "listed" | "pro"
+  /** "market": Venue Pro is not sold for this venue, so what it adds is open and no plan is named. */
+  plan: "listed" | "pro" | "market"
   recent: VenueInsight
   /** Pro only, and only for a claimed venue. */
   preClaim: PreClaimHistory | null
@@ -210,12 +217,17 @@ const cache = new Map<string, { at: number; view: VenueInsightsView }>()
 export async function venueInsights(venueId: string, now: Date = new Date()): Promise<VenueInsightsView | null> {
   const v = await db.venues.findUnique({
     where: { id: venueId },
-    select: { id: true, timezone: true, day_reset_hour: true, claimed_at: true, owner_org_id: true },
+    select: { id: true, timezone: true, day_reset_hour: true, claimed_at: true, owner_org_id: true, city: true, latitude: true, longitude: true },
   })
   if (!v || !v.owner_org_id || !v.claimed_at) return null
-  const pro = await hasEntitlement({ kind: "venue", id: venueId }, "venue_pro", {}, now)
+  const plan: VenueInsightsView["plan"] = (await hasEntitlement({ kind: "venue", id: venueId }, "venue_pro", {}, now))
+    ? "pro"
+    : (await mayBuyVenueHere(v))
+      ? "listed"
+      : "market"
+  const pro = plan !== "listed"
   const to = venueDayBounds(v.timezone, v.day_reset_hour, now).start
-  const key = `${venueId}:${pro ? "pro" : "listed"}:${to.toISOString()}:${v.claimed_at.toISOString()}`
+  const key = `${venueId}:${plan}:${to.toISOString()}:${v.claimed_at.toISOString()}`
   const hit = cache.get(key)
   if (hit && now.getTime() - hit.at < CACHE_MS) return hit.view
 
@@ -226,7 +238,7 @@ export async function venueInsights(venueId: string, now: Date = new Date()): Pr
     pro ? preClaimHistory({ ...v, claimed_at: v.claimed_at }) : null,
   ])
   const view: VenueInsightsView = {
-    plan: pro ? "pro" : "listed",
+    plan,
     recent: { window: pro ? "12m" : "30d", from: from.toISOString(), to: to.toISOString(), ...recent },
     preClaim,
   }
